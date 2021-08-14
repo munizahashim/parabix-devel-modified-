@@ -19,7 +19,9 @@ protected:
 };
 
 FieldNumberingKernel::FieldNumberingKernel(BuilderRef kb, StreamSet * Marks, StreamSet * FieldBixNum, unsigned fieldCount)
-: PabloKernel(kb, "FieldNumbering" + std::to_string(fieldcount), {Binding{"Marks", Marks}}, {Binding{"FieldBixNum", FieldBixNum}}), mFieldCount(fieldCount) { }
+   : PabloKernel(kb, "FieldNumbering" + std::to_string(fieldcount), 
+                   {Binding{"Marks", Marks}}, {Binding{"FieldBixNum", FieldBixNum}}), 
+   mFieldCount(fieldCount) { }
 
 void FieldNumberingKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
