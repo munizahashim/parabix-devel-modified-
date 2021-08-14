@@ -1,12 +1,12 @@
 # This software is licensed to the public under the Open Software License 3.0.
 
-# module: util
+# module: csv
 
 parabix_add_executable(
 NAME
-    hexlines
+    csv_escape_quotes
 SRC
-    hexlines.cpp
+    csv_escape_quotes.cpp
 DEPS
     pablo
     kernel.basis
