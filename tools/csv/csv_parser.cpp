@@ -53,10 +53,10 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class CSVparser : public PabloKernel {
 public:
-    CSVparser(BuilderRef kb, StreamSet * csvMarks, StreamSet * parsedMarks)
+    CSVparser(BuilderRef kb, StreamSet * csvMarks, StreamSet * parsedMarks, StreamSet * toKeep)
         : PabloKernel(kb, "CSVparser",
                       {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)}},
-                      {Binding{"parsedMarks", parsedMarks}}) {}
+                      {Binding{"parsedMarks", parsedMarks}, Binding{"toKeep", toKeep}}) {}
 protected:
     void generatePabloMethod() override;
 };
@@ -81,6 +81,10 @@ void CSVparser::generatePabloMethod() {
     pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(0)), recordMarks);
     pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(1)), fieldMarks);
     pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(2)), quote_escape);
+    PabloAST * CRbeforeLF = pb.createAnd(csvMarks[markCR], pb.createLookahead(csvMarks[markLF], 1));
+    PabloAST * toDelete = pb.createOr3(CRbeforeLF, start_dquote, end_dquote);
+    PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
 }
 
 typedef void (*CSVFunctionType)(uint32_t fd);
@@ -114,7 +118,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
     P->CreateKernelCall<CharacterClassKernelBuilder>(csvSpecial, BasisBits, csvCCs);
     
     StreamSet * csvMarks = P->CreateStreamSet(3);
-    P->CreateKernelCall<CSVparser>(csvCCs, csvMarks);
+    StreamSet * toKeep = P->CreateStreamSet(1);
+    P->CreateKernelCall<CSVparser>(csvCCs, csvMarks, toKeep);
 
     P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
 
@@ -124,6 +129,19 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
     P->CreateKernelCall<FieldNumberingKernel>(csvMarks, fieldBixNum, fieldCount);
     P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
 
+    StreamSet * translatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<CSV_Char_Replacement>(csvMarks, BasisBits, translatedBasis);
+    
+    StreamSet * filteredBasis = P->CreateStreamSet(8);
+    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+
+    // The computed output can be converted back to byte stream form by the
+    // P2S kernel (parallel-to-serial).
+    StreamSet * filtered = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
+
+    //  The StdOut kernel writes a byte stream to standard output.
+    P->CreateKernelCall<StdOutKernel>(filtered);
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
