@@ -115,9 +115,9 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
     
     StreamSet * csvMarks = P->CreateStreamSet(3);
     P->CreateKernelCall<CSVparser>(csvCCs, csvMarks);
-    
+
     P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
-    
+
     const unsigned fieldCount = 3;
 
     StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));

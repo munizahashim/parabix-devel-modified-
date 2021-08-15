@@ -22,7 +22,7 @@ protected:
 
 FieldNumberingKernel::FieldNumberingKernel(BuilderRef kb, kernel::StreamSet * Marks, kernel::StreamSet * FieldBixNum, unsigned fieldCount)
    : PabloKernel(kb, "FieldNumbering" + std::to_string(fieldCount),
-                   {kernel::Binding{"Marks", Marks}}, {kernel::Binding{"FieldBixNum", FieldBixNum}}), 
+                   {kernel::Binding{"Marks", Marks}}, {kernel::Binding{"FieldBixNum", FieldBixNum}}),
    mFieldCount(fieldCount) { }
 
 void FieldNumberingKernel::generatePabloMethod() {
@@ -34,15 +34,15 @@ void FieldNumberingKernel::generatePabloMethod() {
     pablo::PabloAST * fieldStarts = pb.createOr(recordStarts, pb.createAdvance(fieldMarks, 1));
 
     unsigned n = ceil_log2(mFieldCount);
-    pablo::BixNum fieldNumbering(n);
+    pablo::BixNum fieldNumbering(n, pb.createZeroes());
     // Initially only the recordStarts positions are correctly numbered.
-    PabloAST * numbered = recordStarts;
+    pablo::PabloAST * numbered = recordStarts;
     // Work through the numbering bits from the most significant down.
-    for (unsigned k = n - 1; k >= 0; k--) {
-        unsigned K = 1 << k;
+    for (int k = n - 1; k >= 0; k--) {
+        unsigned K = 1U << k;
         // Determine which numbered positions will still be within range when
         // advancing through the fieldStarts index stream.
-        PabloAST * toAdvance = bnc.ULT(fieldNumbering, mFieldCount - K);
+        pablo::PabloAST * toAdvance = bnc.ULT(fieldNumbering, mFieldCount - K);
         fieldNumbering[k] = pb.createIndexedAdvance(pb.createAnd(numbered, toAdvance), fieldStarts, K);
         // Now the positions just identified are correctly numbered.
         numbered = pb.createOr(numbered, fieldNumbering[k]);
