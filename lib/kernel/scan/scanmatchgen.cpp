@@ -1531,7 +1531,6 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     Value * breakWord1 = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(breakWordBasePtr, breakWordIdx1)), sizeTy);
     Value * breakWord1Pos = b->CreateAdd(stridePos, b->CreateMul(breakWordIdx1, sw.WIDTH));
     Value * break1Pos = b->CreateAdd(breakWord1Pos, b->CreateCountForwardZeroes(breakWord1));
-    b->CallPrintInt("break1Pos", break1Pos);
     Value * initialLineLgth = b->CreateAdd(b->CreateSub(break1Pos, stridePos), sz_ONE);
     Value * const strideStartPtr = b->getRawInputPointer("InputStream", stridePos);
     Value * const outputPtr1 = b->getRawOutputPointer("Output", strideProducedPhi);

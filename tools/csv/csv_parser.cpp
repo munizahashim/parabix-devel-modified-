@@ -38,6 +38,8 @@
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include "csv_util.hpp"
+
 
 using namespace kernel;
 using namespace llvm;
@@ -78,6 +80,7 @@ void CSVparser::generatePabloMethod() {
     Var * parserOutput = getOutputStreamVar("parsedMarks");
     pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(0)), recordMarks);
     pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(1)), fieldMarks);
+    pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(2)), quote_escape);
 }
 
 typedef void (*CSVFunctionType)(uint32_t fd);
@@ -101,18 +104,26 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * CSVmarks = P->CreateStreamSet(4);
+    StreamSet * csvCCs = P->CreateStreamSet(4);
     char charLF = 0xA;
     char charCR = 0xD;
     char charDQ = 0x22;
     char charComma = 0x2C;
-    std::vector<re::CC *> ccs = {re::makeByte(charLF), re::makeByte(charCR), re::makeByte(charDQ), re::makeByte(charComma)};
-    P->CreateKernelCall<CharacterClassKernelBuilder>(ccs, BasisBits, CSVmarks);
+    std::vector<re::CC *> csvSpecial =
+      {re::makeByte(charLF), re::makeByte(charCR), re::makeByte(charDQ), re::makeByte(charComma)};
+    P->CreateKernelCall<CharacterClassKernelBuilder>(csvSpecial, BasisBits, csvCCs);
     
-    StreamSet * CSVdelimiters = P->CreateStreamSet(2);
-    P->CreateKernelCall<CSVparser>(CSVmarks, CSVdelimiters);
+    StreamSet * csvMarks = P->CreateStreamSet(3);
+    P->CreateKernelCall<CSVparser>(csvCCs, csvMarks);
     
-    P->CreateKernelCall<DebugDisplayKernel>("CSV delimiters", CSVdelimiters);
+    P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
+    
+    const unsigned fieldCount = 3;
+
+    StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));
+    P->CreateKernelCall<FieldNumberingKernel>(csvMarks, fieldBixNum, fieldCount);
+    P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
+
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
