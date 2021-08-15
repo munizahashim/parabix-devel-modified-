@@ -123,17 +123,21 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
 
     P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
 
-    const unsigned fieldCount = 3;
-
-    StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));
-    P->CreateKernelCall<FieldNumberingKernel>(csvMarks, fieldBixNum, fieldCount);
-    P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
-
     StreamSet * translatedBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<CSV_Char_Replacement>(csvMarks, BasisBits, translatedBasis);
     
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+
+    StreamSet * filteredMarks = P->CreateStreamSet(3);
+    FilterByMask(P, toKeep, csvMarks, filteredMarks);
+    P->CreateKernelCall<DebugDisplayKernel>("filtered marks", filteredMarks);
+
+    const unsigned fieldCount = 3;
+
+    StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));
+    P->CreateKernelCall<FieldNumberingKernel>(filteredMarks, fieldBixNum, fieldCount);
+    P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
