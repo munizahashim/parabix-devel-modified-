@@ -22,26 +22,26 @@ using namespace llvm;
 
 namespace kernel {
 
-LLVM_READONLY std::string StringInsertName(const std::vector<std::string> & insertStrs, const StreamSet * insertMarks) {
+LLVM_READONLY std::string StringInsertName(const std::vector<unsigned> & insertAmts, const StreamSet * insertMarks) {
     std::string name = "StringInsertBixNum";
-    for (auto s : insertStrs) {
-        name += "_" + std::to_string(s.size());
+    for (auto a : insertAmts) {
+        name += "_" + std::to_string(a);
     }
-    if (insertMarks->getNumElements() < insertStrs.size()) {
+    if (insertMarks->getNumElements() < insertAmts.size()) {
         name += "_multiplexed";
     }
     return name;
 }
     
-StringInsertBixNum::StringInsertBixNum(BuilderRef b, const std::vector<std::string> & insertStrs,
+StringInsertBixNum::StringInsertBixNum(BuilderRef b, const std::vector<unsigned> & insertAmts,
                                        StreamSet * insertMarks, StreamSet * insertBixNum)
-: PabloKernel(b, "StringInsertBixNum" + Kernel::getStringHash(StringInsertName(insertStrs, insertMarks)),
+: PabloKernel(b, "StringInsertBixNum" + Kernel::getStringHash(StringInsertName(insertAmts, insertMarks)),
               {Binding{"insertMarks", insertMarks}},
               {Binding{"insertBixNum", insertBixNum}})
-, mInsertStrings(insertStrs)
-, mMultiplexing(insertMarks->getNumElements() < insertStrs.size())
+, mInsertAmounts(insertAmts)
+, mMultiplexing(insertMarks->getNumElements() < insertAmts.size())
 , mBixNumBits(insertBixNum->getNumElements())
-, mSignature(StringInsertName(insertStrs, insertMarks)) {
+, mSignature(StringInsertName(insertAmts, insertMarks)) {
 
 }
 
@@ -51,10 +51,10 @@ void StringInsertBixNum::generatePabloMethod() {
     std::vector<PabloAST *> insertMarks = getInputStreamSet("insertMarks");
     std::vector<PabloAST *> bixNum(mBixNumBits, pb.createZeroes());
     Var * insertVar = getOutputStreamVar("insertBixNum");
-    for (unsigned i = 0; i < mInsertStrings.size(); i++) {
+    for (unsigned i = 0; i < mInsertAmounts.size(); i++) {
         PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertMarks, i) : insertMarks[i];
         for (unsigned j = 0; j < mBixNumBits; j++) {
-            if ((mInsertStrings[i].size() >> j) & 1) {
+            if ((mInsertAmounts[i] >> j) & 1) {
                 bixNum[j] = pb.createOr(bixNum[j], stringMarks);
             }
         }

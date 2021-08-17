@@ -824,9 +824,11 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         unsigned insertLengthBits = 4;
+        std::vector<unsigned> insertAmts;
+        for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<StringInsertBixNum>(colorEscapes, InsertMarks, InsertBixNum);
+        E->CreateKernelCall<StringInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
         //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
         //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
