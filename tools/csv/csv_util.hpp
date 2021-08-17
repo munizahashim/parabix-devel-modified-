@@ -1,13 +1,49 @@
+#include <fstream>
 #include <pablo/builder.hpp>
 #include <pablo/pablo_kernel.h>
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/split.hpp>
 #include <boost/intrusive/detail/math.hpp>
 
 using namespace pablo;
 using namespace kernel;
 
 using boost::intrusive::detail::ceil_log2;
+
+std::vector<std::string> parse_CSV_headers(std::string headerString) {
+    std::vector<std::string> headers;
+    boost::algorithm::split(headers, headerString, [] (char c) {return (c == ',');});
+    for (unsigned i = 0; i < headers.size(); i++) {
+        boost::algorithm::trim(headers[i]);
+    }
+    return headers;
+}
+
+std::vector<std::string> get_CSV_headers(std::string filename) {
+    std::vector<std::string> headers;
+    std::ifstream headerFile(filename.c_str());
+    std::string line1;
+    if (headerFile.is_open()) {
+        std::getline(headerFile, line1);
+        headerFile.close();
+        headers = parse_CSV_headers(line1);
+    }
+    return headers;
+}
+
+std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> headers) {
+    std::vector<std::string> tmp;
+    if (headers.size() == 0) return tmp;
+    tmp.push_back("{\"" + headers[0] + "\":\"");
+    for (unsigned i = 1; i < headers.size(); i++) {
+        tmp.push_back("\",\"" + headers[i] + "\":\"");
+    }
+    tmp.push_back("\"},\n");
+    return tmp;
+}
+
 //
 //  FieldNumberingKernel(N) 
 //  two input streams: record marks, field marks, N fields per record

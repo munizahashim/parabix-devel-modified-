@@ -18,6 +18,7 @@
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/stream_shift.h>
+#include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/io/source_kernel.h>
@@ -46,9 +47,11 @@ using namespace llvm;
 using namespace pablo;
 
 //  These declarations are for command line processing.
-//  See the LLVM CommandLine 2.0 Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory CSV_Quote_Options("CSV Quote Translation Options", "CSV Quote Translation Options.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Quote_Options));
+//  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
+static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
+static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
+static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 
 
 class CSVparser : public PabloKernel {
@@ -89,7 +92,7 @@ void CSVparser::generatePabloMethod() {
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
+CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
@@ -116,36 +119,52 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
     std::vector<re::CC *> csvSpecial =
       {re::makeByte(charLF), re::makeByte(charCR), re::makeByte(charDQ), re::makeByte(charComma)};
     P->CreateKernelCall<CharacterClassKernelBuilder>(csvSpecial, BasisBits, csvCCs);
-    
+
     StreamSet * csvMarks = P->CreateStreamSet(3);
     StreamSet * toKeep = P->CreateStreamSet(1);
     P->CreateKernelCall<CSVparser>(csvCCs, csvMarks, toKeep);
 
-    P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
+    //P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
 
     StreamSet * translatedBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<CSV_Char_Replacement>(csvMarks, BasisBits, translatedBasis);
-    
+
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
 
     StreamSet * filteredMarks = P->CreateStreamSet(3);
     FilterByMask(P, toKeep, csvMarks, filteredMarks);
-    P->CreateKernelCall<DebugDisplayKernel>("filtered marks", filteredMarks);
+    //P->CreateKernelCall<DebugDisplayKernel>("filtered marks", filteredMarks);
 
-    const unsigned fieldCount = 3;
-
+    const unsigned fieldCount = templateStrs.size();
     StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));
     P->CreateKernelCall<FieldNumberingKernel>(filteredMarks, fieldBixNum, fieldCount);
-    P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
+    //P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
+
+    std::vector<unsigned> insertionAmts;
+    unsigned maxInsertAmt = 0;
+    for (auto & s : templateStrs) {
+        unsigned insertAmt = s.size() - 1;
+        insertionAmts.push_back(insertAmt);
+        if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
+    }
+    StreamSet * InsertBixNum = P->CreateStreamSet(ceil_log2(maxInsertAmt));
+    P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldBixNum, InsertBixNum);
+
+    StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
+
+    // Baais bit streams expanded with 0 bits for each string to be inserted.
+    StreamSet * ExpandedBasis = P->CreateStreamSet(8);
+    SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis);
+    //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
-    StreamSet * filtered = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
+    StreamSet * Expanded = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(ExpandedBasis, Expanded);
 
     //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(filtered);
+    P->CreateKernelCall<StdOutKernel>(Expanded);
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
@@ -153,14 +172,26 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver) {
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Quote_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    
+    std::vector<std::string> headers;
+    if (HeaderSpec == "") {
+        headers = get_CSV_headers(inputFile);
+    } else if (HeaderSpecNamesFile) {
+        headers = get_CSV_headers(HeaderSpec);
+    } else {
+        headers = parse_CSV_headers(HeaderSpec);
+    }
+    std::vector<std::string> templateStrs = createJSONtemplateStrings(headers);
+
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
-    CPUDriver driver("csv_quote_xlator");
+    CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    CSVFunctionType fn = generatePipeline(driver);
+    CSVFunctionType fn = generatePipeline(driver, templateStrs);
     //  The compile function "fn"  can now be used.   It takes a file
     //  descriptor as an input, which is specified by the filename given by
-    //  the inputFile command line option.
+    //  the inputFile command line option.]
+
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
