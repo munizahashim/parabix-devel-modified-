@@ -35,8 +35,7 @@ static std::string postproc_getLineAndColumnInfo(const std::string str, const ui
 }
 
 static bool isControl(const uint8_t * ptr) {
-    if (*ptr == '{' || *ptr == '}' || *ptr == '[' ||
-        *ptr == ']' || *ptr == ',' || *ptr == ':') {
+    if (*ptr == '}' || *ptr == ']' || *ptr == ',' || *ptr == ':') {
         return true;
     } else {
         return false;
@@ -84,6 +83,9 @@ static void postproc_parseStrOrPop(bool popAllowed, const uint8_t * ptr, const u
 static bool postproc_parseValue(bool strict, const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
     if (*ptr == '"') {
         currentState = JVStrBegin;
+        return true;
+    } else if (*ptr == '{' || *ptr == '[') {
+        postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
         return true;
     } else if (!isControl(ptr)) {
         currentState = JValue;
