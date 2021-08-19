@@ -30,7 +30,7 @@ static std::string postproc_getLineAndColumnInfo(const std::string str, const ui
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
     std::stringstream ss;
-    ss << str << " at line " << lineNum << " column " << column;
+    ss << str << " at line " << lineNum << " column " << column << " starting in:\n\n" << ptr;
     return ss.str();
 }
 
