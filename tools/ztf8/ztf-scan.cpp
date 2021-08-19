@@ -1410,7 +1410,6 @@ PhraseCompression::PhraseCompression(BuilderRef b,
                                     StreamSet * const byteData,
                                     StreamSet * compressionMask,
                                     StreamSet * encodedBytes,
-                                    StreamSet * compSymSeq,
                                     unsigned strideBlocks)
 : MultiBlockKernel(b, "PhraseCompression_" + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
@@ -1423,11 +1422,9 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(hashValues.size()) {
     if (DelayedAttribute) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
-        mOutputStreamSets.emplace_back("compSymSeq", compSymSeq, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, BoundedRate(0,1));
-        mOutputStreamSets.emplace_back("compSymSeq", compSymSeq, BoundedRate(0,1));
         mInternalScalars.emplace_back(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
@@ -1451,7 +1448,6 @@ void PhraseCompression::generateMultiBlockLogic(BuilderRef b, Value * const numO
     ConstantInt * const i1_FALSE = b->getFalse();
     ConstantInt * const i1_TRUE = b->getTrue();
     Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
-    b->CallPrintInt("sz_TABLEMASK", sz_TABLEMASK);
     Constant * INT32_1 = b->getInt32(1);
 
     Type * sizeTy = b->getSizeTy();
