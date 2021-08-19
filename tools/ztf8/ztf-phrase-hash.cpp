@@ -60,16 +60,16 @@ static cl::OptionCategory ztfHashOptions("ztfHash Options", "ZTF-Hash options.")
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(ztfHashOptions));
 static cl::opt<bool> Decompression("d", cl::desc("Decompress from ZTF-Runs to UTF-8."), cl::cat(ztfHashOptions), cl::init(false));
 static cl::alias DecompressionAlias("decompress", cl::desc("Alias for -d"), cl::aliasopt(Decompression));
-static cl::opt<int> WordLen("length", cl::desc("Length of words."), cl::init(2));
+static cl::opt<int> SymCount("length", cl::desc("Length of words."), cl::init(2));
 
 typedef void (*ztfHashFunctionType)(uint32_t fd);
 
 EncodingInfo encodingScheme1(8,
-                             {{3, 3, 2, 0xC0, 8, 0}, //minLen, maxLen, hashBytes, pfxBase, hashBits, ?
+                             {{3, 3, 2, 0xC0, 8, 0}, //minLen, maxLen, hashBytes, pfxBase, hashBits, length_extension_bits
                               {4, 4, 2, 0xC8, 8, 0},
                               {5, 8, 2, 0xD0, 8, 0},
                               {9, 16, 3, 0xE0, 8, 0},
-                              {17, 32, 4, 0xF0, 8, 0}
+                              {17, 32, 4, 0xF0, 8, 0},
                              });
 
 ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
@@ -84,78 +84,60 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
 
-    StreamSet * const u8basis = P->CreateStreamSet(8);
+    StreamSet * u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
+    std::vector<StreamSet *> combinedMasks;
+    StreamSet * compressedMask = P->CreateStreamSet(1);
+
+    StreamSet * WordChars = P->CreateStreamSet(1);
+    P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
+
+    StreamSet * const phraseRuns = P->CreateStreamSet(1);
+    StreamSet * const cwRuns = P->CreateStreamSet(1);
+    P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns, cwRuns);
+    //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
+
+    StreamSet * const runIndex = P->CreateStreamSet(5);
+    StreamSet * const overflow = P->CreateStreamSet(1);
+    P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow);
+
+    std::vector<StreamSet *> bixHashes(SymCount);
+    StreamSet * basisStart = u8basis;
+    for(unsigned i = 0; i < SymCount; i++) {
+        StreamSet * const bixHash = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
+        P->CreateKernelCall<BixHash>(basisStart, phraseRuns, bixHash, i);
+        //P->CreateKernelCall<DebugDisplayKernel>("bixHash", bixHash);
+        bixHashes[i] = bixHash;
+        basisStart = bixHash;
+    }
+    // split the bixhash[0:8] to represent the word symbol's length
+    std::vector<StreamSet *> combinedHashData = {bixHashes[0], runIndex};
+    StreamSet * const hashValues = P->CreateStreamSet(1, 16);
+    P->CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
+    //P->CreateKernelCall<DebugDisplayKernel>("hashValues", hashValues);
+
+    std::vector<StreamSet *> allHashValues(SymCount);
+    allHashValues[0] = hashValues;
+    for (unsigned i = 1; i < SymCount; i++) {
+        allHashValues[i] = bixHashes[i];
+    }
     StreamSet * u8bytes = codeUnitStream;
     std::vector<StreamSet *> extractionMasks;
-    for (unsigned iter = WordLen; iter > 0; iter--) {
-        StreamSet * WordChars = P->CreateStreamSet(1);
-        P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
 
-        StreamSet * const phraseRuns = P->CreateStreamSet(1);
-        StreamSet * const codewordRuns = P->CreateStreamSet(1);
-        P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns);
-        //codewordRuns
-        //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
-        //P->CreateKernelCall<DebugDisplayKernel>("codewordRuns", codewordRuns);
-
-        std::vector<StreamSet *> allPhraseRuns;
-        std::vector<StreamSet *> allRunIndex;
-        std::vector<StreamSet *> allOverflow;
-        std::vector<StreamSet *> allHashValues;
-        allPhraseRuns.reserve(iter);
-        allRunIndex.reserve(iter);
-        allOverflow.reserve(iter);
-        allHashValues.reserve(iter);
-        // analyze all the phrase run sequence with current length of phrase
-        for (unsigned i = 0; i < iter; i++) {
-            StreamSet * const phraseSeq = P->CreateStreamSet(1);
-            // use compSymSeq to aviod a sequence running across codewords
-            P->CreateKernelCall<PhraseRunSeq>(phraseRuns, phraseSeq, iter, i);
-            //P->CreateKernelCall<DebugDisplayKernel>("phraseSeq", phraseSeq);
-            allPhraseRuns.push_back(phraseSeq);
-            StreamSet * const runIndex = P->CreateStreamSet(5);
-            StreamSet * const overflow = P->CreateStreamSet(1);
-            P->CreateKernelCall<RunIndex>(phraseSeq, runIndex, overflow);
-            allRunIndex.push_back(runIndex);
-            allOverflow.push_back(overflow);
-            //P->CreateKernelCall<DebugDisplayKernel>("runIndex", runIndex);
-            StreamSet * const bixHashes = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
-            P->CreateKernelCall<BixHash>(u8basis, phraseSeq, bixHashes);
-            //P->CreateKernelCall<DebugDisplayKernel>("bixHashes", bixHashes);
-            std::vector<StreamSet *> combinedHashData = {bixHashes, runIndex};
-            StreamSet * const hashValues = P->CreateStreamSet(1, 16);
-            P->CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
-            allHashValues.push_back(hashValues);
-            //P->CreateKernelCall<DebugDisplayKernel>("hashValues", hashValues);
-        }
-
-        extractionMasks.reserve(encodingScheme1.byLength.size());
-        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
-            std::vector<StreamSet *> allGroupMarks;
-            // get the groupMarks streams marking all phrases of length l such that groupInfo.lo < l < groupInfo.hi
-            // for each of the q phraseSeq streams
-            for ( unsigned ii = 0; ii < iter; ii++) {
-                StreamSet * groupMarks = P->CreateStreamSet(1);
-                P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, allPhraseRuns[ii], allRunIndex[ii], allOverflow[ii], groupMarks);
-                //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
-                allGroupMarks.push_back(groupMarks);
-            }
-            StreamSet * extractionMask = P->CreateStreamSet(1);
-            StreamSet * compSymSeq = P->CreateStreamSet(1);
-            StreamSet * input_bytes = u8bytes;
-            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-
-            // TODO: inlcude length based phrase compression
-            P->CreateKernelCall<PhraseCompression>(encodingScheme1, i, allGroupMarks, allHashValues, input_bytes,  extractionMask, output_bytes, compSymSeq);
-            //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
-            //P->CreateKernelCall<DebugDisplayKernel>("compSymSeq", compSymSeq);
-            extractionMasks.push_back(extractionMask);
-            u8bytes = output_bytes;
-        }
+    for (unsigned i = 0; i < encodingScheme1.byLength.size()-1; i++) {
+        StreamSet * groupMarks = P->CreateStreamSet(1);
+        P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, runIndex, overflow, groupMarks);
+        //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
+        StreamSet * extractionMask = P->CreateStreamSet(1);
+        StreamSet * compSymSeq = P->CreateStreamSet(1);
+        StreamSet * input_bytes = u8bytes;
+        StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<PhraseCompression>(encodingScheme1, i, groupMarks, allHashValues, input_bytes, extractionMask, output_bytes, compSymSeq);
+        //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
+        extractionMasks.push_back(extractionMask);
+        u8bytes = output_bytes;
     }
-
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
     StreamSet * const encoded = P->CreateStreamSet(8);
