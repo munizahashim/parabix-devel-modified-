@@ -130,10 +130,9 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, runIndex, overflow, groupMarks);
         //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
         StreamSet * extractionMask = P->CreateStreamSet(1);
-        StreamSet * compSymSeq = P->CreateStreamSet(1);
         StreamSet * input_bytes = u8bytes;
         StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<PhraseCompression>(encodingScheme1, i, groupMarks, allHashValues, input_bytes, extractionMask, output_bytes, compSymSeq);
+        P->CreateKernelCall<PhraseCompression>(encodingScheme1, i, groupMarks, allHashValues, input_bytes, extractionMask, output_bytes);
         //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
         extractionMasks.push_back(extractionMask);
         u8bytes = output_bytes;

@@ -113,7 +113,7 @@ public:
     PhraseCompression(BuilderRef b,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
-                           std::vector<StreamSet *> symbolMarks,
+                           StreamSet * symbolMarks,
                            std::vector<StreamSet *> hashValues,
                            StreamSet * const byteData,
                            StreamSet * compressionMask,
@@ -122,6 +122,10 @@ public:
                            unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+
+    std::map<std::string, llvm::Value*> previousPhraseMap;
+
+    void clearPreviousPhraseMap(BuilderRef iBuilder);
 
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
