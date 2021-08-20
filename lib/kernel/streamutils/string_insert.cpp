@@ -52,7 +52,7 @@ void StringInsertBixNum::generatePabloMethod() {
     std::vector<PabloAST *> bixNum(mBixNumBits, pb.createZeroes());
     Var * insertVar = getOutputStreamVar("insertBixNum");
     for (unsigned i = 0; i < mInsertAmounts.size(); i++) {
-        PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertMarks, i) : insertMarks[i];
+        PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertMarks, i + 1) : insertMarks[i];
         for (unsigned j = 0; j < mBixNumBits; j++) {
             if ((mInsertAmounts[i] >> j) & 1) {
                 bixNum[j] = pb.createOr(bixNum[j], stringMarks);

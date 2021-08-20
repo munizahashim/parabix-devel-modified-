@@ -48,55 +48,40 @@ std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> head
 //  FieldNumberingKernel(N) 
 //  two input streams: record marks, field marks, N fields per record
 //  output: at the start position after each mark, a bixnum value equal to the
-//          sequential field number (counting from 0 at each record start).
+//          sequential field number (counting from 1 at each record start).
 //
 
 class FieldNumberingKernel : public PabloKernel {
 public:
-    FieldNumberingKernel(BuilderRef kb, StreamSet * Marks, StreamSet * FieldBixNum, unsigned fieldCount);
+    FieldNumberingKernel(BuilderRef kb, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum);
 protected:
     void generatePabloMethod() override;
-    unsigned mFieldCount;
+    unsigned mNumberingBits;
 };
 
-FieldNumberingKernel::FieldNumberingKernel(BuilderRef kb, StreamSet * Marks, StreamSet * FieldBixNum, unsigned fieldCount)
-   : PabloKernel(kb, "FieldNumbering" + std::to_string(fieldCount),
-                   {Binding{"Marks", Marks}}, {Binding{"FieldBixNum", FieldBixNum}}),
-   mFieldCount(fieldCount) { }
+FieldNumberingKernel::FieldNumberingKernel(BuilderRef kb, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum)
+   : PabloKernel(kb, "FieldNumbering" + std::to_string(SeparatorNum->getNumElements()),
+                 {Binding{"RecordMarks", RecordMarks}, Binding{"SeparatorNum", SeparatorNum}}, {Binding{"FieldBixNum", FieldBixNum}}),
+   mNumberingBits(SeparatorNum->getNumElements()) { }
 
 void FieldNumberingKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
-    PabloAST * recordMarks = getInputStreamSet("Marks")[0];
-    PabloAST * fieldMarks = getInputStreamSet("Marks")[1];
-    PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(recordMarks), 1));
-    PabloAST * fieldStarts = pb.createOr(recordStarts, pb.createAdvance(fieldMarks, 1));
-
-    unsigned n = ceil_log2(mFieldCount);
-    BixNum fieldNumbering(n, pb.createZeroes());
-    // Initially only the recordStarts positions are correctly numbered.
-    PabloAST * numbered = recordStarts;
-    // Work through the numbering bits from the most significant down.
-    for (int k = n - 1; k >= 0; k--) {
-        unsigned K = 1U << k;
-        // Determine which numbered positions will still be within range when
-        // advancing through the fieldStarts index stream.
-        PabloAST * toAdvance = bnc.ULT(fieldNumbering, mFieldCount - K);
-        fieldNumbering[k] = pb.createIndexedAdvance(pb.createAnd(numbered, toAdvance), fieldStarts, K);
-        // Now the positions just identified are correctly numbered.
-        numbered = pb.createOr(numbered, fieldNumbering[k]);
-    }
+    BixNum recordMarks = getInputStreamSet("RecordMarks");
+    BixNum separatorNum = getInputStreamSet("SeparatorNum");
+    BixNum fieldNumbering = bnc.AddModular(bnc.AddModular(separatorNum, 2), recordMarks);
     Var * fieldBixNum = getOutputStreamVar("FieldBixNum");
-    for (unsigned i = 0; i < n; i++) {
+    for (unsigned i = 0; i < mNumberingBits; i++) {
         pb.createAssign(pb.createExtract(fieldBixNum, i), fieldNumbering[i]);
     }
 }
 
 class CSV_Char_Replacement : public PabloKernel {
 public:
-    CSV_Char_Replacement(BuilderRef kb, StreamSet * csvMarks, StreamSet * basis, StreamSet * translatedBasis)
+    CSV_Char_Replacement(BuilderRef kb, StreamSet * separators, StreamSet * quoteEscape, StreamSet * basis,
+                         StreamSet * translatedBasis)
         : PabloKernel(kb, "CSV_Char_Replacement",
-                      {Binding{"csvMarks", csvMarks}, Binding{"basis", basis}},
+                      {Binding{"separators", separators}, Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
                       {Binding{"translatedBasis", translatedBasis}}) {}
 protected:
     void generatePabloMethod() override;
@@ -104,24 +89,23 @@ protected:
 
 void CSV_Char_Replacement::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
-    enum {recordDelim, fieldDelim, quoteEscape};
+    PabloAST * separators = getInputStreamSet("separators")[0];
+    PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     //
     // Zero out the field and record delimiters.
     // Translate "" to \"    ASCII value of " = 0x22, ASCII value of \ = 0x5C
     //    this translation flips bits 1 through 6
-    PabloAST * toZero = pb.createNot(pb.createOr(csvMarks[recordDelim], csvMarks[fieldDelim]));
-    PabloAST * toXlate = csvMarks[quoteEscape];
+    PabloAST * zeroing = pb.createNot(separators);
     std::vector<PabloAST *> translated_basis(8, nullptr);
-    translated_basis[0] = pb.createAnd(basis[0], toZero);
-    translated_basis[1] = pb.createAnd(pb.createXor(basis[1], toXlate), toZero);  // flip
-    translated_basis[2] = pb.createAnd(pb.createXor(basis[2], toXlate), toZero);  // flip
-    translated_basis[3] = pb.createAnd(pb.createXor(basis[3], toXlate), toZero);  // flip
-    translated_basis[4] = pb.createAnd(pb.createXor(basis[4], toXlate), toZero);  // flip
-    translated_basis[5] = pb.createAnd(pb.createXor(basis[5], toXlate), toZero);  // flip
-    translated_basis[6] = pb.createAnd(pb.createXor(basis[6], toXlate), toZero);  // flip
-    translated_basis[7] = pb.createAnd(basis[7], toZero);
+    translated_basis[0] = pb.createAnd(basis[0], zeroing);
+    translated_basis[1] = pb.createAnd(pb.createXor(basis[1], quoteEscape), zeroing);  // flip
+    translated_basis[2] = pb.createAnd(pb.createXor(basis[2], quoteEscape), zeroing);  // flip
+    translated_basis[3] = pb.createAnd(pb.createXor(basis[3], quoteEscape), zeroing);  // flip
+    translated_basis[4] = pb.createAnd(pb.createXor(basis[4], quoteEscape), zeroing);  // flip
+    translated_basis[5] = pb.createAnd(pb.createXor(basis[5], quoteEscape), zeroing);  // flip
+    translated_basis[6] = pb.createAnd(pb.createXor(basis[6], quoteEscape), zeroing);  // flip
+    translated_basis[7] = pb.createAnd(basis[7], zeroing);
 
     Var * translatedVar = getOutputStreamVar("translatedBasis");
     for (unsigned i = 0; i < 8; i++) {
