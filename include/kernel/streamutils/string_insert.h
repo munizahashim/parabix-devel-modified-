@@ -11,10 +11,11 @@ namespace kernel {
 //  position indices at which insertion is to occur, a bixNum stream set is
 //  calculated such that the bixNum at position p is n if the zeroes to be
 //  inserted at the position is n, or 0 if no insertion is to occur.
-//  If the number of streams in the insertMarks stream set is less than
-//  the size of the insertion amount vector, then it is interpreted as a
-//  multiplexed set, i.e., a bixnum whose index selects the insertion amount
-//  to apply at a particular position.
+//  The insertMarks stream set may have one stream each for the element
+//  of the insertion amounts vector, or may be multiplexed.   If multiplexed,
+//  the insertMarks streamset is a BixNum encoding the 1-based index of
+//  the insertion amount, with a BixNum value of 0 indicating that no
+//  insertion is to occur at the identified position.
 //
 //  The result may then be used for calculation of a SpreadMask by InsertionSpreadMask.
 //
@@ -40,7 +41,8 @@ public:
     StringReplaceKernel(BuilderRef b, const std::vector<std::string> & insertStrs,
                         StreamSet * basis, StreamSet * spreadMask,
                         StreamSet * insertMarks, StreamSet * runIndex,
-                        StreamSet * output);
+                        StreamSet * output,
+                        int offset = 0);
     void generatePabloMethod() override;
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override {
@@ -49,6 +51,7 @@ public:
 private:
     const std::vector<std::string>  mInsertStrings;
     const bool                      mMultiplexing;
+    const int                       mMarkOffset;
     const std::string               mSignature;
 };
 }

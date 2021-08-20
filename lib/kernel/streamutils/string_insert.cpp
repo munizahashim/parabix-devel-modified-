@@ -64,7 +64,7 @@ void StringInsertBixNum::generatePabloMethod() {
     }
 }
 
-LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & insertStrs, const StreamSet * insertMarks) {
+LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & insertStrs, const StreamSet * insertMarks, int markOffset) {
     std::string name = "StringReplaceBixNum";
     for (const auto & s : insertStrs) {
         name += "_" + s;
@@ -72,21 +72,23 @@ LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & ins
     if (insertMarks->getNumElements() < insertStrs.size()) {
         name += "_multiplexed";
     }
+    name += std::to_string(markOffset);
     return name;
 }
 
 StringReplaceKernel::StringReplaceKernel(BuilderRef b, const std::vector<std::string> & insertStrs,
                                          StreamSet * basis, StreamSet * spreadMask,
                                          StreamSet * insertMarks, StreamSet * runIndex,
-                                         StreamSet * output)
-: PabloKernel(b, "StringReplaceBixNum" + Kernel::getStringHash(StringReplaceName(insertStrs, insertMarks)),
+                                         StreamSet * output, int markOffset)
+: PabloKernel(b, "StringReplaceBixNum" + Kernel::getStringHash(StringReplaceName(insertStrs, insertMarks, markOffset)),
              {Binding{"basis", basis}, Binding{"spreadMask", spreadMask},
               Binding{"insertMarks", insertMarks, FixedRate(1), LookAhead(1 << (runIndex->getNumElements()))},
               Binding{"runIndex", runIndex}},
              {Binding{"output", output}})
 , mInsertStrings(insertStrs)
 , mMultiplexing(insertMarks->getNumElements() < insertStrs.size())
-, mSignature(StringReplaceName(insertStrs, insertMarks)) {
+, mMarkOffset(markOffset)
+, mSignature(StringReplaceName(insertStrs, insertMarks, markOffset)) {
 
 }
 
@@ -101,16 +103,21 @@ void StringReplaceKernel::generatePabloMethod() {
     std::unique_ptr<cc::CC_Compiler> ccc;
     ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(pb.getPabloBlock(), runIndex);
     PabloAST * runMask = pb.createInFile(pb.createNot(spreadMask));
-    std::vector<PabloAST *> insertSpans(insertMarks.size());
+    std::vector<PabloAST *> insertSpans(mInsertStrings.size());
     for (unsigned i = 0; i < mInsertStrings.size(); i++) {
-        PabloAST * stringStart = pb.createLookahead(insertMarks[i], mInsertStrings[i].size());
+        PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertMarks, i + 1) : insertMarks[i];
+        PabloAST * stringStart = stringMarks;
+        if (mMarkOffset > 0) {
+            stringStart = pb.createLookahead(stringMarks, mMarkOffset);
+        } else if (mMarkOffset < 0) {
+            stringStart = pb.createLookahead(stringMarks, mInsertStrings[i].size() + 1 + mMarkOffset);
+        }
         PabloAST * span = pb.createMatchStar(stringStart, runMask);
         insertSpans[i] = pb.createAnd(span, runMask);
     }
     for (unsigned bit = 0; bit < 8; bit++) {
         PabloAST * updated = basis[bit];
         for (unsigned i = 0; i < mInsertStrings.size(); i++) {
-            PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertSpans, i) : insertSpans[i];
             re::CC * bitCC = re::makeCC(&cc::Byte);
             for (unsigned j = 0; j < mInsertStrings[i].size(); j++) {
                 if ((mInsertStrings[i][j] >> bit) & 1) {
@@ -118,7 +125,7 @@ void StringReplaceKernel::generatePabloMethod() {
                 }
             }
             PabloAST * ccStrm = ccc->compileCC(bitCC);
-            updated = pb.createSel(stringMarks, ccStrm, updated);
+            updated = pb.createSel(insertSpans[i], ccStrm, updated);
         }
         pb.createAssign(pb.createExtract(output, pb.getInteger(bit)), updated);
     }

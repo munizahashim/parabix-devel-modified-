@@ -147,7 +147,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
     
     const unsigned fieldCount = templateStrs.size();
-    const unsigned fieldCountBits = ceil_log2(fieldCount);  // 1-based numbering
+    const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
     StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
 
     P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, /*invert = */ true);
@@ -157,7 +157,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
     P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
 
-    StreamSet * fieldNum = P->CreateStreamSet(ceil_log2(fieldCount + 1));
+    StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
     SpreadByMask(P, fieldSeparators, compressedFieldNum, fieldNum);
     
     P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
@@ -169,7 +169,12 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         insertionAmts.push_back(insertAmt);
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
-    StreamSet * InsertBixNum = P->CreateStreamSet(ceil_log2(maxInsertAmt));
+    llvm::errs() << "maxInsertamt = " << maxInsertAmt << "\n";
+    
+    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
+    llvm::errs() << "insertLengthBits = " << insertLengthBits << "\n";
+
+    StreamSet * InsertBixNum = P->CreateStreamSet(fieldCountBits);
     P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
     P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
@@ -177,15 +182,29 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     // Baais bit streams expanded with 0 bits for each string to be inserted.
     StreamSet * ExpandedBasis = P->CreateStreamSet(8);
     SpreadByMask(P, SpreadMask, translatedBasis, ExpandedBasis);
-    //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+    P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+    
+    // For each run of 0s marking insert positions, create a parallel
+    // bixnum sequentially numbering the string insert positions.
+    StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, /*invert = */ true);
+    P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+
+    StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
+    SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum);
+    P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
+
+    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -2);
+
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
-    StreamSet * Expanded = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ExpandedBasis, Expanded);
+    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
 
     //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(Expanded);
+    P->CreateKernelCall<StdOutKernel>(Instantiated);
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
