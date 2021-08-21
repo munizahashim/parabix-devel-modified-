@@ -36,7 +36,7 @@ std::vector<std::string> get_CSV_headers(std::string filename) {
 std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> headers) {
     std::vector<std::string> tmp;
     if (headers.size() == 0) return tmp;
-    tmp.push_back("{\"" + headers[0] + "\":\"");
+    tmp.push_back("\"},\n{\"" + headers[0] + "\":\"");
     for (unsigned i = 1; i < headers.size(); i++) {
         tmp.push_back("\",\"" + headers[i] + "\":\"");
     }
@@ -67,9 +67,12 @@ FieldNumberingKernel::FieldNumberingKernel(BuilderRef kb, StreamSet * SeparatorN
 void FieldNumberingKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
-    BixNum recordMarks = getInputStreamSet("RecordMarks");
-    BixNum separatorNum = getInputStreamSet("SeparatorNum");
-    BixNum fieldNumbering = bnc.AddModular(bnc.AddModular(separatorNum, 2), recordMarks);
+    PabloAST * recordMarks = getInputStreamSet("RecordMarks")[0];   //  1 at record positions, 0 elsewhere
+    BixNum separatorNum = getInputStreamSet("SeparatorNum"); //  consecutively numbered from 0
+    BixNum increment(2);
+    increment[0] = recordMarks;   //  Add 1 at record positions
+    increment[1] = pb.createNot(recordMarks);  // Add 2 at field mark positions.
+    BixNum fieldNumbering = bnc.AddFull(separatorNum, increment);
     Var * fieldBixNum = getOutputStreamVar("FieldBixNum");
     for (unsigned i = 0; i < mNumberingBits; i++) {
         pb.createAssign(pb.createExtract(fieldBixNum, i), fieldNumbering[i]);
