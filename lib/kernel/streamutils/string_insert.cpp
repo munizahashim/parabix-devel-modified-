@@ -105,12 +105,23 @@ void StringReplaceKernel::generatePabloMethod() {
     PabloAST * runMask = pb.createInFile(pb.createNot(spreadMask));
     std::vector<PabloAST *> insertSpans(mInsertStrings.size());
     for (unsigned i = 0; i < mInsertStrings.size(); i++) {
-        PabloAST * stringMarks = mMultiplexing ? bnc.EQ(insertMarks, i + 1) : insertMarks[i];
-        PabloAST * stringStart = stringMarks;
+        unsigned lookahead = 0;
         if (mMarkOffset > 0) {
-            stringStart = pb.createLookahead(stringMarks, mMarkOffset);
+            lookahead = mMarkOffset;
         } else if (mMarkOffset < 0) {
-            stringStart = pb.createLookahead(stringMarks, mInsertStrings[i].size() + 1 + mMarkOffset);
+            lookahead = mInsertStrings[i].size() + 1 + mMarkOffset;
+        }
+        PabloAST * stringStart;
+        if (lookahead == 0) {
+            stringStart = mMultiplexing ? bnc.EQ(insertMarks, i + 1) : insertMarks[i];
+        } else if (mMultiplexing) {
+            BixNum ahead(insertMarks.size());
+            for (unsigned j = 0; j < insertMarks.size(); j++) {
+                ahead[j] = pb.createLookahead(insertMarks[j], lookahead);
+            }
+            stringStart = bnc.EQ(ahead, i + 1);
+        } else {
+            stringStart = pb.createLookahead(insertMarks[i], lookahead);
         }
         PabloAST * span = pb.createMatchStar(stringStart, runMask);
         insertSpans[i] = pb.createAnd(span, runMask);
