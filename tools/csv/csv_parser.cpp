@@ -174,7 +174,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
     llvm::errs() << "insertLengthBits = " << insertLengthBits << "\n";
 
-    StreamSet * InsertBixNum = P->CreateStreamSet(fieldCountBits);
+    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
     P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
     P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
