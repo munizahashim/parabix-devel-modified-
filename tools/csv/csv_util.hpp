@@ -113,3 +113,21 @@ void CSV_Char_Replacement::generatePabloMethod() {
     }
 }
 
+class Extend1Zeroes : public PabloKernel {
+public:
+    Extend1Zeroes(BuilderRef kb, StreamSet * mask, StreamSet * extended)
+    : PabloKernel(kb, "Extend1Zeroes",
+                  {Binding{"mask", mask}},
+                  {Binding{"extended", extended}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void Extend1Zeroes::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * mask = getInputStreamSet("mask")[0];
+    PabloAST * inverted = pb.createNot(mask);
+    PabloAST * extended = pb.createNot(pb.createOr(inverted, pb.createAdvance(inverted, 1)));
+    Var * outputVar = getOutputStreamVar("extended");
+    pb.createAssign(pb.createExtract(outputVar, pb.getInteger(0)), extended);
+}

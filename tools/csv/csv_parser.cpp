@@ -159,7 +159,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
     SpreadByMask(P, fieldSeparators, compressedFieldNum, fieldNum);
-    
+
     P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
 
     std::vector<unsigned> insertionAmts;
@@ -170,7 +170,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
     llvm::errs() << "maxInsertamt = " << maxInsertAmt << "\n";
-    
+
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
     llvm::errs() << "insertLengthBits = " << insertLengthBits << "\n";
 
@@ -183,11 +183,16 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * ExpandedBasis = P->CreateStreamSet(8);
     SpreadByMask(P, SpreadMask, translatedBasis, ExpandedBasis);
     P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
-    
+
+    // We need to insert strings at all positions marked by 0s in the
+    // SpreadMask, plus the additional 0 at the delimiter position.
+    StreamSet * InsertMask = P->CreateStreamSet(1);
+    P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
+
     // For each run of 0s marking insert positions, create a parallel
     // bixnum sequentially numbering the string insert positions.
     StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, /*invert = */ true);
+    P->CreateKernelCall<RunIndex>(InsertMask, InsertIndex, nullptr, /*invert = */ true);
     P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
     StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
@@ -195,7 +200,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
 
     StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -2);
+    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, InsertMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -2);
 
 
     // The computed output can be converted back to byte stream form by the
@@ -223,6 +228,9 @@ int main(int argc, char *argv[]) {
         headers = parse_CSV_headers(HeaderSpec);
     }
     std::vector<std::string> templateStrs = createJSONtemplateStrings(headers);
+    for (auto & s : templateStrs) {
+        llvm::errs() << "template string: |" << s << "|\n";
+    }
 
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
