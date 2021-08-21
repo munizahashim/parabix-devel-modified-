@@ -1,6 +1,10 @@
 #include <fstream>
 #include <pablo/builder.hpp>
 #include <pablo/pablo_kernel.h>
+#include <pablo/pe_ones.h>
+#include <pablo/pe_zeroes.h>
+#include <pablo/bixnum/bixnum.h>
+#include <pablo/pe_ones.h>
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <boost/algorithm/string.hpp>
@@ -42,6 +46,88 @@ std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> head
     }
     tmp.push_back("\"},\n");
     return tmp;
+}
+
+
+char charLF = 0xA;
+char charCR = 0xD;
+char charDQ = 0x22;
+char charComma = 0x2C;
+
+class CSVlexer : public PabloKernel {
+public:
+    CSVlexer(BuilderRef kb, StreamSet * Source, StreamSet * CSVlexical)
+        : PabloKernel(kb, "CSVlexer",
+                      {Binding{"Source", Source}},
+                      {Binding{"CSVlexical", CSVlexical, FixedRate(), Add1()}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+enum {markLF, markCR, markDQ, markComma, markEOF};
+
+void CSVlexer::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::unique_ptr<cc::CC_Compiler> ccc;
+    ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("Source"));
+    PabloAST * LF = ccc->compileCC(re::makeCC(charLF, &cc::Byte));
+    PabloAST * CR = ccc->compileCC(re::makeCC(charCR, &cc::Byte));
+    PabloAST * DQ = ccc->compileCC(re::makeCC(charDQ, &cc::Byte));
+    PabloAST * Comma = ccc->compileCC(re::makeCC(charComma, &cc::Byte));
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
+    Var * lexOut = getOutputStreamVar("CSVlexical");
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markLF)), LF);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markCR)), CR);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markDQ)), DQ);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markComma)), Comma);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markEOF)), EOFbit);
+}
+
+class CSVparser : public PabloKernel {
+public:
+    CSVparser(BuilderRef kb, StreamSet * csvMarks, StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape, StreamSet * toKeep, bool deleteHeader = true)
+        : PabloKernel(kb, "CSVparser" + std::to_string(deleteHeader),
+                      {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)}},
+                      {Binding{"recordSeparators", recordSeparators},
+                       Binding{"fieldSeparators", fieldSeparators},
+                       Binding{"quoteEscape", quoteEscape},
+                       Binding{"toKeep", toKeep}})
+    , mDeleteHeader(deleteHeader) {}
+protected:
+    void generatePabloMethod() override;
+    bool mDeleteHeader;
+};
+
+void CSVparser::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
+    PabloAST * dquote = csvMarks[markDQ];
+    PabloAST * dquote_odd = pb.createEveryNth(dquote, pb.getInteger(2));
+    PabloAST * dquote_even = pb.createXor(dquote, dquote_odd);
+    PabloAST * quote_escape = pb.createAnd(dquote_even, pb.createLookahead(dquote, 1));
+    PabloAST * escaped_quote = pb.createAdvance(quote_escape, 1);
+    PabloAST * start_dquote = pb.createXor(dquote_odd, escaped_quote);
+    PabloAST * end_dquote = pb.createXor(dquote_even, quote_escape);
+    PabloAST * quoted_data = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {start_dquote, end_dquote});
+    PabloAST * unquoted = pb.createNot(quoted_data);
+    PabloAST * recordMarks = pb.createAnd(csvMarks[markLF], unquoted);
+    PabloAST * fieldMarks = pb.createOr(pb.createAnd(csvMarks[markComma], unquoted), recordMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), recordMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("fieldSeparators"), pb.getInteger(0)), fieldMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("quoteEscape"), pb.getInteger(0)), quote_escape);
+    PabloAST * CRbeforeLF = pb.createAnd(csvMarks[markCR], pb.createLookahead(csvMarks[markLF], 1));
+    PabloAST * toDelete = pb.createOr3(CRbeforeLF, start_dquote, end_dquote);
+    if (mDeleteHeader) {
+        PabloAST * afterHeader = pb.createMatchStar(pb.createAdvance(recordMarks, 1), pb.createOnes());
+        toDelete = pb.createOr(toDelete, pb.createNot(afterHeader));
+    }
+    toDelete = pb.createOr(toDelete, pb.createAnd(recordMarks, pb.createLookahead(csvMarks[markEOF], 1)));
+    PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
+    recordMarks = pb.createAnd(recordMarks, toKeep);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), recordMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("fieldSeparators"), pb.getInteger(0)), fieldMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("quoteEscape"), pb.getInteger(0)), quote_escape);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
 }
 
 //
