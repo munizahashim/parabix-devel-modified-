@@ -139,8 +139,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         if (port.CanModifySegmentLength) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
-//        } else {
-//            getAccessibleInputItems(b, port);
         }
     }
 
@@ -261,7 +259,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            isFinalSegment = mAnyClosed; // b->CreateICmpEQ(numOfLinearStrides, sz_ZERO);
+            isFinalSegment = mAnyClosed;
         } else {
             isFinalSegment = mFinalPartitionSegment;
         }
@@ -407,17 +405,24 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
-    Value * strideLength = getInputStrideLength(b, port);
     // Only the partition root dictates how many strides this kernel will end up doing. All other kernels
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
+
+    Value * stepLength = nullptr;
+
     if (mIsPartitionRoot && StrideStepLength[mKernelId] > 1) {
-        ConstantInt * const stepSize = b->getSize(StrideStepLength[mKernelId]);
-        strideLength = b->CreateMul(strideLength, stepSize);
+        stepLength = b->getSize(StrideStepLength[mKernelId]);
+        Value * const closed = isClosed(b, inputPort);
+        stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
     }
 
-    Value * const required = addLookahead(b, port, strideLength); assert (required);
+    Value * const strideLength = calculateStrideLength(b, port, mAlreadyProcessedPhi[port.Port], stepLength);
+
+    // Value * strideLength = getInputStrideLength(b, port, stepLength);
+
     const auto prefix = makeBufferName(mKernelId, inputPort);
+    Value * const required = addLookahead(b, port, strideLength); assert (required);
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_requiredInput (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
     #endif
@@ -1234,9 +1239,6 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
     Value * current = b->CreateLoad(currentPtr);
 
-//    b->CreateDprintfCall(b->getInt32(STDERR_FILENO),
-//                         "< pop[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
-//                         position, current, currentPtr);
 
     if (mBranchToLoopExit) {
         current = b->CreateSelect(mBranchToLoopExit, previouslyTransferred, current);

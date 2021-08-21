@@ -354,10 +354,6 @@ public:
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;
 
-
-//    unsigned                        MaxNumOfLocalInputPortIds = 0;
-//    unsigned                        MaxNumOfLocalOutputPortIds = 0;
-
     RelationshipGraph               mStreamGraph;
     RelationshipGraph               mScalarGraph;
 
