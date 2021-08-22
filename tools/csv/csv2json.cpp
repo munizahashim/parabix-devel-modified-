@@ -73,7 +73,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P->CreateStreamSet(5);
     P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
-    
+
     StreamSet * recordSeparators = P->CreateStreamSet(1);
     StreamSet * fieldSeparators = P->CreateStreamSet(1);
     StreamSet * quoteEscape = P->CreateStreamSet(1);
@@ -98,14 +98,14 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     StreamSet * recordsByField = P->CreateStreamSet(1);
     FilterByMask(P, filteredFieldSeparators, filteredRecordSeparators, recordsByField);
-    
+
     const unsigned fieldCount = templateStrs.size();
     const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
     StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
 
     P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, /*invert = */ true);
     //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
-    
+
     StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
     P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
     //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
@@ -167,7 +167,7 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    
+
     std::vector<std::string> headers;
     if (HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
