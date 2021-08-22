@@ -10,6 +10,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/intrusive/detail/math.hpp>
+#include <re/cc/cc_compiler.h>
+#include <re/cc/cc_compiler_target.h>
 
 using namespace pablo;
 using namespace kernel;
@@ -33,6 +35,8 @@ std::vector<std::string> get_CSV_headers(std::string filename) {
         std::getline(headerFile, line1);
         headerFile.close();
         headers = parse_CSV_headers(line1);
+    } else {
+        llvm::report_fatal_error("Cannot open " + filename);
     }
     return headers;
 }
@@ -64,7 +68,7 @@ protected:
     void generatePabloMethod() override;
 };
 
-enum {markLF, markCR, markDQ, markComma, markEOF};
+enum {markLF = 0, markCR = 1, markDQ = 2, markComma = 3, markEOF = 4};
 
 void CSVlexer::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
