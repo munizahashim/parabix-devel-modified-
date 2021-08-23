@@ -16,6 +16,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/run_index.h>
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
@@ -32,10 +33,6 @@
 #include <string>
 #include <toolchain/toolchain.h>
 #include <toolchain/pablo_toolchain.h>
-#include <pablo/builder.hpp>
-#include <pablo/pe_ones.h>
-#include <pablo/pe_zeroes.h>
-#include <pablo/bixnum/bixnum.h>
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -52,43 +49,6 @@ static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing 
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-
-
-class CSVparser : public PabloKernel {
-public:
-    CSVparser(BuilderRef kb, StreamSet * csvMarks, StreamSet * parsedMarks, StreamSet * toKeep)
-        : PabloKernel(kb, "CSVparser",
-                      {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)}},
-                      {Binding{"parsedMarks", parsedMarks}, Binding{"toKeep", toKeep}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-enum {markLF, markCR, markDQ, markComma};
-
-void CSVparser::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
-    PabloAST * dquote = csvMarks[markDQ];
-    PabloAST * dquote_odd = pb.createEveryNth(dquote, pb.getInteger(2));
-    PabloAST * dquote_even = pb.createXor(dquote, dquote_odd);
-    PabloAST * quote_escape = pb.createAnd(dquote_even, pb.createLookahead(dquote, 1));
-    PabloAST * escaped_quote = pb.createAdvance(quote_escape, 1);
-    PabloAST * start_dquote = pb.createXor(dquote_odd, escaped_quote);
-    PabloAST * end_dquote = pb.createXor(dquote_even, quote_escape);
-    PabloAST * quoted_data = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {start_dquote, end_dquote});
-    PabloAST * unquoted = pb.createNot(quoted_data);
-    PabloAST * recordMarks = pb.createAnd(csvMarks[markLF], unquoted);
-    PabloAST * fieldMarks = pb.createAnd(csvMarks[markComma], unquoted);
-    Var * parserOutput = getOutputStreamVar("parsedMarks");
-    pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(0)), recordMarks);
-    pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(1)), fieldMarks);
-    pb.createAssign(pb.createExtract(parserOutput, pb.getInteger(2)), quote_escape);
-    PabloAST * CRbeforeLF = pb.createAnd(csvMarks[markCR], pb.createLookahead(csvMarks[markLF], 1));
-    PabloAST * toDelete = pb.createOr3(CRbeforeLF, start_dquote, end_dquote);
-    PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
-}
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -111,35 +71,49 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P->CreateStreamSet(4);
-    char charLF = 0xA;
-    char charCR = 0xD;
-    char charDQ = 0x22;
-    char charComma = 0x2C;
-    std::vector<re::CC *> csvSpecial =
-      {re::makeByte(charLF), re::makeByte(charCR), re::makeByte(charDQ), re::makeByte(charComma)};
-    P->CreateKernelCall<CharacterClassKernelBuilder>(csvSpecial, BasisBits, csvCCs);
+    StreamSet * csvCCs = P->CreateStreamSet(5);
+    P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
 
-    StreamSet * csvMarks = P->CreateStreamSet(3);
+    StreamSet * recordSeparators = P->CreateStreamSet(1);
+    StreamSet * fieldSeparators = P->CreateStreamSet(1);
+    StreamSet * quoteEscape = P->CreateStreamSet(1);
     StreamSet * toKeep = P->CreateStreamSet(1);
-    P->CreateKernelCall<CSVparser>(csvCCs, csvMarks, toKeep);
+    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape, toKeep, HeaderSpec == "");
 
     //P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
 
     StreamSet * translatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<CSV_Char_Replacement>(csvMarks, BasisBits, translatedBasis);
+    P->CreateKernelCall<CSV_Char_Replacement>(fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
 
-    StreamSet * filteredMarks = P->CreateStreamSet(3);
-    FilterByMask(P, toKeep, csvMarks, filteredMarks);
-    //P->CreateKernelCall<DebugDisplayKernel>("filtered marks", filteredMarks);
+    StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
+    FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);
+    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
+    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
+
+    //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
+    //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
+
+    StreamSet * recordsByField = P->CreateStreamSet(1);
+    FilterByMask(P, filteredFieldSeparators, filteredRecordSeparators, recordsByField);
 
     const unsigned fieldCount = templateStrs.size();
-    StreamSet * fieldBixNum = P->CreateStreamSet(ceil_log2(fieldCount));
-    P->CreateKernelCall<FieldNumberingKernel>(filteredMarks, fieldBixNum, fieldCount);
-    //P->CreateKernelCall<DebugDisplayKernel>("fieldBixNum", fieldBixNum);
+    const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
+    StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
+
+    P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, /*invert = */ true);
+    //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
+
+    StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
+    P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
+    //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
+
+    StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
+    SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
+
+    //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
 
     std::vector<unsigned> insertionAmts;
     unsigned maxInsertAmt = 0;
@@ -148,23 +122,43 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         insertionAmts.push_back(insertAmt);
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
-    StreamSet * InsertBixNum = P->CreateStreamSet(ceil_log2(maxInsertAmt));
-    P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldBixNum, InsertBixNum);
+    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
+    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
+    //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
 
     // Baais bit streams expanded with 0 bits for each string to be inserted.
     StreamSet * ExpandedBasis = P->CreateStreamSet(8);
     SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis);
-    //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+    //P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+
+    // We need to insert strings at all positions marked by 0s in the
+    // SpreadMask, plus the additional 0 at the delimiter position.
+    StreamSet * InsertMask = P->CreateStreamSet(1);
+    P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
+
+    // For each run of 0s marking insert positions, create a parallel
+    // bixnum sequentially numbering the string insert positions.
+    StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<RunIndex>(InsertMask, InsertIndex, nullptr, /*invert = */ true);
+    //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+
+    StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
+    SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum);
+    //P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
+
+    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, InsertMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -2);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
-    StreamSet * Expanded = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ExpandedBasis, Expanded);
+    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
 
     //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(Expanded);
+    P->CreateKernelCall<StdOutKernel>(Instantiated);
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
@@ -173,7 +167,7 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    
+
     std::vector<std::string> headers;
     if (HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
@@ -183,7 +177,11 @@ int main(int argc, char *argv[]) {
         headers = parse_CSV_headers(HeaderSpec);
     }
     std::vector<std::string> templateStrs = createJSONtemplateStrings(headers);
-
+    //for (auto & s : templateStrs) {
+    //    llvm::errs() << "template string: |" << s << "|\n";
+    //}
+    std::string templatePrologue = "[\n{\"" + headers[0] + "\":\"";
+    std::string templateEpilogue = "\"}\n]\n";
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
@@ -197,8 +195,11 @@ int main(int argc, char *argv[]) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         //  Run the pipeline.
+        printf("%s", templatePrologue.c_str());
+        fflush(stdout);
         fn(fd);
         close(fd);
+        printf("%s", templateEpilogue.c_str());
     }
     return 0;
 }

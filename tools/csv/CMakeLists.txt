@@ -4,9 +4,9 @@
 
 parabix_add_executable(
 NAME
-    csv_escape_quotes
+    csv2json
 SRC
-    csv_escape_quotes.cpp
+    csv2json
 DEPS
     pablo
     kernel.basis
@@ -16,6 +16,4 @@ DEPS
     kernel.util
     toolchain
 )
-
-
 
