@@ -9,6 +9,8 @@
 #include <fstream>
 #include <iostream>
 
+#define EXPERIMENTAL_SCHEDULING_ALGORITHM
+
 namespace kernel {
 
 constexpr static unsigned INITIAL_TOPOLOGICAL_POPULATION_SIZE = 10;
@@ -20,6 +22,14 @@ constexpr static unsigned MAX_PROGRAM_POPULATION_SIZE = 20;
 constexpr static unsigned PARITION_SCHEDULING_GA_ROUNDS = 50;
 
 constexpr static unsigned PARITION_SCHEDULING_GA_STALLS = 10;
+
+
+constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
+
+constexpr static unsigned JUMP_SCHEDULING_GA_ROUNDS = 200;
+
+constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
+
 
 constexpr static unsigned PROGRAM_SCHEDULING_GA_ROUNDS = 50;
 
@@ -231,7 +241,6 @@ unsigned postorder_minimize(OrderingDAWG & O) {
     BitVector visited(stateCount);
 
     const auto t = stateCount - 1;
-
 
     for (const auto u : make_iterator_range(vertices(O))) {
         const auto f = M.find(u);
@@ -1532,106 +1541,116 @@ namespace { // anonymous namespace
 
 using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, unsigned, no_property>;
 
+#ifdef EXPERIMENTAL_SCHEDULING_ALGORITHM
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
+struct ProgramSchedulingJumpAnalysisWorker final {
+
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+
+    using JumpGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & candidate) override {
+    void repair(Candidate & L) {
 
-        assert (candidate.size() == numOfKernels);
+        assert (L.size() == candidateLength);
+        for (unsigned i = 0; i != candidateLength; ++i) {
+            remaining[i] = in_degree(i, G) + 1;
+        }
+        assert (replacement.size() == candidateLength);
 
-        assert (replacement.empty());
+        for (unsigned i = 0; i < candidateLength; ) {
+            bool progress = false;
+            for (unsigned j = 0; j != candidateLength; ++j) {
+                const auto k = L[j];
+                if (remaining[k] == 1) {
+                    assert (i < candidateLength);
+                    replacement[i++] = k;
+                    remaining[k] = 0;
+                    for (auto e : make_iterator_range(out_edges(k, G))) {
+                        const auto v = target(e, G);
+                        assert (remaining[v] > 1);
+                        --remaining[v];
+                    }
+                    progress = true;
+                }
+            }
+            assert (progress);
+        }
+        assert (replacement.size() == candidateLength);
+        L.swap(replacement);
+    }
 
-        assert (stack.empty());
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief fitness
+     ** ------------------------------------------------------------------------------------------------------------- */
+    size_t fitness(const Candidate & candidate) {
 
-        for (unsigned i = 0; i < numOfKernels; ++i) {
-            const auto k = candidate[i];
-            assert (k < numOfKernels);
-            position[k] = i;
+        const auto n = candidate.size();
+        assert (n == num_vertices(jumpGraph));
+        for (unsigned i = 0; i < n; ++i) {
+            clear_vertex(i, jumpGraph);
         }
 
+        unsigned pathScore = 0;
 
-        SmallVector<Vertex, 8> tmp;
-
-        stack.push(0);
-        remaining.assign(initialDegree.begin(), initialDegree.end());
-
-        for (;;) {
-
-            const auto u = stack.top();
-            stack.pop();
-
-            assert (remaining[u] == 0);
-
-            assert (u < hierarchicalSubgraphs.size());
-
-            const OrderingDAWG & H = hierarchicalSubgraphs[u];
-            assert (num_edges(H) > 0);
-            assert (in_degree(0, H) == 0);
-            assert (out_degree(0, H) > 0);
-
-            // explore the subgraph and greedily choose a path through the DAWG
-            // and build up the replacement from it.
-
-            assert (replacement.size() < numOfKernels);
-
-            for (unsigned t = 0;;) {
-
-                OrderingDAWG::out_edge_iterator begin, end;
-                std::tie(begin, end) = out_edges(t, H);
-                auto selected = begin;
-                auto best = position[H[*begin]];
-                for (auto ei = begin; ++ei != end; ) {
-                    const auto pos = position[H[*ei]];
-                    if (pos < best) {
-                        selected = ei;
-                        best = pos;
+        for (unsigned i = 1; i < n; ++i) {
+            const auto a = candidate[i - 1];
+            const auto b = candidate[i];
+            assert (a < n && b < n);
+            const PartitionData & A = P[a];
+            const PartitionData & B = P[b];
+            const auto v = (A.LinkedGroupId != B.LinkedGroupId);
+            pathScore += v ? 1 : 0;
+            add_edge(a, b, jumpGraph);
+            if (G[a] != G[b]) {
+                auto j = i + 1;
+                for (; j < (n - 1); ++j) {
+                    const auto c = candidate[j];
+                    if (G[b] != G[c]) {
+                        break;
                     }
                 }
-                replacement.push_back(H[*selected]);
-                t = target(*selected, H);
-                if (out_degree(t, H) == 0) {
-                    break;
+                if ((j - 1) > i) {
+                    const auto c = candidate[j];
+                    add_edge(a, c, jumpGraph);
+                    ++pathScore;
                 }
-            }
-
-            assert (tmp.empty());
-
-            for (const auto e : make_iterator_range(out_edges(u, G))) {
-                const auto v = target(e, G);
-                assert (remaining[v] > 0);
-                if (remaining[v] == 1) {
-                    tmp.push_back(v);
-                }
-                remaining[v]--;
-            }
-
-            if (tmp.empty()) {
-                if (LLVM_UNLIKELY(stack.empty())) {
-                    break;
-                }
-            } else {
-                std::sort(tmp.begin(), tmp.end(), [&](const Vertex u, const Vertex v) {
-                    return position[u] > position[v];
-                });
-                for (const auto v : tmp) {
-                    stack.push(v);
-                }
-                tmp.clear();
             }
         }
 
-        assert (replacement.size() == numOfKernels);
+        assert (in_degree(candidate[0], jumpGraph) == 0);
+        assert (out_degree(candidate[0], jumpGraph) > 0);
 
+        assert (in_degree(candidate[n - 1], jumpGraph) > 0);
+        assert (out_degree(candidate[n - 1], jumpGraph) == 0);
 
-
-        candidate.swap(replacement);
-        replacement.clear();
+        #ifndef NDEBUG
+        for (unsigned i = 0; i < n; ++i) {
+            pathCount[i] = 0;
+        }
+        #endif
+        pathCount[candidate[n - 1]] = 1;
+        for (unsigned i = n - 1; i-- > 0; ) {
+            const auto u = candidate[i];
+            unsigned paths = 0;
+            for (const auto e : make_iterator_range(out_edges(u, jumpGraph))) {
+                const auto v = target(e, jumpGraph);
+                const auto k = pathCount[v];
+                assert (k > 0);
+                paths += k;
+            }
+            pathCount[u] = paths;
+        }
+        const auto totalPathCount = pathCount[candidate[0]];
+        assert (totalPathCount > 0);
+        return pathScore * totalPathCount;
     }
+
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief makeRandomCandidate
@@ -1640,79 +1659,394 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
         Candidate candidate;
         candidate.reserve(candidateLength);
 
-        // depth-first topological ordering
+        // random topological ordering
 
-        assert (stack.empty());
+        std::vector<unsigned> deg(initialDegree);
 
-        SmallVector<Vertex, 8> tmp;
-        stack.push(0);
-        remaining.assign(initialDegree.begin(), initialDegree.end());
+        std::vector<unsigned> Q;
 
-        while (!stack.empty()) {
-
-            const auto u = stack.top();
-            stack.pop();
-
-            assert (u < hierarchicalSubgraphs.size());
-
-            const OrderingDAWG & H = hierarchicalSubgraphs[u];
-            if (LLVM_UNLIKELY(num_edges(H) == 0)) {
-                continue;
+        for (unsigned i = 0; i < candidateLength; ++i) {
+            if (deg[i] == 0) {
+                Q.push_back(i);
             }
+        }
 
-            assert (num_edges(H) > 0);
-            assert (in_degree(0, H) == 0);
-            assert (out_degree(0, H) > 0);
+        for (;;) {
 
-            // fill in the kernels from the partition subgraph
-            for (auto r = 0;;) {
-                const auto d = out_degree(r, H);
-                if (d == 0) {
-                    break;
-                }
-                std::uniform_int_distribution<unsigned> dist(0, d - 1);
-                const auto k = dist(rng);
-                const auto begin = out_edges(r, H).first;
-                const auto e = *(begin + k);
-                const auto t = H[e];
-                assert (t < candidateLength);
-                candidate.push_back(t);
-                r = target(e, H);
-            }
+            std::shuffle(Q.begin(), Q.end(), rng);
 
+            const auto u = Q.back();
+            Q.pop_back();
+
+            candidate.push_back(u);
+
+            assert (deg[u] == 0);
             for (const auto e : make_iterator_range(out_edges(u, G))) {
                 const auto v = target(e, G);
-                assert (remaining[v] > 0);
-                if (remaining[v] == 1) {
-                    tmp.push_back(v);
+                assert (deg[v] > 0);
+                deg[v]--;
+                if (deg[v] == 0) {
+                    Q.push_back(v);
                 }
-                remaining[v]--;
             }
 
-            const auto m = tmp.size();
-            if (m == 0) {
-                continue;
-            } else if (m == 1) {
-                stack.push(tmp.front());
-            } else {
-                std::shuffle(tmp.begin(), tmp.end(), rng);
-                for (const auto v : tmp) {
-                    stack.push(v);
-                }
+            if (Q.empty()) {
+                break;
             }
-            tmp.clear();
 
         }
+
+        assert (candidate.size() == candidateLength);
+
+        return candidate;
+    }
+
+public:
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief constructor
+     ** ------------------------------------------------------------------------------------------------------------- */
+    ProgramSchedulingJumpAnalysisWorker(const GlobalDependencyGraph & G,
+                                        const PartitionGraph & P,
+                                        const std::vector<unsigned> & initialDegree,
+                                        const unsigned candidateLength,
+                                        random_engine & rng)
+    : G(G)
+    , P(P)
+    , candidateLength(candidateLength)
+    , rng(rng)
+    , initialDegree(initialDegree)
+    , jumpGraph(candidateLength)
+    , pathCount(candidateLength)
+    , remaining(candidateLength)
+    , replacement(candidateLength)
+    {
+        assert (candidateLength == num_vertices(G));
+        assert (candidateLength == num_vertices(P));
+    }
+
+private:
+
+    const GlobalDependencyGraph & G;
+    const PartitionGraph & P;
+    const unsigned candidateLength;
+
+    random_engine & rng;
+
+    const std::vector<unsigned> & initialDegree;
+
+    JumpGraph jumpGraph;
+    std::vector<unsigned> pathCount;
+    std::vector<unsigned> remaining;
+    Candidate replacement;
+
+
+};
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief ProgramSchedulingJumpAnalysis
+ ** ------------------------------------------------------------------------------------------------------------- */
+struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief initGA
+     ** ------------------------------------------------------------------------------------------------------------- */
+    bool initGA(Population & initialPopulation) override {
+        for (unsigned i = 0; i < INITIAL_SCHEDULING_POPULATION_ATTEMPTS; ++i) {
+            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation)) {
+                if (initialPopulation.size() >= INITIAL_SCHEDULING_POPULATION_SIZE) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief repair
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void repairCandidate(Candidate & candidate) override {
+        worker.repair(candidate);
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief fitness
+     ** ------------------------------------------------------------------------------------------------------------- */
+    size_t fitness(const Candidate & candidate) override {
+        return worker.fitness(candidate);
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief constructor
+     ** ------------------------------------------------------------------------------------------------------------- */
+    ProgramSchedulingJumpAnalysis(const GlobalDependencyGraph & G,
+                              const PartitionGraph & P,
+                              const std::vector<unsigned> & initialDegree,
+                              const unsigned numOfUnlinkedPartitions,
+                              random_engine & rng)
+    : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_ROUNDS,
+                                            JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, rng)
+    , worker(G, P, initialDegree, numOfUnlinkedPartitions, rng) {
+
+
+    }
+
+private:
+
+    ProgramSchedulingJumpAnalysisWorker worker;
+
+};
+
+#endif
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief ProgramSchedulingAnalysis
+ ** ------------------------------------------------------------------------------------------------------------- */
+struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
+
+    using TargetVector = std::vector<double>;
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief repair
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void repair(Candidate & candidate) override {
 
         assert (candidate.size() == numOfKernels);
-        #ifndef NDEBUG
-        flat_set<unsigned> C;
-        C.reserve(numOfKernels);
-        for (const auto c: candidate) {
-            C.insert(c);
+        assert (index.size() == numOfKernels);
+
+        // record the index position of each kernel in the candidate
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            const auto j = candidate[i];
+            assert (j < numOfKernels);
+            index[j] = i;
         }
-        assert ("duplicate kernels in candidate?" && C.size() == numOfKernels);
-        #endif
+
+        const double normalizing_factor = (numOfKernels * (numOfKernels - 1)) + 1;
+
+        auto inversion_cost = [&]() {
+
+            for (unsigned i = 0; i < numOfKernels; ++i) {
+                const auto k = toEval[i];
+                assert (k < numOfKernels);
+                tau_aux[k] = i;
+            }
+            for (unsigned i = 0; i < numOfKernels; ++i) {
+                tau_offset[i] = tau_aux[index[i]];
+            }
+
+            size_t inversions = 0;
+
+            std::function<void(unsigned, unsigned)> inversion_count = [&](const unsigned lo, const unsigned hi) {
+                if (lo < hi) {
+                    const auto mid = (lo + hi) / 2;
+                    inversion_count(lo, mid);
+                    inversion_count(mid + 1, hi);
+
+                    for (auto i = lo; i <= hi; ++i) {
+                        tau_aux[i] = tau_offset[i];
+                    }
+                    auto i = lo;
+                    auto j = mid + 1;
+                    for (auto k = lo; k <= hi; ++k) {
+                        if (i > mid) {
+                            tau_offset[k] = tau_aux[j++];
+                        } else if (j > hi) {
+                            tau_offset[k] = tau_aux[i++];
+                        } else if (tau_aux[j] < tau_aux[i]) {
+                            tau_offset[k] = tau_aux[j++];
+                            inversions += (mid - i + 1);
+                        } else {
+                            tau_offset[k] = tau_aux[i++];
+                        }
+                    }
+                }
+            };
+
+            inversion_count(0, numOfKernels - 1);
+
+            return ((double)(2 * inversions) / normalizing_factor);
+        };
+
+
+       double bestInversionCost = 1.0;
+
+       std::array<double, HAMILTONIAN_PATH_NUM_OF_ANTS> pathCost;
+
+       for (auto & e : trail) {
+           e.second = HAMILTONIAN_PATH_ACO_TAU_INITIAL_VALUE;
+       }
+
+       replacement.clear();
+
+       size_t r = 0;
+
+       for (;r < SCHEDULING_FITNESS_COST_ACO_ROUNDS;++r) {
+
+           Vertex u = 0;
+
+           const auto pathIdx = (r % HAMILTONIAN_PATH_NUM_OF_ANTS);
+
+           auto & P = path[pathIdx];
+
+           P.clear();
+
+           for (;;) {
+
+               P.push_back(u);
+
+               if (out_degree(u, I) == 0) {
+                   break;
+               }
+
+               OrderingDAWG::out_edge_iterator begin, end;
+
+               std::tie(begin, end) = out_edges(u, I);
+
+               assert (targets.empty());
+               double sum = 0.0;
+               for (auto ei = begin; ei != end; ++ei) {
+                   const auto v = target(*ei, I);
+                   const auto f = trail.find(std::make_pair(u, v));
+                   assert (f != trail.end());
+                   const auto a = f->second;
+                   const auto value = a * a * a;
+                   sum += value;
+                   targets.emplace_back(sum);
+               }
+
+               std::uniform_real_distribution<double> distribution(0.0, sum);
+               const auto c = distribution(rng);
+
+               // first element in the range [first,last) which does not compare less than val.
+               const auto ti = std::lower_bound(targets.begin(), targets.end(), c);
+               assert (ti != targets.end());
+               auto ei = begin;
+               std::advance(ei, std::distance(targets.begin(), ti));
+               u = target(*ei, I); // set our next target
+
+               targets.clear();
+           }
+
+           assert (P.size() == (numOfKernels + 1));
+
+           // extract the sequence of kernel ids from the path
+           toEval.clear();
+           for (unsigned i = 1; i <= numOfKernels; ++i) {
+                const auto a = P[i - 1];
+                const auto b = P[i];
+                const auto e = edge(a, b, I);
+                assert (e.second);
+                toEval.push_back(I[e.first]);
+           }
+
+           assert (toEval.size() == numOfKernels);
+
+           pathCost[pathIdx] = inversion_cost();
+
+           if (pathIdx == (HAMILTONIAN_PATH_NUM_OF_ANTS - 1)) {
+
+               auto updatePath = [&](const Candidate & path, const double inversionCost) {
+
+                   const auto l = path.size();
+
+                   if (inversionCost > bestInversionCost) {
+
+                       const auto d = inversionCost - bestInversionCost;
+                       const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
+
+                       for (unsigned i = 1; i < l; ++i) {
+                           const auto e = std::make_pair(path[i - 1], path[i]);
+                           const auto f = trail.find(e);
+                           assert (f != trail.end());
+                           double & t = f->second;
+                           t = std::max(t - deposit, HAMILTONIAN_PATH_ACO_TAU_MIN);
+                       }
+
+                   } else if (inversionCost < bestInversionCost) {
+                       const auto d = bestInversionCost - inversionCost;
+                       const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
+
+                       for (unsigned i = 1; i < l; ++i) {
+                           const auto e = std::make_pair(path[i - 1], path[i]);
+                           const auto f = trail.find(e);
+                           assert (f != trail.end());
+                           double & t = f->second;
+                           t = std::min(t + deposit, HAMILTONIAN_PATH_ACO_TAU_MAX);
+                       }
+
+                   }
+
+               };
+
+               auto highestInversionCost = std::numeric_limits<double>::min();
+               auto highestInversion = 0U;
+               auto lowestInversionCost = std::numeric_limits<double>::max();
+               auto lowestInversion = 0U;
+
+               for (unsigned i = 0; i < HAMILTONIAN_PATH_NUM_OF_ANTS; ++i) {
+                   if (highestInversionCost < pathCost[i]) {
+                       highestInversionCost = pathCost[i];
+                       highestInversion = i;
+                   }
+                   if (lowestInversionCost > pathCost[i]) {
+                       lowestInversionCost = pathCost[i];
+                       lowestInversion = i;
+                   }
+               }
+
+               updatePath(path[highestInversion], highestInversionCost);
+               updatePath(path[lowestInversion], lowestInversionCost);
+
+               if (bestInversionCost > lowestInversionCost) {
+                   bestInversionCost = lowestInversionCost;
+
+                   // reconstruct the repaired ordering
+                   toEval.clear();
+                   const auto & P = path[lowestInversion];
+                   for (unsigned i = 1; i <= numOfKernels; ++i) {
+                        const auto a = P[i - 1];
+                        const auto b = P[i];
+                        const auto e = edge(a, b, I);
+                        assert (e.second);
+                        toEval.push_back(I[e.first]);
+                   }
+                   assert (toEval.size() == numOfKernels);
+                   replacement.swap(toEval);
+               }
+           }
+       }
+
+       assert (bestInversionCost < 1.0);
+       assert (replacement.size() == numOfKernels);
+
+       candidate.swap(replacement);
+
+   }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief makeRandomCandidate
+     ** ------------------------------------------------------------------------------------------------------------- */
+    Candidate makeRandomCandidate() {
+        Candidate candidate;
+        candidate.reserve(candidateLength);
+
+        // choose a random path and generate the candidate from the DAWG labels
+        unsigned u = 0;
+        for (;;) {
+            const auto d = out_degree(u, I);
+            if (LLVM_UNLIKELY(d == 0)) {
+                break;
+            }
+            OrderingDAWG::out_edge_iterator ei, ei_end;
+            std::tie(ei, ei_end) = out_edges(u, I);
+            if (d > 1) {
+                std::uniform_int_distribution<> dist(0, d - 1);
+                std::advance(ei, dist(rng));
+            }
+            candidate.push_back(I[*ei]);
+            u = target(*ei, I);
+        }
+        assert (candidate.size() == numOfKernels);
         return candidate;
     }
 
@@ -1722,32 +2056,47 @@ public:
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     ProgramSchedulingAnalysisWorker(const SchedulingGraph & S,
-                                    const GlobalDependencyGraph & G,
-                                    const std::vector<OrderingDAWG> & hierarchicalSubgraphs,
-                                    const std::vector<unsigned> & initialDegree,
+                                    const OrderingDAWG & I,
                                     const unsigned numOfKernels,
                                     random_engine & rng)
     : SchedulingAnalysisWorker(S, numOfKernels, numOfKernels, rng)
-    , G(G)
-    , hierarchicalSubgraphs(hierarchicalSubgraphs)
-    , initialDegree(initialDegree)
-    , remaining(num_vertices(G))
-    , position(numOfKernels)
-    {
+    , I(I)
+    , index(numOfKernels)
+    , tau_aux(numOfKernels)
+    , tau_offset(numOfKernels) {
+
+        for (unsigned i = 0; i < HAMILTONIAN_PATH_NUM_OF_ANTS; ++i) {
+            path[i].reserve(numOfKernels);
+        }
+
         replacement.reserve(numOfKernels);
+        toEval.reserve(numOfKernels);
+        trail.reserve(num_edges(I));
+
+        for (const auto e : make_iterator_range(edges(I))) {
+            const unsigned u = source(e, I);
+            const unsigned v = target(e, I);
+            trail.emplace(std::make_pair(u, v), HAMILTONIAN_PATH_ACO_TAU_INITIAL_VALUE);
+        }
+
     }
 
 private:
 
-    const GlobalDependencyGraph & G;
+    const OrderingDAWG & I;
 
-    const std::vector<OrderingDAWG> & hierarchicalSubgraphs;
-    const std::vector<unsigned> & initialDegree;
+    flat_map<std::pair<Vertex, Vertex>, double> trail;
+    std::vector<unsigned> index;
+    std::array<Candidate, HAMILTONIAN_PATH_NUM_OF_ANTS> path;
 
-    std::stack<Vertex> stack;
+    TargetVector targets;
+
+    Candidate toEval;
+    std::vector<unsigned> tau_aux;
+    std::vector<unsigned> tau_offset;
+
+
     Candidate replacement;
-    std::vector<unsigned> remaining;
-    std::vector<unsigned> position;
 
 };
 
@@ -1788,14 +2137,12 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     ProgramSchedulingAnalysis(const SchedulingGraph & S,
-                              const GlobalDependencyGraph & G,
-                              const std::vector<OrderingDAWG> & hierarchicalSubgraphs,
-                              const std::vector<unsigned> & initialDegree,
+                              const OrderingDAWG & I,
                               const unsigned numOfKernels,
                               random_engine & rng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_ROUNDS,
                                             PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, rng)
-    , worker(S, G, hierarchicalSubgraphs, initialDegree, numOfKernels, rng) {
+    , worker(S, I, numOfKernels, rng) {
 
     }
 
@@ -1806,300 +2153,6 @@ private:
 };
 
 } // end of anonymous namespace
-
-#if 0
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief scheduleProgramGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, random_engine & rng) const {
-
-    // create a bipartite graph consisting of partitions and cross-partition
-    // streamset nodes and relationships
-
-    flat_set<Vertex> streamSets;
-
-    for (unsigned partitionId = 1; partitionId < PartitionCount; ++partitionId) {
-        for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
-            const auto streamSet = P[e];
-            // a streamSet with a value 0 denotes a non-I/O ordering constraint
-            if (LLVM_UNLIKELY(streamSet == 0)) continue;
-            assert (streamSet < num_vertices(Relationships));
-            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-            assert (isa<StreamSet>(Relationships[streamSet].Relationship));
-            streamSets.insert(streamSet);
-        }
-
-//        // insert any streamSets with no consumers to ensure we capture them in
-//        // out I/O orderings.
-//        const auto & K = P[partitionId].Kernels;
-//        for (const auto k : K) {
-//            for (const auto e : make_iterator_range(out_edges(k, Relationships))) {
-//                const auto binding = target(e, Relationships);
-//                const RelationshipNode & output = Relationships[binding];
-//                if (LLVM_LIKELY(output.Type == RelationshipNode::IsBinding)) {
-//                    for (const auto f : make_iterator_range(out_edges(binding, Relationships))) {
-//                        const auto streamSet = target(f, Relationships);
-//                        assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-//                        assert (isa<StreamSet>(Relationships[streamSet].Relationship));
-//                        if (out_degree(streamSet, Relationships) == 0) {
-//                            streamSets.insert(streamSet);
-//                        }
-//                    }
-//                }
-//            }
-//        }
-
-    }
-
-    const auto numOfStreamSets = streamSets.size();
-
-    GlobalDependencyGraph G(PartitionCount);
-
-    auto getPartitionId = [&](const unsigned kernel) {
-        const auto f = PartitionIds.find(kernel);
-        assert (f != PartitionIds.end());
-        const auto partitionId = f->second;
-        assert (partitionId > 0);
-        return partitionId;
-    };
-
-    flat_set<unsigned> kernels;
-
-    flat_set<unsigned> consumerPartitions;
-
-    for (unsigned i = 0; i < numOfStreamSets; ++i) {
-
-        const auto streamSet = *streamSets.nth(i);
-
-        const auto f = first_in_edge(streamSet, Relationships);
-        assert (Relationships[f].Reason != ReasonType::Reference);
-
-        const auto binding = source(f, Relationships);
-        const RelationshipNode & output = Relationships[binding];
-        assert (output.Type == RelationshipNode::IsBinding);
-
-        const auto g = first_in_edge(binding, Relationships);
-        assert (Relationships[g].Reason != ReasonType::Reference);
-        const unsigned producer = source(g, Relationships);
-
-        const auto producerPartitionId = getPartitionId(producer);
-        kernels.insert(producer);
-
-        assert (consumerPartitions.empty());
-
-        for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
-            const auto binding = target(e, Relationships);
-            const RelationshipNode & input = Relationships[binding];
-            if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
-                const auto f = first_out_edge(binding, Relationships);
-                assert (Relationships[f].Reason != ReasonType::Reference);
-                const unsigned consumer = target(f, Relationships);
-
-                const auto consumerPartitionId = getPartitionId(consumer);
-                assert (consumerPartitionId >= producerPartitionId);
-
-                if (producerPartitionId != consumerPartitionId) {
-                    kernels.insert(consumer);
-                    consumerPartitions.insert(consumerPartitionId);
-                }
-            }
-        }
-
-        for (const auto consumerPartitionId : consumerPartitions) {
-            add_edge(producerPartitionId, consumerPartitionId, G);
-        }
-        consumerPartitions.clear();
-
-    }
-
-    assert (PartitionCount > 2);
-
-    for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
-        if (in_degree(partitionId, G) == 0) {
-            add_edge(0, partitionId, G);
-        }
-        if (out_degree(partitionId, G) == 0) {
-            add_edge(partitionId, PartitionCount - 1, G);
-        }
-    }
-
-    // We need to ensure that when we filter a partition ordering DAWG later that
-    // we account for source kernels. The easiest way is simply to force them to
-    // be included in the kernel filter.
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-        const PartitionData & currentPartition = P[partitionId];
-        const auto & K = currentPartition.Kernels;
-        #ifndef NDEBUG
-        if (partitionId == 0 || partitionId == (PartitionCount - 1)) {
-            assert (K.size() == 1);
-            const auto k = K.front();
-            const RelationshipNode & rn = Relationships[k];
-            assert (rn.Type == RelationshipNode::IsKernel);
-            assert (rn.Kernel == mPipelineKernel);
-        }
-        #endif
-        for (const auto k : K) {
-             for (const auto e : make_iterator_range(in_edges(k, Relationships))) {
-                const auto binding = source(e, Relationships);
-                const RelationshipNode & input = Relationships[binding];
-                if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
-                    goto not_a_source;
-                }
-            }
-            kernels.insert(k);
- not_a_source: continue;
-        }
-    }
-
-    const auto numOfFrontierKernels = kernels.size();
-
-    auto getKernelId = [&](const unsigned kernel) {
-        const auto f = kernels.find(kernel);
-        assert (f != kernels.end());
-        return std::distance(kernels.begin(), f);
-    };
-
-    const auto n = numOfFrontierKernels + numOfStreamSets;
-
-    assert (n > 0);
-
-    SchedulingGraph S(n);
-
-    for (unsigned i = 0; i < numOfStreamSets; ++i) {
-
-        const auto streamSet = *streamSets.nth(i);
-
-        const auto streamSetNode = numOfFrontierKernels + i;
-        assert (in_degree(streamSetNode, S) == 0);
-        assert (out_degree(streamSetNode, S) == 0);
-
-        const auto f = first_in_edge(streamSet, Relationships);
-        assert (Relationships[f].Reason != ReasonType::Reference);
-
-        const auto binding = source(f, Relationships);
-        const RelationshipNode & output = Relationships[binding];
-        assert (output.Type == RelationshipNode::IsBinding);
-
-        const auto g = first_in_edge(binding, Relationships);
-        assert (Relationships[g].Reason != ReasonType::Reference);
-        const unsigned producer = source(g, Relationships);
-
-        const auto producerPartitionId = getPartitionId(producer);
-        const Binding & outputBinding = output.Binding;
-        const ProcessingRate & rate = outputBinding.getRate();
-
-        SchedulingNode & node = S[streamSetNode];
-        node.Type = SchedulingNode::IsStreamSet;
-
-        if (LLVM_UNLIKELY(rate.isUnknown())) {
-            node.Size = Rational{0};
-        } else {
-            const RelationshipNode & rn = Relationships[producer];
-            assert (node.Type == RelationshipNode::IsKernel);
-            const PartitionData & N = P[producerPartitionId];
-            const auto & K = N.Kernels;
-            const auto h = std::find(K.begin(), K.end(), producer);
-            assert (h != K.end());
-            const auto index = std::distance(K.begin(), h);
-
-            const auto strideSize = rn.Kernel->getStride();
-            const auto sum = rate.getLowerBound() + rate.getUpperBound();
-
-            const auto expectedItemsPerStride = sum * strideSize * Rational{1, 2};
-            const PartitionData & Pi = P[producerPartitionId];
-            const auto expectedItemsPerSegment = N.Repetitions[index] * expectedItemsPerStride;
-            const Rational bytesPerItem{outputBinding.getFieldWidth() * outputBinding.getNumElements(), 8};
-            node.Size = expectedItemsPerSegment * bytesPerItem; // bytes per segment
-        }
-
-        add_edge(getKernelId(producer), streamSetNode, S);
-
-        for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
-            const auto binding = target(e, Relationships);
-            const RelationshipNode & input = Relationships[binding];
-            if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
-                const auto f = first_out_edge(binding, Relationships);
-                assert (Relationships[f].Reason != ReasonType::Reference);
-                const unsigned consumer = target(f, Relationships);
-
-                const auto consumerPartitionId = getPartitionId(consumer);
-                assert (consumerPartitionId >= producerPartitionId);
-
-                if (producerPartitionId != consumerPartitionId) {
-                    add_edge(streamSetNode, getKernelId(consumer), S);
-                }
-            }
-        }
-    }
-
-    std::vector<OrderingDAWG> hierarchicalSubgraphs;
-    hierarchicalSubgraphs.reserve(PartitionCount);
-
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-
-        assert (partitionId < num_vertices(P));
-
-        const PartitionData & currentPartition = P[partitionId];
-
-        const auto & O = currentPartition.Orderings;
-
-        assert (num_edges(O) > 0);
-
-        OrderingDAWG H(1);
-
-        std::function<void(unsigned, unsigned)> filter_trie = [&](const unsigned u, const unsigned i) {
-            for (const auto e : make_iterator_range(out_edges(i, O))) {
-                const auto t = O[e];
-                auto v = u;
-                // Is kernel "t" a kernel with cross partition I/O?
-                const auto f = kernels.find(t);
-                if (f != kernels.end()) {
-                    const auto k = std::distance(kernels.begin(), f);
-                    v = add_vertex(H);
-                    add_edge(u, v, k, H);
-                } else {
-                    for (const auto k : kernels) {
-                        assert (k != t);
-                    }
-                }
-                filter_trie(v, target(e, O));
-            }
-        };
-
-        filter_trie(0, 1);
-        assert (num_edges(H) > 0);
-        postorder_minimize(H);
-        assert (num_edges(H) > 0);
-
-        hierarchicalSubgraphs.emplace_back(H);
-    }
-
-    std::vector<unsigned> initialDegree(PartitionCount);
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-        const auto d = in_degree(partitionId, G);
-        assert ((partitionId == 0) ^ (d != 0));
-        initialDegree[partitionId] = d;
-    }
-
-    ProgramSchedulingAnalysis SA(S, G, hierarchicalSubgraphs, initialDegree, numOfFrontierKernels, rng);
-
-    SA.runGA();
-
-    auto partial = SA.getResult();
-
-    for (auto e : make_iterator_range(edges(partial))) {
-        auto & k = partial[e];
-        assert (k < numOfFrontierKernels);        
-        k = *kernels.nth(k);
-    }
-
-    return partial;
-}
-
-#endif
-
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief scheduleProgramGraph
@@ -2247,8 +2300,6 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
 
     }
 
-
-
     assert (PartitionCount > 2);
 
     for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
@@ -2286,6 +2337,31 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
     }
 
     END_SCOPED_REGION
+
+    // Now compute the transitive reduction of the partition relationships
+    BEGIN_SCOPED_REGION
+    const reverse_traversal ordering(PartitionCount);
+    assert (is_valid_topological_sorting(ordering, G));
+    transitive_closure_dag(ordering, G);
+    transitive_reduction_dag(ordering, G);
+    END_SCOPED_REGION
+
+    std::vector<unsigned> initialDegree(PartitionCount);
+    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
+        const auto d = in_degree(partitionId, G);
+        assert ((partitionId == 0) ^ (d != 0));
+        initialDegree[partitionId] = d;
+    }
+
+    #ifdef EXPERIMENTAL_SCHEDULING_ALGORITHM
+
+    ProgramSchedulingJumpAnalysis JA(G, P, initialDegree, PartitionCount, rng);
+    JA.runGA();
+    auto pathGraph = JA.getResult();
+    postorder_minimize(pathGraph);
+
+    #endif
+
 
     // We need to ensure that when we filter a partition ordering DAWG later that
     // we account for source kernels. The easiest way is simply to force them to
@@ -2352,10 +2428,6 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
                     const auto k = std::distance(kernels.begin(), f);
                     v = add_vertex(H);
                     add_edge(u, v, k, H);
-                } else {
-                    for (const auto k : kernels) {
-                        assert (k != t);
-                    }
                 }
                 filter_trie(v, target(e, O));
             }
@@ -2369,37 +2441,50 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
         hierarchicalSubgraphs.emplace_back(std::move(H));
     }
 
-#if 0
-
-    errs() << "built hierachical subgraphs\n";
+#ifdef EXPERIMENTAL_SCHEDULING_ALGORITHM
 
     OrderingDAWG I(1);
 
-    flat_map<unsigned, unsigned> M;
+    BEGIN_SCOPED_REGION
 
-    unsigned count = 0;
+    flat_map<unsigned, unsigned> outer;
 
-    auto buildSubgraph = [&](const std::vector<unsigned> & L) {
+    outer.reserve(num_vertices(pathGraph));
 
-        errs() << "built subgraph " << (++count) << "\n";
+    flat_map<unsigned, unsigned> inner;
 
-        unsigned s = 0;
+    // unsigned count = 0;
 
-        for (const auto i : L) {
-            const OrderingDAWG & H = hierarchicalSubgraphs[i];
+    // To construct I, we take the edge graph of the pathGraph but subsitute the
+    // hierarchical subgraph of the vertex for which that edge in the pathGraph
+    // refers to.
 
-            // insert H after node s and find H's sink
+    std::function<void(unsigned, unsigned)> buildGraph = [&](const unsigned u, const unsigned s) {
 
-            assert (M.empty());
+        for (const auto e : make_iterator_range(out_edges(u, pathGraph))) {
+            const auto h = pathGraph[e];
+            const auto v = target(e, pathGraph);
+            const auto f = outer.find(v);
+            unsigned t = 0;
+            bool visit = false;
+            if (f == outer.end()) {
+                t = add_vertex(I);
+                outer.emplace(v, t);
+                visit = true;
+            } else {
+                t = f->second;
+            }
 
-            auto t = s;
+            const OrderingDAWG & H = hierarchicalSubgraphs[h];
+
+            assert (inner.empty());
 
             std::function<void(unsigned, unsigned)> insertSubgraph = [&](const unsigned u, const unsigned x) {
                 for (const auto e : make_iterator_range(out_edges(u, H))) {
                     const auto k = H[e];
                     const auto v = target(e, H);
-                    const auto f = M.find(v);
-                    if (f != M.end()) {
+                    const auto f = inner.find(v);
+                    if (f != inner.end()) {
                         const auto y = f->second;
                         for (const auto f : make_iterator_range(out_edges(x, I))) {
                             const auto z = target(f, I);
@@ -2418,14 +2503,15 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
                                 goto found_existing_transition;
                             }
                         }
-                        y = add_vertex(I);
+                        if (LLVM_UNLIKELY(out_degree(v, H) == 0)) {
+                            y = t;
+                        } else {
+                            y = add_vertex(I);
+                        }
                         add_edge(x, y, k, I);
             found_existing_transition:
-                        M.emplace(v, y);
-                        if (LLVM_UNLIKELY(out_degree(v, H) == 0)) {
-                            assert ("partition DAWG should have only one sink!" && t == s);
-                            t = y;
-                        } else {
+                        inner.emplace(v, y);
+                        if (LLVM_UNLIKELY(out_degree(v, H) != 0)) {
                             insertSubgraph(v, y);
                         }
                     }
@@ -2436,24 +2522,20 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
 
             insertSubgraph(0, s);
 
-            M.clear();
+            inner.clear();
 
-            assert (t != s);
-
-            s = t;
-
+            if (visit) {
+                buildGraph(v, t);
+            }
         }
+
     };
 
-    enumerateUpToNTopologicalOrderings(G, -1U, buildSubgraph);
-
-    errs() << "starting minimize\n";
+    buildGraph(0, 0);
 
     postorder_minimize(I);
 
-    errs() << "ending minimize\n";
-
-    printDAWG(I, errs(), "I");
+    END_SCOPED_REGION
 
 #endif
 
@@ -2526,19 +2608,16 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
         }
     }
 
-    std::vector<unsigned> initialDegree(PartitionCount);
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-        const auto d = in_degree(partitionId, G);
-        assert ((partitionId == 0) ^ (d != 0));
-        initialDegree[partitionId] = d;
-    }
 
-    ProgramSchedulingAnalysis SA(S, G, hierarchicalSubgraphs, initialDegree, numOfFrontierKernels, rng);
+    ProgramSchedulingAnalysis SA(S, I, numOfFrontierKernels, rng);
 
     SA.runGA();
 
     auto partial = SA.getResult();
 
+    postorder_minimize(partial);
+
+    // replace the internal kernel ids with the program kernel ids.
     for (auto e : make_iterator_range(edges(partial))) {
         auto & k = partial[e];
         assert (k < numOfFrontierKernels);
@@ -2663,6 +2742,8 @@ OrderingDAWG PipelineAnalysis::assembleFullSchedule(const PartitionGraph & P, co
         buildFullSchedule(target(f, partial), 1, firstGoal, getPartitionId(firstGoal));
     }
     assert (path.empty());
+
+    postorder_minimize(schedule);
 
     return schedule;
 }

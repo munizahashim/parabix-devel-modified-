@@ -429,7 +429,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     }
 
     flat_set<unsigned> componentIds;
-    componentIds.reserve(synchronousPartitionCount);
+    componentIds.reserve(synchronousPartitionCount * 2);
 
     for (unsigned i = 0; i < m; ++i) {
         const auto u = sequence[i];
@@ -514,20 +514,20 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     PartitionGraph P(partitionCount);
 
+
+
     for (unsigned i = 0; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
         if (node.Type == RelationshipNode::IsKernel) {
-
-            assert (partitionIds[i] < partitionCount);
+            assert (componentId[i] < partitionCount);
             const auto j = renumbered[componentId[i]];
             assert (j < partitionCount);
-
-
-
             assert ((j > 0 && (j + 1) < partitionCount) ^ (node.Kernel == mPipelineKernel));
-
-            P[j].Kernels.push_back(u);
+            PartitionData & pd = P[j];
+            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == partitionIds[j]);
+            pd.LinkedGroupId = partitionIds[j];
+            pd.Kernels.push_back(u);
             PartitionIds.emplace(u, j);
         }
     }

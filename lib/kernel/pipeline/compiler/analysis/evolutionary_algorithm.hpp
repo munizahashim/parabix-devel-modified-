@@ -385,6 +385,9 @@ public:
                 nextGeneration.clear();
             }
 
+            // errs() << "averageGenerationFitness=" << averageGenerationFitness << "\n";
+            // errs() << "bestGenerationalFitness=" << bestGenerationalFitness << "\n";
+
             priorAverageFitness = averageGenerationFitness;
             priorBestFitness = bestGenerationalFitness;
         }
