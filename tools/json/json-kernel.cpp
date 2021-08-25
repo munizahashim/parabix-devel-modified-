@@ -244,7 +244,7 @@ void JSONExtraneousChars::generatePabloMethod() {
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), extraneousChars);
 }
 
-static PabloAST sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloAST * lexInMarker) {
+static PabloAST * sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloAST * lexInMarker) {
     PabloAST * conflict = pb.createAnd(strSpan, lexInMarker);
     return pb.createXor(lexInMarker, conflict);
 }
