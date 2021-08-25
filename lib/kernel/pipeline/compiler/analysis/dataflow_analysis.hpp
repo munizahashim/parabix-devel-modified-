@@ -138,9 +138,6 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
                                 } else {
                                     hard_assert(Z3_mk_ge(ctx, expOutRate, expInRate));
                                     soft_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
-//                                    Z3_ast args[2] = { expOutRate, expInRate };
-//                                    const auto diff = Z3_mk_sub(ctx, 2, args);
-//                                    Z3_optimize_minimize(ctx, solver, diff);
                                 }
                             }
                         }
@@ -185,6 +182,15 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
 
     Z3_optimize_dec_ref(ctx, solver);
     Z3_del_context(ctx);
+
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recomputeMinimumExpectedDataflow
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::recomputeMinimumExpectedDataflow() {
+
 
 }
 
@@ -812,12 +818,12 @@ void PipelineAnalysis::computeMinimumStrideLengthForConsistentDataflow() {
     StrideStepLength.resize(PipelineOutput + 1);
 
     auto make_partition_vars = [&](const unsigned first, const unsigned last) {
-        auto gcd = MinimumNumOfStrides[first];
+        auto gcd = MaximumNumOfStrides[first];
         for (auto i = first + 1; i <= last; ++i) {
-            gcd = boost::gcd(gcd, MinimumNumOfStrides[i]);
+            gcd = boost::gcd(gcd, MaximumNumOfStrides[i]);
         }
         for (auto i = first; i <= last; ++i) {
-            StrideStepLength[i] = (MinimumNumOfStrides[i] / gcd);
+            StrideStepLength[i] = (MaximumNumOfStrides[i] / gcd);
         }
     };
 

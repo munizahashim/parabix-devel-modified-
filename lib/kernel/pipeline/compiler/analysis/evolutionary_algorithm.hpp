@@ -26,7 +26,7 @@ T abs_subtract(const T a, const T b) {
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief OrderingBasedEvolutionaryAlgorithm
+ * @brief PermutationBasedEvolutionaryAlgorithm
  *
  * Both the partition scheduling algorithm and whole program scheduling algorithm rely on the following class.
  * Within it is a genetic algorithm designed to find a minimum memory schedule of a given SchedulingGraph.
@@ -35,8 +35,47 @@ namespace kernel {
  * to call with only one function. Instead both the "initGA" and "repair" functions are implemented within
  * the actual scheduling functions.
  ** ------------------------------------------------------------------------------------------------------------- */
+template<unsigned numOfGenotypeSubstrings = 1>
 class PermutationBasedEvolutionaryAlgorithm {
+
+    template<unsigned n>
+    struct __TypeGenerator {
+
+        using SubstringLength = std::array<unsigned, n>;
+
+        using InitializerType = const SubstringLength &;
+
+        static unsigned getSubstringLength(const SubstringLength & lengths, const unsigned i) {
+            assert (i < lengths.size());
+            return lengths[i];
+        }
+
+        static unsigned sumOfSubstringLengths(const SubstringLength & lengths) {
+            return std::accumulate(lengths.begin(), lengths.end(), 0);
+        }
+    };
+
+    template<>
+    struct __TypeGenerator<1> {
+
+        using SubstringLength = unsigned;
+
+        using InitializerType = SubstringLength;
+
+        static unsigned getSubstringLength(const SubstringLength length, const unsigned /*i*/) {
+            return length;
+        }
+
+        static unsigned sumOfSubstringLengths(const SubstringLength length) {
+            return length;
+        }
+    };
+
+    using SubStrTy = __TypeGenerator<numOfGenotypeSubstrings>;
+
 public:
+
+    using CandidateLengthType = typename SubStrTy::SubstringLength;
 
     using Candidate = std::vector<Vertex>;
 
@@ -109,13 +148,15 @@ public:
             goto enumerated_entire_search_space;
         }
 
-        assert (candidateLength > 1);
-
         BEGIN_SCOPED_REGION
 
-        permutation_bitset bitString(candidateLength);
+        const auto candidateSize = SubStrTy::sumOfSubstringLengths(candidateLength);
 
-        BitVector uncopied(candidateLength);
+        assert (candidateSize > 1);
+
+        permutation_bitset bitString(candidateSize);
+
+        BitVector uncopied(candidateSize);
 
         std::uniform_real_distribution<double> zeroToOneReal(0.0, 1.0);
 
@@ -146,7 +187,6 @@ public:
             const auto d = std::min(maxGenerations - g, c);
             assert (d >= 1);
             const double currentMutationRate = (double)(d) / (double)(maxStallGenerations) + 0.03;
-            // const double currentMutationRate = (double)(g + 1) / (double)(maxGenerations);
             const double currentCrossoverRate = 1.0 - currentMutationRate;
 
             // CROSSOVER:
@@ -159,17 +199,14 @@ public:
                         const Candidate & A = population[i]->first;
                         const Candidate & B = population[j]->first;
 
-                        assert (A.size() == candidateLength);
-                        assert (B.size() == candidateLength);
-
                         // generate a random bit string
                         bitString.randomize(rng);
 
                         auto crossover = [&](const Candidate & A, const Candidate & B, const bool selector) {
 
-                            Candidate C(candidateLength);
+                            Candidate C(candidateSize);
 
-                            assert (candidateLength > 1);
+                            assert (candidateSize > 1);
                             assert (C.size() == candidateLength);
 
                             uncopied.reset();
@@ -178,44 +215,56 @@ public:
                             unsigned count = 0;
                             #endif
 
-                            for (unsigned k = 0; k < candidateLength; ++k) {
-                                const auto t = bitString.test(k);
-                                if (t == selector) {
-                                    const auto v = A[k];
-                                    assert (v < candidateLength);
-                                    assert ("candidate contains duplicate values?" && !uncopied.test(v));
-                                    uncopied.set(v);
-                                    #ifndef NDEBUG
-                                    ++count;
-                                    #endif
-                                } else {
-                                    C[k] = A[k];
-                                }
-                            }
+                            for (unsigned c = 0, s = 0; c != numOfGenotypeSubstrings; ++c) {
+                                const auto len = SubStrTy::getSubstringLength(candidateLength, c);
 
-                            assert (count == uncopied.count());
-
-                            for (unsigned k = 0U, p = -1U; k < candidateLength; ++k) {
-                                const auto t = bitString.test(k);
-                                if (t == selector) {
-                                    // V contains 1-bits for every entry we did not
-                                    // directly copy from A into C. We now insert them
-                                    // into C in the same order as they are in B.
-                                    #ifndef NDEBUG
-                                    assert (count-- > 0);
-                                    #endif
-                                    for (;;){
-                                        ++p;
-                                        assert (p < candidateLength);
-                                        const auto v = B[p];
-                                        assert (v < candidateLength);
-                                        if (uncopied.test(v)) {
-                                            break;
-                                        }
+                                for (unsigned k = 0; k < len; ++k) {
+                                    if (bitString.test(s + k) == selector) {
+                                        const auto v = A[k];
+                                        assert (v < len);
+                                        assert ("candidate contains duplicate values?" && !uncopied.test(v));
+                                        uncopied.set(s + v);
+                                        #ifndef NDEBUG
+                                        ++count;
+                                        #endif
+                                    } else {
+                                        C[k] = A[k];
                                     }
-                                    C[k] = B[p];
                                 }
+
+                                assert (count == uncopied.count());
+
+                                s += len;
                             }
+
+                            for (unsigned c = 0, s = 0; c != numOfGenotypeSubstrings; ++c) {
+                                const auto len = SubStrTy::getSubstringLength(candidateLength, c);
+
+                                for (unsigned k = 0U, p = -1U; k < len; ++k) {
+                                    const auto t = bitString.test(s + k);
+                                    if (t == selector) {
+                                        // V contains 1-bits for every entry we did not
+                                        // directly copy from A into C. We now insert them
+                                        // into C in the same order as they are in B.
+                                        #ifndef NDEBUG
+                                        assert (count-- > 0);
+                                        #endif
+                                        for (;;){
+                                            ++p;
+                                            assert (p < candidateLength);
+                                            const auto v = B[p];
+                                            assert (v < candidateLength);
+                                            if (uncopied.test(s + v)) {
+                                                break;
+                                            }
+                                        }
+                                        C[k] = B[p];
+                                    }
+                                }
+
+                                s += len;
+                            }
+
                             assert (count == 0);
 
                             repairCandidate(C);
@@ -238,11 +287,15 @@ public:
 
                     auto & A = population[i];
 
-                    const auto a = std::uniform_int_distribution<unsigned>{0, candidateLength - 2}(rng);
-                    const auto b = std::uniform_int_distribution<unsigned>{a + 1, candidateLength - 1}(rng);
-
                     Candidate C{A->first};
-                    std::shuffle(C.begin() + a, C.begin() + b, rng);
+
+                    for (unsigned c = 0, s = 0; c != numOfGenotypeSubstrings; ++c) {
+                        const auto len = SubStrTy::getSubstringLength(candidateLength, c);
+                        const auto a = std::uniform_int_distribution<unsigned>{0, len - 2}(rng);
+                        const auto b = std::uniform_int_distribution<unsigned>{a + 1, len - 1}(rng);
+                        std::shuffle(C.begin() + (s + a), C.begin() + (s + b), rng);
+                        s += len;
+                    }
 
                     repairCandidate(C);
                     insertCandidate(std::move(C), population);
@@ -496,11 +549,13 @@ in_trie:    ++i;
 
 protected:
 
-    PermutationBasedEvolutionaryAlgorithm(const unsigned candidateLength
-                          , const unsigned maxRounds
-                          , const unsigned maxStallRounds
-                          , const unsigned maxCandidates
-                          , random_engine & rng)
+    using InitType = typename SubStrTy::InitializerType;
+
+    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
+                                         , const unsigned maxRounds
+                                         , const unsigned maxStallRounds
+                                         , const unsigned maxCandidates
+                                         , random_engine & rng)
     : candidateLength(candidateLength)
     , maxGenerations(maxRounds)
     , maxCandidates(maxCandidates)
@@ -513,7 +568,7 @@ protected:
 
 protected:
 
-    const unsigned candidateLength;
+    const CandidateLengthType candidateLength;
     const unsigned maxGenerations;
     const unsigned maxCandidates;
 

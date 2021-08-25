@@ -2,7 +2,6 @@
 #define SCHEDULING_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
-#include "evolutionary_algorithm.hpp"
 
 #include <chrono>
 #include <llvm/Support/Format.h>
@@ -108,30 +107,15 @@ void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, random_eng
     // edgeless if any permutation of its kernels is valid or contains all of its optimal
     // orderings for the kernels within each partition.
 
-    // TODO: look into performance problem with
-    // bin/icgrep -EnableTernaryOpt -DisableMatchStar '(?g)fodder|simple' ../QA/testfiles/simple1 -colors=always
-
-//    printRelationshipGraph(Relationships, errs(), "Initial");
-
-//    errs() << "analyzeDataflowWithinPartitions\n";
-
     analyzeDataflowWithinPartitions(P, rng);
-
-//    errs() << "scheduleProgramGraph\n";
 
     const auto partial = scheduleProgramGraph(P, rng);
 
-//    printDAWG(partial, errs(), "Partial");
-
-//    errs() << "assembleFullSchedule\n";
-
     const auto full = assembleFullSchedule(P, partial);
 
-//    printDAWG(full, errs(), "Full");
-
-//    errs() << "selectScheduleFromDAWG\n";
-
     const auto schedule = selectScheduleFromDAWG(full);
+
+
 
 //    errs() << "addSchedulingConstraints\n";
 
@@ -425,7 +409,7 @@ protected:
  ** ------------------------------------------------------------------------------------------------------------- */
 class MemoryAnalysis {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
 
     using IntervalEdge = typename MemIntervalGraph::edge_descriptor;
 
@@ -945,7 +929,7 @@ private:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct SchedulingAnalysisWorker {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -979,7 +963,6 @@ public:
     random_engine & rng;
     MemoryAnalysis analyzer;
 
-
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -987,7 +970,7 @@ public:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -1049,7 +1032,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief PartitionSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -1401,24 +1384,6 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         add_edge(fakeInput, j, itemsPerStride, G);
     }
 
-//    for (auto i = firstStreamSet; i < n; ++i) {
-//        if (LLVM_UNLIKELY(in_degree(i, G) == 0)) {
-//            assert (out_degree(i, G) > 0);
-
-//            SchedulingGraph::out_edge_iterator ei, ei_end;
-//            std::tie(ei, ei_end) = out_edges(i, G);
-//            auto itemsPerStride = G[*ei];
-//            while (++ei != ei_end) {
-//                const auto & r = G[*ei];
-//                if (r > itemsPerStride) {
-//                    itemsPerStride = r;
-//                }
-//            }
-
-//            add_edge(fakeInput, i, itemsPerStride, G);
-//        }
-//    }
-
     for (auto i = fakeInput + 1; i < fakeOutput; ++i) {
         const auto u = kernels[i - 1U];
         const RelationshipNode & node = Relationships[u];
@@ -1548,7 +1513,7 @@ using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, unsigne
  ** ------------------------------------------------------------------------------------------------------------- */
 struct ProgramSchedulingJumpAnalysisWorker final {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
 
     using JumpGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
@@ -1746,7 +1711,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingJumpAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -2103,7 +2068,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -2676,14 +2641,6 @@ OrderingDAWG PipelineAnalysis::assembleFullSchedule(const PartitionGraph & P, co
         const PartitionData & pd = P[pid];
         const auto & O = pd.Orderings;
 
-//        errs().indent(path.size() * 4);
-//        errs() << "u=" << u << ", x=" << x << ", goal=" << kernelGoal <<
-//                  ", pid=" << pid << " :";
-//        for (const auto k : path) {
-//            errs() << ' ' << k;
-//        }
-//        errs() << "\n";
-
         assert (x > 0 && x < num_vertices(O));
 
         // are we transitioning to a new partition? if so, permit it
@@ -2753,7 +2710,7 @@ OrderingDAWG PipelineAnalysis::assembleFullSchedule(const PartitionGraph & P, co
  ** ------------------------------------------------------------------------------------------------------------- */
 std::vector<unsigned> PipelineAnalysis::selectScheduleFromDAWG(const OrderingDAWG & schedule) const {
 
-    // TODO: if we have multiple memory optimal schedules, look for the one that
+    // TODO: if we have multiple minimal memory schedules, look for the one that
     // keeps calls to the same kernel closer or permits a better memory layout
     // w.r.t. sequential memory prefetchers?
 

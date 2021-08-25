@@ -514,8 +514,6 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     PartitionGraph P(partitionCount);
 
-
-
     for (unsigned i = 0; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
@@ -525,8 +523,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
             assert (j < partitionCount);
             assert ((j > 0 && (j + 1) < partitionCount) ^ (node.Kernel == mPipelineKernel));
             PartitionData & pd = P[j];
-            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == partitionIds[j]);
-            pd.LinkedGroupId = partitionIds[j];
+            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == partitionIds[i]);
+            pd.LinkedGroupId = partitionIds[i];
             pd.Kernels.push_back(u);
             PartitionIds.emplace(u, j);
         }

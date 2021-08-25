@@ -56,9 +56,6 @@ public:
         #endif
         auto partitionGraph = P.identifyKernelPartitions();
 
-        // Add ordering constraints to ensure we can keep sequences of kernels with a fixed rates in
-        // the same sequence. This will help us to partition the graph later and is useful to determine
-        // whether we can bypass a region without testing every kernel.
         #ifdef PRINT_STAGES
         errs() << "computeExpectedDataFlowRates\n";
         #endif
@@ -78,8 +75,6 @@ public:
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);
 
-        // P.printRelationshipGraph(P.mStreamGraph, errs(), "Streams");
-        // P.printRelationshipGraph(P.mScalarGraph, errs(), "Scalars");
 
         #ifdef PRINT_STAGES
         errs() << "generateInitialBufferGraph\n";
@@ -102,7 +97,7 @@ public:
         P.computeMinimumStrideLengthForConsistentDataflow();
 
         #ifdef PRINT_STAGES
-        errs() << "computeInterPartitionSymbolicRates\n";
+        errs() << "identifyInterPartitionSymbolicRates\n";
         #endif
 
         P.identifyInterPartitionSymbolicRates();
@@ -131,16 +126,9 @@ public:
 
         P.annotateBufferGraphWithAddAttributes();
 
-        #ifdef PRINT_STAGES
-        errs() << "identifyInterPartitionSymbolicRates\n";
-        #endif
-
-        P.identifyInterPartitionSymbolicRates();
-
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyLinearBuffers();
-//        P.identifyLocalPortIds();
         P.identifyPortsThatModifySegmentLength();
         P.identifyZeroExtendedStreamSets();
 
@@ -291,6 +279,8 @@ private:
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
 
+    void recomputeMinimumExpectedDataflow();
+
     void computeMaximumExpectedDataflow();
 
     void identifyInterPartitionSymbolicRates();
@@ -383,6 +373,7 @@ public:
 }
 
 #include "pipeline_graph_printers.hpp"
+#include "evolutionary_algorithm.hpp"
 #include "relationship_analysis.hpp"
 #include "buffer_analysis.hpp"
 #include "buffer_size_analysis.hpp"
