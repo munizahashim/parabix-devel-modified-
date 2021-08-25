@@ -234,6 +234,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
                         case AttrId::InternallySynchronized:
+                        case AttrId::IsolateOnHybridThread:
                             V.set(nextRateId++);
                         case AttrId::CanTerminateEarly:
                         case AttrId::MayFatallyTerminate:
