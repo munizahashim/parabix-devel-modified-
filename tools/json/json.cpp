@@ -130,18 +130,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 7. Clean lexers (in case there's special chars inside string)
     // Note: this will clone previous lkex stream
     StreamSet * const finalLexStream = P->CreateStreamSet(14);
-    P->CreateKernelCall<PabloSourceKernel>(
-        parser,
-        jsonPabloSrc,
-        "CleanLexerBasedInStringSpan",
-        Bindings { // Input Stream Bindings
-            Binding {"span", stringSpan},
-            Binding {"lexIn", lexStream}
-        },
-        Bindings { // Output Stream Bindings
-            Binding {"lexOut", finalLexStream}
-        }
-    );
+    P->CreateKernelCall<JSONLexSanitizer>(strSpan, lexStream, finalLexStream);
 
     // 8. Validate rest of the output (check for extraneous chars)
     const size_t COMBINED_STREAM_COUNT = 14;

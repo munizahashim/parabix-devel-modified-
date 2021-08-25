@@ -101,6 +101,28 @@ protected:
     void generatePabloMethod() override;
 };
 
+/*
+ * Clean lexer in case there are still 'dirty' chars in the string span
+ *        json: { "ke{1": value1, "ke}2"  : null }
+ *         span: ...1111............1111...........
+ *  lexIn.lCurly 1....1............................
+ *  lexIn.rCurly .....................1...........1
+ *  lexIn.lCurly 1.................................
+ *  lexIn.rCurly .................................1
+*/
+class JSONLexSanitizer : public pablo::PabloKernel {
+public:
+    JSONLexSanitizer(const std::unique_ptr<KernelBuilder> & b, StreamSet * const stringSpan, StreamSet * const lexIn, StreamSet * lexOut)
+    : pablo::PabloKernel(b,
+                         "jsonLexSanitizer",
+                         {Binding{"strSpan", stringSpan}, Binding{"lexIn", lexIn}},
+                         {Binding{"lexOut", lexOut}}) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+protected:
+    void generatePabloMethod() override;
+};
+
 }
 
 #endif

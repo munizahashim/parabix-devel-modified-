@@ -243,3 +243,42 @@ void JSONExtraneousChars::generatePabloMethod() {
     PabloAST * extraneousChars = pb.createNot(combinedSpans);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), extraneousChars);
 }
+
+static PabloAST sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloAST * lexInMarker) {
+    PabloAST * conflict = pb.createAnd(strSpan, lexInMarker);
+    return pb.createXor(lexInMarker, conflict);
+}
+
+void JSONLexSanitizer::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> lexIn = getInputStreamSet("lexIn");
+    PabloAST * strSpan = getInputStreamSet("strSpan")[0];
+    Var * const lexOut = getOutputStreamVar("lexOut");
+
+    PabloAST * sanitizelCurly = sanitizeLexInput(pb, strSpan, lexIn[Lex::lCurly]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lCurly)), sanitizelCurly);
+
+    PabloAST * sanitizerCurly = sanitizeLexInput(pb, strSpan, lexIn[Lex::rCurly]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lCurly)), sanitizerCurly);
+
+    PabloAST * sanitizelBracket = sanitizeLexInput(pb, strSpan, lexIn[Lex::lBracket]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lBracket)), sanitizelBracket);
+
+    PabloAST * sanitizerBracket = sanitizeLexInput(pb, strSpan, lexIn[Lex::rBracket]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::rBracket)), sanitizerBracket);
+
+    PabloAST * sanitizeColon = sanitizeLexInput(pb, strSpan, lexIn[Lex::colon]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::colon)), sanitizeColon);
+
+    PabloAST * sanitizeComma = sanitizeLexInput(pb, strSpan, lexIn[Lex::comma]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::comma)), sanitizeComma);
+
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::dQuote)), lexIn[Lex::dQuote]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::hyphen)), lexIn[Lex::hyphen]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::digit)), lexIn[Lex::digit]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::backslash)), lexIn[Lex::backslash]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::n)), lexIn[Lex::n]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::t)), lexIn[Lex::t]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::f)), lexIn[Lex::f]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::ws)), lexIn[Lex::ws]);
+}

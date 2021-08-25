@@ -248,43 +248,6 @@ kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
     span[0] = inSpan
 }
 
-# Clean lexer in case there are still 'dirty' chars in the string span
-#         json: { "ke{1": value1, "ke}2"  : null }
-#         span: ...1111............1111...........
-#  lexIn.lCurly 1....1............................
-#  lexIn.rCurly .....................1...........1
-#  lexIn.lCurly 1.................................
-#  lexIn.rCurly .................................1
-#
-kernel CleanLexerBasedInStringSpan :: [StringSpan span, Lex lexIn] -> [Lex lexOut] {
-    lCurlyAux = span & lexIn.lCurly
-    lexOut.lCurly = lCurlyAux ^ lexIn.lCurly
-
-    rCurlyAux = span & lexIn.rCurly
-    lexOut.rCurly = rCurlyAux ^ lexIn.rCurly
-
-    lBracketAux = span & lexIn.lBracket
-    lexOut.lBracket = lBracketAux ^ lexIn.lBracket
-
-    rBracketAux = span & lexIn.rBracket
-    lexOut.rBracket = rBracketAux ^ lexIn.rBracket
-
-    colonAux = span & lexIn.colon
-    lexOut.colon = colonAux ^ lexIn.colon
-
-    commaAux = span & lexIn.comma
-    lexOut.comma = commaAux ^ lexIn.comma
-
-    lexOut.dQuote = lexIn.dQuote
-    lexOut.hyphen = lexIn.hyphen
-    lexOut.digit = lexIn.digit
-    lexOut.backslash = lexIn.backslash
-    lexOut.n = lexIn.n
-    lexOut.f = lexIn.f
-    lexOut.t = lexIn.t
-    lexOut.ws = lexIn.ws
-}
-
 kernel LexLocations :: [Lex lex] -> [BasisBits output] {
     rOrLCurly = lex.lCurly | lex.rCurly
     rOrLBracket = lex.lBracket | lex.rBracket
