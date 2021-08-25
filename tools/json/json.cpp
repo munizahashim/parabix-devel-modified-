@@ -127,22 +127,38 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         }
     );
 
-    // 7. Validate rest of the output (check for extraneous chars)
+    // 7. Clean lexers (in case there's special chars inside string)
+    // Note: this will clone previous lkex stream
+    StreamSet * const finalLexStream = P->CreateStreamSet(14);
+    P->CreateKernelCall<PabloSourceKernel>(
+        parser,
+        jsonPabloSrc,
+        "CleanLexerBasedInStringSpan",
+        Bindings { // Input Stream Bindings
+            Binding {"span", stringSpan},
+            Binding {"lexIn", lexStream}
+        },
+        Bindings { // Output Stream Bindings
+            Binding {"lexOut", finalLexStream}
+        }
+    );
+
+    // 8. Validate rest of the output (check for extraneous chars)
     const size_t COMBINED_STREAM_COUNT = 14;
     StreamSet * const allSpans = P->CreateStreamSet(COMBINED_STREAM_COUNT, 1);
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{lexStream, stringSpan, keywordSpan, numberSpan},
+        std::vector<StreamSet *>{finalLexStream, stringSpan, keywordSpan, numberSpan},
         allSpans
     );
     StreamSet * const combinedSpans = su::Collapse(P, allSpans);
     StreamSet * const extraErr = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONExtraneousChars>(combinedSpans, extraErr);
 
-    // 8. Validate objects and arrays
+    // 9. Validate objects and arrays
     StreamSet * const kwLexCollapsed = su::Collapse(P, keywordLex);
     StreamSet * const allLex = P->CreateStreamSet(10, 1);
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{su::Select(P, lexStream, su::Range(0, 7)), kwLexCollapsed, numberLex},
+        std::vector<StreamSet *>{su::Select(P, finalLexStream, su::Range(0, 7)), kwLexCollapsed, numberLex},
         allLex
     );
     StreamSet * const collapsedLex = su::Collapse(P, allLex);
@@ -158,7 +174,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         { Indices, Spans },
         { LineNumbers, Indices });
 
-    // 9. Output whether or not it is valid
+    // 10. Output whether or not it is valid
     StreamSet * const Errors = P->CreateStreamSet(4, 1);
     P->CreateKernelCall<StreamsMerge>(
         std::vector<StreamSet *>{keywordErr, utf8Err, numberErr, extraErr},
