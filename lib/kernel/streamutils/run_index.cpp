@@ -10,6 +10,8 @@
 #include <pablo/pe_var.h>           // for Var
 #include <pablo/pe_infile.h>
 
+#include <pablo/bixnum/bixnum.h>
+
 using namespace pablo;
 
 namespace kernel {
@@ -79,5 +81,63 @@ void RunIndex::generatePabloMethod() {
         pb.createAssign(pb.createExtract(getOutputStreamVar("overflow"), pb.getInteger(0)), overflow);
     }
 }
+
+Bindings AccumRunIndexOutputBindings(StreamSet * accumRunIndex, StreamSet * accumOverflow) {
+    if (accumOverflow == nullptr) return {Binding{"accumRunIndex", accumOverflow}};
+    return {Binding{"accumRunIndex", accumRunIndex}, Binding{"accumOverflow", accumOverflow}};
+}
+
+AccumRunIndex::AccumRunIndex(BuilderRef b,
+                   StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * accumRunIndex, StreamSet * accumOverflow)
+    : PabloKernel(b, "AccumRunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow"),
+           // input
+{Binding{"runMarks", runMarks}, Binding{"runIndex", runIndex}, Binding{"overflow", overflow}},
+           // output
+AccumRunIndexOutputBindings(accumRunIndex, accumOverflow)),
+mIndexCount(accumRunIndex->getNumElements()),
+mOverflow(accumOverflow != nullptr) {
+    assert(mIndexCount > 0);
+    assert(mIndexCount <= 5);
+}
+
+void AccumRunIndex::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
+    PabloAST * runMarks = pb.createInFile(runMarksVar);
+    PabloAST * symStartPos = pb.createNot(runMarks);
+    std::vector<PabloAST *> runIndex = getInputStreamSet("runIndex");
+    PabloAST * overflow = pb.createExtract(getInputStreamVar("overflow"), pb.getInteger(0));
+    // output
+    std::vector<PabloAST *> accumRunIndex(mIndexCount);
+    Var * accumRunIndexVar = getOutputStreamVar("accumRunIndex");
+    BixNumCompiler bnc(pb);
+    BixNum curSymLen(mIndexCount);
+    BixNum prevSymLen(mIndexCount);
+
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        // check ri[i] against symStartPos; set 0 if symStartPos is 0 => all the RI bixnum prior to sym end set to 0
+        runIndex[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symStartPos);
+    }
+    //propagte last sym's length to next sym stopping right before next sym's start pos
+    for (unsigned int i = 0; i < 32; i++) { // max sym byte_length restricted to 32 (allow initializng at compile time)
+        for (unsigned ii = 0; ii < mIndexCount; ii++) {
+            PabloAST * priorBits = pb.createAdvance(runIndex[ii], 1);
+            priorBits = pb.createAnd(priorBits, runMarks);
+            runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
+        }
+    }
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        curSymLen[i] = pb.createAnd(runIndex[i], symStartPos);
+        prevSymLen[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symStartPos);
+    }
+    BixNum sum = bnc.AddFull(bnc.AddFull(curSymLen, prevSymLen), 2);
+
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        pb.createAssign(pb.createExtract(accumRunIndexVar, pb.getInteger(i)), sum[i]);
+    }
+
+}
+
+
 }
 
