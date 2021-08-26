@@ -75,7 +75,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
     b->SetInsertPoint(expandZeroExtension);
     assert (b->getCacheAlignment() >= (b->getBitBlockWidth() / 8));
     b->CreateFree(currentBuffer);
-    Value * const newBuffer = b->CreateCacheAlignedMalloc(requiredSpace);
+    Value * const newBuffer = b->CreatePageAlignedMalloc(requiredSpace);
     b->CreateMemZero(newBuffer, requiredSpace, b->getCacheAlignment());
     b->CreateStore(requiredSpace, zeroExtendSpace);
     b->CreateStore(newBuffer, zeroExtendBuffer);

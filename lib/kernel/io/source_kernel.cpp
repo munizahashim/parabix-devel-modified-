@@ -169,7 +169,7 @@ void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     const auto codeUnitSize = codeUnitWidth / 8;
     ConstantInt * const bufferBytes = b->getSize(stride * 4 * codeUnitSize);
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
-    Value * const buffer = b->CreatePointerCast(b->CreateCacheAlignedMalloc(bufferBytes), codeUnitPtrTy);
+    Value * const buffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(bufferBytes), codeUnitPtrTy);
     b->setBaseAddress("sourceBuffer", buffer);
     b->setScalarField("buffer", buffer);
     b->setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
@@ -264,7 +264,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b->SetInsertPoint(expandAndCopyBack);
     Value * const expandedCapacity = b->CreateShl(capacity, 1);
     Value * const expandedBytes = b->CreateMul(expandedCapacity, codeUnitBytes);
-    Value * const expandedBuffer = b->CreatePointerCast(b->CreateCacheAlignedMalloc(expandedBytes), unreadData->getType());
+    Value * const expandedBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(expandedBytes), unreadData->getType());
     b->CreateMemCpy(expandedBuffer, unreadData, remainingBytes, blockSize);
     // Free the prior buffer if it exists
     Value * const ancillaryBuffer = b->getScalarField("ancillaryBuffer");

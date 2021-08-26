@@ -37,7 +37,7 @@ inline LLVM_READNONE bool allocateOnHeap(BuilderRef b) {
 inline Value * makeStateObject(BuilderRef b, Type * type) {
     Value * ptr = nullptr;
     if (LLVM_UNLIKELY(allocateOnHeap(b))) {
-        ptr = b->CreateCacheAlignedMalloc(type);
+        ptr = b->CreatePageAlignedMalloc(type);
     } else {
         ptr = b->CreateCacheAlignedAlloca(type);
     }
@@ -392,7 +392,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         ConstantInt * const reqMemory = b->getSize(RequiredThreadLocalStreamSetMemory);
         Value * const memorySize = b->CreateMul(reqMemory, expectedNumOfStrides);
-        Value * const base = b->CreateCacheAlignedMalloc(memorySize);
+        Value * const base = b->CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
     }

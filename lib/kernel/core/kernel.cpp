@@ -1043,7 +1043,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b->CreateCacheAlignedMalloc(getSharedStateType());
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;

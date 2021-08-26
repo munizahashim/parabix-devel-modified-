@@ -745,7 +745,7 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                     Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     Type * const traceTy = traceData->getType()->getPointerElementType();
                     Type * const entryTy =  traceTy->getStructElementType(0)->getPointerElementType();
-                    Value * const entryData = b->CreateCacheAlignedMalloc(entryTy, SZ_ONE);
+                    Value * const entryData = b->CreatePageAlignedMalloc(entryTy, SZ_ONE);
                     // fill in the struct
                     b->CreateStore(entryData, b->CreateGEP(traceData, {ZERO, ZERO}));
                     b->CreateStore(SZ_ONE, b->CreateGEP(traceData, {ZERO, ONE}));
@@ -1066,7 +1066,7 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
         Constant * const TWO = b->getInt32(2);
         Constant * const THREE = b->getInt32(3);
 
-        Value * const traceDataArray = b->CreateCacheAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
+        Value * const traceDataArray = b->CreatePageAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
 
         // fill in the struct
         b->CreateStore(SZ_ZERO, b->CreateGEP(traceData, {ZERO, ZERO})); // "last" num of strides
@@ -1417,7 +1417,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
 
     b->SetInsertPoint(expand);
     Type * const logTy = currentLog->getType()->getPointerElementType();
-    Value * const newLog = b->CreateCacheAlignedMalloc(logTy);
+    Value * const newLog = b->CreatePageAlignedMalloc(logTy);
     PointerType * const voidPtrTy = b->getVoidPtrTy();   
     b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(newLog, { ZERO, ONE}));
     b->CreateStore(newLog, trace);

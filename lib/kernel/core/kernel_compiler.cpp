@@ -221,7 +221,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
-        mThreadLocalHandle = b->CreateCacheAlignedMalloc(mTarget->getThreadLocalStateType());
+        mThreadLocalHandle = b->CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
         mTarget->generateInitializeThreadLocalMethod(b);
         b->CreateRet(mThreadLocalHandle);
