@@ -606,176 +606,93 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
 #else
 
-    using BV = dynamic_bitset<>;
-    using Graph = adjacency_list<hash_setS, vecS, bidirectionalS>;
+    using BitSet = dynamic_bitset<>;
 
-    // Summarize the partitioning graph to only represent the existance of a dataflow relationship
-    // between the partitions.
+    std::vector<BitSet> rateChange(PartitionCount);
 
-    Graph G(PartitionCount);
+    auto steadyStateDataflowChange = [&](const BufferPort & port, const bool isOutput) {
 
-    for (auto producer = PipelineInput; producer < PipelineOutput; ++producer) {
-        bool anyNonFixedOutput = false;
-        for (const auto e : make_iterator_range(out_edges(producer, mBufferGraph))) {
-            const BufferPort & port = mBufferGraph[e];
-            const Binding & binding = port.Binding;
-            if (!binding.getRate().isFixed()) {
-                anyNonFixedOutput = true;
-                break;
-            }
-        }
-
-        const auto pid = KernelPartitionId[producer];
-        assert (pid < PartitionCount);
-
-        if (anyNonFixedOutput) {
-            for (const auto e : make_iterator_range(out_edges(producer, mBufferGraph))) {
-                const auto streamSet = target(e, mBufferGraph);
-                for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                    const auto consumer = target(f, mBufferGraph);
-                    const auto cid = KernelPartitionId[consumer];
-                    assert (pid <= cid && cid < PartitionCount);
-                    if (pid != cid) {
-                        add_edge(pid, cid, G);
+        const Binding & binding = port.Binding;
+        const ProcessingRate & rate = binding.getRate();
+        switch (rate.getKind()) {
+            case RateId::Fixed:
+            case RateId::Greedy:
+                if (isOutput) {
+                    for (const auto & attr : binding.getAttributes()) {
+                        switch (attr.getKind()) {
+                            case AttrId::Deferred:
+                                return true;
+                        }
                     }
+                }
+                return false;
+            default:
+                return true;
+        }
+    };
+
+    auto addRateId = [&](const unsigned id, const unsigned rateId) {
+        auto & bs = rateChange[id];
+        if (rateId >= bs.size()) {
+            bs.resize((rateId + 127) &~ 63, false);
+        }
+        bs.set(rateId);
+    };
+
+    unsigned rateId = 0;
+
+    for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(output, mBufferGraph);
+        const auto pid = KernelPartitionId[producer];
+        if (steadyStateDataflowChange(mBufferGraph[output], true)) {
+            const auto demarcateId = rateId++;
+            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                const auto cid = KernelPartitionId[consumer];
+                if (cid != pid) {
+                    addRateId(cid, demarcateId);
                 }
             }
         } else {
-            add_edge(pid, pid + 1U, G);
-        }
-    }
-
-    const auto terminal = PartitionCount - 1U;
-
-    for (auto partitionId = 0U; partitionId < terminal; ++partitionId) {
-       if (out_degree(partitionId, G) == 0) {
-           add_edge(partitionId, terminal, G);
-       }
-    }
-
-    // Now compute the transitive reduction of the partition relationships
-    BEGIN_SCOPED_REGION
-    const reverse_traversal ordering(PartitionCount);
-    assert (is_valid_topological_sorting(ordering, G));
-    transitive_closure_dag(ordering, G);
-    transitive_reduction_dag(ordering, G);
-    END_SCOPED_REGION
-
-    #ifndef NDEBUG
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        mPartitionJumpIndex[i] = -1U;
-    }
-    #endif
-
-    std::vector<unsigned> rank(PartitionCount);
-    for (unsigned i = 0; i < PartitionCount; ++i) { // forward topological ordering
-        unsigned newRank = 0;
-        for (const auto e : make_iterator_range(in_edges(i, G))) {
-            newRank = std::max(newRank, rank[source(e, G)]);
-        }
-        rank[i] = newRank + 1;
-    }
-
-    std::vector<unsigned> occurences(PartitionCount);
-    std::vector<unsigned> singleton(PartitionCount);
-
-    std::vector<std::bitset<2>> ancestors(PartitionCount);
-
-    std::vector<unsigned> reverseLCA(PartitionCount);
-    for (unsigned i = 0; i < terminal; ++i) {
-        reverseLCA[i] = i + 1;
-    }
-
-    for (unsigned i = 0; i < PartitionCount; ++i) {  // forward topological ordering
-        const auto d = in_degree(i, G);
-
-        if (d > 1) {
-
-            Graph::in_edge_iterator begin, end;
-            std::tie(begin, end) = in_edges(i, G);
-
-            auto lca = i;
-            for (auto ei = begin; (++ei) != end; ) {
-                const auto x = source(*ei, G);
-                for (auto ej = begin; ej != ei; ++ej) {
-                    const auto y = source(*ej, G);
-                    assert (x != y);
-
-                    // Determine the common ancestors of each input to node_i
-                    for (unsigned j = 0; j < lca; ++j) {
-                        ancestors[j].reset();
-                    }
-                    ancestors[x].set(0);
-                    ancestors[y].set(1);
-
-                    std::fill_n(occurences.begin(), rank[i] - 1, 0);
-                    for (auto j = i; j--; ) { // reverse topological ordering
-                        for (const auto e : make_iterator_range(out_edges(j, G))) {
-                            const auto v = target(e, G);
-                            ancestors[j] |= ancestors[v];
-                        }
-                        if (ancestors[j].all()) {
-                            const auto k = rank[j];
-                            occurences[k]++;
-                            singleton[k] = j;
-                        }
-                    }
-                    // Now scan again through them to determine the single ancestor
-                    // to the pair of inputs that is of highest rank.
-
-                    for (auto j = rank[i] - 1; j--; ) {
-                        if (occurences[j] == 1) {
-                            lca = singleton[j];
-                            break;
-                        }
+            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                if (steadyStateDataflowChange(mBufferGraph[input], false)) {
+                    const auto consumer = target(input, mBufferGraph);
+                    const auto cid = KernelPartitionId[consumer];
+                    if (cid != pid) {
+                        addRateId(cid, rateId++);
                     }
                 }
             }
-            assert (lca <= i);
-            auto & val = reverseLCA[lca];
-            val = std::max(val, i);
         }
     }
-    reverseLCA[terminal] = terminal;
 
-    for (auto partitionId = 1U; partitionId < terminal; ++partitionId) {
-       add_edge(partitionId, partitionId + 1, G);
-    }
-    add_edge(terminal, terminal, G);
+    rateChange[0].resize(rateId);
 
-#if 0
-
-    auto & out = errs();
-
-    out << "digraph \"" << "J1" << "\" {\n";
-    for (auto v : make_iterator_range(vertices(G))) {
-        out << "v" << v << " [label=\"" << v << " : {";
-        out << reverseLCA[v];
-        out << "}\"];\n";
-    }
-    for (auto e : make_iterator_range(edges(G))) {
-        const auto s = source(e, G);
-        const auto t = target(e, G);
-        out << "v" << s << " -> v" << t << ";\n";
+    for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
+        const BitSet & prior =  rateChange[i - 1];
+        BitSet & current =  rateChange[i];
+        current.resize(rateId);
+        current |= prior;
     }
 
-    out << "}\n\n";
-    out.flush();
-
-#endif
-
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        auto n = reverseLCA[i];
-        assert (n < PartitionCount);
-        while (in_degree(n, G) < 2) {
-            const auto m = reverseLCA[n];
-            assert (n != m);
-            n = m;
-            assert (n < PartitionCount);
+    mPartitionJumpIndex[0] = 1;
+    for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
+        const BitSet & prior =  rateChange[i - 1];
+        const BitSet & current =  rateChange[i];
+        unsigned jumpIndex = i + 1;
+        if (prior != current) {
+            for (unsigned j = (i + 1); j < PartitionCount; ++j) {
+                const BitSet & next =  rateChange[j];
+                if (current != next) {
+                    jumpIndex = j;
+                    break;
+                }
+            }
         }
-        assert (n > i || (i == (PartitionCount - 1)));
-        mPartitionJumpIndex[i] = n;
+        mPartitionJumpIndex[i] = jumpIndex;
     }
+    mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif
 }
