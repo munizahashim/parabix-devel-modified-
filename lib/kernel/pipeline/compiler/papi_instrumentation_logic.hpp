@@ -118,7 +118,8 @@ void PipelineCompiler::addPAPIEventCounterKernelProperties(BuilderRef b, const u
         ArrayType * const papiEventListCountersTy = ArrayType::get(papiCounterTy, numOfEvents);
         ArrayType * const papiDataTy = ArrayType::get(papiEventListCountersTy, NUM_OF_PAPI_COUNTERS);
         const auto prefix = makeKernelName(kernel) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX;
-        mTarget->addInternalScalar(papiDataTy, prefix, kernel);
+        const auto groupId = getCacheLineGroupId(kernel);
+        mTarget->addInternalScalar(papiDataTy, prefix, groupId);
         /*
         if (isRoot) {
             mTarget->addInternalScalar(papiEventListCountersTy, prefix + std::to_string(PAPI_PARTITION_JUMP_SYNCHRONIZATION), kernel);
