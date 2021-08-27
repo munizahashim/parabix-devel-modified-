@@ -95,14 +95,19 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
-       mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(MaximumNumOfStrides[FirstKernelInPartition]));
+        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(MaximumNumOfStrides[FirstKernelInPartition]));
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, + "%s_maximumNumOfStrides = %" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
+        #endif
     } else {
         const Rational strideRateFactor{MaximumNumOfStrides[mKernelId], MaximumNumOfStrides[FirstKernelInPartition]};
-        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, strideRateFactor / mPartitionStrideRateScalingFactor);
+        const auto factor = strideRateFactor; // / mPartitionStrideRateScalingFactor;
+        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
+                   b->getSize(factor.numerator()),  b->getSize(factor.denominator()), mMaximumNumOfStrides);
+        #endif
     }
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, + "%s_maximumNumOfStrides = %" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
-    #endif
 }
 
 
