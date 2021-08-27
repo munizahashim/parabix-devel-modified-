@@ -409,7 +409,7 @@ protected:
  ** ------------------------------------------------------------------------------------------------------------- */
 class MemoryAnalysis {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
     using IntervalEdge = typename MemIntervalGraph::edge_descriptor;
 
@@ -929,7 +929,7 @@ private:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct SchedulingAnalysisWorker {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -970,7 +970,7 @@ public:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -1032,7 +1032,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief PartitionSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
+struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -1513,7 +1513,7 @@ using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, unsigne
  ** ------------------------------------------------------------------------------------------------------------- */
 struct ProgramSchedulingJumpAnalysisWorker final {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm<1>::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
     using JumpGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
@@ -1711,7 +1711,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingJumpAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
+struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -2068,7 +2068,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<1> {
+struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA

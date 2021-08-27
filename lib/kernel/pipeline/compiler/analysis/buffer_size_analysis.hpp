@@ -26,7 +26,7 @@ using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS, no_property, 
 
 using Interval = std::pair<unsigned, unsigned>;
 
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm<1> {
+struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
 
     using ColourLine = flat_set<Interval>;
 
