@@ -102,9 +102,8 @@ mOverflow(accumOverflow != nullptr) {
 
 void AccumRunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
-    PabloAST * runMarks = pb.createInFile(runMarksVar);
-    PabloAST * symStartPos = pb.createNot(runMarks);
+    PabloAST * runMarks = getInputStreamSet("runMarks")[0];
+    PabloAST * symEndPos = pb.createNot(runMarks); // further validation needed?
     std::vector<PabloAST *> runIndex = getInputStreamSet("runIndex");
     PabloAST * overflow = pb.createExtract(getInputStreamVar("overflow"), pb.getInteger(0));
     // output
@@ -115,8 +114,8 @@ void AccumRunIndex::generatePabloMethod() {
     BixNum prevSymLen(mIndexCount);
 
     for (unsigned i = 0; i < mIndexCount; i++) {
-        // check ri[i] against symStartPos; set 0 if symStartPos is 0 => all the RI bixnum prior to sym end set to 0
-        runIndex[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symStartPos);
+        // check ri[i] against symEndPos; set 0 if symEndPos is 0 => all the RI bixnum prior to sym end set to 0
+        runIndex[i] = pb.createAnd(runIndex[i], symEndPos);
     }
     //propagte last sym's length to next sym stopping right before next sym's start pos
     for (unsigned int i = 0; i < 32; i++) { // max sym byte_length restricted to 32 (allow initializng at compile time)
@@ -126,14 +125,24 @@ void AccumRunIndex::generatePabloMethod() {
             runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
         }
     }
+    // remove 1 byte symbols like LF
+    PabloAST * byteLenSym = pb.createAnd(symEndPos, pb.createAdvance(symEndPos, 1));
+    // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
+    byteLenSym = pb.createIndexedAdvance(byteLenSym, symEndPos, 1);
+    symEndPos = pb.createAnd(symEndPos, pb.createXor(symEndPos, pb.createAdvance(symEndPos, 1)));
     for (unsigned i = 0; i < mIndexCount; i++) {
-        curSymLen[i] = pb.createAnd(runIndex[i], symStartPos);
-        prevSymLen[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symStartPos);
+        curSymLen[i] = pb.createAnd(runIndex[i], symEndPos);
+        prevSymLen[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symEndPos);
     }
-    BixNum sum = bnc.AddFull(bnc.AddFull(curSymLen, prevSymLen), 2);
+    // first symbol has no prev symbol
+    // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
+    PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
+    PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
+    BixNum sum = bnc.AddFull(bnc.AddFull(prevSymLen, curSymLen), 2);
 
     for (unsigned i = 0; i < mIndexCount; i++) {
-        pb.createAssign(pb.createExtract(accumRunIndexVar, pb.getInteger(i)), sum[i]);
+        // if either of the operands is 0, ignore the sum in final run -> avoids 1-byte symbols like LF
+        pb.createAssign(pb.createExtract(accumRunIndexVar, pb.getInteger(i)), pb.createAnd3(sum[i], symEndPos, inRangeFinal));
     }
 
 }
