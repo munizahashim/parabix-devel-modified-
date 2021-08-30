@@ -8,6 +8,33 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/ADT/SmallVector.h>
 
+/*
+ * <Json> ::= <Object>
+ *          | <Array>
+ * 
+ * <Object> ::= '{' '}'
+ *            | '{' <Members> '}'
+ * 
+ * <Members> ::= <Pair>
+ *             | <Pair> ',' <Members>
+ * 
+ * <Pair> ::= String ':' <Value>
+ * 
+ * <Array> ::= '[' ']'
+ *           | '[' <Elements> ']'
+ * 
+ * <Elements> ::= <Value>
+ *              | <Value> ',' <Elements>
+ * 
+ * <Value> ::= String
+ *           | Number
+ *           | <Object>
+ *           | <Array>
+ *           | true
+ *           | false
+ *           | null
+ */
+
 enum JSONState {
     JInit = 0,
     JKStrBegin,
@@ -148,8 +175,6 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
 }
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
-    printf("%c line number: %ld pos: %ld\n\n", *ptr, lineNum, position);
-   	/*
     if (currentState == JInit) {
         postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
@@ -170,7 +195,7 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         postproc_parseValueOrPop(false, ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
         llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
-    }*/
+    }
 }
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {
