@@ -145,11 +145,13 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
     if len(grep_out) > 0 and grep_out[-1] == '\n': grep_out = grep_out[:-1]
     filtered_out = filter_colorization(grep_out)
     if filtered_out != expected_result:
-        print(u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out))
+        msg = u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out)
+        print(msg.encode('utf-8'))
         failure_count += 1
     else:
         if options.verbose:
-            print(u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out))
+            msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
+            print(msg.encode('utf-8'))
 
 
 flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
