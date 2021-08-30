@@ -37,6 +37,12 @@ void BixHash::generatePabloMethod() {
         for (unsigned i = 0; i < mHashBits; i++) {
             hash[i] = basis[i];
         }
+        PabloAST * prevWord = pb.createNot(run);
+        for (unsigned i = 0; i < mHashBits; i++) {
+            PabloAST * priorBits = pb.createAdvance(hash[i], 1);
+            // Mix in bits from prior word's last byte.
+            hash[i] = pb.createXor(hash[i], pb.createAnd(prevWord, priorBits));
+        }
     }
     // In each step, the select stream will mark positions that are
     // to receive bits from prior locations in the symbol. The
@@ -53,12 +59,6 @@ void BixHash::generatePabloMethod() {
             hash[i] = pb.createXor(hash[i], pb.createAnd(select, priorBits));
         }
         select = pb.createAnd(select, pb.createAdvance(select, shft));
-    }
-    PabloAST * prevWord = pb.createNot(run);
-    for (unsigned i = 0; i < mHashBits; i++) {
-        PabloAST * priorBits = pb.createAdvance(hash[i], 1);
-        // Mix in bits from prior word's last byte.
-        hash[i] = pb.createXor(hash[i], pb.createAnd(prevWord, priorBits));
     }
     Var * hashVar = getOutputStreamVar("hashes");
     for (unsigned i = 0; i < mHashBits; i++) {
