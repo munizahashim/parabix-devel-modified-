@@ -163,6 +163,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
 
+const unsigned MaxHeaderSize = 24;
+
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
@@ -175,6 +177,11 @@ int main(int argc, char *argv[]) {
         headers = get_CSV_headers(HeaderSpec);
     } else {
         headers = parse_CSV_headers(HeaderSpec);
+    }
+    for (auto & s : headers) {
+        if (s.size() > MaxHeaderSize) {
+            s = s.substr(0, MaxHeaderSize);
+        }
     }
     std::vector<std::string> templateStrs = createJSONtemplateStrings(headers);
     //for (auto & s : templateStrs) {
