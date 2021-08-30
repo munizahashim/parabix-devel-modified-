@@ -130,6 +130,15 @@ public:
     static void linkPAPILibrary(BuilderRef b);
     #endif
 
+    unsigned getCacheLineGroupId(const unsigned kernelId) const {
+        #ifdef GROUP_SHARED_KERNEL_STATE_INTO_CACHE_LINE_ALIGNED_REGIONS
+        if (mNumOfThreads > 1) {
+            return kernelId;
+        }
+        #endif
+        return 0;
+    }
+
 private:
 
     PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P);

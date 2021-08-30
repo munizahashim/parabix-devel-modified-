@@ -14,10 +14,12 @@
 #include <llvm/IR/Verifier.h>
 #endif
 #include <boost/intrusive/detail/math.hpp>
+#include <boost/container/flat_set.hpp>
 
 using namespace llvm;
 using namespace boost;
 using boost::intrusive::detail::floor_log2;
+using boost::container::flat_set;
 
 namespace kernel {
 
@@ -221,7 +223,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
-        mThreadLocalHandle = b->CreateCacheAlignedMalloc(mTarget->getThreadLocalStateType());
+        mThreadLocalHandle = b->CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
         mTarget->generateInitializeThreadLocalMethod(b);
         b->CreateRet(mThreadLocalHandle);
@@ -996,25 +998,115 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
     return outputs;
 }
 
+template <typename IndexTy>
+static bool checkIndexedTypeInternal(StructType *ST, ArrayRef<IndexTy> IdxList) {
+  // Handle the special case of the empty set index set, which is always valid.
+  if (IdxList.empty())
+    return true;
+
+  const auto n = ST->getStructNumElements();
+
+  for (unsigned i = 0; i < n; ++i) {
+      Type * ty = ST->getStructElementType(i);
+        if (!ty->isSized())   {
+            errs() << i << " is unsized: ";
+            ty->print(errs(), false);
+            errs() << "\n";
+            return false;
+        }
+  }
+
+  // If there is at least one index, the top level type must be sized, otherwise
+  // it cannot be 'stepped over'.
+  if (!cast<StructType>(ST)->isSized()) {
+     errs() << "unsized?";
+     return false;
+  }
+
+  Type * Agg = ST;
+  unsigned CurIdx = 1;
+  for (; CurIdx != IdxList.size(); ++CurIdx) {
+    CompositeType *CT = dyn_cast<CompositeType>(Agg);
+    if (!CT || CT->isPointerTy()) {
+        errs() << CurIdx << " is not composite?";
+        return false;
+    }
+    IndexTy Index = IdxList[CurIdx];
+    if (!CT->indexValid(Index)) {
+        errs() << CurIdx << " is not valid index?";
+        return false;
+    }
+    Agg = CT->getTypeAtIndex(Index);
+  }
+  if (CurIdx != IdxList.size()) {
+    errs() << CurIdx << " has incorrect elements " << IdxList.size();
+  }
+
+
+  return CurIdx == IdxList.size();
+}
+
+bool checkIndexedType(Type *Ty, ArrayRef<Value *> IdxList) {
+    return checkIndexedTypeInternal(cast<StructType>(Ty), IdxList);
+}
+
+//bool isSized(StructType * type, SmallPtrSetImpl<Type*> *Visited) {
+
+//    if (type->isOpaque())
+//      return false;
+
+
+//    // Okay, our struct is sized if all of the elements are, but if one of the
+//    // elements is opaque, the struct isn't sized *yet*, but may become sized in
+//    // the future, so just bail out without caching.
+//    for (auto I = type->element_begin(), E = type->element_end(); I != E; ++I)
+//      if (!(*I)->isSized(Visited))
+//        return false;
+
+//    // Here we cheat a bit and cast away const-ness. The goal is to memoize when
+//    // we find a sized type, as types can only move from opaque to sized, not the
+//    // other way.
+//    const_cast<StructType*>(type)->setSubclassData(
+//      type->getSubclassData() | StructType::SCDB_IsSized);
+//    return true;
+// }
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions options) {
 
-    FixedArray<Value *, 2> indices;
+    FixedArray<Value *, 3> indices;
     indices[0] = b->getInt32(0);
-    unsigned sharedIndex = 0;
-    #ifndef NDEBUG
+
     const auto sharedTy = mTarget->getSharedStateType();
-    #define CHECK_TYPES(H,T) ((H == nullptr && T == nullptr) || (H && T && H->getType() == T->getPointerTo()))
-    assert ("incorrect shared handle/type!" && CHECK_TYPES(mSharedHandle, sharedTy));
-    const auto sharedCount = sharedTy ? sharedTy->getStructNumElements() : 0U;
+
     const auto threadLocalTy = mTarget->getThreadLocalStateType();
+
+    #ifndef NDEBUG
+    auto verifyStateType = [](Value * const handle, StructType * const stateType) {
+        if (handle == nullptr && stateType == nullptr) {
+            return true;
+        }
+        if (handle == nullptr || stateType == nullptr) {
+            return false;
+        }
+        if (handle->getType() != stateType->getPointerTo()) {
+            return false;
+        }
+        assert (!stateType->isOpaque());
+        const auto n = stateType->getStructNumElements();
+        assert ((n % 2) == 0);
+        for (unsigned i = 0; i < n; i += 2) {
+            assert (isa<StructType>(stateType->getStructElementType(i)));
+        }
+        return true;
+    };
+    assert ("incorrect shared handle/type!" && verifyStateType(mSharedHandle, sharedTy));
     if (options == InitializeOptions::IncludeThreadLocal) {
-        assert ("incorrect thread local handle/type!" && CHECK_TYPES(mThreadLocalHandle, threadLocalTy));
+        assert ("incorrect thread local handle/type!" && verifyStateType(mThreadLocalHandle, threadLocalTy));
     }
     #undef CHECK_TYPES
-    const auto threadLocalCount = threadLocalTy ? threadLocalTy->getStructNumElements() : 0U;
     #endif
 
     mScalarFieldMap.clear();
@@ -1041,80 +1133,79 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         }
     };
 
-    auto enumerate = [&](const Bindings & bindings) {
-        #ifndef NDEBUG
-        if (LLVM_UNLIKELY(mSharedHandle == nullptr && bindings.size() > 0)) {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << getName() << " was given an empty state but was assigned I/O bindings.";
-            report_fatal_error(out.str());
+    flat_set<unsigned> sharedGroups;
+    flat_set<unsigned> threadLocalGroups;
+
+    for (const auto & scalar : mInternalScalars) {
+        assert (scalar.getValueType());
+        switch (scalar.getScalarType()) {
+            case ScalarType::Internal:
+                sharedGroups.insert(scalar.getGroup());
+                break;
+            case ScalarType::ThreadLocal:
+                threadLocalGroups.insert(scalar.getGroup());
+                break;
+            default: break;
         }
-        #endif
+    }
+
+    std::vector<unsigned> sharedIndex(sharedGroups.size() + 2, 0);
+    std::vector<unsigned> threadLocalIndex(threadLocalGroups.size(), 0);
+
+    auto enumerate = [&](const Bindings & bindings, const unsigned groupId) {
+        indices[1] = b->getInt32(groupId * 2);
+        auto & k = sharedIndex[groupId];
         for (const auto & binding : bindings) {
-            assert (sharedIndex < sharedCount);
-            indices[1] = b->getInt32(sharedIndex);
-            #ifndef NDEBUG
-            PointerType * const statePtrTy = cast<PointerType>(mSharedHandle->getType());
-            StructType * const stateTy = cast<StructType>(statePtrTy->getPointerElementType());
-            Type * elemTy = stateTy->getStructElementType(sharedIndex);
-
-            SmallVector<unsigned, 8> structIndex;
-
-            std::function<bool(Type*)> checkType = [&](const Type * ty) {
-                if (const StructType * structTy = dyn_cast<StructType>(ty)) {
-                    for (unsigned i = 0; i < structTy->getStructNumElements(); ++i) {
-                        structIndex.push_back(i);
-                        if (checkType(structTy->getStructElementType(i))) {
-                            return true;
-                        }
-                        structIndex.pop_back();
-                    }
-                }
-                return !ty->isSized();
-            };
-
-            if (LLVM_UNLIKELY(checkType(elemTy))) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << "Shared handle type for " <<
-                       getName() << "." << binding.getName() <<
-                       " is not a sized type: element ";
-                char joiner = '[';
-                assert (structIndex.size() > 0);
-                for (auto i : structIndex) {
-                    out << joiner << i;
-                    elemTy = elemTy->getStructElementType(i);
-                    joiner = ',';
-                }
-                out << "] is a ";
-                elemTy->print(out);
-                report_fatal_error(out.str());
-            }
-            #endif
-            Value * const scalar = b->CreateInBoundsGEP(mSharedHandle, indices);
+            assert ((groupId * 2) < sharedTy->getStructNumElements());
+            assert (k < sharedTy->getStructElementType(groupId * 2)->getStructNumElements());
+            assert (sharedTy->getStructElementType(groupId * 2)->getStructElementType(k) == binding.getType());
+            indices[2] = b->getInt32(k++);
+            assert (checkIndexedType(sharedTy, indices));
+            Value * const scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType());
-            ++sharedIndex;
         }
     };
 
-    enumerate(mInputScalars);
-    enumerate(mOutputScalars);
+    enumerate(mInputScalars, 0);
 
-    unsigned threadLocalIndex = 0;
+
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
+
+        auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+            const auto f = groups.find(binding.getGroup());
+            assert (f != groups.end());
+            return std::distance(groups.begin(), f);
+        };
+
         switch (binding.getScalarType()) {
             case ScalarType::Internal:
-                assert (sharedIndex < sharedCount);
-                indices[1] = b->getInt32(sharedIndex++);
-                scalar = b->CreateInBoundsGEP(mSharedHandle, indices);
+                assert (mSharedHandle);
+                BEGIN_SCOPED_REGION
+                const auto j = getGroupIndex(sharedGroups) + 1;
+                indices[1] = b->getInt32(j * 2);
+                auto & k = sharedIndex[j];
+                assert ((j * 2) < sharedTy->getStructNumElements());
+                assert (k < sharedTy->getStructElementType(j * 2)->getStructNumElements());
+                assert (sharedTy->getStructElementType(j * 2)->getStructElementType(k) == binding.getValueType());
+                indices[2] = b->getInt32(k++);
+                scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
+                END_SCOPED_REGION
                 break;
             case ScalarType::ThreadLocal:
                 if (options == InitializeOptions::SkipThreadLocal) continue;
-                assert (threadLocalIndex < threadLocalCount);
                 assert (mThreadLocalHandle);
-                indices[1] = b->getInt32(threadLocalIndex++);
-                scalar = b->CreateInBoundsGEP(mThreadLocalHandle, indices);
+                BEGIN_SCOPED_REGION
+                const auto j = getGroupIndex(threadLocalGroups);
+                indices[1] = b->getInt32(j * 2);
+                auto & k = threadLocalIndex[j];
+                assert ((j * 2) < threadLocalTy->getStructNumElements());
+                assert (k < threadLocalTy->getStructElementType(j * 2)->getStructNumElements());
+                assert (threadLocalTy->getStructElementType(j * 2)->getStructElementType(k) == binding.getValueType());
+                indices[2] = b->getInt32(k++);
+                assert (checkIndexedType(threadLocalTy, indices));
+                scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                END_SCOPED_REGION
                 break;
             case ScalarType::NonPersistent:
                 scalar = b->CreateAllocaAtEntryPoint(binding.getValueType());
@@ -1124,8 +1215,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         }
         addToScalarFieldMap(binding.getName(), scalar, binding.getValueType());
     }
-    assert (mSharedHandle == nullptr || sharedIndex == sharedCount);
-    assert (mThreadLocalHandle == nullptr || threadLocalIndex == threadLocalCount);
+
+    enumerate(mOutputScalars, sharedGroups.size() + 1);
 
     // finally add any aliases
     for (const auto & alias : mScalarAliasMap) {

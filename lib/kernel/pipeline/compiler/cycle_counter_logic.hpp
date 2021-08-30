@@ -7,44 +7,47 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelCycleCountProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned kernel, const bool isRoot) {
+void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned kernelId, const bool isRoot) {
+
+    const auto groupId = getCacheLineGroupId(kernelId);
+
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         // TODO: make these thread local to prevent false sharing and enable
         // analysis of thread distributions?
         IntegerType * const int64Ty = b->getInt64Ty();
 
-        const auto prefix = makeKernelName(kernel) + STATISTICS_CYCLE_COUNT_SUFFIX;
-        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::KERNEL_SYNCHRONIZATION));
+        const auto prefix = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
+        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::KERNEL_SYNCHRONIZATION), groupId);
         if (isRoot) {
-            mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::PARTITION_JUMP_SYNCHRONIZATION));
+            mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::PARTITION_JUMP_SYNCHRONIZATION), groupId);
         }
-        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::BUFFER_EXPANSION));        
-        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::BUFFER_COPY));
-        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::KERNEL_EXECUTION));
-        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::TOTAL_TIME));
+        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::BUFFER_EXPANSION), groupId);
+        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::BUFFER_COPY), groupId);
+        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::KERNEL_EXECUTION), groupId);
+        mTarget->addInternalScalar(int64Ty, prefix + std::to_string(CycleCounter::TOTAL_TIME), groupId);
     }
 
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
 
-        const auto prefix = makeKernelName(kernel);
+        const auto prefix = makeKernelName(kernelId);
         IntegerType * const int64Ty = b->getInt64Ty();
 
         // total # of segments processed by kernel
-        mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_SEGMENT_COUNT_SUFFIX, kernel);
+        mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_SEGMENT_COUNT_SUFFIX, groupId);
 
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const auto port = mBufferGraph[e].Port;
-            const auto prefix = makeBufferName(kernel, port);
-            mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_BLOCKING_IO_SUFFIX, kernel);
+            const auto prefix = makeBufferName(kernelId, port);
+            mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_BLOCKING_IO_SUFFIX, groupId);
         }
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             // TODO: ignore dynamic buffers
             const auto port = mBufferGraph[e].Port;
-            const auto prefix = makeBufferName(kernel, port);
-            mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_BLOCKING_IO_SUFFIX, kernel);
+            const auto prefix = makeBufferName(kernelId, port);
+            mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_BLOCKING_IO_SUFFIX, groupId);
         }
     }
 
@@ -59,15 +62,15 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
 
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
-        const auto numOfInputs = numOfStreamInputs(kernel);
+        const auto numOfInputs = numOfStreamInputs(kernelId);
         for (unsigned i = 0; i < numOfInputs; ++i) {
-            const auto prefix = makeBufferName(kernel, StreamSetPort{PortType::Input, i});
-            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, kernel);
+            const auto prefix = makeBufferName(kernelId, StreamSetPort{PortType::Input, i});
+            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
         }
-        const auto numOfOutputs = numOfStreamOutputs(kernel);
+        const auto numOfOutputs = numOfStreamOutputs(kernelId);
         for (unsigned i = 0; i < numOfOutputs; ++i) {
-            const auto prefix = makeBufferName(kernel, StreamSetPort{PortType::Output, i});
-            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, kernel);
+            const auto prefix = makeBufferName(kernelId, StreamSetPort{PortType::Output, i});
+            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
         }
 
     }
@@ -745,7 +748,7 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                     Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     Type * const traceTy = traceData->getType()->getPointerElementType();
                     Type * const entryTy =  traceTy->getStructElementType(0)->getPointerElementType();
-                    Value * const entryData = b->CreateCacheAlignedMalloc(entryTy, SZ_ONE);
+                    Value * const entryData = b->CreatePageAlignedMalloc(entryTy, SZ_ONE);
                     // fill in the struct
                     b->CreateStore(entryData, b->CreateGEP(traceData, {ZERO, ZERO}));
                     b->CreateStore(SZ_ONE, b->CreateGEP(traceData, {ZERO, ONE}));
@@ -1066,7 +1069,7 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
         Constant * const TWO = b->getInt32(2);
         Constant * const THREE = b->getInt32(3);
 
-        Value * const traceDataArray = b->CreateCacheAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
+        Value * const traceDataArray = b->CreatePageAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
 
         // fill in the struct
         b->CreateStore(SZ_ZERO, b->CreateGEP(traceData, {ZERO, ZERO})); // "last" num of strides
@@ -1417,7 +1420,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
 
     b->SetInsertPoint(expand);
     Type * const logTy = currentLog->getType()->getPointerElementType();
-    Value * const newLog = b->CreateCacheAlignedMalloc(logTy);
+    Value * const newLog = b->CreatePageAlignedMalloc(logTy);
     PointerType * const voidPtrTy = b->getVoidPtrTy();   
     b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(newLog, { ZERO, ONE}));
     b->CreateStore(newLog, trace);
@@ -1455,7 +1458,8 @@ void PipelineCompiler::addItemCountDeltaProperties(BuilderRef b, const unsigned 
     StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
     PointerType * const traceTy = logChunkTy->getPointerTo();
     const auto fieldName = (makeKernelName(kernel) + suffix).str();
-    mTarget->addInternalScalar(traceTy, fieldName, kernel);
+    const auto groupId = getCacheLineGroupId(kernel);
+    mTarget->addInternalScalar(traceTy, fieldName, groupId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

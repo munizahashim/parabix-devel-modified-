@@ -10,8 +10,11 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addHandlesToPipelineKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index) {
-    for (const auto e : make_iterator_range(out_edges(index, mBufferGraph))) {
+inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId) {
+
+    const auto groupId = getCacheLineGroupId(kernelId);
+
+    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         // external buffers already have a buffer handle
@@ -20,7 +23,7 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
         }
         assert (parent(streamSet, mBufferGraph) != PipelineInput);
         const BufferPort & rd = mBufferGraph[e];
-        const auto handleName = makeBufferName(index, rd.Port);
+        const auto handleName = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
         Type * const handleType = buffer->getHandleType(b);
 
@@ -29,15 +32,10 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
             assert (bn.isOwned());
             mTarget->addNonPersistentScalar(handleType, handleName);
         } else if (LLVM_LIKELY(bn.isOwned())) {
-            mTarget->addInternalScalar(handleType, handleName);
-//            if (bn.Locality == BufferLocality::GloballyShared) {
-//                mTarget->addInternalScalar(handleType, handleName);
-//            } else {
-//                mTarget->addThreadLocalScalar(handleType, handleName);
-//            }
+            mTarget->addInternalScalar(handleType, handleName, groupId);
         } else {
             mTarget->addNonPersistentScalar(handleType, handleName);
-            mTarget->addInternalScalar(buffer->getPointerType(), handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, index);
+            mTarget->addInternalScalar(buffer->getPointerType(), handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
     }
 }

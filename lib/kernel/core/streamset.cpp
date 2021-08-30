@@ -432,7 +432,7 @@ void StaticBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplier
 
     indices[1] = b->getInt32(BaseAddress);
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
-    Value * const mallocAddr = b->CreateCacheAlignedMalloc(mType, size, mAddressSpace);
+    Value * const mallocAddr = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
     Value * const buffer = addUnderflow(b, mallocAddr, mUnderflow);
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
     b->CreateStore(buffer, baseAddressField);
@@ -740,7 +740,7 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
 
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
-    Value * const baseAddress = b->CreateCacheAlignedMalloc(mType, size, mAddressSpace);
+    Value * const baseAddress = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
@@ -974,7 +974,7 @@ void DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Value 
             Value * const newBufferCapacity = b->CreateRoundUp(requiredChunks, capacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const requiredCapacity = b->CreateAdd(newBufferCapacity, additionalCapacity);
-            Value * expandedBuffer = b->CreateCacheAlignedMalloc(mType, requiredCapacity, mAddressSpace);
+            Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, requiredCapacity, mAddressSpace);
             expandedBuffer = b->CreateInBoundsGEP(expandedBuffer, underflow);
             b->CreateStore(newBufferCapacity, intCapacityField);
 
@@ -1016,7 +1016,7 @@ void DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Value 
 
             Value * const totalBytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
 
-            Value * newBuffer = b->CreateCacheAlignedMalloc(mType, requiredCapacity, mAddressSpace);
+            Value * newBuffer = b->CreatePageAlignedMalloc(mType, requiredCapacity, mAddressSpace);
             newBuffer = b->CreateInBoundsGEP(newBuffer, { underflow });
 
             Value * const consumedOffset = b->CreateURem(consumedChunks, capacity);

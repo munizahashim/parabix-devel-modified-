@@ -37,7 +37,7 @@ inline LLVM_READNONE bool allocateOnHeap(BuilderRef b) {
 inline Value * makeStateObject(BuilderRef b, Type * type) {
     Value * ptr = nullptr;
     if (LLVM_UNLIKELY(allocateOnHeap(b))) {
-        ptr = b->CreateCacheAlignedMalloc(type);
+        ptr = b->CreatePageAlignedMalloc(type);
     } else {
         ptr = b->CreateCacheAlignedAlloca(type);
     }
@@ -109,7 +109,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     addConsumerKernelProperties(b, PipelineInput);
     addPipelinePriorItemCountProperties(b);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        addBufferHandlesToPipelineKernel(b, i);
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
@@ -118,14 +117,12 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
             currentPartitionId = partitionId;
         }
         addInternalKernelProperties(b, i);
-        addConsumerKernelProperties(b, i);
         addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
         addPAPIEventCounterKernelProperties(b, i, isRoot);
         #endif
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
-        addFamilyKernelProperties(b, i);
     }
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
@@ -177,8 +174,34 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     // With the inclusion of InternallySynchronized attributes for PipelineKernels, this is
     // no longer true and the test requires greater precision.
 
+    const auto groupId = getCacheLineGroupId(kernelId);
+
     const auto name = makeKernelName(kernelId);
-    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX, kernelId);
+    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX, groupId);
+
+    for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+        const BufferPort & br = mBufferGraph[e];
+        const auto prefix = makeBufferName(kernelId, br.Port);
+        if (LLVM_UNLIKELY(br.IsDeferred)) {
+            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
+        }
+        mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
+    }
+
+    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+        const BufferPort & br = mBufferGraph[e];
+        const auto prefix = makeBufferName(kernelId, br.Port);
+        if (LLVM_UNLIKELY(br.IsDeferred)) {
+            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
+        }
+        mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
+    }
+
+    addConsumerKernelProperties(b, kernelId);
+
+    addBufferHandlesToPipelineKernel(b, kernelId);
+
+    addFamilyKernelProperties(b, kernelId);
 
     if (LLVM_LIKELY(kernel->isStateful())) {
         PointerType * sharedStateTy = nullptr;
@@ -187,7 +210,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         } else {
             sharedStateTy = kernel->getSharedStateType()->getPointerTo(0);
         }
-        mTarget->addInternalScalar(sharedStateTy, name, kernelId);
+        mTarget->addInternalScalar(sharedStateTy, name, groupId);
     }
 
     if (kernel->hasThreadLocal()) {
@@ -198,38 +221,9 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         } else {
             localStateTy = kernel->getThreadLocalStateType()->getPointerTo(0);
         }
-        mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, kernelId);
+        mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-
-
-    for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-//        const auto streamSet = source(e, mBufferGraph);
-//        const BufferNode & bn = mBufferGraph[streamSet];
-//        if (LLVM_UNLIKELY(bn.isExternal())) {
-//            continue;
-//        }
-//        assert (parent(streamSet, mBufferGraph) != PipelineInput);
-        const BufferPort & br = mBufferGraph[e];
-        const auto prefix = makeBufferName(kernelId, br.Port);
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
-            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, kernelId);
-        }
-        mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, kernelId);
-    }
-
-    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-//        if (LLVM_UNLIKELY(bn.isExternal())) {
-//            continue;
-//        }
-//        assert (parent(streamSet, mBufferGraph) != PipelineInput);
-        const BufferPort & br = mBufferGraph[e];
-        const auto prefix = makeBufferName(kernelId, br.Port);
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
-            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, kernelId);
-        }
-        mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, kernelId);
-    }
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
@@ -251,7 +245,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
                 traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
                 traceStruct[1] = sizeTy; // length of trace log
                 mTarget->addInternalScalar(StructType::get(C, traceStruct),
-                                                   prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, kernelId);
+                                                   prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, groupId);
             }
         }
     }
@@ -271,7 +265,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         traceStruct[3] = sizeTy; // trace capacity (for realloc)
 
         mTarget->addInternalScalar(StructType::get(C, traceStruct),
-                                           name + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX, kernelId);
+                                           name + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX, groupId);
     }
 
 }
@@ -392,7 +386,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         ConstantInt * const reqMemory = b->getSize(RequiredThreadLocalStreamSetMemory);
         Value * const memorySize = b->CreateMul(reqMemory, expectedNumOfStrides);
-        Value * const base = b->CreateCacheAlignedMalloc(memorySize);
+        Value * const base = b->CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
     }

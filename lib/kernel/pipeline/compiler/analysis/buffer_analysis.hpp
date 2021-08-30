@@ -712,16 +712,27 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
             auto calculateCopyLength = [&](const BufferPort & rate, const unsigned kernel) {
                 const auto r = rate.Maximum - rate.Minimum;
-                return ceiling(r); //  * StrideStepLength[kernel]
+                return ceiling(r);
             };
-            bn.CopyBack = calculateCopyLength(producerRate, producer);
+
+            const auto copyBack = calculateCopyLength(producerRate, producer);
+
             unsigned copyForwards = 0;
             for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const BufferPort & consumerRate = mBufferGraph[e];
-                const auto cf = calculateCopyLength(consumerRate, target(e, mBufferGraph)) + consumerRate.LookAhead;
+                const auto kernel = target(e, mBufferGraph);
+                const auto cpl = calculateCopyLength(consumerRate, kernel);
+                const auto cf = (cpl * StrideStepLength[kernel]) + consumerRate.LookAhead;
                 copyForwards = std::max(copyForwards, cf);
             }
-            bn.CopyForwards = copyForwards;
+            if (copyForwards > blockWidth || copyBack > blockWidth) {
+                bn.IsLinear = true;
+                bn.CopyBack = 0;
+                bn.CopyForwards = 0;
+            } else {
+                bn.CopyForwards = copyForwards;
+                bn.CopyBack = copyBack;
+            }
         }
 
         const auto overflow1 = std::max(bn.CopyBack, bn.CopyForwards);

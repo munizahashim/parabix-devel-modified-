@@ -7,6 +7,7 @@
 #include <kernel/core/kernel_compiler.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <boost/container/flat_set.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Format.h>
 #if BOOST_VERSION < 106600
@@ -16,6 +17,7 @@
 #endif
 using namespace llvm;
 using namespace boost;
+using boost::container::flat_set;
 
 namespace kernel {
 
@@ -239,39 +241,142 @@ void Kernel::constructStateTypes(BuilderRef b) {
     auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
     mThreadLocalStateType = m->getTypeByName(strThreadLocal);
     if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
-        SmallVector<Type *, 64> shared;
-        SmallVector<Type *, 64> threadLocal;
-        shared.reserve(mInputScalars.size() + mOutputScalars.size() + mInternalScalars.size());
-        for (const auto & scalar : mInputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        for (const auto & scalar : mOutputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-        // within the kernel state to hide the complexity from the user?
+
+        flat_set<unsigned> sharedGroups;
+        flat_set<unsigned> threadLocalGroups;
+
         for (const auto & scalar : mInternalScalars) {
             assert (scalar.getValueType());
             switch (scalar.getScalarType()) {
                 case ScalarType::Internal:
-                    shared.push_back(scalar.getValueType());
+                    sharedGroups.insert(scalar.getGroup());
                     break;
                 case ScalarType::ThreadLocal:
-                    threadLocal.push_back(scalar.getValueType());
+                    threadLocalGroups.insert(scalar.getGroup());
                     break;
                 default: break;
             }
         }
+
+        const auto sharedGroupCount = sharedGroups.size();
+        const auto threadLocalGroupCount = threadLocalGroups.size();
+
+        std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
+        std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+        for (const auto & scalar : mInputScalars) {
+            assert (scalar.getType());
+            shared[0].push_back(scalar.getType());
+        }
+
+        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
+        // within the kernel state to hide the complexity from the user?
+        for (const auto & scalar : mInternalScalars) {
+            assert (scalar.getValueType());
+
+            auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+                const auto f = groups.find(scalar.getGroup());
+                assert (f != groups.end());
+                return std::distance(groups.begin(), f);
+            };
+
+            switch (scalar.getScalarType()) {
+                case ScalarType::Internal:
+                    shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                    break;
+                case ScalarType::ThreadLocal:
+                    threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                    break;
+                default: break;
+            }
+        }
+
+        assert (shared[sharedGroupCount + 1].empty());
+        for (const auto & scalar : mOutputScalars) {
+            assert (scalar.getType());
+            shared[sharedGroupCount + 1].push_back(scalar.getType());
+        }
+
+        DataLayout dl(m);
+
+        IntegerType * const int8Ty = b->getInt8Ty();
+
+        auto getTypeSize = [&](Type * const type) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+            return dl.getTypeAllocSize(type);
+            #else
+            return dl.getTypeAllocSize(type).getFixedSize();
+            #endif
+        };
+
+        const auto cacheAlignment = b->getCacheAlignment();
+
+        auto makeGroupedStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
+                                         StringRef name, const bool addGroupCacheLinePadding) {
+
+            const auto n = structTypeVec.size();
+            if (n == 0) {
+                return StructType::create(b->getContext(), name);
+            }
+
+            std::vector<Type *> structTypes(n * 2);
+
+            if (addGroupCacheLinePadding) {
+                // TODO: review LLVM code; I'm worried that I cannot rely on struct size to
+                // always account for internal struct alignments.
+
+                unsigned offset = 0;
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * const sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    const auto typeSize = getTypeSize(sty);
+                    const auto paddingOffset = (typeSize % cacheAlignment);
+                    unsigned padding = 0;
+                    if (paddingOffset != 0) {
+                        padding = (cacheAlignment - paddingOffset);
+                    }
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = ArrayType::get(int8Ty, padding);
+                    offset += typeSize + padding;
+                }
+            } else {
+                Type * const emptyTy = ArrayType::get(int8Ty, 0);
+                assert (emptyTy->isSized());
+                assert (getTypeSize(emptyTy) == 0);
+                for (unsigned i = 0; i != n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = emptyTy;
+                }
+            }
+
+            StructType * const st = StructType::create(b->getContext(), structTypes, name);
+
+            #ifndef NDEBUG
+            if (addGroupCacheLinePadding) {
+                const StructLayout * const sl = dl.getStructLayout(st);
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto offset = sl->getElementOffset(i * 2);
+                    assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                }
+            }
+            #endif
+
+            return st;
+        };
+
         // NOTE: StructType::create always creates a new type even if an identical one exists.
-        StructType * const sharedTy = StructType::create(b->getContext(), shared, strShared);
+        StructType * const sharedTy = makeGroupedStructType(shared, strShared, sharedGroupCount > 1);
         assert (mSharedStateType == nullptr || mSharedStateType == nullIfEmpty(sharedTy));
         mSharedStateType = sharedTy;
 
-        StructType * const threadLocalTy = StructType::create(b->getContext(), threadLocal, strThreadLocal);
+        StructType * const threadLocalTy = makeGroupedStructType(threadLocal, strThreadLocal, false);
         assert (mThreadLocalStateType == nullptr || mThreadLocalStateType == nullIfEmpty(threadLocalTy));
         mThreadLocalStateType = threadLocalTy;
+
     }
     mSharedStateType = nullIfEmpty(mSharedStateType);
     mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
@@ -1043,7 +1148,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b->CreateCacheAlignedMalloc(getSharedStateType());
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;

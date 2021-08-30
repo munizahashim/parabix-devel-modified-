@@ -462,7 +462,7 @@ void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(BuilderRef 
     Constant * const defaultSize = b->getSize(32);
     Value * bufferPtr = b->getScalarFieldPtr(SPAN_BUFFER);
     Value * capacityPtr = b->getScalarFieldPtr(SPAN_CAPACITY);
-    b->CreateStore(b->CreateCacheAlignedMalloc(b->getSizeTy(), defaultSize), bufferPtr);
+    b->CreateStore(b->CreatePageAlignedMalloc(b->getSizeTy(), defaultSize), bufferPtr);
     b->CreateStore(defaultSize, capacityPtr);
 }
 

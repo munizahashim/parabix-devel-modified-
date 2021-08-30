@@ -8,27 +8,30 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addFamilyKernelProperties(BuilderRef b, const unsigned index) const {
-    const Kernel * const kernel = getKernel(index);
+void PipelineCompiler::addFamilyKernelProperties(BuilderRef b, const unsigned kernelId) const {
+    const Kernel * const kernel = getKernel(kernelId);
     if (LLVM_LIKELY(kernel->hasFamilyName())) {
+
+        const auto groupId = getCacheLineGroupId(kernelId);
+
         PointerType * const voidPtrTy = b->getVoidPtrTy();
-        const auto prefix = makeKernelName(index);
+        const auto prefix = makeKernelName(kernelId);
         const auto tl = kernel->hasThreadLocal();
         const auto ai = kernel->allocatesInternalStreamSets();
         if (ai) {
-            mTarget->addInternalScalar(voidPtrTy, prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, index);
+            mTarget->addInternalScalar(voidPtrTy, prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, groupId);
         }
         if (tl) {
-            mTarget->addInternalScalar(voidPtrTy, prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, index);
+            mTarget->addInternalScalar(voidPtrTy, prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, groupId);
             if (ai) {
-                mTarget->addInternalScalar(voidPtrTy, prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, index);
+                mTarget->addInternalScalar(voidPtrTy, prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, groupId);
             }
         }
-        mTarget->addInternalScalar(voidPtrTy, prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX, index);
+        mTarget->addInternalScalar(voidPtrTy, prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX, groupId);
         if (tl) {
-            mTarget->addInternalScalar(voidPtrTy, prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, index);
+            mTarget->addInternalScalar(voidPtrTy, prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, groupId);
         }
-        mTarget->addInternalScalar(voidPtrTy, prefix + FINALIZE_FUNCTION_POINTER_SUFFIX, index);
+        mTarget->addInternalScalar(voidPtrTy, prefix + FINALIZE_FUNCTION_POINTER_SUFFIX, groupId);
     }
 }
 

@@ -251,7 +251,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     KernelPartitionId[PipelineInput] = 0;
 
-    auto currentOrigPartitionId = -1U;
+    auto currentGroupId = -1U;
+    auto inputPartitionId = -1U;
     auto outputPartitionId = -1U;
 
     assert (kernels[0] == PipelineInput);
@@ -276,9 +277,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         return expected.numerator();
     };
 
-    SmallVector<unsigned, 64> remappedPartitionId(origPartitionCount);
-    remappedPartitionId[0] = 0;
-
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
         assert (subsitution[in] == -1U);
@@ -293,11 +291,15 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
         // renumber the partitions to reflect the selected ordering
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
-        if (origPartitionId != currentOrigPartitionId) {
+        if (origPartitionId != inputPartitionId) {
         #endif
-            ++outputPartitionId;
-            currentOrigPartitionId = origPartitionId;
-            remappedPartitionId[currentOrigPartitionId] = outputPartitionId;
+            inputPartitionId = origPartitionId;
+//            const PartitionData & P = partitionGraph[origPartitionId];
+//            const auto groupId = P.LinkedGroupId;
+//            if (groupId != currentGroupId) {
+                ++outputPartitionId;
+//                currentGroupId = groupId;
+//            }
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
         }
         #endif
@@ -317,12 +319,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     END_SCOPED_REGION
 
-    // our new partition count can exceed the original one by at most one
     PartitionCount = outputPartitionId + 1U;
-    #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
-    assert (origPartitionCount <= PartitionCount);
-    assert ((origPartitionCount + 1) >= PartitionCount);
-    #endif
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.

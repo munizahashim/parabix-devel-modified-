@@ -2,7 +2,6 @@
 #define BUFFER_SIZE_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
-#include "evolutionary_algorithm.hpp"
 
 namespace kernel {
 
@@ -11,35 +10,23 @@ namespace kernel {
 
 namespace { // anonymous namespace
 
-constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATES = 20;
+constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATES = 30;
 
-constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS = 100;
+constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS = 200;
 
 constexpr static unsigned BUFFER_SIZE_POPULATION_SIZE = 30;
 
-constexpr static unsigned BUFFER_SIZE_GA_ROUNDS = 30;
+constexpr static unsigned BUFFER_SIZE_GA_ROUNDS = 100;
 
-constexpr static unsigned BUFFER_SIZE_GA_STALLS = 10;
+constexpr static unsigned BUFFER_SIZE_GA_STALLS = 30;
 
+constexpr static unsigned NON_HUGE_PAGE_SIZE = 4096;
 
-struct Pack {
-    size_t   S = 0;
-    unsigned A = 0;
-    unsigned D = 0;
-
-    Pack() = default;
-    Pack(size_t s, unsigned a, unsigned d) : S(s), A(a), D(d) { }
-};
-
-using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
+using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS, no_property, no_property>;
 
 using Interval = std::pair<unsigned, unsigned>;
 
-static size_t bs_init_time = 0;
-static size_t bs_fitness_time = 0;
-static size_t bs_fitness_calls = 0;
-
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm{
+struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
 
     using ColourLine = flat_set<Interval>;
 
@@ -48,111 +35,18 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      ** ------------------------------------------------------------------------------------------------------------- */
     bool initGA(Population & initialPopulation) override {
 
-        assert (candidates.empty());
-        assert (initialPopulation.empty());
-
-        std::vector<Pack> H;
-        H.reserve(candidateLength);
-
-        std::vector<unsigned> J;
-        J.reserve(candidateLength);
-
-        struct PackWeightComparator {
-            bool operator()(const Pack & a,const Pack & b) const{
-                return a.S > b.S;
-            }
-        };
-
-        auto intersects = [](const Pack & A, const Pack & B) -> bool {
-            const auto r = A.A <= B.D && B.A <= A.D;
-            assert (r == (std::max(A.A, B.A) <= std::min(A.D, B.D)));
-            return r;
-        };
-
         for (unsigned r = 0; r < BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS; ++r) {
-            assert (H.empty());
+            Candidate C(candidateLength);
+            std::iota(C.begin(), C.end(), 0);
+            std::shuffle(C.begin(), C.end(), rng);
 
-            H.emplace_back(0, firstKernel, lastKernel);
-
-            J.resize(candidateLength);
-
-            // by shuffling the order of J, we introduce some randomness to
-            // the otherwise deterministic algorithm.
-            std::iota(J.begin(), J.end(), 0);
-            std::shuffle(J.begin(), J.end(), rng);
-
-            Candidate candidate;
-            candidate.reserve(candidateLength);
-
-            for (;;) {
-
-                assert (!H.empty());
-                // pick a h=(w,l,r) from H s.t. w is minimal and remove h from H
-                const auto h = H.front();
-                std::pop_heap(H.begin(), H.end(), PackWeightComparator{});
-                H.pop_back();
-                assert (H.front().S >= h.S);
-
-                // if there exists a (s,a,d) in J s.t. (a,d) ∩ (l,r) ≠ ∅ and
-                // for all g=(q,x,y) in H, (a,d) ∩ (x,y) = ∅, do ...
-
-                for (auto j = J.begin(); j != J.end(); ) {
-                    const auto & a = allocations[*j];
-
-                    assert (a.S > 0);
-
-                    if (intersects(a, h)) {
-
-                        for (const auto & g : H) {
-                            if (intersects(a, g)) {
-                                goto more_than_one_intersection;
-                            }
-                        }
-
-                        // record j as in our candidate list and remove it from J
-                        candidate.push_back(*j);
-                        J.erase(j);
-
-                        // update the idealized memory layout to accommodate the
-                        // chosen allocation.
-                        const auto l = std::max(a.A, h.A);
-                        const auto r = std::min(a.D, h.D);
-
-                        H.emplace_back(h.S + a.S, l, r);
-                        std::push_heap(H.begin(), H.end(), PackWeightComparator{});
-
-                        if (h.A < a.A) {
-                            H.emplace_back(h.S, h.A, a.A);
-                            std::push_heap(H.begin(), H.end(), PackWeightComparator{});
-                        }
-
-                        if (a.D < h.D) {
-                            H.emplace_back(h.S, a.D, h.D);
-                            std::push_heap(H.begin(), H.end(), PackWeightComparator{});
-                        }
-                        break;
-                    }
-    more_than_one_intersection:
-                    ++j;
-                }
-
-                if (J.empty()) {
-                    break;
-                }
-            }
-
-            // given our candidate, do a first-fit allocation to determine the actual
-            // memory layout.
-
-            if (insertCandidate(std::move(candidate), initialPopulation)) {
+            if (insertCandidate(std::move(C), initialPopulation)) {
                 if (initialPopulation.size() >= BUFFER_LAYOUT_INITIAL_CANDIDATES) {
                     return false;
                 }
             }
 
-            H.clear();
         }
-
 
         return true;
     }
@@ -166,8 +60,6 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      * @brief fitness
      ** ------------------------------------------------------------------------------------------------------------- */
     size_t fitness(const Candidate & candidate) override {
-
-        const auto t0 = std::chrono::high_resolution_clock::now();
 
         assert (candidate.size() == candidateLength);
 
@@ -184,56 +76,49 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
             const auto u = candidate[i];
             assert (u < candidateLength);
             const auto w = weight[u];
+            assert (w > 0);
+            const auto pageWidth = round_up_to(w, NON_HUGE_PAGE_SIZE);
 
-            if (w == 0) {
-                remaining[u] = -1;
-                assert (degree(u, I) == 0);
-            } else {
-                remaining[u] = out_degree(u, I);
-                unsigned first = 0;
-                for (const auto & interval : GC_CL) {
-                    const auto last = interval.first;
-                    assert (first <= last);
-                    if ((first + w) < last) {
-                        break;
-                    }
-                    first = interval.second;
-                }
-                const auto last = first + w;
+            remaining[u] = out_degree(u, I);
+            unsigned first = 0;
+            for (const auto & interval : GC_CL) {
+                const auto last = interval.first;
                 assert (first <= last);
-                if (last > max_colours) {
-                    max_colours = last;
+                if ((first + pageWidth) < last) {
+                    break;
                 }
+                first = interval.second;
+            }
+            const auto last = first + w;
+            assert (first <= last);
+            if (last > max_colours) {
+                max_colours = last;
+            }
 
-                GC_Intervals[u] = std::make_pair(first, last);
+            GC_Intervals[u] = std::make_pair(first, last);
 
-                GC_CL.emplace(first, last);
+            GC_CL.emplace(first, last);
 
-                for (const auto e : make_iterator_range(out_edges(u, I))) {
-                    const auto j = target(e, I);
-                    if (GC_ordering[j] < i) {
-                        assert (remaining[j] > 0);
-                        remaining[j]--;
-                    }
-                }
-
-                for (unsigned j = 0; j <= i; ++j) {
-                    const auto v = candidate[i];
-                    assert (v < candidateLength);
-                    if (remaining[v] == 0) {
-                        const auto f = GC_CL.find(GC_Intervals[v]);
-                        assert (f != GC_CL.end());
-                        GC_CL.erase(f);
-                        remaining[v] = -1;
-                    }
+            for (const auto e : make_iterator_range(out_edges(u, I))) {
+                const auto j = target(e, I);
+                if (GC_ordering[j] < i) {
+                    assert (remaining[j] > 0);
+                    remaining[j]--;
                 }
             }
+
+            for (unsigned j = 0; j <= i; ++j) {
+                const auto v = candidate[i];
+                assert (v < candidateLength);
+                if (remaining[v] == 0) {
+                    const auto f = GC_CL.find(GC_Intervals[v]);
+                    assert (f != GC_CL.end());
+                    GC_CL.erase(f);
+                    remaining[v] = -1;
+                }
+            }
+
         }
-
-        const auto t1 = std::chrono::high_resolution_clock::now();
-
-        bs_fitness_time += (t1 - t0).count();
-        ++bs_fitness_calls;
 
         return max_colours;
     }
@@ -259,18 +144,13 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
-                         , const unsigned firstKernel
-                         , const unsigned lastKernel
                          , IntervalGraph && I
-                         , std::vector<Pack> && allocations
                          , std::vector<size_t> && weight
                          , std::vector<int> && remaining
                          , random_engine & rng)
-    : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets, BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, rng)
-    , firstKernel(firstKernel)
-    , lastKernel(lastKernel)
+    : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
+                                             BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, rng)
     , I(std::move(I))
-    , allocations(std::move(allocations))
     , weight(std::move(weight))
     , remaining(std::move(remaining))
     , GC_Intervals(numOfLocalStreamSets)
@@ -281,13 +161,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 
 private:
 
-    const unsigned firstKernel;
-    const unsigned lastKernel;
-
     const IntervalGraph I;
-
-    const std::vector<Pack> allocations;
-
     const std::vector<size_t> weight;
 
     std::vector<int> remaining;
@@ -303,14 +177,13 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineBufferLayout
  *
- * Given our buffer graph, we want to identify the best placement to maximize memory reuse byway of minimizing
- * the total memory required. Although this assumes that the memory-aware scheduling algorithm was first called,
- * it does not actually use any data from it. The reason for this disconnection is to enable us to explore
+ * Given our buffer graph, we want to identify the best placement to maximize sequential prefetching behavior with
+ * the minimal total memory required. Although this assumes that the memory-aware scheduling algorithm was first
+ * called, it does not actually use any data from it. The reason for this disconnection is to enable us to explore
  * the impact of static memory allocation independent of the chosen scheduling algorithm.
  *
- * The following is a genetic algorithm that adapts Gergov's incremental 2-approx from "Algorithms for
- * Compile time memory optimization" (1999) to generate some initial layout candidates then attempts
- * to refine them.
+ * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
+ * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) {
 
@@ -323,23 +196,19 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
 
     #warning TODO: can we insert a zero-extension region rather than having a secondary buffer?
 
+    unsigned numOfLocalStreamSets = 0;
     IntervalGraph I(n);
     std::vector<size_t> weight(n, 0);
     std::vector<int> remaining(n, 0); // NOTE: signed int type is necessary here
-    std::vector<Pack> allocations(n);
+
+
     std::vector<unsigned> mapping(n, -1U);
-
-    unsigned numOfLocalStreamSets = 0;
-
-    const auto blockWidth = b->getBitBlockWidth();
-
-    const auto alignment = b->getCacheAlignment();
+    const auto alignment = b->getCacheAlignment() * 2; // Intel L2 spatial prefetcher pulls cache block pairs
 
     BEGIN_SCOPED_REGION
 
     // The buffer graph is constructed in order of how the compiler will structure the pipeline program
-    // (i.e., the invocation order of its kernels.) Construct our allocation "rectangles" based on its
-    // ordering.
+    // (i.e., the invocation order of its kernels.)
 
     DataLayout DL(b->getModule());
 
@@ -361,7 +230,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                 const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
                 #endif
                 assert (typeSize > 0);
-                assert ((typeSize % (blockWidth / 8)) == 0);
 
                 const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
 
@@ -374,14 +242,8 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                 assert (i < n);
 
                 const auto j = numOfLocalStreamSets++;
-
                 mapping[i] = j;
 
-                Pack & P = allocations[j];
-                assert (P.A == 0);
-                P.A = kernel;
-                P.D = kernel;
-                P.S = w;
                 weight[j] = w;
 
                 // record how many consumers exist before the streamset memory can be reused
@@ -392,12 +254,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
         }
 
         // Mark any overlapping allocations in our interval graph.
-
-        // NOTE: although Gergov's constructs an interval graph based on the mapping
-        // of the rectangle to starting offset discovered when performing the packing
-        // process, we do not have that same information to guide us after the initial
-        // candidates have been generated. Instead we use a general interval graph
-        // within the first-fit process but guide colouring based on candidate order.
 
         for (unsigned i = 0; i < numOfLocalStreamSets; ++i) {
             if (remaining[i] > 0) {
@@ -410,23 +266,14 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
         }
 
         auto markFinishedStreamSets = [&](const unsigned streamSet) {
-
             const auto i = streamSet - FirstStreamSet;
             assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
             assert (i < n);
             const auto j = mapping[i];
-
             if (j != -1U) {
                 assert (j < numOfLocalStreamSets);
-                auto & r = remaining[j];
-                if ((--r) == 0) {
-                    Pack & P = allocations[j];
-                    assert (P.A == P.D);
-                    assert (firstKernel <= P.A && P.A <= kernel);
-                    P.D = kernel;
-                }
+                remaining[j]--;
             }
-
         };
 
         // Determine which streamsets are no longer alive
@@ -444,29 +291,8 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
         return;
     }
 
-//    auto & out = errs();
-
-//    out << "graph \"I\" {\n";
-
-//    for (unsigned i = 0; i < n; ++i) {
-//        const auto j = mapping[i];
-//        if (j != -1U) {
-//            out << "v" << j << " [label=\"" << FirstStreamSet + i << "\"];\n";
-//        }
-//    }
-
-//    for (auto e : make_iterator_range(edges(I))) {
-//        const auto s = source(e, I);
-//        const auto t = target(e, I);
-//        out << "v" << s << " -- v" << t << ";\n";
-//    }
-
-//    out << "}\n\n";
-//    out.flush();
-
-
-    BufferLayoutOptimizer BA(numOfLocalStreamSets, firstKernel, lastKernel,
-                             std::move(I), std::move(allocations), std::move(weight), std::move(remaining), rng);
+    BufferLayoutOptimizer BA(numOfLocalStreamSets,
+                             std::move(I), std::move(weight), std::move(remaining), rng);
 
     BA.runGA();
 
@@ -489,28 +315,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
             assert ((bn.BufferStart % alignment) == 0);
         }
     }
-
-//    out << "graph \"I2\" {\n";
-
-//    for (unsigned i = 0; i < n; ++i) {
-//        const auto j = mapping[i];
-//        if (j != -1U) {
-
-//            const BufferNode & bn = mBufferGraph[FirstStreamSet + i];
-
-
-//            out << "v" << j << " [label=\"" << FirstStreamSet + i  << " : " << bn.BufferStart << "\"];\n";
-//        }
-//    }
-
-//    for (auto e : make_iterator_range(edges(I))) {
-//        const auto s = source(e, I);
-//        const auto t = target(e, I);
-//        out << "v" << s << " -- v" << t << ";\n";
-//    }
-
-//    out << "}\n\n";
-//    out.flush();
 
     assert (RequiredThreadLocalStreamSetMemory > 0);
 

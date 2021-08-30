@@ -254,6 +254,15 @@ struct Attribute {
         // NOTE: this means either the kernel must either internally handle synchronization
         // or that any interleaving of segments is valid.
 
+        IsolateOnHybridThread,
+
+        // By using a hybrid-linear pipeline, some programs can improve their throughput by
+        // executing a heavyweight kernel on a fixed-code thread. Automatically deciding
+        // which kernels can be moved to it would require both a data and code oracle to
+        // determine the expected behaviour of the kernel itself and such oracles cannot
+        // exist for Family kernels. Thus this programmer attribute statically marks
+        // such kernels for hybrid execution.
+
         InfrequentlyUsed,
 
         // This kernel is infrequently used and should be compiled with O1 instead of O3.
@@ -468,6 +477,10 @@ inline Attribute Family() {
 
 inline Attribute InternallySynchronized() {
     return Attribute(Attribute::KindId::InternallySynchronized, 0);
+}
+
+inline Attribute IsolateOnHybridThread() {
+    return Attribute(Attribute::KindId::IsolateOnHybridThread, 0);
 }
 
 inline Attribute InfrequentlyUsed() {

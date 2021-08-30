@@ -30,6 +30,8 @@
 #include <cxxabi.h>
 using boost::intrusive::detail::floor_log2;
 
+static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
+
 #ifdef HAS_ADDRESS_SANITIZER
 #include <llvm/Analysis/AliasAnalysis.h>
 #endif
@@ -405,24 +407,18 @@ Value * CBuilder::CreateMalloc(Value * size) {
     return ptr;
 }
 
-Value * CBuilder::CreateCacheAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace) {
+Value * CBuilder::CreatePageAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace) {
     Value * size = ConstantExpr::getSizeOf(type);
     if (ArraySize) {
         size = CreateMul(size, CreateZExtOrTrunc(ArraySize, size->getType()));
     }
-    return CreatePointerCast(CreateCacheAlignedMalloc(size), type->getPointerTo(addressSpace));
+    return CreatePointerCast(CreatePageAlignedMalloc(size), type->getPointerTo(addressSpace));
 }
 
-Value * CBuilder::CreateCacheAlignedMalloc(llvm::Value * const size) {
-    unsigned alignment = 0;
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        alignment = getPageSize();
-    } else {
-        alignment = getCacheAlignment();
-    }
-    Constant * align = ConstantInt::get(size->getType(), alignment);
+Value * CBuilder::CreatePageAlignedMalloc(llvm::Value * const size) {
+    Constant * align = ConstantInt::get(size->getType(), NON_HUGE_PAGE_SIZE);
     Value * const alignedSize = CreateRoundUp(size, align);
-    Value * const ptr = CreateAlignedMalloc(alignedSize, alignment);
+    Value * const ptr = CreateAlignedMalloc(alignedSize, NON_HUGE_PAGE_SIZE);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         CreateMProtect(ptr, alignedSize, Protect::READ);
     }

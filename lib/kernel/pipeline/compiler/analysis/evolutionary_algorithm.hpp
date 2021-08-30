@@ -26,7 +26,7 @@ T abs_subtract(const T a, const T b) {
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief OrderingBasedEvolutionaryAlgorithm
+ * @brief PermutationBasedEvolutionaryAlgorithm
  *
  * Both the partition scheduling algorithm and whole program scheduling algorithm rely on the following class.
  * Within it is a genetic algorithm designed to find a minimum memory schedule of a given SchedulingGraph.
@@ -37,6 +37,8 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 class PermutationBasedEvolutionaryAlgorithm {
 public:
+
+    using CandidateLengthType = unsigned;
 
     using Candidate = std::vector<Vertex>;
 
@@ -109,9 +111,9 @@ public:
             goto enumerated_entire_search_space;
         }
 
-        assert (candidateLength > 1);
-
         BEGIN_SCOPED_REGION
+
+        assert (candidateLength > 1);
 
         permutation_bitset bitString(candidateLength);
 
@@ -146,7 +148,6 @@ public:
             const auto d = std::min(maxGenerations - g, c);
             assert (d >= 1);
             const double currentMutationRate = (double)(d) / (double)(maxStallGenerations) + 0.03;
-            // const double currentMutationRate = (double)(g + 1) / (double)(maxGenerations);
             const double currentCrossoverRate = 1.0 - currentMutationRate;
 
             // CROSSOVER:
@@ -158,9 +159,6 @@ public:
 
                         const Candidate & A = population[i]->first;
                         const Candidate & B = population[j]->first;
-
-                        assert (A.size() == candidateLength);
-                        assert (B.size() == candidateLength);
 
                         // generate a random bit string
                         bitString.randomize(rng);
@@ -179,8 +177,7 @@ public:
                             #endif
 
                             for (unsigned k = 0; k < candidateLength; ++k) {
-                                const auto t = bitString.test(k);
-                                if (t == selector) {
+                                if (bitString.test(k) == selector) {
                                     const auto v = A[k];
                                     assert (v < candidateLength);
                                     assert ("candidate contains duplicate values?" && !uncopied.test(v));
@@ -192,8 +189,6 @@ public:
                                     C[k] = A[k];
                                 }
                             }
-
-                            assert (count == uncopied.count());
 
                             for (unsigned k = 0U, p = -1U; k < candidateLength; ++k) {
                                 const auto t = bitString.test(k);
@@ -216,6 +211,7 @@ public:
                                     C[k] = B[p];
                                 }
                             }
+
                             assert (count == 0);
 
                             repairCandidate(C);
@@ -238,10 +234,10 @@ public:
 
                     auto & A = population[i];
 
+                    Candidate C{A->first};
+
                     const auto a = std::uniform_int_distribution<unsigned>{0, candidateLength - 2}(rng);
                     const auto b = std::uniform_int_distribution<unsigned>{a + 1, candidateLength - 1}(rng);
-
-                    Candidate C{A->first};
                     std::shuffle(C.begin() + a, C.begin() + b, rng);
 
                     repairCandidate(C);
@@ -385,6 +381,9 @@ public:
                 nextGeneration.clear();
             }
 
+            // errs() << "averageGenerationFitness=" << averageGenerationFitness << "\n";
+            // errs() << "bestGenerationalFitness=" << bestGenerationalFitness << "\n";
+
             priorAverageFitness = averageGenerationFitness;
             priorBestFitness = bestGenerationalFitness;
         }
@@ -493,11 +492,11 @@ in_trie:    ++i;
 
 protected:
 
-    PermutationBasedEvolutionaryAlgorithm(const unsigned candidateLength
-                          , const unsigned maxRounds
-                          , const unsigned maxStallRounds
-                          , const unsigned maxCandidates
-                          , random_engine & rng)
+    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
+                                         , const unsigned maxRounds
+                                         , const unsigned maxStallRounds
+                                         , const unsigned maxCandidates
+                                         , random_engine & rng)
     : candidateLength(candidateLength)
     , maxGenerations(maxRounds)
     , maxCandidates(maxCandidates)
@@ -510,7 +509,7 @@ protected:
 
 protected:
 
-    const unsigned candidateLength;
+    const CandidateLengthType candidateLength;
     const unsigned maxGenerations;
     const unsigned maxCandidates;
 
