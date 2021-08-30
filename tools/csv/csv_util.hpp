@@ -44,9 +44,9 @@ std::vector<std::string> get_CSV_headers(std::string filename) {
 std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> headers) {
     std::vector<std::string> tmp;
     if (headers.size() == 0) return tmp;
-    tmp.push_back("\"},\n{\"" + headers[0] + "\":\"");
+    tmp.push_back("\"},\n{\"" + headers[0] + "\":");
     for (unsigned i = 1; i < headers.size(); i++) {
-        tmp.push_back("\",\"" + headers[i] + "\":\"");
+        tmp.push_back("\",\"" + headers[i] + "\":");
     }
     tmp.push_back("\"},\n");
     return tmp;
@@ -174,10 +174,10 @@ void FieldNumberingKernel::generatePabloMethod() {
 
 class CSV_Char_Replacement : public PabloKernel {
 public:
-    CSV_Char_Replacement(BuilderRef kb, StreamSet * separators, StreamSet * quoteEscape, StreamSet * basis,
+    CSV_Char_Replacement(BuilderRef kb, StreamSet * separatorsLF, StreamSet * separatorsComma, StreamSet * quoteEscape, StreamSet * basis,
                          StreamSet * translatedBasis)
         : PabloKernel(kb, "CSV_Char_Replacement",
-                      {Binding{"separators", separators}, Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
+                      {Binding{"separatorsLF", separatorsLF}, Binding{"separatorsComma", separatorsComma}, Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
                       {Binding{"translatedBasis", translatedBasis}}) {}
 protected:
     void generatePabloMethod() override;
@@ -185,23 +185,24 @@ protected:
 
 void CSV_Char_Replacement::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * separators = getInputStreamSet("separators")[0];
+    PabloAST * separatorsLF = getInputStreamSet("separatorsLF")[0];
+    PabloAST * separatorsComma = getInputStreamSet("separatorsComma")[0];
+    separatorsComma = pb.createAnd(separatorsComma, pb.createNot(separatorsLF));
     PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     //
-    // Zero out the field and record delimiters.
-    // Translate "" to \"    ASCII value of " = 0x22, ASCII value of \ = 0x5C
-    //    this translation flips bits 1 through 6
-    PabloAST * zeroing = pb.createNot(separators);
+    // Translate "" to \"  ASCII value of " = 0x22, ASCII value of \ = 0x5C
+    // Translate , to "    ASCII value of , = 0x2C, ASCII value of " = 0x22
+    // Translate LF to "   ASCII value of LF = 0x0A, ASCII value of " = 0x22
     std::vector<PabloAST *> translated_basis(8, nullptr);
-    translated_basis[0] = pb.createAnd(basis[0], zeroing);
-    translated_basis[1] = pb.createAnd(pb.createXor(basis[1], quoteEscape), zeroing);  // flip
-    translated_basis[2] = pb.createAnd(pb.createXor(basis[2], quoteEscape), zeroing);  // flip
-    translated_basis[3] = pb.createAnd(pb.createXor(basis[3], quoteEscape), zeroing);  // flip
-    translated_basis[4] = pb.createAnd(pb.createXor(basis[4], quoteEscape), zeroing);  // flip
-    translated_basis[5] = pb.createAnd(pb.createXor(basis[5], quoteEscape), zeroing);  // flip
-    translated_basis[6] = pb.createAnd(pb.createXor(basis[6], quoteEscape), zeroing);  // flip
-    translated_basis[7] = pb.createAnd(basis[7], zeroing);
+    translated_basis[0] = basis[0];
+    translated_basis[1] = pb.createXor(basis[1], pb.createOr(quoteEscape, separatorsComma));
+    translated_basis[2] = pb.createXor(basis[2], pb.createOr(quoteEscape, separatorsComma));
+    translated_basis[3] = pb.createXor(basis[3], pb.createOr3(quoteEscape, separatorsLF, separatorsComma));
+    translated_basis[4] = pb.createXor(basis[4], quoteEscape);  // flip only for quoteEscape
+    translated_basis[5] = pb.createXor(basis[5], pb.createOr(quoteEscape, separatorsLF));  // flip
+    translated_basis[6] = pb.createXor(basis[6], quoteEscape);  // flip only for quoteEscape
+    translated_basis[7] = basis[7];
 
     Var * translatedVar = getOutputStreamVar("translatedBasis");
     for (unsigned i = 0; i < 8; i++) {

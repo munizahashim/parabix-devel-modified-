@@ -14,15 +14,15 @@ namespace kernel {
 //  The insertMarks stream set may have one stream each for the element
 //  of the insertion amounts vector, or may be multiplexed.   If multiplexed,
 //  the insertMarks streamset is a BixNum encoding the 1-based index of
-//  the insertion amount, with a BixNum value of 0 indicating that no
+//  of the insertionAmts vector, with a BixNum value of 0 indicating that no
 //  insertion is to occur at the identified position.
 //
 //  The result may then be used for calculation of a SpreadMask by InsertionSpreadMask.
 //
 
-class StringInsertBixNum final : public pablo::PabloKernel {
+class ZeroInsertBixNum final : public pablo::PabloKernel {
 public:
-    StringInsertBixNum(BuilderRef b, const std::vector<unsigned> &insertAmts,
+    ZeroInsertBixNum(BuilderRef b, const std::vector<unsigned> &insertAmts,
                        StreamSet * insertMarks, StreamSet * insertBixNum);
     void generatePabloMethod() override;
     bool hasSignature() const override { return true; }
@@ -30,7 +30,7 @@ public:
         return mSignature;
     }
 private:
-    const std::vector<unsigned>  mInsertAmounts;
+    const std::vector<unsigned>     mInsertAmounts;
     const bool                      mMultiplexing;
     const unsigned                  mBixNumBits;
     const std::string               mSignature;

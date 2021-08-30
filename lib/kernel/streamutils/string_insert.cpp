@@ -22,8 +22,8 @@ using namespace llvm;
 
 namespace kernel {
 
-LLVM_READONLY std::string StringInsertName(const std::vector<unsigned> & insertAmts, const StreamSet * insertMarks) {
-    std::string name = "StringInsertBixNum";
+LLVM_READONLY std::string ZeroInsertName(const std::vector<unsigned> & insertAmts, const StreamSet * insertMarks) {
+    std::string name = "ZeroInsertBixNum";
     for (auto a : insertAmts) {
         name += "_" + std::to_string(a);
     }
@@ -33,19 +33,19 @@ LLVM_READONLY std::string StringInsertName(const std::vector<unsigned> & insertA
     return name;
 }
     
-StringInsertBixNum::StringInsertBixNum(BuilderRef b, const std::vector<unsigned> & insertAmts,
+ZeroInsertBixNum::ZeroInsertBixNum(BuilderRef b, const std::vector<unsigned> & insertAmts,
                                        StreamSet * insertMarks, StreamSet * insertBixNum)
-: PabloKernel(b, "StringInsertBixNum" + Kernel::getStringHash(StringInsertName(insertAmts, insertMarks)),
+: PabloKernel(b, "StringInsertBixNum" + Kernel::getStringHash(ZeroInsertName(insertAmts, insertMarks)),
               {Binding{"insertMarks", insertMarks}},
               {Binding{"insertBixNum", insertBixNum}})
 , mInsertAmounts(insertAmts)
 , mMultiplexing(insertMarks->getNumElements() < insertAmts.size())
 , mBixNumBits(insertBixNum->getNumElements())
-, mSignature(StringInsertName(insertAmts, insertMarks)) {
+, mSignature(ZeroInsertName(insertAmts, insertMarks)) {
 
 }
 
-void StringInsertBixNum::generatePabloMethod() {
+void ZeroInsertBixNum::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     std::vector<PabloAST *> insertMarks = getInputStreamSet("insertMarks");
