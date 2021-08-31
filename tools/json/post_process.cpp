@@ -43,9 +43,7 @@ enum JSONState {
     JVStrEnd,
     JObjInit,
     JObjColon,
-    JObjNext,
     JArrInit,
-    JArrNext,
     JValue,
     JDone
 };
@@ -78,9 +76,9 @@ static void postproc_popAndFindNewState() {
     }
     const uint8_t last = *stack.back();
     if (last == '{') {
-        currentState = JObjNext;
+        currentState = JObjInit;
     } else if (last == '[') {
-        currentState = JArrNext;
+        currentState = JArrInit;
     } else {
         llvm_unreachable("The stack has an unknown char");
     }
@@ -159,9 +157,9 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
     const uint8_t last = *stack.back();
     if (*ptr == ',') {        
         if (last == '{') {
-            currentState = JObjNext;
+            currentState = JObjInit;
         } else if (last == '[') {
-            currentState = JArrNext;
+            currentState = JArrInit;
         } else {
             llvm::report_fatal_error(postproc_getLineAndColumnInfo("Wrong char in stack", ptr, lineBegin, lineNum));
         }
@@ -189,10 +187,6 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         postproc_parseValue(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JVStrEnd || currentState == JValue) {
         postproc_parseCommaOrPop(ptr, lineBegin, lineNum, position);
-    } else if (currentState == JObjNext) {
-        postproc_parseStrOrPop(false, ptr, lineBegin, lineNum, position);
-    } else if (currentState == JArrNext) {
-        postproc_parseValueOrPop(false, ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
         llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
