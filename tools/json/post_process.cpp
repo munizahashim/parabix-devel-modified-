@@ -45,6 +45,7 @@ enum JSONState {
     JObjColon,
     JArrInit,
     JValue,
+    JNextComma,
     JDone
 };
 
@@ -75,10 +76,8 @@ static void postproc_popAndFindNewState() {
         return;
     }
     const uint8_t last = *stack.back();
-    if (last == '{') {
-        currentState = JObjInit;
-    } else if (last == '[') {
-        currentState = JArrInit;
+    if (last == '{' || last == '[') {
+        currentState = JNextComma;
     } else {
         llvm_unreachable("The stack has an unknown char");
     }
@@ -155,7 +154,7 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
         return;
     }
     const uint8_t last = *stack.back();
-    if (*ptr == ',') {        
+    if (*ptr == ',') {
         if (last == '{') {
             currentState = JObjInit;
         } else if (last == '[') {
@@ -185,7 +184,7 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         postproc_parseColon(ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjColon) {
         postproc_parseValue(true, ptr, lineBegin, lineNum, position);
-    } else if (currentState == JVStrEnd || currentState == JValue) {
+    } else if (currentState == JVStrEnd || currentState == JValue || currentState == JNextComma) {
         postproc_parseCommaOrPop(ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
         llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
