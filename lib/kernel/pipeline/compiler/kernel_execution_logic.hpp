@@ -39,7 +39,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
         BasicBlock * const invokeOk = b->CreateBasicBlock(prefix + "_invokeOk", mKernelCompletionCheck);
-        doSegmentRetVal = b->CreateInvoke(doSegFuncType, doSegment, invokeOk, mRethrowException, args);
+        doSegmentRetVal = b->CreateInvoke(doSegment, invokeOk, mRethrowException, args);
         b->SetInsertPoint(invokeOk);
     } else {
         doSegmentRetVal = b->CreateCall(doSegFuncType, doSegment, args);
