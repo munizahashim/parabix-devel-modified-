@@ -358,7 +358,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mExhaustedInput = mExhaustedPipelineInputAtExit;
     mPipelineProgress = mAnyProgressedAtExitPhi;
     if (mIsPartitionRoot) {
+        assert (mTotalNumOfStridesAtExitPhi);
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
+        assert (mFinalPartitionSegmentAtExitPhi);
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
     }
 
@@ -436,11 +438,10 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     }
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
 
-    if (mTotalNumOfStridesAtLoopExitPhi) {
-        Value * updatedNumOfStrides = mUpdatedNumOfStrides; assert (mUpdatedNumOfStrides);
-        if (mIsPartitionRoot) {
-            updatedNumOfStrides = b->CreateMulRational(updatedNumOfStrides, mPartitionStrideRateScalingFactor);
-        }
+    // if (mTotalNumOfStridesAtLoopExitPhi) {
+    if (mIsPartitionRoot) {
+        assert (mUpdatedNumOfStrides);
+        Value * const updatedNumOfStrides = b->CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(updatedNumOfStrides, exitBlock);
     }
 
@@ -622,14 +623,19 @@ inline void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
     }
     mTerminatedAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_terminatedAtLoopExit");
     mAnyProgressedAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_anyProgressAtLoopExit");
-    if (mIsPartitionRoot && mKernelIsInternallySynchronized) {
-        mTotalNumOfStridesAtLoopExitPhi = nullptr;
-    } else {
-        mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
-    }
+//    if (mIsPartitionRoot && mKernelIsInternallySynchronized) {
+//        mTotalNumOfStridesAtLoopExitPhi = nullptr;
+//    } else {
+//        mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
+//    }
+    mTotalNumOfStridesAtLoopExitPhi = nullptr;
+//    if (mIsPartitionRoot) {
+//        mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
+//    }
     mExhaustedPipelineInputAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInputAtLoopExit");
     mFinalPartitionSegmentAtLoopExitPhi = nullptr;
     if (mIsPartitionRoot) {
+        mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
         mFinalPartitionSegmentAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_finalPartitionSegmentAtLoopExitPhi");
     }
 }
@@ -666,16 +672,18 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         }
     }
 
+//    if (mIsPartitionRoot) {
+//        Value * currentNumOfStrides;
+//        if (mMayLoopToEntry) {
+//            assert (mCurrentNumOfStridesAtLoopEntryPhi);
+//            currentNumOfStrides = b->CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
+//        } else {
+//            currentNumOfStrides = b->getSize(0);
+//        }
+//        mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
+//    }
+
     if (mMayLoopToEntry || !mIsPartitionRoot) {
-        if (mTotalNumOfStridesAtLoopExitPhi) {
-            Value * currentNumOfStrides;
-            if (mMayLoopToEntry) {
-                currentNumOfStrides = mCurrentNumOfStridesAtLoopEntryPhi;
-            } else {
-                currentNumOfStrides = b->getSize(0);
-            }
-            mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
-        }
         assert (mExhaustedPipelineInputPhi);
         mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
         assert (mAlreadyProgressedPhi);
@@ -690,6 +698,9 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         }
         if (mMayLoopToEntry) {
             mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
+            assert (mCurrentNumOfStridesAtLoopEntryPhi);
+            Value * const currentNumOfStrides = b->CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
+            mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
             b->CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, mKernelLoopExit, mKernelJumpToNextUsefulPartition);
         } else {
             b->CreateBr(mKernelJumpToNextUsefulPartition);
@@ -713,13 +724,20 @@ inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
     IntegerType * const boolTy = b->getInt1Ty();
 
     mTerminatedAtExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_terminatedAtKernelExit");
+    assert (mTerminatedAtLoopExitPhi);
     mTerminatedAtExitPhi->addIncoming(mTerminatedAtLoopExitPhi, mKernelLoopExitPhiCatch);
-    if (mIsPartitionRoot && mKernelIsInternallySynchronized) {
-        mTotalNumOfStridesAtExitPhi = nullptr;
-    } else {
+    mTotalNumOfStridesAtExitPhi = nullptr;
+    if (mIsPartitionRoot) {
+        assert (mTotalNumOfStridesAtLoopExitPhi);
         mTotalNumOfStridesAtExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtExit");
         mTotalNumOfStridesAtExitPhi->addIncoming(mTotalNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
     }
+//    if (mIsPartitionRoot && mKernelIsInternallySynchronized) {
+//        mTotalNumOfStridesAtExitPhi = nullptr;
+//    } else {
+//        mTotalNumOfStridesAtExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtExit");
+//        mTotalNumOfStridesAtExitPhi->addIncoming(mTotalNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
+//    }
     createConsumedPhiNodes(b);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -749,7 +767,8 @@ inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
 inline void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b) {
     Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
     mTerminatedAtExitPhi->addIncoming(completed, mKernelInitiallyTerminatedExit);
-    if (mTotalNumOfStridesAtExitPhi) {
+    // if (mTotalNumOfStridesAtExitPhi) {
+    if (mIsPartitionRoot) {
         ConstantInt * const sz_ZERO = b->getSize(0);
         mTotalNumOfStridesAtExitPhi->addIncoming(sz_ZERO, mKernelInitiallyTerminatedExit);
     }
@@ -777,9 +796,10 @@ inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
     mTerminatedAtLoopExitPhi->addIncoming(mTerminatedSignalPhi, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);
     mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedInput, exitBlock);
-    if (mTotalNumOfStridesAtLoopExitPhi) {
+    // if (mTotalNumOfStridesAtLoopExitPhi) {
+    if (mIsPartitionRoot) {
         Value * finalNumOfStrides = mUpdatedNumOfStrides; assert (mUpdatedNumOfStrides);
-        if (mIsPartitionRoot) {
+        //if (mIsPartitionRoot) {
             if (mFinalPartialStrideFixedRateRemainderPhi) {
                 const Rational fixedRateFactor = mFixedRateLCM * Rational{mKernel->getStride()};
                 Value * fixedRateItems = b->CreateMulRational(finalNumOfStrides, fixedRateFactor);
@@ -788,7 +808,7 @@ inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
             } else {
                 finalNumOfStrides = b->CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);
             }
-        }
+        //}
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(finalNumOfStrides, exitBlock);
     }
     if (mIsPartitionRoot) {

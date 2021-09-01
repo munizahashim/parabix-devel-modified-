@@ -110,9 +110,11 @@ void PipelineCompiler::identifyPartitionKernelRange() {
  * @brief determinePartitionStrideRateScalingFactor
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::determinePartitionStrideRateScalingFactor() {
-    auto max = MaximumNumOfStrides[FirstKernelInPartition];
+    auto l = StrideStepLength[FirstKernelInPartition];
+    auto g = StrideStepLength[FirstKernelInPartition];
     for (auto i = FirstKernelInPartition + 1U; i <= LastKernelInPartition; ++i) {
-        max = std::max(MaximumNumOfStrides[i], max);
+        l = boost::lcm(l, StrideStepLength[i]);
+        g = boost::gcd(g, StrideStepLength[i]);
     }
     // If a kernel within this partition has a min/max stride value that is greater
     // than the min/max stride of the partition root then when the root kernel
@@ -120,7 +122,7 @@ void PipelineCompiler::determinePartitionStrideRateScalingFactor() {
     // kernel executes N full strides and a final block. To accomidate this
     // possibility, the partition root scales the num of partition strides
     // full+partial strides by to the following ratio:
-    mPartitionStrideRateScalingFactor = Rational{max, MaximumNumOfStrides[FirstKernelInPartition]};
+    mPartitionStrideRateScalingFactor = Rational{l,g};
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

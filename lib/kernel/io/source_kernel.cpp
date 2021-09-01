@@ -312,7 +312,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     bytesToRead->addIncoming(moreToRead, readIncomplete);
     producedSoFar->addIncoming(itemsBuffered, readIncomplete);
     b->CreateCondBr(b->CreateICmpSGT(bytesRead, b->getSize(0)), readData, setTermination);
-    
+
     // ... set the termination signal.
     b->SetInsertPoint(setTermination);
     Value * const bytesToZero = b->CreateMul(b->CreateSub(itemsPending, itemsBuffered), codeUnitBytes);

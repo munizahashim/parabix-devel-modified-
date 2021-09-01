@@ -100,8 +100,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         debugPrint(b, + "%s_maximumNumOfStrides = %" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
         #endif
     } else {
-        const Rational strideRateFactor{MaximumNumOfStrides[mKernelId], MaximumNumOfStrides[FirstKernelInPartition]};
-        const auto factor = strideRateFactor; // / mPartitionStrideRateScalingFactor;
+
+        const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
+        const auto factor = ratio / mPartitionStrideRateScalingFactor;
         mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
@@ -155,7 +156,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
                 numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
             }
         }
-    } else {
+    } else if (in_degree(mKernelId, mBufferGraph) > 0) {
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }

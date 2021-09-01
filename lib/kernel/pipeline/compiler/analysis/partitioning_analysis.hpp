@@ -622,6 +622,8 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
                         switch (attr.getKind()) {
                             case AttrId::Deferred:
                                 return true;
+                            default:
+                                break;
                         }
                     }
                 }

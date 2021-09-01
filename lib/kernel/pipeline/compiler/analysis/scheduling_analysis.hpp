@@ -776,14 +776,13 @@ is_bipartite_graph:
             if (assignment.test(u) != assignment.test(v)) {
                 return false;
             } else {
-                add_edge(u, v, residualGraph);
                 const auto Wu = weight[firstStreamSet + u];
                 const auto Wv = weight[firstStreamSet + v];
-
                 if (Wu > 0 && Wv > 0) {
                     anyResiduals = true;
-                    residualWeights[firstStreamSet + u] = weight[firstStreamSet + u];
-                    residualWeights[firstStreamSet + v] = weight[firstStreamSet + v];
+                    add_edge(u, v, residualGraph);
+                    residualWeights[firstStreamSet + u] = Wu;
+                    residualWeights[firstStreamSet + v] = Wv;
                 }
                 return true;
             }
@@ -2176,6 +2175,8 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
                         switch (attr.getKind()) {
                             case AttrId::Deferred:
                                 return true;
+                            default:
+                                break;
                         }
                     }
                 }
