@@ -238,7 +238,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             Value * addr = nullptr;
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
                 assert ("internally synchronized I/O must be linear!" && bn.IsLinear);
-                addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr);
+                addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr, bn.isNonThreadLocal(), false);
             } else {
                 addr = mInputVirtualBaseAddressPhi[rt.Port];
             }
@@ -300,7 +300,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         } else if (LLVM_UNLIKELY(managed)) {
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = addVirtualBaseAddressArg(buffer);
         } else {
-            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal);
+            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal, bn.isNonThreadLocal(), true);
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 

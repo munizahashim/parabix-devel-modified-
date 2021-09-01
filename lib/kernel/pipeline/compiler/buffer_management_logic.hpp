@@ -776,11 +776,14 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
                                                 const BufferPort & rateData,
                                                 const BufferNode & bufferNode,
                                                 Value * position,
-                                                Value * isFinal) const {
+                                                Value * isFinal,
+                                                const bool prefetch,
+                                                const bool write) const {
 
 
     const StreamSetBuffer * const buffer = bufferNode.Buffer;
     assert ("buffer cannot be null!" && buffer);
+    assert (isFromCurrentFunction(b, buffer->getHandle()));
     Value * const baseAddress = buffer->getBaseAddress(b);
     if (bufferNode.isUnowned()) {
         assert (bufferNode.Locality != BufferLocality::ThreadLocal);
@@ -800,9 +803,45 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     }
 
     Value * const address = buffer->getStreamLogicalBasePtr(b, baseAddress, ZERO, blockIndex);
-    return b->CreatePointerCast(address, bufferType);
+    Value * const addr = b->CreatePointerCast(address, bufferType);
+    if (prefetch) {
+        Value * const prefetchAddr = buffer->getStreamBlockPtr(b, addr, ZERO, blockIndex);
+        prefetchAtLeastThreeCacheLinesFrom(b, prefetchAddr, write);
+    }
+    return addr;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief prefetchThreeCacheLinesFrom
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * const addr, const bool write) const {
+
+    Module * const m = b->getModule();
+    Function * const prefetchFunc = Intrinsic::getDeclaration(m, Intrinsic::prefetch);
+
+    DataLayout dl(m);
+    Type * const elemTy = addr->getType()->getPointerElementType();
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+    const auto typeSize = dl.getTypeAllocSize(elemTy);
+    #else
+    const auto typeSize = dl.getTypeAllocSize(elemTy).getFixedSize();
+    #endif
+    assert (typeSize > 0);
+
+    IntegerType * const int32Ty = b->getInt32Ty();
+    FixedArray<Value *, 4> args;
+    args[1] = ConstantInt::get(int32Ty, write ? 1 : 0); // write flag
+    args[2] = ConstantInt::get(int32Ty, 3); // locality
+    args[3] = ConstantInt::get(int32Ty, 1); // cache type?
+
+    const auto cl = b->getCacheAlignment();
+    const auto toFetch = round_up_to(cl * 3, typeSize);
+    Value * const baseAddr = b->CreatePointerCast(addr, b->getInt8PtrTy());
+    for (unsigned i = 0; i < toFetch; i += cl) {
+        args[0] = b->CreateGEP(baseAddr, b->getSize(i));
+        b->CreateCall(prefetchFunc->getFunctionType(), prefetchFunc, args);
+    }
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputVirtualBaseAddresses
@@ -818,8 +857,8 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         }
         const auto buffer = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[buffer];
-        assert (isFromCurrentFunction(b, bn.Buffer->getHandle()));
-        baseAddresses[rt.Port.Number] = getVirtualBaseAddress(b, rt, bn, processed, nullptr);
+        Value * const addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr, bn.isNonThreadLocal(), false);
+        baseAddresses[rt.Port.Number] = addr;
     }
 }
 
