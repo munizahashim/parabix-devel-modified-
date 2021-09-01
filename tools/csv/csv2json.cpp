@@ -83,7 +83,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
 
     StreamSet * translatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<CSV_Char_Replacement>(fieldSeparators, quoteEscape, BasisBits, translatedBasis);
+    P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
@@ -103,7 +103,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
     StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
 
-    P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, /*invert = */ true);
+    P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, RunIndex::Kind::RunOf0);
     //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
 
     StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
@@ -118,14 +118,14 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     std::vector<unsigned> insertionAmts;
     unsigned maxInsertAmt = 0;
     for (auto & s : templateStrs) {
-        unsigned insertAmt = s.size() - 1;
+        unsigned insertAmt = s.size();
         insertionAmts.push_back(insertAmt);
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
     StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<StringInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
+    P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
     //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
 
@@ -136,13 +136,13 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     // We need to insert strings at all positions marked by 0s in the
     // SpreadMask, plus the additional 0 at the delimiter position.
-    StreamSet * InsertMask = P->CreateStreamSet(1);
-    P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
+    //StreamSet * InsertMask = P->CreateStreamSet(1);
+    //P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
 
     // For each run of 0s marking insert positions, create a parallel
     // bixnum sequentially numbering the string insert positions.
     StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<RunIndex>(InsertMask, InsertIndex, nullptr, /*invert = */ true);
+    P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
     //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
     StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
@@ -150,7 +150,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
 
     StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, InsertMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -2);
+    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -1);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
@@ -162,6 +162,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
+
+const unsigned MaxHeaderSize = 24;
 
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
@@ -175,6 +177,11 @@ int main(int argc, char *argv[]) {
         headers = get_CSV_headers(HeaderSpec);
     } else {
         headers = parse_CSV_headers(HeaderSpec);
+    }
+    for (auto & s : headers) {
+        if (s.size() > MaxHeaderSize) {
+            s = s.substr(0, MaxHeaderSize);
+        }
     }
     std::vector<std::string> templateStrs = createJSONtemplateStrings(headers);
     //for (auto & s : templateStrs) {
