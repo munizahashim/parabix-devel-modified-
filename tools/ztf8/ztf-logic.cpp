@@ -457,6 +457,36 @@ void LengthGroupSelector::generatePabloMethod() {
     pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
 }
 
+OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
+                           EncodingInfo & encodingScheme,
+                           unsigned groupNo,
+                           StreamSet * groupMarks,
+                           StreamSet * overlapping)
+: PabloKernel(b, "OverlappingLengthGroupMarker" + std::to_string(groupNo),
+              {Binding{"groupMarks", groupMarks, FixedRate(), LookAhead(1)}},
+              {Binding{"overlapping", overlapping}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
+
+void OverlappingLengthGroupMarker::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * groupMarks = getInputStreamSet("groupMarks")[0];
+    Var * overlappingStreamVar = getOutputStreamVar("overlapping");
+    LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
+
+    unsigned offset = 2;
+    unsigned lo = groupInfo.lo;
+    unsigned hi = groupInfo.hi;
+    unsigned min = 0;
+    unsigned groupSize = hi - lo + 1;
+    std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
+    PabloAST * initialOverlap = groupMarks;
+    // groupMarks positions overlap only when the distance between consecutive groupMarks positions is less than lo
+    PabloAST * finalOverlappingMarks = pb.createZeroes();
+    for (unsigned i = 0; i < lo; i++) {
+        finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(groupMarks, pb.createAdvance(initialOverlap, 1)));
+    }
+    pb.createAssign(pb.createExtract(overlappingStreamVar, pb.getInteger(0)), finalOverlappingMarks);
+}
 
 LengthSorter::LengthSorter(BuilderRef b,
                            EncodingInfo & encodingScheme,
