@@ -8,12 +8,14 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addConsumerKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned producer) {   
-    if (producer != PipelineInput || mTraceIndividualConsumedItemCounts) {
+inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned kernelId) {
+    if (kernelId != PipelineInput || mTraceIndividualConsumedItemCounts) {
 
         IntegerType * const sizeTy = b->getSizeTy();
 
-        for (const auto e : make_iterator_range(out_edges(producer, mBufferGraph))) {
+        const auto groupId = getCacheLineGroupId(kernelId);
+
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             // If the out-degree for this buffer is zero, then we've proven that its consumption rate
@@ -22,7 +24,7 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
             if (LLVM_UNLIKELY(numOfIndependentConsumers != 0)) {
                 const BufferPort & rd = mBufferGraph[e];
                 assert (rd.Port.Type == PortType::Output);
-                const auto prefix = makeBufferName(producer, rd.Port);
+                const auto prefix = makeBufferName(kernelId, rd.Port);
                 const auto name = prefix + CONSUMED_ITEM_COUNT_SUFFIX;
 
                 // If we're tracing the consumer item counts, we need to store one for each
@@ -32,7 +34,7 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
                     countTy = ArrayType::get(sizeTy, numOfIndependentConsumers + 1);
                 }
                 if (LLVM_LIKELY(bn.isOwned() || bn.isInternal() || mTraceIndividualConsumedItemCounts)) {
-                    mTarget->addInternalScalar(countTy, name, producer);
+                    mTarget->addInternalScalar(countTy, name, groupId);
                 } else {
                     mTarget->addNonPersistentScalar(countTy, name);
                 }

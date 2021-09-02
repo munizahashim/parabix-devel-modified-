@@ -824,9 +824,11 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         unsigned insertLengthBits = 4;
+        std::vector<unsigned> insertAmts;
+        for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<StringInsertBixNum>(colorEscapes, InsertMarks, InsertBixNum);
+        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
         //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
         //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
@@ -834,7 +836,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
-        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, /*invert = */ true);
+        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
@@ -853,13 +855,13 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis);
+        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
 
         StreamSet * ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
 
         StreamSet * ColorizedBreaks = E->CreateStreamSet(1);
-        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks);
+        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
 
         StreamSet * ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
         E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);

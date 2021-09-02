@@ -350,6 +350,7 @@ if (GENERATE_TOOLS)
     add_subdirectory(tools/xml)
     add_subdirectory(tools/ztf8)
     add_subdirectory(tools/util)
+    add_subdirectory(tools/csv)
 endif()
 
 # Kernel Tests

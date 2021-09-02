@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <queue>
 #include <z3.h>
-// #include <util/maxsat.hpp>
 #include <assert.h>
 
 #include <kernel/core/kernel.h>
@@ -18,11 +17,10 @@
 
 #include <llvm/Support/Format.h>
 
-#define EXPERIMENTAL_SCHEDULING
-
 // #define PRINT_STAGES
 
 #include <boost/graph/connected_components.hpp>
+#include <boost/graph/dominator_tree.hpp>
 
 namespace kernel {
 
@@ -50,7 +48,6 @@ public:
 
         P.generateInitialPipelineGraph(b);
 
-      //  P.printRelationshipGraph(P.Relationships, errs(), "R");
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
@@ -59,9 +56,6 @@ public:
         #endif
         auto partitionGraph = P.identifyKernelPartitions();
 
-        // Add ordering constraints to ensure we can keep sequences of kernels with a fixed rates in
-        // the same sequence. This will help us to partition the graph later and is useful to determine
-        // whether we can bypass a region without testing every kernel.
         #ifdef PRINT_STAGES
         errs() << "computeExpectedDataFlowRates\n";
         #endif
@@ -72,13 +66,15 @@ public:
         errs() << "schedulePartitionedProgram\n";
         #endif
 
-        P.schedulePartitionedProgram(partitionGraph, rng, 1.0, 1);
+        P.schedulePartitionedProgram(partitionGraph, rng);
+
+        #ifdef PRINT_STAGES
+        errs() << "transcribeRelationshipGraph\n";
+        #endif
 
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);
 
-        // P.printRelationshipGraph(P.mStreamGraph, errs(), "Streams");
-        // P.printRelationshipGraph(P.mScalarGraph, errs(), "Scalars");
 
         #ifdef PRINT_STAGES
         errs() << "generateInitialBufferGraph\n";
@@ -94,14 +90,47 @@ public:
 
         P.computeMaximumExpectedDataflow();
 
+        #ifdef PRINT_STAGES
+        errs() << "computeMinimumStrideLengthForConsistentDataflow\n";
+        #endif
+
         P.computeMinimumStrideLengthForConsistentDataflow();
 
         #ifdef PRINT_STAGES
-        errs() << "computeInterPartitionSymbolicRates\n";
+        errs() << "identifyInterPartitionSymbolicRates\n";
         #endif
 
-
         P.identifyInterPartitionSymbolicRates();
+
+        #ifdef PRINT_STAGES
+        errs() << "markInterPartitionStreamSetsAsGloballyShared\n";
+        #endif
+
+        P.markInterPartitionStreamSetsAsGloballyShared(); // linkedPartitions
+
+        #ifdef PRINT_STAGES
+        errs() << "identifyTerminationChecks\n";
+        #endif
+
+        P.identifyTerminationChecks();
+
+        #ifdef PRINT_STAGES
+        errs() << "determinePartitionJumpIndices\n";
+        #endif
+
+        P.determinePartitionJumpIndices();
+
+        #ifdef PRINT_STAGES
+        errs() << "annotateBufferGraphWithAddAttributes\n";
+        #endif
+
+        P.annotateBufferGraphWithAddAttributes();
+
+        // Finish annotating the buffer graph
+        P.identifyOwnedBuffers();
+        P.identifyLinearBuffers();
+        P.identifyPortsThatModifySegmentLength();
+        P.identifyZeroExtendedStreamSets();
 
         #ifdef PRINT_STAGES
         errs() << "determineBufferSize\n";
@@ -109,38 +138,27 @@ public:
 
         P.determineBufferSize(b);
 
-
-
-//        errs() << "determineBufferLayout\n";
+        #ifdef PRINT_STAGES
+        errs() << "determineBufferLayout\n";
+        #endif
 
         P.determineBufferLayout(b, rng);
 
-//        errs() << "identifyBufferLocality\n";
-
-        P.markInterPartitionStreamSetsAsGloballyShared(); // linkedPartitions
-
-//        P.makePartitionIOGraph();
-
-//        errs() << "identifyTerminationChecks\n";
-
-        P.identifyTerminationChecks();
-        P.determinePartitionJumpIndices();
-
-        P.annotateBufferGraphWithAddAttributes();
-
-        // Finish annotating the buffer graph       
-        P.identifyLinearBuffers();
-        P.identifyZeroExtendedStreamSets();
-//        P.identifyLocalPortIds();
-
+        #ifdef PRINT_STAGES
+        errs() << "makeConsumerGraph\n";
+        #endif
 
         // Make the remaining graphs
         P.makeConsumerGraph();
 
-
-
-
+        #ifdef PRINT_STAGES
+        errs() << "makePartitionJumpTree\n";
+        #endif
         P.makePartitionJumpTree();
+
+        #ifdef PRINT_STAGES
+        errs() << "makeTerminationPropagationGraph\n";
+        #endif
         P.makeTerminationPropagationGraph();
 
         // Finish the buffer graph
@@ -149,9 +167,9 @@ public:
 
         P.gatherInfo();
 
-        #ifdef PRINT_BUFFER_GRAPH
-        P.printBufferGraph(errs());
-        #endif
+        if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
+            P.printBufferGraph(errs());
+        }
 
         return P;
     }
@@ -210,15 +228,13 @@ private:
 
     PartitionGraph identifyKernelPartitions();
 
-    void makePartitionIOGraph();
-
     void determinePartitionJumpIndices();
 
     void makePartitionJumpTree();
 
     // scheduling analysis
 
-    void schedulePartitionedProgram(PartitionGraph & P, random_engine & rng, const double maxCutRoundsFactor, const unsigned maxCutPasses);
+    void schedulePartitionedProgram(PartitionGraph & P, random_engine & rng);
 
     void analyzeDataflowWithinPartitions(PartitionGraph & P, random_engine & rng) const;
 
@@ -226,15 +242,13 @@ private:
 
     PartitionDependencyGraph makePartitionDependencyGraph(const unsigned numOfKernels, const SchedulingGraph & S) const;
 
-    PartitionDataflowGraph analyzeDataflowBetweenPartitions(PartitionGraph & P) const;
+    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, random_engine & rng) const;
 
-    PartitionOrdering makeInterPartitionSchedulingGraph(PartitionGraph & P, const PartitionDataflowGraph & D) const;
+    OrderingDAWG assembleFullSchedule(const PartitionGraph & P, const OrderingDAWG & partial) const;
 
-    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, const PartitionOrdering & O, const PartitionDataflowGraph & D, random_engine & rng) const;
+    std::vector<unsigned> selectScheduleFromDAWG(const OrderingDAWG & schedule) const;
 
-    std::vector<unsigned> selectScheduleFromDAWG(const KernelIdVector & kernels, const OrderingDAWG & schedule);
-
-    void addSchedulingConstraints(const PartitionGraph & P, const std::vector<unsigned> & program);
+    void addSchedulingConstraints(const std::vector<unsigned> & program);
 
     // buffer management analysis functions
 
@@ -245,11 +259,15 @@ private:
 
     void determineBufferLayout(BuilderRef b, random_engine & rng);
 
+    void identifyOwnedBuffers();
+
     void identifyLinearBuffers();
     void markInterPartitionStreamSetsAsGloballyShared();
     void identifyLocalPortIds();
 
     void identifyOutputNodeIds();
+
+    void identifyPortsThatModifySegmentLength();
 
     // void identifyDirectUpdatesToStateObjects();
 
@@ -260,6 +278,8 @@ private:
     // dataflow analysis functions
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
+
+    void recomputeMinimumExpectedDataflow();
 
     void computeMaximumExpectedDataflow();
 
@@ -304,8 +324,8 @@ private:
 
 public:
 
-    static constexpr unsigned       PipelineInput = 0U;
-    static constexpr unsigned       FirstKernel = 1U;
+    static const unsigned           PipelineInput = 0U;
+    static const unsigned           FirstKernel = 1U;
     unsigned                        LastKernel = 0;
     unsigned                        PipelineOutput = 0;
     unsigned                        FirstStreamSet = 0;
@@ -324,10 +344,6 @@ public:
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;
 
-
-//    unsigned                        MaxNumOfLocalInputPortIds = 0;
-//    unsigned                        MaxNumOfLocalOutputPortIds = 0;
-
     RelationshipGraph               mStreamGraph;
     RelationshipGraph               mScalarGraph;
 
@@ -335,6 +351,7 @@ public:
 
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
+    std::vector<unsigned>           StrideStepLength;
 
     BufferGraph                     mBufferGraph;
 
@@ -356,6 +373,7 @@ public:
 }
 
 #include "pipeline_graph_printers.hpp"
+#include "evolutionary_algorithm.hpp"
 #include "relationship_analysis.hpp"
 #include "buffer_analysis.hpp"
 #include "buffer_size_analysis.hpp"

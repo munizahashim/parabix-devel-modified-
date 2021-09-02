@@ -22,15 +22,19 @@ namespace kernel {
     calculated for runs of 0 bits.
 */
 
+
 class RunIndex : public pablo::PabloKernel {
 public:
+    enum class Kind {RunOf0, RunOf1};
+    enum class Numbering {RunOnly, RunPlus1};
     RunIndex(BuilderRef b,
-               StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow = nullptr, bool invert = false);
+               StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow = nullptr, Kind k = Kind::RunOf1, Numbering n = Numbering::RunOnly);
     void generatePabloMethod() override;
 private:
     unsigned mIndexCount;
     bool mOverflow;
-    bool mInvertMask;
+    Kind mRunKind;
+    Numbering mNumbering;
 };
 
 

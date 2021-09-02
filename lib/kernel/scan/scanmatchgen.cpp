@@ -126,7 +126,6 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
     Value * matchBitBlock = b->loadInputStreamBlock("matchResult", sz_ZERO, strideBlockIndex);
     Value * breakBitBlock = b->loadInputStreamBlock("lineBreak", sz_ZERO, strideBlockIndex);
-
     Value * const anyMatch = b->simd_any(sw.width, matchBitBlock);
     Value * const anyBreak = b->simd_any(sw.width, breakBitBlock);
     if (mLineNumbering) {
@@ -239,16 +238,10 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const startPtr = b->getRawInputPointer("InputStream", matchStart);
     Value * const endPtr = b->getRawInputPointer("InputStream", matchEndPos);
 
-//    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-//        Value * const A = b->CreateSub(matchEndPos, matchStart);
-//        Value * const B = b->CreatePtrDiff(endPtr, startPtr);
-//        b->CreateAssert(b->CreateICmpEQ(A, B), "InputStream is not contiguous");
-//    }
-
     auto argi = dispatcher->arg_begin();
     const auto matchRecNumArg = &*(argi++);
     Value * const matchRecNum = b->CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
-    b->CreateCall(dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
+    b->CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
     // There may be more matches in the current word.
@@ -290,8 +283,9 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     b->SetInsertPoint(callFinalizeScan);
     Function * finalizer = m->getFunction("finalize_match_wrapper"); assert (finalizer);
+    FunctionType * fTy = finalizer->getFunctionType();
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
-    b->CreateCall(finalizer, {accumulator, bufferEnd});
+    b->CreateCall(fTy, finalizer, {accumulator, bufferEnd});
     b->CreateBr(scanReturn);
 
     b->SetInsertPoint(scanReturn);
@@ -353,7 +347,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
     Value * const avail = b->getAvailableItemCount("InputStream");
-    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount, {accumulator}), b->getInt32(1));
+    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
     //b->CallPrintInt("maxFileNum", maxFileNum);
 
     Value * const initialLineStart = b->getProcessedItemCount("InputStream");
@@ -394,7 +388,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * inFinalFile = b->CreateICmpEQ(batchFileNum, maxFileNum);
     Value * availableLimit = b->getAvailableItemCount("matchResult");
     Value * nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    Value * fileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
+    Value * fileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b->CreateSelect(inFinalFile, availableLimit, fileLimit);
     b->setScalarField("pendingFileLimit", pendingLimit);
     b->CreateBr(stridePrecomputation);
@@ -540,16 +534,16 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
         //b->CallPrintInt("priorLineCount", priorLineCount);
-        //b->CreateCall(finalizer, {accumulator, batchFileNum, priorLineCount});
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
+        //b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, batchFileNum, priorLineCount});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
-    Value * nextFileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
+    Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
     //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
@@ -575,7 +569,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     auto argi = dispatcher->arg_begin();
     const auto matchRecNumArg = &*(argi++);
     Value * const matchRecNum = b->CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
-    b->CreateCall(dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
+    b->CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
     // There may be more matches in the current word.
@@ -632,15 +626,15 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
         //b->CallPrintInt("priorLineCount", priorLineCount);
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
-    nextFileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
+    nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
     limit = b->CreateSelect(inFinalFile, strideLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGT(strideLimit, limit);
@@ -663,13 +657,13 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     b->SetInsertPoint(callFinalizeScan);
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
-    b->CreateCall(finalizer, {accumulator, bufferEnd});
+    b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, bufferEnd});
     //b->CallPrintInt("finalizeScan maxFileNum", maxFileNum);
     /*if (mLineNumbering) {
         //b->CallPrintInt("strideFinalLineNumPhi", strideFinalLineNumPhi);
-        b->CreateCall(setBatchLineNumber, {accumulator, maxFileNum, strideFinalLineNumPhi});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, strideFinalLineNumPhi});
     } else {
-        b->CreateCall(setBatchLineNumber, {accumulator, maxFileNum, sz_ZERO});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, sz_ZERO});
     }
      */
     b->CreateBr(scanReturn);
@@ -681,8 +675,8 @@ ScanBatchKernel::ScanBatchKernel(BuilderRef b, StreamSet * const Matches, Stream
     : MultiBlockKernel(b, "scanBatch" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}
-,Binding{"lineBreak", LineBreakStream}
-,Binding{"InputStream", ByteStream, FixedRate(), { Deferred() }}},
+,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended()}
+,Binding{"InputStream", ByteStream, FixedRate(), { ZeroExtended(), Deferred() }}},
 // outputs
 {},
 // input scalars
@@ -883,7 +877,6 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * lineStartPos = b->CreateAdd(lineStartBase, lineStartInWord);
     // The break position is the line start for cases (a), (b); otherwise use the pending value.
     Value * const matchStart = b->CreateSelect(b->CreateOr(inWordCond, inStrideCond), lineStartPos, pendingLineStart, "matchStart");
-
     Value * const matchStartPtr = b->getRawOutputPointer("Coordinates", b->getInt32(LINE_STARTS), matchNumPhi);
     b->CreateStore(matchStart, matchStartPtr);
     Value * const lineEndsPtr = b->getRawOutputPointer("Coordinates", b->getInt32(LINE_ENDS), matchNumPhi);
@@ -975,7 +968,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
 
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
-    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount, {accumulator}), b->getInt32(1));
+    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
     //b->CallPrintInt("maxFileNum", maxFileNum);
 
     Value * initialLineNum = nullptr;
@@ -1016,7 +1009,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * inFinalFile = b->CreateICmpEQ(batchFileNum, maxFileNum);
     Value * availableLimit = b->getAvailableItemCount("matchResult");
     Value * nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    Value * fileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
+    Value * fileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b->CreateSelect(inFinalFile, availableLimit, fileLimit);
     b->setScalarField("pendingFileLimit", pendingLimit);
     b->CreateBr(stridePrecomputation);
@@ -1146,15 +1139,15 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
         //b->CallPrintInt("priorLineCount", priorLineCount);
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
 
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
-    Value * nextFileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
+    Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
     //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
@@ -1235,15 +1228,15 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
         //b->CallPrintInt("priorLineCount", priorLineCount);
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
-        b->CreateCall(setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
+        b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
-    nextFileLimit = b->CreateCall(getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
+    nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
     limit = b->CreateSelect(inFinalFile, strideLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGT(strideLimit, limit);
@@ -1353,7 +1346,7 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
     auto argi = dispatcher->arg_begin();
     const auto matchRecNumArg = &*(argi++);
     Value * const matchRecNum = b->CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
-    b->CreateCall(dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
+    b->CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b->CreateICmpNE(nextMatchNum, matchesAvail);
     phiMatchNum->addIncoming(nextMatchNum, b->GetInsertBlock());
     b->CreateCondBr(haveMoreMatches, processMatchCoordinates, coordinatesDone);
@@ -1366,7 +1359,7 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
     b->setProcessedItemCount("InputStream", avail);
     Function * finalizer = m->getFunction("finalize_match_wrapper"); assert (finalizer);
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
-    b->CreateCall(finalizer, {accumulator, bufferEnd});
+    b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, bufferEnd});
     b->CreateBr(scanReturn);
 
     b->SetInsertPoint(scanReturn);
@@ -1406,6 +1399,8 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     BasicBlock * const strideMatchLoop = b->CreateBasicBlock("strideMatchLoop");
     BasicBlock * const pendingMatchProcessing = b->CreateBasicBlock("pendingMatchProcessing");
     BasicBlock * const strideInitialMatch = b->CreateBasicBlock("strideInitialMatch");
+    BasicBlock * const writeLF = b->CreateBasicBlock("writeLF");
+    BasicBlock * const strideInitialDone = b->CreateBasicBlock("strideInitialDone");
     BasicBlock * const inStrideMatch = b->CreateBasicBlock("inStrideMatch");
     BasicBlock * const strideEndMatch = b->CreateBasicBlock("strideEndMatch");
     BasicBlock * const strideMatchesDone = b->CreateBasicBlock("strideMatchesDone");
@@ -1541,9 +1536,18 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     Value * const outputPtr1 = b->getRawOutputPointer("Output", strideProducedPhi);
     b->CreateMemCpy(outputPtr1, strideStartPtr, initialLineLgth, 1);
     Value * producedPos1 = b->CreateAdd(strideProducedPhi, initialLineLgth);
-    matchMaskPhi->addIncoming(matchMask, strideInitialMatch);
-    matchWordPhi->addIncoming(sz_ZERO, strideInitialMatch);
-    producedPosPhi->addIncoming(producedPos1, strideInitialMatch);
+    b->CreateCondBr(b->CreateICmpUGE(break1Pos, avail), writeLF, strideInitialDone);
+
+    b->SetInsertPoint(writeLF);
+    Value * finalBytePtr = b->getRawOutputPointer("Output", b->CreateSub(producedPos1, sz_ONE));
+    finalBytePtr = b->CreateBitCast(finalBytePtr, b->getInt8PtrTy());
+    b->CreateStore(b->getInt8(0x0A), finalBytePtr);
+    b->CreateBr(strideInitialDone);
+
+    b->SetInsertPoint(strideInitialDone);
+    matchMaskPhi->addIncoming(matchMask, strideInitialDone);
+    matchWordPhi->addIncoming(sz_ZERO, strideInitialDone);
+    producedPosPhi->addIncoming(producedPos1, strideInitialDone);
     b->CreateCondBr(b->CreateIsNotNull(matchMask), strideMatchLoop, strideMatchesDone);
 
     b->SetInsertPoint(strideEndMatch);
@@ -1566,7 +1570,7 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     b->SetInsertPoint(strideMatchesDone);
     PHINode * const strideFinalProduced = b->CreatePHI(sizeTy, 3);
     strideFinalProduced->addIncoming(nextProducedPos, inStrideMatch);
-    strideFinalProduced->addIncoming(producedPos1, strideInitialMatch);
+    strideFinalProduced->addIncoming(producedPos1, strideInitialDone);
     strideFinalProduced->addIncoming(strideProducedPhi, strideMasksReady);
     strideNo->addIncoming(nextStrideNo, strideMatchesDone);
     pendingMatchPhi->addIncoming(Constant::getNullValue(pendingMatch->getType()), strideMatchesDone);
@@ -1649,7 +1653,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     auto argi = dispatcher->arg_begin();
     const auto matchRecNumArg = &*(argi++);
     Value * const matchRecNum = b->CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
-    b->CreateCall(dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
+    b->CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b->CreateICmpNE(nextMatchNum, matchesAvail);
     phiMatchNum->addIncoming(nextMatchNum, b->GetInsertBlock());
     b->CreateCondBr(haveMoreMatches, processMatchCoordinates, coordinatesDone);
@@ -1662,7 +1666,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     b->setProcessedItemCount("InputStream", avail);
     Function * finalizer = m->getFunction("finalize_match_wrapper"); assert (finalizer);
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
-    b->CreateCall(finalizer, {accumulator, bufferEnd});
+    b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, bufferEnd});
     b->CreateBr(scanReturn);
 
     b->SetInsertPoint(scanReturn);

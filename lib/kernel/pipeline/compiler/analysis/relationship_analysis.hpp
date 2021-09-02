@@ -251,7 +251,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     KernelPartitionId[PipelineInput] = 0;
 
-    auto currentOrigPartitionId = -1U;
+    auto currentGroupId = -1U;
+    auto inputPartitionId = -1U;
     auto outputPartitionId = -1U;
 
     assert (kernels[0] == PipelineInput);
@@ -263,21 +264,18 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         assert (partitionId < origPartitionCount);
         const PartitionData & P = partitionGraph[partitionId];
         const auto & R = P.Repetitions;
+        const KernelIdVector & K = P.Kernels;
+        assert (P.Repetitions.size() == K.size());
         if (R.empty()) {
             return 0U;
         }
-        const KernelIdVector & K = P.Kernels;
-        assert (P.Repetitions.size() == K.size());
         const auto k = std::find(K.begin(), K.end(), kernelId);
         assert (k != K.end());
         const auto j = std::distance(K.begin(), k);
-        const auto expected = R[j] * P.ExpectedRepetitions;
+        const auto & expected = R[j];
         assert (expected.numerator() > 0 && expected.denominator() == 1);
         return expected.numerator();
     };
-
-    SmallVector<unsigned, 64> remappedPartitionId(origPartitionCount);
-    remappedPartitionId[0] = 0;
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
@@ -293,11 +291,15 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
         // renumber the partitions to reflect the selected ordering
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
-        if (origPartitionId != currentOrigPartitionId) {
+        if (origPartitionId != inputPartitionId) {
         #endif
-            ++outputPartitionId;
-            currentOrigPartitionId = origPartitionId;
-            remappedPartitionId[currentOrigPartitionId] = outputPartitionId;
+            inputPartitionId = origPartitionId;
+//            const PartitionData & P = partitionGraph[origPartitionId];
+//            const auto groupId = P.LinkedGroupId;
+//            if (groupId != currentGroupId) {
+                ++outputPartitionId;
+//                currentGroupId = groupId;
+//            }
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
         }
         #endif
@@ -317,10 +319,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     END_SCOPED_REGION
 
-    // our new partition count can exceed the original one by at most one
     PartitionCount = outputPartitionId + 1U;
-    assert (origPartitionCount <= PartitionCount);
-    assert ((origPartitionCount + 1) >= PartitionCount);
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.
@@ -792,14 +791,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     combineDuplicateKernels(b, kernels, Relationships);
     removeUnusedKernels(p_in, p_out, kernels, Relationships);
 
-    #ifndef EXPERIMENTAL_SCHEDULING
-    // Add ordering constraints to ensure the input must be before all kernel invocations
-    // and the invocations must come before the output.
-    for (const auto v : vertex) {
-        add_edge(p_in, v, RelationshipType{PortType::Input, 0, ReasonType::OrderingConstraint}, Relationships);
-        add_edge(v, p_out, RelationshipType{PortType::Input, 0, ReasonType::OrderingConstraint}, Relationships);
-    }
-    #endif
+
 
 }
 

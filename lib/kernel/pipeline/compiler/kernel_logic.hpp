@@ -158,81 +158,6 @@ Value * PipelineCompiler::truncateBlockSize(BuilderRef b, const Binding & bindin
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getInitializationFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelInitializeFunction(BuilderRef b) const {
-    Function * const init = mKernel->getInitializeFunction(b);
-    assert (!mKernel->hasFamilyName());
-    return init;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getKernelAllocateSharedInternalStreamSetsFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
-    Function * const term = mKernel->getAllocateSharedInternalStreamSetsFunction(b, false);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-    }
-    return term;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getInitializationThreadLocalFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelInitializeThreadLocalFunction(BuilderRef b) const {
-    Function * const init = mKernel->getInitializeThreadLocalFunction(b);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, init->getType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-    }
-    return init;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getKernelAllocateThreadLocalInternalStreamSetsFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
-    Function * const term = mKernel->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-    }
-    return term;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getDoSegmentFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
-    Function * const doSegment = mKernel->getDoSegmentFunction(b);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
-    }
-    return doSegment;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getInitializationThreadLocalFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelFinalizeThreadLocalFunction(BuilderRef b) const {
-    Function * const finalize = mKernel->getFinalizeThreadLocalFunction(b);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, finalize->getType(), FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-    }
-    return finalize;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getFinalizeFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelFinalizeFunction(BuilderRef b) const {
-    Function * const term = mKernel->getFinalizeFunction(b);
-    if (mKernel->hasFamilyName()) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), FINALIZE_FUNCTION_POINTER_SUFFIX);
-    }
-    return term;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadLocalHandlePtr
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
@@ -325,26 +250,25 @@ bool PipelineCompiler::mayLoopBackToEntry() const {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.NonLinear) {
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & binding = br.Binding;
-            const ProcessingRate & rate = binding.getRate();
+        if (bn.IsLinear) continue;
+        const BufferPort & br = mBufferGraph[e];
+        const Binding & binding = br.Binding;
+        const ProcessingRate & rate = binding.getRate();
 
-            // If the greedy rate does not have a positive lower bound,
-            // we cannot test whether we're finished.
+        // If the greedy rate does not have a positive lower bound,
+        // we cannot test whether we're finished.
 
-            // NOTE: having a greedy rate requires that all I/O for this
-            // kernel is linear. Thus this case should be reported as an
-            // error but is left with the check for now.
+        // NOTE: having a greedy rate requires that all I/O for this
+        // kernel is linear. Thus this case should be reported as an
+        // error but is left with the check for now.
 
-            if (LLVM_UNLIKELY(rate.isGreedy())) {
-                if (rate.getLowerBound() == Rational{0, 1}) {
-                    continue;
-                }
+        if (LLVM_UNLIKELY(rate.isGreedy())) {
+            if (rate.getLowerBound() == Rational{0, 1}) {
+                continue;
             }
-
-            return true;
         }
+
+        return true;
     }
     return false;
 }

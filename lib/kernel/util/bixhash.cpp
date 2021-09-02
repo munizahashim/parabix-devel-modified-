@@ -52,7 +52,7 @@ void BixHash::generatePabloMethod() {
     for (unsigned j = 0; j < mHashSteps; j++) {
         unsigned shft = 1<<j;
         // Select bits from prior positions.
-        shuffle (bitmix.begin(), bitmix.end(), random_shuffle_engine);
+        std::shuffle (bitmix.begin(), bitmix.end(), random_shuffle_engine);
         for (unsigned i = 0; i < mHashBits; i++) {
             PabloAST * priorBits = pb.createAdvance(hash[bitmix[i]], shft);
             // Mix in bits from prior positions.

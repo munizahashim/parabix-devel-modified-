@@ -7,6 +7,7 @@
 #include <kernel/core/kernel_compiler.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <boost/container/flat_set.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Format.h>
 #if BOOST_VERSION < 106600
@@ -16,6 +17,7 @@
 #endif
 using namespace llvm;
 using namespace boost;
+using boost::container::flat_set;
 
 namespace kernel {
 
@@ -239,39 +241,142 @@ void Kernel::constructStateTypes(BuilderRef b) {
     auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
     mThreadLocalStateType = m->getTypeByName(strThreadLocal);
     if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
-        SmallVector<Type *, 64> shared;
-        SmallVector<Type *, 64> threadLocal;
-        shared.reserve(mInputScalars.size() + mOutputScalars.size() + mInternalScalars.size());
-        for (const auto & scalar : mInputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        for (const auto & scalar : mOutputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-        // within the kernel state to hide the complexity from the user?
+
+        flat_set<unsigned> sharedGroups;
+        flat_set<unsigned> threadLocalGroups;
+
         for (const auto & scalar : mInternalScalars) {
             assert (scalar.getValueType());
             switch (scalar.getScalarType()) {
                 case ScalarType::Internal:
-                    shared.push_back(scalar.getValueType());
+                    sharedGroups.insert(scalar.getGroup());
                     break;
                 case ScalarType::ThreadLocal:
-                    threadLocal.push_back(scalar.getValueType());
+                    threadLocalGroups.insert(scalar.getGroup());
                     break;
                 default: break;
             }
         }
+
+        const auto sharedGroupCount = sharedGroups.size();
+        const auto threadLocalGroupCount = threadLocalGroups.size();
+
+        std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
+        std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+        for (const auto & scalar : mInputScalars) {
+            assert (scalar.getType());
+            shared[0].push_back(scalar.getType());
+        }
+
+        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
+        // within the kernel state to hide the complexity from the user?
+        for (const auto & scalar : mInternalScalars) {
+            assert (scalar.getValueType());
+
+            auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+                const auto f = groups.find(scalar.getGroup());
+                assert (f != groups.end());
+                return std::distance(groups.begin(), f);
+            };
+
+            switch (scalar.getScalarType()) {
+                case ScalarType::Internal:
+                    shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                    break;
+                case ScalarType::ThreadLocal:
+                    threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                    break;
+                default: break;
+            }
+        }
+
+        assert (shared[sharedGroupCount + 1].empty());
+        for (const auto & scalar : mOutputScalars) {
+            assert (scalar.getType());
+            shared[sharedGroupCount + 1].push_back(scalar.getType());
+        }
+
+        DataLayout dl(m);
+
+        IntegerType * const int8Ty = b->getInt8Ty();
+
+        auto getTypeSize = [&](Type * const type) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+            return dl.getTypeAllocSize(type);
+            #else
+            return dl.getTypeAllocSize(type).getFixedSize();
+            #endif
+        };
+
+        const auto cacheAlignment = b->getCacheAlignment();
+
+        auto makeGroupedStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
+                                         StringRef name, const bool addGroupCacheLinePadding) {
+
+            const auto n = structTypeVec.size();
+            if (n == 0) {
+                return StructType::create(b->getContext(), name);
+            }
+
+            std::vector<Type *> structTypes(n * 2);
+
+            if (addGroupCacheLinePadding) {
+                // TODO: review LLVM code; I'm worried that I cannot rely on struct size to
+                // always account for internal struct alignments.
+
+                unsigned offset = 0;
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * const sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    const auto typeSize = getTypeSize(sty);
+                    const auto paddingOffset = (typeSize % cacheAlignment);
+                    unsigned padding = 0;
+                    if (paddingOffset != 0) {
+                        padding = (cacheAlignment - paddingOffset);
+                    }
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = ArrayType::get(int8Ty, padding);
+                    offset += typeSize + padding;
+                }
+            } else {
+                Type * const emptyTy = ArrayType::get(int8Ty, 0);
+                assert (emptyTy->isSized());
+                assert (getTypeSize(emptyTy) == 0);
+                for (unsigned i = 0; i != n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = emptyTy;
+                }
+            }
+
+            StructType * const st = StructType::create(b->getContext(), structTypes, name);
+
+            #ifndef NDEBUG
+            if (addGroupCacheLinePadding) {
+                const StructLayout * const sl = dl.getStructLayout(st);
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto offset = sl->getElementOffset(i * 2);
+                    assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                }
+            }
+            #endif
+
+            return st;
+        };
+
         // NOTE: StructType::create always creates a new type even if an identical one exists.
-        StructType * const sharedTy = StructType::create(b->getContext(), shared, strShared);
+        StructType * const sharedTy = makeGroupedStructType(shared, strShared, sharedGroupCount > 1);
         assert (mSharedStateType == nullptr || mSharedStateType == nullIfEmpty(sharedTy));
         mSharedStateType = sharedTy;
 
-        StructType * const threadLocalTy = StructType::create(b->getContext(), threadLocal, strThreadLocal);
+        StructType * const threadLocalTy = makeGroupedStructType(threadLocal, strThreadLocal, false);
         assert (mThreadLocalStateType == nullptr || mThreadLocalStateType == nullIfEmpty(threadLocalTy));
         mThreadLocalStateType = threadLocalTy;
+
     }
     mSharedStateType = nullIfEmpty(mSharedStateType);
     mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
@@ -436,6 +541,7 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) 
         const auto funcName = concat(getName(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX, tmp);
         Module * const m = b->getModule();
         func = m->getFunction(funcName);
+
         if (LLVM_LIKELY(func == nullptr)) {
 
             SmallVector<Type *, 2> params;
@@ -851,7 +957,6 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
  * @brief addOrDeclareMainFunction
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const {
-
     auto suppliedArgs = 1U;
     if (LLVM_LIKELY(isStateful())) {
         suppliedArgs += 1;
@@ -951,7 +1056,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
 
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
-        Function * const allocInternal = getAllocateSharedInternalStreamSetsFunction(b);
+        Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
         SmallVector<Value *, 2> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
             allocArgs.push_back(sharedHandle);
@@ -959,16 +1064,16 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         // pass in the desired number of segments
         #warning fix this so BufferSegments is an argument to main
         allocArgs.push_back(b->getSize(codegen::BufferSegments));
-        b->CreateCall(allocInternal, allocArgs);
+        b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (hasThreadLocal()) {
-            Function * const allocInternal = getAllocateThreadLocalInternalStreamSetsFunction(b);
+            Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
             SmallVector<Value *, 3> allocArgs;
             if (LLVM_LIKELY(isStateful())) {
                 allocArgs.push_back(sharedHandle);
             }
             allocArgs.push_back(threadLocalHandle);
             allocArgs.push_back(ONE);
-            b->CreateCall(allocInternal, allocArgs);
+            b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
 
@@ -996,8 +1101,10 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         b->SetInsertPoint(handleCatch);
         LandingPadInst * const caughtResult = b->CreateLandingPad(caughtResultType, 0);
         caughtResult->addClause(ConstantPointerNull::get(int8PtrTy));
-        b->CreateCall(b->getBeginCatch(), {b->CreateExtractValue(caughtResult, 0)});
-        b->CreateCall(b->getEndCatch());
+        Function * catchFn = b->getBeginCatch();
+        Function * catchEndFn = b->getEndCatch();
+        b->CreateCall(catchFn->getFunctionType(), catchFn, {b->CreateExtractValue(caughtResult, 0)});
+        b->CreateCall(catchEndFn->getFunctionType(), catchEndFn, {});
         BasicBlock * const afterCatch = b->GetInsertBlock();
         b->CreateBr(handleDeallocation);
 
@@ -1006,7 +1113,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         successPhi->addIncoming(b->getTrue(), beforeInvoke);
         successPhi->addIncoming(b->getFalse(), afterCatch);
     } else {
-        b->CreateCall(doSegment, segmentArgs);
+        b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
     if (hasThreadLocal()) {
         SmallVector<Value *, 2> args;
@@ -1041,7 +1148,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b->CreateCacheAlignedMalloc(getSharedStateType());
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
@@ -1055,7 +1162,7 @@ void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
     assert (args[0] && "cannot initialize before creation");
     assert (args[0]->getType()->getPointerElementType() == getSharedStateType());
     Function * const init = getInitializeFunction(b);
-    b->CreateCall(init, args);
+    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1066,9 +1173,11 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, Value * const handle
     if (hasThreadLocal()) {
         Function * const init = getInitializeThreadLocalFunction(b);
         if (handle) {
-            instance = b->CreateCall(init, handle);
+            FixedArray<Value *, 1> args;
+            args[0] = handle;
+            instance = b->CreateCall(init->getFunctionType(), init, args);
         } else {
-            instance = b->CreateCall(init);
+            instance = b->CreateCall(init->getFunctionType(), init, {});
         }
     }
     return instance;
@@ -1080,7 +1189,7 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, Value * const handle
 void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
     assert (args.size() == (isStateful() ? 2 : 1));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
-    b->CreateCall(init, args);
+    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1090,9 +1199,9 @@ Value * Kernel::finalizeInstance(BuilderRef b, Value * const handle) const {
     Value * result = nullptr;
     Function * const termFunc = getFinalizeFunction(b);
     if (LLVM_LIKELY(isStateful())) {
-        result = b->CreateCall(termFunc, { handle });
+        result = b->CreateCall(termFunc->getFunctionType(), termFunc, { handle });
     } else {
-        result = b->CreateCall(termFunc);
+        result = b->CreateCall(termFunc->getFunctionType(), termFunc, {});
     }
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
@@ -1136,7 +1245,8 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         initArgs.push_back(f->second); assert (initArgs.back());
     }
     recursivelyConstructFamilyKernels(b, initArgs, params);
-    b->CreateCall(getInitializeFunction(b), initArgs);
+    Function * init = getInitializeFunction(b);
+    b->CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
 
     if (LLVM_LIKELY(hasFamilyName())) {

@@ -123,6 +123,11 @@ def escape_quotes(e):  return e.replace(u"'", u"'\\''")
 
 failure_count = 0
 
+
+colorizationRE = re.compile("\x1B\[01;31m\x1B\[K|\x1B\[m")
+def filter_colorization(grep_output):
+    return colorizationRE.sub("", grep_output)
+
 def execute_grep_test(flags, regexp, datafile, expected_result):
     global failure_count
     flag_string = ""
@@ -138,12 +143,15 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
     except subprocess.CalledProcessError as e:
         grep_out = codecs.decode(e.output, 'utf-8')
     if len(grep_out) > 0 and grep_out[-1] == '\n': grep_out = grep_out[:-1]
-    if grep_out != expected_result:
-        print(u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out))
+    filtered_out = filter_colorization(grep_out)
+    if filtered_out != expected_result:
+        msg = u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out)
+        print(msg.encode('utf-8'))
         failure_count += 1
     else:
         if options.verbose:
-            print(u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out))
+            msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
+            print(msg.encode('utf-8'))
 
 
 flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
@@ -155,6 +163,7 @@ flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             '-DisableMatchStar' : [],
             '-segment-size' : ['8192', '16384', '32768'],
             '-ccc-type' : ['ternary'],
+            '-colors' : ['always', 'never'],
             '-EnableTernaryOpt' : []}
 
 def add_random_flags(flags, fileLength):

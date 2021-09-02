@@ -22,15 +22,16 @@ Bindings RunIndexOutputBindings(StreamSet * runIndex, StreamSet * overflow) {
 }
     
 RunIndex::RunIndex(BuilderRef b,
-                   StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, bool invert)
-    : PabloKernel(b, "RunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow") + (invert ? "" : "_invert"),
+                   StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, Kind kind, Numbering n)
+    : PabloKernel(b, "RunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow") + (kind == Kind::RunOf0 ? "" : "_invert") + (n == Numbering::RunOnly ? "" : "_add1"),
            // input
 {Binding{"runMarks", runMarks}},
            // output
 RunIndexOutputBindings(runIndex, overflow)),
 mIndexCount(runIndex->getNumElements()),
 mOverflow(overflow != nullptr),
-mInvertMask(invert) {
+mRunKind(kind),
+mNumbering(n) {
     assert(mIndexCount > 0);
     assert(mIndexCount <= 5);
 }
@@ -38,7 +39,7 @@ mInvertMask(invert) {
 void RunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
-    PabloAST * runMarks = mInvertMask ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
+    PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
     PabloAST * runStart = pb.createAnd(runMarks, pb.createNot(pb.createAdvance(runMarks, 1)), "runStart");
     PabloAST * selectZero = runMarks;
     PabloAST * outputEnable = runMarks;
@@ -63,7 +64,9 @@ void RunIndex::generatePabloMethod() {
         PabloAST * oddStart = pb.createAnd(odd, runStart);
         PabloAST * idx = pb.createOr(pb.createAnd(pb.createMatchStar(evenStart, runMarks), odd),
                                      pb.createAnd(pb.createMatchStar(oddStart, runMarks), even));
-        idx = pb.createAnd(idx, selectZero);
+        if (mNumbering == Numbering::RunOnly) {
+            idx = pb.createAnd(idx, selectZero);
+        }
         for (unsigned j = 0; j < i; j++) {
             idx = pb.createOr(idx, pb.createAdvance(idx, 1<<j));
         }

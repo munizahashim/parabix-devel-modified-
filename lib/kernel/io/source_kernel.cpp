@@ -47,7 +47,8 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
     b->setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
     Function * const fileSizeFn = b->getModule()->getFunction("file_size"); assert (fileSizeFn);
-    Value * fileSize = b->CreateZExtOrTrunc(b->CreateCall(fileSizeFn, fd), sizeTy);
+    FunctionType * fTy = fileSizeFn->getFunctionType();
+    Value * fileSize = b->CreateZExtOrTrunc(b->CreateCall(fTy, fileSizeFn, fd), sizeTy);
     b->CreateLikelyCondBr(b->CreateIsNotNull(fileSize), nonEmptyFile, emptyFile);
 
     b->SetInsertPoint(nonEmptyFile);
@@ -83,6 +84,10 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
     Value * const numOfStrides = b->getNumOfStrides();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        b->CreateAssert(b->CreateIsNotNull(numOfStrides),
+                        "Internal error: %s.numOfStrides cannot be 0", b->GetString("MMapSource"));
+    }
 
     ConstantInt * const MMAP_PAGE_SIZE = b->getSize(getPageSize());
     Value * const STRIDE_ITEMS = b->CreateMul(numOfStrides, b->getSize(stride));
@@ -110,7 +115,6 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b->SetInsertPoint(checkRemaining);
     Value * const producedItems = b->getProducedItemCount("sourceBuffer");
     Value * const nextProducedItems = b->CreateAdd(producedItems, STRIDE_ITEMS);
-    Value * const newBuffer = b->getRawOutputPointer("sourceBuffer", producedItems);
     Value * const fileItems = b->getScalarField("fileItems");
     Value * const lastPage = b->CreateICmpULE(fileItems, nextProducedItems);
     b->CreateUnlikelyCondBr(lastPage, setTermination, exit);
@@ -165,7 +169,7 @@ void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     const auto codeUnitSize = codeUnitWidth / 8;
     ConstantInt * const bufferBytes = b->getSize(stride * 4 * codeUnitSize);
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
-    Value * const buffer = b->CreatePointerCast(b->CreateCacheAlignedMalloc(bufferBytes), codeUnitPtrTy);
+    Value * const buffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(bufferBytes), codeUnitPtrTy);
     b->setBaseAddress("sourceBuffer", buffer);
     b->setScalarField("buffer", buffer);
     b->setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
@@ -176,6 +180,11 @@ void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
 void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
 
     Value * const numOfStrides = b->getNumOfStrides();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        b->CreateAssert(b->CreateIsNotNull(numOfStrides),
+                        "Internal error: %s.numOfStrides cannot be 0", b->GetString("ReadSource"));
+    }
+
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(stride));
     ConstantInt * const codeUnitBytes = b->getSize(codeUnitWidth / 8);
     Value * const segmentBytes = b->CreateMul(segmentItems, codeUnitBytes);
@@ -255,7 +264,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b->SetInsertPoint(expandAndCopyBack);
     Value * const expandedCapacity = b->CreateShl(capacity, 1);
     Value * const expandedBytes = b->CreateMul(expandedCapacity, codeUnitBytes);
-    Value * const expandedBuffer = b->CreatePointerCast(b->CreateCacheAlignedMalloc(expandedBytes), unreadData->getType());
+    Value * const expandedBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(expandedBytes), unreadData->getType());
     b->CreateMemCpy(expandedBuffer, unreadData, remainingBytes, blockSize);
     // Free the prior buffer if it exists
     Value * const ancillaryBuffer = b->getScalarField("ancillaryBuffer");
@@ -358,7 +367,8 @@ void FDSourceKernel::generateInitializeMethod(BuilderRef b) {
     // If the fileSize is 0, we may have a virtual file such as /proc/cpuinfo
     Function * const fileSizeFn = b->getModule()->getFunction("file_size");
     assert (fileSizeFn);
-    Value * const fileSize = b->CreateCall(fileSizeFn, fd);
+    FunctionType * fTy = fileSizeFn->getFunctionType();
+    Value * const fileSize = b->CreateCall(fTy, fileSizeFn, fd);
     Value * const emptyFile = b->CreateIsNull(fileSize);
     b->CreateUnlikelyCondBr(emptyFile, initializeRead, initializeMMap);
 
@@ -409,6 +419,11 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
     Value * const numOfStrides = b->getNumOfStrides();
 
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        b->CreateAssert(b->CreateIsNotNull(numOfStrides),
+                        "Internal error: %s.numOfStrides cannot be 0", b->GetString(getName()));
+    }
+
     const auto codeUnitWidth = source->getFieldWidth();
 
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(getStride()));
@@ -445,12 +460,12 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
         // make sure our copy is block-aligned
         Value * const consumedOffset = b->CreateAnd(consumedItems, ConstantExpr::getNeg(BLOCK_WIDTH));
         readStart = b->getRawOutputPointer("sourceBuffer", consumedOffset);
-        readEnd = b->getRawOutputPointer("sourceBuffer", fileItems);
-        if (codeUnitWidth == 1) {
+        Value * lastFileByte = fileItems;
+        if (codeUnitWidth < 8) {
             // If trying to load a bitstream and the number of items is not byte-aligned, load an extra byte.
-            Value * const isPartialByte = b->CreateICmpNE(b->CreateURem(fileItems, b->getSize(8)), b->getSize(0));
-            readEnd = b->CreateGEP(readEnd, b->CreateSelect(isPartialByte, b->getInt32(1), b->getInt32(0)));
+            lastFileByte = b->CreateRoundUpRational(fileItems, Rational{8, codeUnitWidth});
         }
+        readEnd = b->getRawOutputPointer("sourceBuffer", lastFileByte);
     }
 
     DataLayout DL(b->getModule());

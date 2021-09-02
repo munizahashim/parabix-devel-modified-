@@ -254,14 +254,12 @@ enum BufferLocality {
 struct BufferNode {
     StreamSetBuffer * Buffer = nullptr;
     unsigned Type = 0;
-    bool NonLinear = false;
+    bool IsLinear = false;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
     unsigned CopyBack = 0;
-    unsigned CopyBackReflection = 0;
-
-    unsigned LookAhead = 0;
+    unsigned CopyForwards = 0;
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
@@ -306,8 +304,10 @@ struct BufferPort {
     Rational Minimum;
     Rational Maximum;
 
-//    unsigned LocalPortId = 0U;
-//    unsigned GlobalPortId = 0U;
+    bool CanModifySegmentLength = false;
+    #ifdef COMPUTE_SYMBOLIC_RATE_IDS
+    unsigned SymbolicRateId = 0U;
+    #endif
 
     // binding attributes
     unsigned Add = 0;
@@ -408,7 +408,10 @@ struct PartitionData {
     KernelIdVector          Kernels;
     std::vector<Rational>   Repetitions;
     OrderingDAWG            Orderings;
-    Rational                ExpectedRepetitions{0};
+    unsigned                LinkedGroupId = 0;
+
+
+//    Rational                ExpectedRepetitions{0};
 
 };
 
