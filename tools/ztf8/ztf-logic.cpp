@@ -460,10 +460,12 @@ void LengthGroupSelector::generatePabloMethod() {
 OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
                            EncodingInfo & encodingScheme,
                            unsigned groupNo,
+                           StreamSet * groupLenBixnum,
                            StreamSet * groupMarks,
                            StreamSet * overlapping)
 : PabloKernel(b, "OverlappingLengthGroupMarker" + std::to_string(groupNo),
-              {Binding{"groupMarks", groupMarks, FixedRate(), LookAhead(1)}},
+              {Binding{"groupMarks", groupMarks, FixedRate(), LookAhead(1)},
+               Binding{"groupLenBixnum", groupLenBixnum}},
               {Binding{"overlapping", overlapping}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
 
 void OverlappingLengthGroupMarker::generatePabloMethod() {
@@ -472,6 +474,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     PabloAST * groupMarks = getInputStreamSet("groupMarks")[0];
     Var * overlappingStreamVar = getOutputStreamVar("overlapping");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
+    std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
 
     unsigned offset = 2;
     unsigned lo = groupInfo.lo;
@@ -479,11 +482,24 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     unsigned min = 0;
     unsigned groupSize = hi - lo + 1;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
-    PabloAST * initialOverlap = groupMarks;
-    // groupMarks positions overlap only when the distance between consecutive groupMarks positions is less than lo
     PabloAST * finalOverlappingMarks = pb.createZeroes();
-    for (unsigned i = 0; i < lo; i++) {
-        finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(groupMarks, pb.createAdvance(initialOverlap, 1)));
+    PabloAST * prevMarks = groupMarks;
+    // groupMarks positions overlap only when the distance between consecutive groupMarks positions is less than lo
+    if (lo == hi) {
+        for (unsigned i = 0; i < lo-1; i++) {
+            prevMarks = pb.createAdvance(prevMarks, 1);
+            finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(groupMarks, prevMarks));
+        }
+    }
+    // check len-1 prev positions for any overlapping phrase in a length group
+    else {
+        for (unsigned len = lo; len < hi; len++) {
+            PabloAST * lenBixnumPos = bnc.EQ(groupLenBixnum, len - offset);
+            for (unsigned i = 0; i < len-1; i++) {
+                prevMarks = pb.createAdvance(prevMarks, 1);
+                finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(lenBixnumPos, prevMarks));
+            }
+        }
     }
     pb.createAssign(pb.createExtract(overlappingStreamVar, pb.getInteger(0)), finalOverlappingMarks);
 }

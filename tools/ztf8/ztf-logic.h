@@ -185,6 +185,7 @@ public:
     OverlappingLengthGroupMarker(BuilderRef b,
                  EncodingInfo & encodingScheme,
                  unsigned groupNo,
+                 StreamSet * groupLenBixnum,
                  StreamSet * groupMarks,
                  StreamSet * overlapping);
 protected:
