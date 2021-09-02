@@ -5,6 +5,7 @@
  */
 
 #include "ztf-scan.h"
+#include "common.h"
 #include <llvm/IR/Function.h>                      // for Function, Function...
 #include <llvm/IR/Module.h>                        // for Module
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
@@ -29,163 +30,14 @@
 using namespace kernel;
 using namespace llvm;
 
-static cl::opt<bool> DeferredAttribute("deferred", cl::desc("Use Deferred attribute instead of Lookbehind for source data"), cl::init(false));
-static cl::opt<bool> DelayedAttribute("delayed", cl::desc("Use Delayed Attribute instead of BoundedRate for output"), cl::init(true));
-static cl::opt<bool> PrefixCheck("prefix-check-mode", cl::desc("Use experimental prefix check mode"), cl::init(false));
-
-const unsigned BITS_PER_BYTE = 8;
-const unsigned SIZE_T_BITS = sizeof(size_t) * BITS_PER_BYTE;
-
 using BuilderRef = Kernel::BuilderRef;
 
-struct ScanWordParameters {
-    unsigned width;
-    unsigned indexWidth;
-    Type * const Ty;
-    Type * const pointerTy;
-    Constant * const WIDTH;
-    Constant * const ix_MAXBIT;
-    Constant * WORDS_PER_BLOCK;
-    Constant * WORDS_PER_STRIDE;
-
-    ScanWordParameters(BuilderRef b, unsigned stride) :
-#ifdef PREFER_NARROW_SCANWIDTH
-        width(std::max(BITS_PER_BYTE, stride/SIZE_T_BITS)),
-#else
-        width(std::min(SIZE_T_BITS, stride/BITS_PER_BYTE)),
-#endif
-        indexWidth(stride/width),
-        Ty(b->getIntNTy(width)),
-        pointerTy(Ty->getPointerTo()),
-        WIDTH(b->getSize(width)),
-        ix_MAXBIT(b->getSize(indexWidth - 1)),
-        WORDS_PER_BLOCK(b->getSize(b->getBitBlockWidth()/width)),
-        WORDS_PER_STRIDE(b->getSize(indexWidth))
-        {   //  The stride must be a power of 2 and a multiple of the BitBlock width.
-            assert((((stride & (stride - 1)) == 0) && (stride >= b->getBitBlockWidth()) && (stride <= SIZE_T_BITS * SIZE_T_BITS)));
-        }
-};
-
-struct LengthGroupParameters {
-    LengthGroupInfo groupInfo;
-    Constant * MAX_HASH_BITS;
-    Constant * SUFFIX_BITS;
-    Constant * SUFFIX_MASK;
-    unsigned const groupHalfLength;
-    Type * halfLengthTy;
-    Type * halfSymPtrTy;
-    Constant * HALF_LENGTH;
-    Constant * LO;
-    Constant * HI;
-    // All subtables are sized the same.
-    Constant * SUBTABLE_SIZE;
-    Constant * HASH_BITS;
-    Constant * EXTENDED_BITS;
-    Constant * HASH_MASK;
-    Constant * ENC_BYTES;
-    Constant * MAX_INDEX;
-    Constant * PREFIX_BASE;
-    Constant * PREFIX_LENGTH_OFFSET;
-    Constant * LENGTH_MASK;
-    Constant * EXTENSION_MASK;
-
-    LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo) :
-        groupInfo(encodingScheme.byLength[groupNo]),
-        MAX_HASH_BITS(b->getSize(encodingScheme.MAX_HASH_BITS)),
-        SUFFIX_BITS(b->getSize(7)),
-        SUFFIX_MASK(b->getSize(0x7F)),
-        groupHalfLength(1UL << boost::intrusive::detail::floor_log2(groupInfo.lo)),
-        halfLengthTy(b->getIntNTy(8U * groupHalfLength)),
-        halfSymPtrTy(halfLengthTy->getPointerTo()),
-        HALF_LENGTH(b->getSize(groupHalfLength)),
-        LO(b->getSize(groupInfo.lo)),
-        HI(b->getSize(groupInfo.hi)),
-        // All subtables are sized the same.
-        SUBTABLE_SIZE(b->getSize((1UL << groupInfo.hash_bits) * groupInfo.hi)),
-        HASH_BITS(b->getSize(groupInfo.hash_bits)),
-        EXTENDED_BITS(b->getSize(std::max((groupInfo.hash_bits + groupInfo.length_extension_bits), ((groupInfo.encoding_bytes - 1U) * 7U)))),
-        HASH_MASK(b->getSize((1UL << ((groupInfo.hash_bits >> 1UL) * groupInfo.encoding_bytes)) - 1UL)),
-        ENC_BYTES(b->getSize(groupInfo.encoding_bytes)),
-        MAX_INDEX(b->getSize(groupInfo.encoding_bytes - 1UL)),
-        PREFIX_BASE(b->getSize(groupInfo.prefix_base)),
-        PREFIX_LENGTH_OFFSET(b->getSize(encodingScheme.prefixLengthOffset(groupInfo.lo))),
-        LENGTH_MASK(b->getSize(2UL * groupHalfLength - 1UL)),
-        EXTENSION_MASK(b->getSize((1UL << groupInfo.length_extension_bits) - 1UL)) {
-            assert(groupInfo.hi <= (1UL << (boost::intrusive::detail::floor_log2(groupInfo.lo) + 1UL)));
-        }
-};
-
-unsigned hashTableSize(LengthGroupInfo g) {
-    unsigned numSubTables = (g.hi - g.lo + 1);
-    return numSubTables * g.hi * (1<<g.hash_bits);
-}
-
-unsigned phraseHashTableSize(LengthGroupInfo g, unsigned sz_stride) {
-    unsigned segmentSizeInBytes = 8 * sz_stride; // numStrides * sz_stride
-    unsigned maxSyms = segmentSizeInBytes / g.lo;
-    return 32768; // temp
-
-}
-
-std::string lengthRangeSuffix(EncodingInfo encodingScheme, unsigned lo, unsigned hi) {
-    std::stringstream suffix;
-    suffix << encodingScheme.uniqueSuffix() << "_" << lo << "_" << hi;
-    if (DeferredAttribute) suffix << "deferred";
-    if (DelayedAttribute) suffix << "_delayed";
-    return suffix.str();
-}
-
-std::string lengthGroupSuffix(EncodingInfo encodingScheme, unsigned groupNo) {
-    LengthGroupInfo g = encodingScheme.byLength[groupNo];
-    return lengthRangeSuffix(encodingScheme, g.lo, g.hi);
-}
-
 Binding ByteDataBinding(unsigned max_length, StreamSet * byteData) {
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         return Binding{"byteData", byteData, FixedRate(), { Deferred() }}; // , Linear()
     } else {
         return Binding{"byteData", byteData, FixedRate(), { LookBehind(max_length+1) }}; // , Linear()
     }
-}
-
-std::vector<Value *> initializeCompressionMasks(BuilderRef b,
-                                                ScanWordParameters & sw,
-                                                Constant * sz_BLOCKS_PER_STRIDE,
-                                                unsigned maskCount,
-                                                Value * strideBlockOffset,
-                                                Value * compressMaskPtr,
-                                                BasicBlock * strideMasksReady) {
-    Constant * sz_ZERO = b->getSize(0);
-    Constant * sz_ONE = b->getSize(1);
-    Type * sizeTy = b->getSizeTy();
-    std::vector<Value *> keyMasks(maskCount);
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    BasicBlock * const maskInitialization = b->CreateBasicBlock("maskInitialization");
-    b->CreateBr(maskInitialization);
-    b->SetInsertPoint(maskInitialization);
-    std::vector<PHINode *> keyMaskAccum(maskCount);
-    for (unsigned i = 0; i < maskCount; i++) {
-        keyMaskAccum[i] = b->CreatePHI(sizeTy, 2);
-        keyMaskAccum[i]->addIncoming(sz_ZERO, entryBlock);
-    }
-    PHINode * const blockNo = b->CreatePHI(sizeTy, 2);
-    blockNo->addIncoming(sz_ZERO, entryBlock);
-    Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
-    for (unsigned i = 0; i < maskCount; i++) {
-        Value * keyBitBlock = b->loadInputStreamBlock("symbolMarks" + (i > 0 ? std::to_string(i) : ""), sz_ZERO, strideBlockIndex);
-        Value * const anyKey = b->simd_any(sw.width, keyBitBlock);
-        Value * keyWordMask = b->CreateZExtOrTrunc(b->hsimd_signmask(sw.width, anyKey), sizeTy);
-        keyMasks[i] = b->CreateOr(keyMaskAccum[i], b->CreateShl(keyWordMask, b->CreateMul(blockNo, sw.WORDS_PER_BLOCK)));
-        keyMaskAccum[i]->addIncoming(keyMasks[i], maskInitialization);
-    }
-    // Initialize the compression mask.
-    // Default initial compression mask is all ones (no zeroes => no compression).
-    b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP(compressMaskPtr, strideBlockIndex));
-    Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
-    blockNo->addIncoming(nextBlockNo, maskInitialization);
-    // Default initial compression mask is all ones (no zeroes => no compression).
-    b->CreateCondBr(b->CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), maskInitialization, strideMasksReady);
-    return keyMasks;
 }
 
 LengthGroupCompression::LengthGroupCompression(BuilderRef b,
@@ -197,7 +49,7 @@ LengthGroupCompression::LengthGroupCompression(BuilderRef b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "LengthGroupCompression" + lengthGroupSuffix(encodingScheme, groupNo) + (PrefixCheck ? "_prefix" : ""),
+: MultiBlockKernel(b, "LengthGroupCompression" + lengthGroupSuffix(encodingScheme, groupNo) + (PrefixCheckIsSet() ? "_prefix" : ""),
                    {Binding{"symbolMarks", symbolMarks},
                        Binding{"hashValues", hashValues},
                        ByteDataBinding(encodingScheme.byLength[groupNo].hi, byteData)},
@@ -205,7 +57,7 @@ LengthGroupCompression::LengthGroupCompression(BuilderRef b,
                    {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
                        InternalScalar{ArrayType::get(b->getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
-    if (DelayedAttribute) {
+    if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
@@ -251,7 +103,7 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateStore(pendingMask, producedPtr);
     Value * compressMaskPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", initialPos), bitBlockPtrTy);
     Value * hashTableBasePtr = b->CreateBitCast(b->getScalarFieldPtr("hashTable"), b->getInt8PtrTy());
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         // Copy pending output data.
         Value * const initialProduced = b->getProducedItemCount("result");
         b->CreateMemCpy(b->getRawOutputPointer("encodedBytes", initialProduced), b->getScalarFieldPtr("pendingOutput"), sz_DELAYED, 1);
@@ -323,7 +175,7 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * entry2 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr2);
     Value * symIsEqEntry = b->CreateAnd(b->CreateICmpEQ(entry1, sym1), b->CreateICmpEQ(entry2, sym2));
     Value * maskLength = nullptr;
-    if (PrefixCheck) {
+    if (PrefixCheckIsSet()) {
         BasicBlock * const tryPrefix = b->CreateBasicBlock("tryPrefix");
         BasicBlock * const havePrefix = b->CreateBasicBlock("havePrefix");
         b->CreateCondBr(symIsEqEntry, markCompression, tryPrefix);
@@ -435,7 +287,7 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->SetInsertPoint(stridesDone);
     // In the next segment, we may need to access byte data in the last
     // 16 bytes of this segment.
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
     }
@@ -518,12 +370,12 @@ LengthGroupDecompression::LengthGroupDecompression(BuilderRef b,
                        InternalScalar{ArrayType::get(b->getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
-    if (DelayedAttribute) {
+    if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
     }
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
 }
@@ -555,7 +407,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * const initialPos = b->getProcessedItemCount("keyMarks0");
     Value * const avail = b->getAvailableItemCount("keyMarks0");
 
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         // Copy pending output data.
         Value * const initialProduced = b->getProducedItemCount("result");
         b->CreateMemCpy(b->getRawOutputPointer("result", initialProduced), b->getScalarFieldPtr("pendingOutput"), lg.HI, 1);
@@ -727,7 +579,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->SetInsertPoint(stridesDone);
     // If the segment ends in the middle of a 2-byte codeword, we need to
     // make sure that we still have access to the codeword in the next block.
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
     }
@@ -735,7 +587,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     // be an incomplete symbol at the end of this block.   Store the
     // data that may be overwritten as pending and set the produced item
     // count to that which is guaranteed to be correct.
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         Value * guaranteedProduced = b->CreateSub(avail, lg.HI);
         b->CreateMemCpy(b->getScalarFieldPtr("pendingOutput"), b->getRawOutputPointer("result", guaranteedProduced), lg.HI, 1);
         b->setProducedItemCount("result", b->CreateSelect(b->isFinal(), avail, guaranteedProduced));
@@ -1007,7 +859,7 @@ mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + symbolMarks.size() - 1)  {
     for (unsigned i = 0; i < symbolMarks.size(); i++) {
         mInputStreamSets.emplace_back("symbolMarks" + (i > 0 ? std::to_string(i) : ""), symbolMarks[i]);
     }
-    if (DelayedAttribute) {
+    if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
@@ -1057,7 +909,7 @@ void FixedLengthCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", initialProduced), bitBlockPtrTy);
     b->CreateStore(pendingMask, producedPtr);
     Value * compressMaskPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", initialPos), bitBlockPtrTy);
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         // Copy pending output data.
         Value * const initialProduced = b->getProducedItemCount("result");
         b->CreateMemCpy(b->getRawOutputPointer("encodedBytes", initialProduced), b->getScalarFieldPtr("pendingOutput"), sz_DELAYED, 1);
@@ -1098,7 +950,7 @@ void FixedLengthCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->SetInsertPoint(stridesDone);
     // In the next segment, we may need to access byte data in the last
     // 16 bytes of this segment.
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, b->getSize(16)));
         b->setProcessedItemCount("byteData", processed);
     }
@@ -1306,7 +1158,7 @@ mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + keyMarks.size() - 1)  {
     for (unsigned i = 0; i < hashMarks.size(); i++) {
         mInputStreamSets.emplace_back("hashMarks" + std::to_string(i), hashMarks[i]);
     }
-    if (DelayedAttribute) {
+    if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
@@ -1343,7 +1195,7 @@ void FixedLengthDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
 
     Value * const initialPos = b->getProcessedItemCount("keyMarks0");
     Value * const avail = b->getAvailableItemCount("keyMarks0");
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         // Copy pending output data.
         Value * const initialProduced = b->getProducedItemCount("result");
         b->CreateMemCpy(b->getRawOutputPointer("result", initialProduced), b->getScalarFieldPtr("pendingOutput"), sz_DELAYED, 1);
@@ -1382,7 +1234,7 @@ void FixedLengthDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->SetInsertPoint(stridesDone);
     // If the segment ends in the middle of a 2-byte codeword, we need to
     // make sure that we still have access to the codeword in the next block.
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, sz_DELAYED));
         b->setProcessedItemCount("byteData", processed);
     }
@@ -1392,7 +1244,7 @@ void FixedLengthDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     // count to that which is guaranteed to be correct.
     Value * guaranteedProduced = b->CreateSub(avail, sz_DELAYED);
     //b->CreateMemCpy(b->getScalarFieldPtr("pendingOutput"), b->getRawOutputPointer("result", guaranteedProduced), sz_DELAYED, 1);
-    if (!DelayedAttribute) {
+    if (!DelayedAttributeIsSet()) {
         b->setProducedItemCount("result", b->CreateSelect(b->isFinal(), avail, guaranteedProduced));
     }
 }
@@ -1419,7 +1271,7 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(hashValues.size()) {
     for (unsigned i = 0; i < hashValues.size(); i++) {
         mInputStreamSets.emplace_back("hashValues" + (i > 0 ? std::to_string(i) : ""), hashValues[i]);
     }
-    if (DelayedAttribute) {
+    if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
@@ -1587,7 +1439,7 @@ void PhraseCompression::generateMultiBlockLogic(BuilderRef b, Value * const numO
     b->SetInsertPoint(stridesDone);
     // In the next segment, we may need to access byte data in the last
     // 16 bytes of this segment.
-    if (DeferredAttribute) {
+    if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
     }
