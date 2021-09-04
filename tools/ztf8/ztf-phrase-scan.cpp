@@ -34,13 +34,11 @@ MarkRepeatedHashvalue::MarkRepeatedHashvalue(BuilderRef b,
                                     StreamSet * hashMarks,
                                     unsigned strideBlocks)
 : MultiBlockKernel(b, "MarkRepeatedHashvalue" + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
-                   {Binding{"symbolMarks", symbolMarks}},
+                   {Binding{"symbolMarks", symbolMarks},
+                    Binding{"hashValues", hashValues}},
                    {}, {}, {}, {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
-                       InternalScalar{ArrayType::get(b->getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
+                       InternalScalar{ArrayType::get(b->getInt8Ty(), /*hashTableSize(encodingScheme.byLength[groupNo])*/333334), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
-    //for (unsigned i = 0; i < hashValues.size(); i++) {
-        mInputStreamSets.emplace_back("hashValues" , hashValues);
-    //}
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("hashMarks", hashMarks, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
@@ -86,14 +84,14 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     BasicBlock * const hashMarksDone = b->CreateBasicBlock("hashMarksDone");
 
     //common to all the input streams
-    Value * initialProduced = b->getProducedItemCount("hashMarks");
-    Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", initialProduced), bitBlockPtrTy);
-
     Value * initialPos = b->getProcessedItemCount("symbolMarks");
     Value * avail = b->getAvailableItemCount("symbolMarks");
+    Value * initialProduced = b->getProducedItemCount("hashMarks");
+    Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", initialProduced), bitBlockPtrTy);
     Value * pendingMask = b->CreateNot(b->getScalarField("pendingMaskInverted"));
     b->CreateStore(pendingMask, producedPtr);
     Value * hashMarksPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", initialPos), bitBlockPtrTy);
+    Value * hashTableBasePtr = b->CreateBitCast(b->getScalarFieldPtr("hashTable"), b->getInt8PtrTy());
 
     b->CreateBr(stridePrologue);
     b->SetInsertPoint(stridePrologue);
@@ -111,8 +109,6 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     b->SetInsertPoint(strideMasksReady);
     Value * keywordBasePtr = b->getInputStreamBlockPtr("symbolMarks", sz_ZERO, strideBlockOffset);
     keywordBasePtr = b->CreateBitCast(keywordBasePtr, sw.pointerTy);
-
-    Value * tempHashTableBasePtr = b->CreateBitCast(b->getScalarFieldPtr("hashTable"), b->getInt8Ty()->getPointerTo());
 
     b->CreateUnlikelyCondBr(b->CreateICmpEQ(hashMask, sz_ZERO), keyHashesDone, keyHashProcessingLoop);
     b->SetInsertPoint(keyHashProcessingLoop);
@@ -135,32 +131,35 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_TWO, "keyLength");
     // get start position of the keyword/phrase
 
-    // divide the key into 2 halves for equal bytes load
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
+    //b->CallPrintInt("keyHash", keyHash);
     Value * tableIdxHash = b->CreateAnd(hashValue, sz_TABLEMASK, "tableIdx");
     //b->CallPrintInt("hashValue", hashValue);
     //b->CallPrintInt("tableIdxHash", tableIdxHash);
 
-    Value * tableEntryPtr = b->CreateInBoundsGEP(tempHashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), lg.SUBTABLE_SIZE));
-    Value * tblPtr1 = b->CreateBitCast(tableEntryPtr, b->getInt8Ty());
+    Value * tableEntryPtr = b->CreateInBoundsGEP(hashTableBasePtr, tableIdxHash);
+    Value * tblPtr1 = b->CreateBitCast(tableEntryPtr, b->getInt8PtrTy());
     Value * entry = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr1);
 
-    Value * entryExists = b->CreateICmpEQ(entry, sz_ONE);
+    Value * entryVal = b->CreateTrunc(entry, b->getInt8Ty());
+    Value * entryExists = b->CreateICmpEQ(entryVal, b->getInt8(0x1));
     b->CreateCondBr(entryExists, markHashRepeat, markHashEntry);
 
     b->SetInsertPoint(markHashRepeat);
+
     Value * const hashMarkBasePtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", hashMarkPos), sizeTy->getPointerTo());
     Value * initialMark = b->CreateAlignedLoad(hashMarkBasePtr, 1);
-    Value * updated = b->CreateOr(initialMark, sz_ONE);
+    //b->CallPrintInt("initialMark", initialMark);
+    Value * updated = b->CreateXor(initialMark, sz_ONE);
+    //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, hashMarkBasePtr, 1);
     b->CreateBr(nextHash);
 
     b->SetInsertPoint(markHashEntry);
-    Value * isEmptyEntry = b->CreateICmpEQ(entry, Constant::getNullValue(b->getInt8Ty()));
+    Value * isEmptyEntry = b->CreateICmpEQ(entryVal, Constant::getNullValue(b->getInt8Ty()));
     b->CreateCondBr(isEmptyEntry, storeHashFlag, nextHash);
-
     b->SetInsertPoint(storeHashFlag);
-    b->CreateMonitoredScalarFieldStore("hashTable", sz_ONE, tblPtr1);
+    b->CreateMonitoredScalarFieldStore("hashTable", b->getInt8(0x1), tblPtr1);
     b->CreateBr(nextHash);
 
     b->SetInsertPoint(nextHash);
