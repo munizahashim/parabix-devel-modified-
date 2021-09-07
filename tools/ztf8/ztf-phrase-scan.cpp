@@ -147,10 +147,12 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
 
     b->SetInsertPoint(markHashRepeat);
 
-    Value * const hashMarkBasePtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", hashMarkPos), sizeTy->getPointerTo());
+    Value * markBase = b->CreateSub(hashMarkPos, b->CreateURem(hashMarkPos, sz_BITS));
+    Value * markOffset = b->CreateSub(hashMarkPos, markBase);
+    Value * const hashMarkBasePtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", markBase), sizeTy->getPointerTo());
     Value * initialMark = b->CreateAlignedLoad(hashMarkBasePtr, 1);
     //b->CallPrintInt("initialMark", initialMark);
-    Value * updated = b->CreateXor(initialMark, sz_ONE);
+    Value * updated = b->CreateXor(initialMark, b->CreateShl(sz_ONE, markOffset));
     //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, hashMarkBasePtr, 1);
     b->CreateBr(nextHash);
