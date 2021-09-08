@@ -608,85 +608,115 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     using BitSet = dynamic_bitset<>;
 
-    std::vector<BitSet> rateChange(PartitionCount);
+    using PartitionGraph = adjacency_list<hash_setS, vecS, bidirectionalS, no_property, no_property, no_property>;
 
-    auto steadyStateDataflowChange = [&](const BufferPort & port, const bool isOutput) {
+    std::vector<BitSet> rateDomSet(PartitionCount);
 
-        const Binding & binding = port.Binding;
-        const ProcessingRate & rate = binding.getRate();
-        switch (rate.getKind()) {
-            case RateId::Fixed:
-            case RateId::Greedy:
-                if (isOutput) {
-                    for (const auto & attr : binding.getAttributes()) {
-                        switch (attr.getKind()) {
-                            case AttrId::Deferred:
-                                return true;
-                            default:
-                                break;
-                        }
-                    }
-                }
-                return false;
-            default:
-                return true;
+    unsigned nextRateId = 0;
+
+    auto expandCapacity = [&](BitSet & bs) {
+        const auto size = (nextRateId + 127U) & (~63U);
+        if (bs.size() != size) {
+            bs.resize(size, false);
         }
     };
 
     auto addRateId = [&](const unsigned id, const unsigned rateId) {
-        auto & bs = rateChange[id];
-        if (rateId >= bs.size()) {
-            bs.resize((rateId + 127) &~ 63, false);
-        }
+        auto & bs = rateDomSet[id];
+        expandCapacity(bs);
         bs.set(rateId);
     };
 
-    unsigned rateId = 0;
+    PartitionGraph J(PartitionCount);
 
     for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
         const auto output = in_edge(streamSet, mBufferGraph);
+        const auto & outputPort = mBufferGraph[output];
+        const Binding & binding = outputPort.Binding;
+        const auto & rate = binding.getRate();
+
+        bool hasVarOutput = false;
+        switch (rate.getKind()) {
+            case RateId::Fixed:
+            case RateId::Greedy:
+                if (LLVM_LIKELY(!binding.hasAttribute(AttrId::Deferred))) {
+                    break;
+                }
+            default:
+                hasVarOutput = true;
+        }
+
         const auto producer = source(output, mBufferGraph);
         const auto pid = KernelPartitionId[producer];
-        if (steadyStateDataflowChange(mBufferGraph[output], true)) {
-            const auto demarcateId = rateId++;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                const auto cid = KernelPartitionId[consumer];
-                if (cid != pid) {
-                    addRateId(cid, demarcateId);
-                }
-            }
-        } else {
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                if (steadyStateDataflowChange(mBufferGraph[input], false)) {
-                    const auto consumer = target(input, mBufferGraph);
-                    const auto cid = KernelPartitionId[consumer];
-                    if (cid != pid) {
-                        addRateId(cid, rateId++);
-                    }
+
+        auto rateId = nextRateId;
+        nextRateId += hasVarOutput ? 1 : 0;
+
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            const auto cid = KernelPartitionId[consumer];
+            if (cid != pid) {
+                add_edge(pid, cid, J);
+                if (hasVarOutput) {
+                    addRateId(cid, rateId);
                 }
             }
         }
     }
 
-    rateChange[0].resize(rateId);
+    // Now compute the transitive reduction of the partition relationships
+    BEGIN_SCOPED_REGION
+    const reverse_traversal ordering(PartitionCount);
+    assert (is_valid_topological_sorting(ordering, J));
+    transitive_closure_dag(ordering, J);
+    transitive_reduction_dag(ordering, J);
+    END_SCOPED_REGION
+
+    if (out_degree(0, J) == 0) {
+        for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+            if (LLVM_UNLIKELY(in_degree(partitionId, J) == 0)) {
+                add_edge(0, partitionId, J);
+            }
+        }
+    }
+
+    if (in_degree(PartitionCount - 1, J) == 0) {
+        for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+            if (LLVM_UNLIKELY(out_degree(partitionId, J) == 0)) {
+                add_edge(partitionId, PartitionCount - 1, J);
+            }
+        }
+    }
+
+    for (unsigned i = 0; i < PartitionCount; ++i) {
+        expandCapacity(rateDomSet[i]);
+    }
+
+    rateDomSet[PartitionCount - 1].reset();
+
+    BitSet intersection;
+    expandCapacity(intersection);
 
     for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
-        const BitSet & prior =  rateChange[i - 1];
-        BitSet & current =  rateChange[i];
-        current.resize(rateId);
-        current |= prior;
+        assert (in_degree(i, J) > 0);
+        intersection.set();
+        for (const auto e : make_iterator_range(in_edges(i, J))) {
+            const unsigned producerId = source(e, J);
+            assert (producerId < i);
+            intersection &= rateDomSet[producerId];
+        }
+        rateDomSet[i] |= intersection;
     }
 
     mPartitionJumpIndex[0] = 1;
     for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
-        const BitSet & prior =  rateChange[i - 1];
-        const BitSet & current =  rateChange[i];
+        const BitSet & prior =  rateDomSet[i - 1];
+        const BitSet & current =  rateDomSet[i];
         unsigned jumpIndex = i + 1;
         if (prior != current) {
             for (unsigned j = (i + 1); j < PartitionCount; ++j) {
-                const BitSet & next =  rateChange[j];
-                if (current != next) {
+                const BitSet & next =  rateDomSet[j];
+                if (!current.is_subset_of(next)) {
                     jumpIndex = j;
                     break;
                 }

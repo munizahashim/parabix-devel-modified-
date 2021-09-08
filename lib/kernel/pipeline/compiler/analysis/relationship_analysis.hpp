@@ -190,6 +190,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     if (LLVM_UNLIKELY(!lexical_ordering(Relationships, O))) {
         // TODO: inspect G to determine what type of cycle. E.g., do we have circular references in the binding of
         // a kernel or is it a problem with the I/O relationships?
+        #ifndef NDEBUG
+        printRelationshipGraph(Relationships, errs(), "Relationships");
+        #endif
         report_fatal_error("Pipeline contains a cycle");
     }
 
@@ -251,9 +254,12 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     KernelPartitionId[PipelineInput] = 0;
 
-    auto currentGroupId = -1U;
-    auto inputPartitionId = -1U;
-    auto outputPartitionId = -1U;
+
+    unsigned inputPartitionId = -1U;
+    unsigned outputPartitionId = -1U;
+    #ifdef FUSE_ADJACENT_LINKED_PARTITIONS
+    unsigned currentGroupId = -1U;
+    #endif
 
     assert (kernels[0] == PipelineInput);
     assert (kernels[numOfKernels - 1] == PipelineOutput);
@@ -294,12 +300,16 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         if (origPartitionId != inputPartitionId) {
         #endif
             inputPartitionId = origPartitionId;
-//            const PartitionData & P = partitionGraph[origPartitionId];
-//            const auto groupId = P.LinkedGroupId;
-//            if (groupId != currentGroupId) {
+            #ifdef FUSE_ADJACENT_LINKED_PARTITIONS
+            const PartitionData & P = partitionGraph[origPartitionId];
+            const auto groupId = P.LinkedGroupId;
+            if (groupId != currentGroupId) {
+            #endif
                 ++outputPartitionId;
-//                currentGroupId = groupId;
-//            }
+            #ifdef FUSE_ADJACENT_LINKED_PARTITIONS
+                currentGroupId = groupId;
+            }
+            #endif
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
         }
         #endif
