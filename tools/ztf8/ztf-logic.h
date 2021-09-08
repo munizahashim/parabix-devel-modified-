@@ -186,7 +186,7 @@ public:
                  EncodingInfo & encodingScheme,
                  unsigned groupNo,
                  StreamSet * groupLenBixnum,
-                 StreamSet * groupMarks,
+                 StreamSet * hashMarks,
                  StreamSet * overlapping);
 protected:
     void generatePabloMethod() override;

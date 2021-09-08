@@ -461,17 +461,17 @@ OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
                            EncodingInfo & encodingScheme,
                            unsigned groupNo,
                            StreamSet * groupLenBixnum,
-                           StreamSet * groupMarks,
+                           StreamSet * hashMarks,
                            StreamSet * overlapping)
 : PabloKernel(b, "OverlappingLengthGroupMarker" + std::to_string(groupNo),
-              {Binding{"groupMarks", groupMarks, FixedRate(), LookAhead(1)},
+              {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
                Binding{"groupLenBixnum", groupLenBixnum}},
               {Binding{"overlapping", overlapping}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
 
 void OverlappingLengthGroupMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
-    PabloAST * groupMarks = getInputStreamSet("groupMarks")[0];
+    PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     Var * overlappingStreamVar = getOutputStreamVar("overlapping");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
@@ -482,26 +482,42 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     unsigned min = 0;
     unsigned groupSize = hi - lo + 1;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
-    PabloAST * finalOverlappingMarks = pb.createZeroes();
-    PabloAST * prevMarks = groupMarks;
-    // groupMarks positions overlap only when the distance between consecutive groupMarks positions is less than lo
+    hashMarks = pb.createNot(hashMarks);
+    PabloAST * finalOverlappingMarks = hashMarks;
+    PabloAST * prevMarks = hashMarks;
+    PabloAST * eliminateSmallPhrase = pb.createZeroes();
+    // hashMarks positions overlap only when the distance between consecutive hashMarks positions is less than lo
     if (lo == hi) {
         for (unsigned i = 0; i < lo-1; i++) {
             prevMarks = pb.createAdvance(prevMarks, 1);
-            finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(groupMarks, prevMarks));
+            finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(hashMarks, prevMarks));
         }
     }
     // check len-1 prev positions for any overlapping phrase in a length group
+    // and only retain longer length phrases between overlapping phrases
     else {
-        for (unsigned len = lo; len < hi; len++) {
-            PabloAST * lenBixnumPos = bnc.EQ(groupLenBixnum, len - offset);
-            for (unsigned i = 0; i < len-1; i++) {
-                prevMarks = pb.createAdvance(prevMarks, 1);
-                finalOverlappingMarks = pb.createOr(finalOverlappingMarks, pb.createAnd(lenBixnumPos, prevMarks));
+        for (int len = hi; len > lo; len--) {
+            PabloAST * lenBixnumPos = bnc.EQ(groupLenBixnum, len - offset); // all the len's
+            lenBixnumPos = pb.createAnd(lenBixnumPos, hashMarks); // all the len's at hashMarks
+            //pb.createDebugPrint(lenBixnumPos, "lenBixnumPos"+std::to_string(len));
+            // phrase end position with length > (lo - offset)
+            PabloAST * toRetainBixnum = pb.createAnd(bnc.UGT(groupLenBixnum, len - offset), bnc.ULE(groupLenBixnum, hi - offset)); // greater than len's
+            toRetainBixnum = pb.createAnd(toRetainBixnum, hashMarks); // greater than len's at hashMarks
+            //pb.createDebugPrint(toRetainBixnum, "toRetainBixnum"+std::to_string(len));
+            for (unsigned i = 0; i < len-1; i++) { // check range can be from lo to hi-1 ?
+                // adv toRetainBixnum by 1 position and check if it collides with lenBixnumPos
+                // if yes, retain the original position of toRetainBixnum and eliminate lenBixnumPos
+                // retain - initialize finalOverlappingMarks by hashMarks and eliminate any overlapping smaller phrase mark.
+                toRetainBixnum = pb.createAdvance(toRetainBixnum, 1);
+                // check if toRetainBixnum are in prev len-1 positions of lenBixnumPos
+                eliminateSmallPhrase = pb.createOr(eliminateSmallPhrase, pb.createAnd(toRetainBixnum, lenBixnumPos));
             }
+            //pb.createDebugPrint(eliminateSmallPhrase, "eliminateSmallPhrase"+std::to_string(len));
+            finalOverlappingMarks = pb.createXor(finalOverlappingMarks, eliminateSmallPhrase);
+            //pb.createDebugPrint(finalOverlappingMarks, "finalOverlappingMarks"+std::to_string(len));
         }
     }
-    pb.createAssign(pb.createExtract(overlappingStreamVar, pb.getInteger(0)), finalOverlappingMarks);
+    pb.createAssign(pb.createExtract(overlappingStreamVar, pb.getInteger(0)), eliminateSmallPhrase);
 }
 
 LengthSorter::LengthSorter(BuilderRef b,
