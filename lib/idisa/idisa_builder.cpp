@@ -381,7 +381,7 @@ Value * IDISA_Builder::simd_slli(unsigned fw, Value * a, unsigned shift) {
             fieldShifted = mvmd_slli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift);
             unsigned remaining = fw - fullFieldShift * MAX_NATIVE_SIMD_SHIFT;
             Constant * mask = Constant::getIntegerValue(getIntNTy(fw),
-                                                        APInt::getHighBitsSet(fw, remaining));
+                                                        APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, remaining)));
             fieldShifted = simd_and(fieldShifted, mask);
         }
         if (subFieldShift == 0) return fieldShifted;
@@ -413,7 +413,7 @@ Value * IDISA_Builder::simd_srli(unsigned fw, Value * a, unsigned shift) {
             fieldShifted = mvmd_srli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift);
             unsigned remaining = fw - fullFieldShift * MAX_NATIVE_SIMD_SHIFT;
             Constant * mask = Constant::getIntegerValue(getIntNTy(fw),
-                                                        APInt::getLowBitsSet(fw, remaining));
+                                                        APInt::getSplat(vectorWidth, APInt::getLowBitsSet(fw, remaining)));
             fieldShifted = simd_and(fieldShifted, mask);
         }
         if (subFieldShift == 0) return fieldShifted;
