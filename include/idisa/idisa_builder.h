@@ -43,7 +43,7 @@ class IDISA_Builder : public CBuilder {
 
 public:
 
-    IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth);
+    IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
 
     virtual ~IDISA_Builder();
 
@@ -254,6 +254,8 @@ protected:
     const unsigned              mNativeBitBlockWidth;
     const unsigned              mBitBlockWidth;
     const unsigned              mLaneWidth;
+    const unsigned              MAX_NATIVE_SIMD_SHIFT;
+    const unsigned              MIN_NATIVE_SIMD_SHIFT;
     llvm::VectorType * const    mBitBlockType;
     llvm::Constant * const      mZeroInitializer;
     llvm::Constant * const      mOneInitializer;
