@@ -234,9 +234,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         const StreamSetBuffer * const buffer = bn.Buffer;
 
         out << "label=\"" << streamSet;
-        if (buffer) {
-            out << " (" << buffer->getId() << ")";
-        }
         out << " |{";
 
 
@@ -276,6 +273,12 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             ty = ty->getArrayElementType();
             ty = ty->getVectorElementType();
             out << ty->getIntegerBitWidth();
+        }
+
+        if (bn.Locality == BufferLocality::ThreadLocal) {
+            out << " [0x";
+            out.write_hex(bn.BufferStart);
+            out << "]";
         }
 
         out << "|{";

@@ -490,16 +490,19 @@ void __pipeline_pthread_create_on_cpu(pthread_t * pthread, void *(*start_routine
  * @brief __pipeline_pin_current_thread_to_cpu
  ** ------------------------------------------------------------------------------------------------------------- */
 void __pipeline_pin_current_thread_to_cpu(const int32_t cpu) {
+    #ifdef PIN_THREADS_TO_INDIVIDUAL_CORES
     cpu_set_t cpu_set;
     CPU_ZERO(&cpu_set);
     CPU_SET(cpu, &cpu_set);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_set);
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief __pipeline_pthread_create_on_cpu
  ** ------------------------------------------------------------------------------------------------------------- */
 void __pipeline_pthread_create_on_cpu(pthread_t * pthread, void *(*start_routine)(void *), void * arg, const int32_t cpu) {
+    #ifdef PIN_THREADS_TO_INDIVIDUAL_CORES
     cpu_set_t cpu_set;
     CPU_SET(cpu, &cpu_set);
     pthread_attr_t attr;
@@ -508,9 +511,12 @@ void __pipeline_pthread_create_on_cpu(pthread_t * pthread, void *(*start_routine
     const auto r = pthread_create(pthread, &attr, start_routine, arg);
     pthread_attr_destroy(&attr);
     if (LLVM_UNLIKELY(r != 0)) {
+    #endif
         const auto r = pthread_create(pthread, nullptr, start_routine, arg);
         if (LLVM_UNLIKELY(r != 0)) __report_pthread_create_error(r);
+    #ifdef PIN_THREADS_TO_INDIVIDUAL_CORES
     }
+    #endif
 }
 
 #endif

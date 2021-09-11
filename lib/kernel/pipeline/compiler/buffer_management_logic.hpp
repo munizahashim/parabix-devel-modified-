@@ -435,6 +435,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
         Value * const producedDelta = b->CreateSub(fullyProduced, mInitiallyProducedItemCount[streamSet]);
         debugPrint(b, prefix + "_producedΔ = %" PRIu64, producedDelta);
         #endif
+
     }
 }
 
@@ -835,7 +836,7 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
     args[3] = ConstantInt::get(int32Ty, 1); // cache type?
 
     const auto cl = b->getCacheAlignment();
-    const auto toFetch = round_up_to(cl * 3, typeSize);
+    const auto toFetch = round_up_to<unsigned>(cl * 3, typeSize);
     Value * const baseAddr = b->CreatePointerCast(addr, b->getInt8PtrTy());
     for (unsigned i = 0; i < toFetch; i += cl) {
         args[0] = b->CreateGEP(baseAddr, b->getSize(i));

@@ -2,6 +2,9 @@
 #define BUFFER_SIZE_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
+#include <boost/icl/interval_set.hpp>
+
+using boost::icl::interval_set;
 
 namespace kernel {
 
@@ -16,19 +19,22 @@ constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS = 200;
 
 constexpr static unsigned BUFFER_SIZE_POPULATION_SIZE = 30;
 
-constexpr static unsigned BUFFER_SIZE_GA_ROUNDS = 100;
+constexpr static unsigned BUFFER_SIZE_GA_ROUNDS = 1000;
 
-constexpr static unsigned BUFFER_SIZE_GA_STALLS = 30;
+constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
+
+// Intel spatial prefetcher pulls cache line pairs, aligned to 128 bytes.
+constexpr static unsigned SPATIAL_PREFETCHER_ALIGNMENT = 128;
 
 constexpr static unsigned NON_HUGE_PAGE_SIZE = 4096;
 
-using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS, no_property, no_property>;
+using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
 
-using Interval = std::pair<unsigned, unsigned>;
+using IntervalSet = interval_set<unsigned>;
+
+using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
 
 struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
-
-    using ColourLine = flat_set<Interval>;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
@@ -54,7 +60,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repairCandidate(Candidate & /* candidate */) override { };
+    void repairCandidate(Candidate & /* candidate */) override { }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness
@@ -63,61 +69,43 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 
         assert (candidate.size() == candidateLength);
 
-        std::fill_n(remaining.begin(), candidateLength, 0);
-
-        GC_CL.clear();
-
+        unsigned max_colours = 0;
         for (unsigned i = 0; i < candidateLength; ++i) {
-            GC_ordering[candidate[i]] = i;
-        }
+            const auto a = candidate[i];
+            assert (a < candidateLength);
+            const auto w = weight[a];
 
-        size_t max_colours = 0;
-        for (unsigned i = 0; i < candidateLength; ++i) {
-            const auto u = candidate[i];
-            assert (u < candidateLength);
-            const auto w = weight[u];
-            assert (w > 0);
-            const auto pageWidth = round_up_to(w, NON_HUGE_PAGE_SIZE);
-
-            remaining[u] = out_degree(u, I);
-            unsigned first = 0;
-            for (const auto & interval : GC_CL) {
-                const auto last = interval.first;
-                assert (first <= last);
-                if ((first + pageWidth) < last) {
-                    break;
-                }
-                first = interval.second;
-            }
-            const auto last = first + w;
-            assert (first <= last);
-            if (last > max_colours) {
-                max_colours = last;
-            }
-
-            GC_Intervals[u] = std::make_pair(first, last);
-
-            GC_CL.emplace(first, last);
-
-            for (const auto e : make_iterator_range(out_edges(u, I))) {
-                const auto j = target(e, I);
-                if (GC_ordering[j] < i) {
-                    assert (remaining[j] > 0);
-                    remaining[j]--;
+            assert (GC_IntervalSet.empty());
+            for (unsigned j = 0; j != i; ++j) {
+                const auto b = candidate[j];
+                if (edge(a, b, I).second) {
+                    const auto & interval = GC_Intervals[b];
+                    auto l = interval.lower();
+                    auto r = interval.upper();
+                    if (edge(a, b, C).second) {
+                        l = round_down_to(l, NON_HUGE_PAGE_SIZE);
+                        r = round_up_to(r, NON_HUGE_PAGE_SIZE);
+                    }
+                    GC_IntervalSet.insert(Interval::right_open(l, r));
                 }
             }
 
-            for (unsigned j = 0; j <= i; ++j) {
-                const auto v = candidate[i];
-                assert (v < candidateLength);
-                if (remaining[v] == 0) {
-                    const auto f = GC_CL.find(GC_Intervals[v]);
-                    assert (f != GC_CL.end());
-                    GC_CL.erase(f);
-                    remaining[v] = -1;
-                }
-            }
+            unsigned start = 0;
+            unsigned end = w;
 
+            if (!GC_IntervalSet.empty()) {
+                for (const auto & interval : GC_IntervalSet) {
+                    if (end < interval.lower()) {
+                        break;
+                    } else {
+                        start = round_up_to(interval.upper(), SPATIAL_PREFETCHER_ALIGNMENT);
+                        end = start + w;
+                    }
+                }
+                GC_IntervalSet.clear();
+            }
+            GC_Intervals[a] = Interval::right_open(start, end);
+            max_colours = std::max(max_colours, end);
         }
 
         return max_colours;
@@ -126,16 +114,19 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief getIntervals
      ** ------------------------------------------------------------------------------------------------------------- */
-    std::vector<Interval> getIntervals(const OrderingDAWG & O) {
+    const std::vector<Interval> & getIntervals(const OrderingDAWG & O) {
         Candidate chosen;
         chosen.reserve(candidateLength);
         Vertex u = 0;
         while (out_degree(u, O) != 0) {
             const auto e = first_out_edge(u, O);
             const auto k = O[e];
+
+
             chosen.push_back(k);
             u = target(e, O);
         }
+        assert (chosen.size() == candidateLength);
         fitness(chosen);
         return GC_Intervals;
     }
@@ -144,17 +135,15 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
-                         , IntervalGraph && I
-                         , std::vector<size_t> && weight
-                         , std::vector<int> && remaining
-                         , random_engine & rng)
+                         , IntervalGraph && I, IntervalGraph && C
+                         , const std::vector<unsigned> & weight
+                         , random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
-                                             BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, rng)
+                                             BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, srcRng)
     , I(std::move(I))
-    , weight(std::move(weight))
-    , remaining(std::move(remaining))
-    , GC_Intervals(numOfLocalStreamSets)
-    , GC_ordering(numOfLocalStreamSets) {
+    , C(std::move(C))
+    , weight(weight)
+    , GC_Intervals(numOfLocalStreamSets) {
 
     }
 
@@ -162,13 +151,11 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 private:
 
     const IntervalGraph I;
-    const std::vector<size_t> weight;
+    const IntervalGraph C;
+    const std::vector<unsigned> & weight;
+    IntervalSet GC_IntervalSet;
 
-    std::vector<int> remaining;
     std::vector<Interval> GC_Intervals;
-    std::vector<unsigned> GC_ordering;
-
-    ColourLine GC_CL;
 
 };
 
@@ -191,19 +178,13 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
 
     const auto n = LastStreamSet - FirstStreamSet + 1U;
 
-    const auto firstKernel = out_degree(PipelineInput, mBufferGraph) == 0 ? FirstKernel : PipelineInput;
-    const auto lastKernel = in_degree(PipelineOutput, mBufferGraph) == 0 ? LastKernel : PipelineOutput;
-
     #warning TODO: can we insert a zero-extension region rather than having a secondary buffer?
 
-    unsigned numOfLocalStreamSets = 0;
-    IntervalGraph I(n);
-    std::vector<size_t> weight(n, 0);
+    std::vector<unsigned> weight(n, 0);
     std::vector<int> remaining(n, 0); // NOTE: signed int type is necessary here
-
-
     std::vector<unsigned> mapping(n, -1U);
-    const auto alignment = b->getCacheAlignment() * 2; // Intel L2 spatial prefetcher pulls cache block pairs
+
+    RequiredThreadLocalStreamSetMemory = 0;
 
     BEGIN_SCOPED_REGION
 
@@ -212,114 +193,200 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
 
     DataLayout DL(b->getModule());
 
-    for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+    auto optimizeThreadLocalBufferLayout = [&](const unsigned firstKernel, const unsigned lastKernel) {
 
-        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            const auto streamSet = target(output, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
+        unsigned count = 0;
 
-            if (bn.Locality == BufferLocality::ThreadLocal) {
-                // determine the number of bytes this streamset requires
-                const BufferPort & producerRate = mBufferGraph[output];
-                const Binding & outputRate = producerRate.Binding;
+        #ifndef NDEBUG
+        std::fill_n(mapping.begin(), n, -1U);
+        #endif
 
-                Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                const auto typeSize = DL.getTypeAllocSize(type);
-                #else
-                const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
-                #endif
-                assert (typeSize > 0);
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
-                const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
 
-                assert (c > 0);
-                const auto w = round_up_to(c * typeSize, alignment);
-                assert (w > 0);
-                assert ((w % alignment) == 0);
+                if (bn.Locality == BufferLocality::ThreadLocal) {
+                    // determine the number of bytes this streamset requires
+                    const BufferPort & producerRate = mBufferGraph[output];
+                    const Binding & outputRate = producerRate.Binding;
 
-                const auto i = streamSet - FirstStreamSet;
-                assert (i < n);
-
-                const auto j = numOfLocalStreamSets++;
-                mapping[i] = j;
-
-                weight[j] = w;
-
-                // record how many consumers exist before the streamset memory can be reused
-                // (NOTE: the +1 is to indicate this kernel requires each output streamset
-                // to be distinct even if one or more of the outputs is not used later.)
-                remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
-            }
-        }
-
-        // Mark any overlapping allocations in our interval graph.
-
-        for (unsigned i = 0; i < numOfLocalStreamSets; ++i) {
-            if (remaining[i] > 0) {
-                for (unsigned j = 0; j < i; ++j) {
-                    if (remaining[j] > 0) {
-                        add_edge(i, j, I);
-                    }
+                    Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
+                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+                    const auto typeSize = DL.getTypeAllocSize(type);
+                    #else
+                    const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
+                    #endif
+                    assert (typeSize > 0);
+                    const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
+                    assert (c > 0);
+                    const auto w = c * typeSize;
+                    assert (w > 0);
+                    const auto i = streamSet - FirstStreamSet;
+                    assert (i < n);
+                    const auto j = count++;
+                    assert (mapping[i] == -1U);
+                    mapping[i] = j;
+                    weight[j] = w;
                 }
             }
         }
 
-        auto markFinishedStreamSets = [&](const unsigned streamSet) {
-            const auto i = streamSet - FirstStreamSet;
-            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
-            assert (i < n);
-            const auto j = mapping[i];
-            if (j != -1U) {
-                assert (j < numOfLocalStreamSets);
-                remaining[j]--;
+        if (LLVM_UNLIKELY(count == 0)) {
+            return;
+        }
+
+        IntervalGraph I(count); // live memory interval graph
+
+        for (auto kernel = firstKernel, m = 0U; kernel <= lastKernel; ++kernel) {
+
+
+
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const auto i = streamSet - FirstStreamSet;
+                const auto j = mapping[i];
+                if (j != -1U) {
+                    // record how many consumers exist before the streamset memory can be reused
+                    // (NOTE: the +1 is to indicate this kernel requires each output streamset
+                    // to be distinct even if one or more of the outputs is not used later.)
+                    assert (j == m);
+                    assert (j < count);
+                    remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
+                    m = j + 1;
+                }
             }
-        };
 
-        // Determine which streamsets are no longer alive
-        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            markFinishedStreamSets(target(output, mBufferGraph));
+            // Mark any overlapping allocations in our interval graph.
+            for (unsigned i = 0; i != m; ++i) {
+                if (remaining[i] > 0) {
+                    for (unsigned j = 0; j != i; ++j) {
+                        if (remaining[j] > 0) {
+                            add_edge(j, i, I);
+                        }
+                    }
+                }
+            }
+
+            auto markFinishedStreamSets = [&](const unsigned streamSet) {
+                const auto i = streamSet - FirstStreamSet;
+                assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+                assert (i < n);
+                const auto j = mapping[i];
+                if (j != -1U) {
+                    assert (j < m);
+                    assert (remaining[j] > 0);
+                    remaining[j]--;
+                }
+            };
+
+            // Determine which streamsets are no longer alive
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                markFinishedStreamSets(target(output, mBufferGraph));
+            }
+            for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                markFinishedStreamSets(source(input, mBufferGraph));
+            }
         }
-        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            markFinishedStreamSets(source(input, mBufferGraph));
+
+        IntervalGraph C(count); // co-used interval graph
+
+        flat_set<unsigned> coused;
+
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+
+            assert (coused.empty());
+
+            for (const auto output : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                const auto streamSet = source(output, mBufferGraph);
+                const auto i = streamSet - FirstStreamSet;
+                const auto j = mapping[i];
+                if (j != -1U) {
+                    assert (j < count);
+                    coused.insert(j);
+                }
+            }
+
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const auto i = streamSet - FirstStreamSet;
+                const auto j = mapping[i];
+                if (j != -1U) {
+                    assert (j < count);
+                    coused.insert(j);
+                }
+            }
+
+            const auto n = coused.size();
+            if (n > 1) {
+                auto begin = coused.begin();
+                const auto end = coused.end();
+                for (auto i = begin; ++i != end; ) {
+                    const auto a = *i;
+                    assert (a < count);
+                    for (auto j = begin; j != i; ++j) {
+                        const auto b = *j;
+                        assert (b < a);
+                        add_edge(b, a, C);
+                    }
+                }
+            }
+            coused.clear();
+        }
+
+        BufferLayoutOptimizer BA(count, std::move(I), std::move(C), weight, rng);
+        BA.runGA();
+
+        const auto requiredMemory = BA.getBestFitnessValue();
+
+        assert (requiredMemory > 0);
+
+        RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
+
+        auto O = BA.getResult();
+
+        // TODO: apart from total memory, when would one layout be better than another?
+        // Can we quantify it based on the buffer graph order? Currently, we just take
+        // the first one.
+
+        const auto intervals = BA.getIntervals(O);
+
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const auto i = streamSet - FirstStreamSet;
+                const auto j = mapping[i];
+                if (j != -1U) {
+                    BufferNode & bn = mBufferGraph[streamSet];
+                    const auto & interval = intervals[j];
+                    bn.BufferStart = interval.lower();
+                }
+            }
+        }
+
+    };
+
+
+
+
+    auto currentPartitionId = KernelPartitionId[FirstKernel];
+    auto firstKernelInPartition = FirstKernel;
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+        const auto partitionId = KernelPartitionId[kernel];
+        if (partitionId != currentPartitionId) {
+            optimizeThreadLocalBufferLayout(firstKernelInPartition, kernel - 1U);
+            // set the first kernel for the next partition
+            firstKernelInPartition = kernel;
+            currentPartitionId = partitionId;
         }
     }
-
-    END_SCOPED_REGION
-
-    if (LLVM_UNLIKELY(numOfLocalStreamSets == 0)) {
-        return;
-    }
-
-    BufferLayoutOptimizer BA(numOfLocalStreamSets,
-                             std::move(I), std::move(weight), std::move(remaining), rng);
-
-    BA.runGA();
-
-    RequiredThreadLocalStreamSetMemory = BA.getBestFitnessValue();
-
-    auto O = BA.getResult();
-
-    // TODO: apart from total memory, when would one layout be better than another?
-    // Can we quantify it based on the buffer graph order? Currently, we just take
-    // the first one.
-
-    const auto intervals = BA.getIntervals(O);
-
-    for (unsigned i = 0; i < n; ++i) {
-        const auto j = mapping[i];
-        if (j != -1U) {
-            BufferNode & bn = mBufferGraph[FirstStreamSet + i];
-            const auto & interval = intervals[j];
-            bn.BufferStart = interval.first;
-            assert ((bn.BufferStart % alignment) == 0);
-        }
-    }
-
-    assert (RequiredThreadLocalStreamSetMemory > 0);
-
+    optimizeThreadLocalBufferLayout(firstKernelInPartition, LastKernel);
 }
 
 }
+
+} // end of kernel namespace
 
 #endif // BUFFER_SIZE_ANALYSIS_HPP

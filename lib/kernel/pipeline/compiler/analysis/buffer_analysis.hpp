@@ -464,7 +464,6 @@ void PipelineAnalysis::identifyOwnedBuffers() {
  * @brief identifyLinearBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyLinearBuffers() {
-#ifndef FORCE_ALL_STREAMSETS_TO_BE_LINEAR
 
     // All pipeline I/O must be linear
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
@@ -521,7 +520,8 @@ void PipelineAnalysis::identifyLinearBuffers() {
                 default: break;
             }
         }
-        return false;
+        const ProcessingRate & rate = binding.getRate();
+        return !rate.isFixed();
     };
 
     // If the binding attributes of the producer/consumer(s) of a streamSet indicate
@@ -529,6 +529,10 @@ void PipelineAnalysis::identifyLinearBuffers() {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & N = mBufferGraph[streamSet];
+        #if defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR) && defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR)
+        N.IsLinear = true;
+        #else
+
         if (N.IsLinear) {
             continue;
         }
@@ -537,7 +541,7 @@ void PipelineAnalysis::identifyLinearBuffers() {
         const BufferPort & producerRate = mBufferGraph[binding];
         const Binding & output = producerRate.Binding;
 
-        #ifdef FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR
+        #if defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR) || defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR)
         const auto producer = source(binding, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
         #endif
@@ -552,15 +556,22 @@ void PipelineAnalysis::identifyLinearBuffers() {
                     N.IsLinear = true;
                     break;
                 }
+                #ifdef FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR
+                if (KernelPartitionId[target(binding, mBufferGraph)] == partitionId) {
+                    N.IsLinear = true;
+                    break;
+                }
+                #endif
                 #ifdef FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR
-                const auto consumer = target(binding, mBufferGraph);
-                if (KernelPartitionId[consumer] != partitionId) {
+                if (KernelPartitionId[target(binding, mBufferGraph)] != partitionId) {
                     N.IsLinear = true;
                     break;
                 }
                 #endif
            }
         }
+
+        #endif
     }
 
 #if 0
@@ -584,12 +595,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
     }
 #endif
 
-#else
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & N = mBufferGraph[streamSet];
-        N.IsLinear = true;
-    }
-#endif
 }
 
 

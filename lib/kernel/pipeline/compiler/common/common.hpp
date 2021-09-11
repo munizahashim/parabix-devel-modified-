@@ -405,7 +405,14 @@ inline bool has_child(const typename graph_traits<Graph>::vertex_descriptor u,
     return false;
 }
 
-inline size_t round_up_to(const size_t x, const size_t y) {
+template <typename IntTy>
+inline IntTy round_down_to(const IntTy x, const IntTy y) {
+    assert(is_power_2(y));
+    return x & -y;
+}
+
+template <typename IntTy>
+inline IntTy round_up_to(const IntTy x, const IntTy y) {
     assert(is_power_2(y));
     return (x + y - 1) & -y;
 }

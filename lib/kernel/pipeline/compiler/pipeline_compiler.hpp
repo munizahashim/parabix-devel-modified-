@@ -133,9 +133,9 @@ public:
 
     unsigned getCacheLineGroupId(const unsigned kernelId) const {
         #ifdef GROUP_SHARED_KERNEL_STATE_INTO_CACHE_LINE_ALIGNED_REGIONS
-        if (mNumOfThreads > 1) {
+        // if (mNumOfThreads > 1) {
             return kernelId;
-        }
+        // }
         #endif
         return 0;
     }
