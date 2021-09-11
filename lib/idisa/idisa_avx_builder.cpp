@@ -279,19 +279,26 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_advance(Value * a, Valu
     }
 }
 
-Value * IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract_mask) {
+std::vector<Value *> IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
     if (hasBMI2 && ((fieldwidth == 64) || (fieldwidth == 32))) {
         Function * PEXT_f = (fieldwidth == 64) ? Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_64)
                                             : Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
         const auto n = getBitBlockWidth() / fieldwidth;
-        Value * result = UndefValue::get(fwVectorType(fieldwidth));
+        std::vector<Value *> mask(n);
         for (unsigned i = 0; i < n; i++) {
-            Value * v_i = mvmd_extract(fieldwidth, v, i);
-            Value * mask_i = mvmd_extract(fieldwidth, extract_mask, i);
-            Value * bits = CreateCall(PEXT_f->getFunctionType(), PEXT_f, {v_i, mask_i});
-            result = mvmd_insert(fieldwidth, result, bits, i);
+            mask[i] = mvmd_extract(fieldwidth, extract_mask, i);
         }
-        return bitCast(result);
+        std::vector<Value *> w(v.size());
+        for (unsigned j = 0; j < v.size(); j++) {
+            Value * result = UndefValue::get(fwVectorType(fieldwidth));
+            for (unsigned i = 0; i < n; i++) {
+                Value * v_i = mvmd_extract(fieldwidth, v[j], i);
+                Value * bits = CreateCall(PEXT_f->getFunctionType(), PEXT_f, {v_i, mask[i]});
+                result = mvmd_insert(fieldwidth, result, bits, i);
+            }
+            w[j] = bitCast(result);
+        }
+        return w;
     }
     return IDISA_Builder::simd_pext(fieldwidth, v, extract_mask);
 }

@@ -482,20 +482,31 @@ Value * IDISA_Builder::simd_srlv(unsigned fw, Value * v, Value * shifts) {
     return w;
 }
 
-Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract_mask) {
+std::vector<Value *> IDISA_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
     Value * delcounts = CreateNot(extract_mask);  // initially deletion counts per 1-bit field
-    Value * w = simd_and(extract_mask, v);
+    std::vector<Value *> w(v.size());
+    for (unsigned i = 0; i < v.size(); i++) {
+        w[i] = simd_and(extract_mask, v[i]);
+    }
     for (unsigned fw = 2; fw < fieldwidth; fw = fw * 2) {
         Value * shift_fwd_amts = simd_srli(fw, simd_select_lo(fw*2, delcounts), fw/2);
         Value * shift_back_amts = simd_select_lo(fw, simd_select_hi(fw*2, delcounts));
-        w = simd_or(simd_sllv(fw, simd_select_lo(fw*2, w), shift_fwd_amts),
-                    simd_srlv(fw, simd_select_hi(fw*2, w), shift_back_amts));
+        for (unsigned i = 0; i < v.size(); i++) {
+            w[i] = simd_or(simd_sllv(fw, simd_select_lo(fw*2, w[i]), shift_fwd_amts),
+                           simd_srlv(fw, simd_select_hi(fw*2, w[i]), shift_back_amts));
+        }
         delcounts = simd_add(fw, simd_select_lo(fw, delcounts), simd_srli(fw, delcounts, fw/2));
     }
     // Now shift back all fw fields.
     Value * shift_back_amts = simd_select_lo(fieldwidth, delcounts);
-    w = simd_srlv(fieldwidth, w, shift_back_amts);
+    for (unsigned i = 0; i < v.size(); i++) {
+        w[i] = simd_srlv(fieldwidth, w[i], shift_back_amts);
+    }
     return w;
+}
+
+Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract_mask) {
+    return simd_pext(fieldwidth, std::vector<Value *>{v}, extract_mask)[0];
 }
 
 Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {

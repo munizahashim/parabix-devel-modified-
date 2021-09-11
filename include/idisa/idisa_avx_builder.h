@@ -62,7 +62,7 @@ public:
     llvm::Value * mvmd_sll(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe = false) override;
     llvm::Value * mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) override;
     llvm::Value * mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
-    llvm::Value * simd_pext(unsigned fw, llvm::Value * v, llvm::Value * extract_mask) override;
+    std::vector<llvm::Value *> simd_pext(unsigned fw, std::vector<llvm::Value *> v, llvm::Value * extract_mask) override;
     llvm::Value * simd_pdep(unsigned fw, llvm::Value * v, llvm::Value * deposit_mask) override;
 
     ~IDISA_AVX2_Builder() {}

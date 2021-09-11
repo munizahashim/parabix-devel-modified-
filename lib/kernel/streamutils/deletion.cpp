@@ -188,11 +188,9 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
             }
         }
     } else {
-        Value * delMask = kb->simd_not(maskVec[0]);
-        const auto move_masks = parallel_prefix_deletion_masks(kb, mCompressFieldWidth, delMask);
-        for (unsigned j = 0; j < input.size(); ++j) {
-            Value * output = apply_parallel_prefix_deletion(kb, mCompressFieldWidth, delMask, move_masks, input[j]);
-            kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), blockOffsetPhi, output);
+        std::vector<Value *> output = kb->simd_pext(mCompressFieldWidth, input, maskVec[0]);
+        for (unsigned j = 0; j < output.size(); ++j) {
+            kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), blockOffsetPhi, output[j]);
         }
     }
     Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
