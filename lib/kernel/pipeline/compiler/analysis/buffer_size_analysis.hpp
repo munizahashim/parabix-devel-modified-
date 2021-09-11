@@ -121,8 +121,6 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
         while (out_degree(u, O) != 0) {
             const auto e = first_out_edge(u, O);
             const auto k = O[e];
-
-
             chosen.push_back(k);
             u = target(e, O);
         }

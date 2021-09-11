@@ -218,7 +218,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
 
         // TODO: TraceDynamicBuffers needs to be fixed to permit thread local buffers.
 
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             if (isa<DynamicBuffer>(buffer)) {
 
                 const auto pe = in_edge(streamSet, mBufferGraph);

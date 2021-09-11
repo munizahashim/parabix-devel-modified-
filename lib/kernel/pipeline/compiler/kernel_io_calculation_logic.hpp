@@ -824,13 +824,21 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 
-    buffer->reserveCapacity(b, produced, consumed, required);
-
-    recordBufferExpansionHistory(b, outputPort, buffer);
+    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
     #endif
+
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers && isa<DynamicBuffer>(buffer))) {
+        BasicBlock * const recordHistory = b->CreateBasicBlock(prefix + "recordExpansion", mKernelLoopCall);
+        BasicBlock * const resumeAfterRecording = b->CreateBasicBlock(prefix + "_resumeAfterRecording", mKernelLoopCall);
+        b->CreateCondBr(mallocRequired, recordHistory, resumeAfterRecording);
+        b->SetInsertPoint(recordHistory);
+        recordBufferExpansionHistory(b, outputPort, buffer);
+        b->CreateBr(resumeAfterRecording);
+        b->SetInsertPoint(resumeAfterRecording);
+    }
 
     auto & afterExpansion = mWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;
@@ -1286,7 +1294,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     const StreamSetBuffer * sourceBuffer = nullptr;
 
-    unsigned numOfPeekableItems = 0;
+//    unsigned numOfPeekableItems = 0;
 
     if (port.Type == PortType::Input) {
         initialItemCount = mAlreadyProcessedPhi[port];
@@ -1295,7 +1303,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyForwards) {
             sourceBuffer = bn.Buffer;
-            numOfPeekableItems = bn.CopyForwards;
+//            numOfPeekableItems = bn.CopyForwards;
 
             nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
@@ -1312,7 +1320,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyBack) {
             sourceBuffer = bn.Buffer;
-            numOfPeekableItems = bn.CopyBack;
+//            numOfPeekableItems = bn.CopyBack;
 
             nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);

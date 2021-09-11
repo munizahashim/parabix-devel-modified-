@@ -724,7 +724,7 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
 
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
 
         const auto firstBuffer = PipelineOutput + 1;
         const auto lastBuffer = num_vertices(mBufferGraph);
@@ -754,7 +754,7 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                     b->CreateStore(SZ_ONE, b->CreateGEP(traceData, {ZERO, ONE}));
                     // then the initial record
                     b->CreateStore(SZ_ZERO, b->CreateGEP(entryData, {ZERO, ZERO}));
-                    b->CreateStore(buffer->getCapacity(b), b->CreateGEP(entryData, {ZERO, ONE}));
+                    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryData, {ZERO, ONE}));
                     const auto n = entryTy->getArrayNumElements(); assert (n > 3);
                     unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
                     Constant * const length = b->getSize(sizeTyWidth * (n - 2));
@@ -772,57 +772,56 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
 void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSetPort outputPort,
                                                     const StreamSetBuffer * const buffer) const {
 
-    if (LLVM_UNLIKELY(mTraceDynamicBuffers && isa<DynamicBuffer>(buffer))) {
+    assert (mTraceDynamicBuffers && isa<DynamicBuffer>(buffer));
 
-        const auto prefix = makeBufferName(mKernelId, outputPort);
+    const auto prefix = makeBufferName(mKernelId, outputPort);
 
-        Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
-        Type * const traceDataTy = traceData->getType()->getPointerElementType();
-        Type * const entryTy = traceDataTy->getStructElementType(0)->getPointerElementType();
+    Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+    Type * const traceDataTy = traceData->getType()->getPointerElementType();
+    Type * const entryTy = traceDataTy->getStructElementType(0)->getPointerElementType();
 
-        Constant * const ZERO = b->getInt32(0);
-        Constant * const ONE = b->getInt32(1);
-        Constant * const TWO = b->getInt32(2);
-        Constant * const THREE = b->getInt32(3);
+    Constant * const ZERO = b->getInt32(0);
+    Constant * const ONE = b->getInt32(1);
+    Constant * const TWO = b->getInt32(2);
+    Constant * const THREE = b->getInt32(3);
 
-        Value * const traceLogArrayField = b->CreateGEP(traceData, {ZERO, ZERO});
-        Value * entryArray = b->CreateLoad(traceLogArrayField);
-        Value * const traceLogCountField = b->CreateGEP(traceData, {ZERO, ONE});
-        Value * const traceIndex = b->CreateLoad(traceLogCountField);
-        Value * const traceCount = b->CreateAdd(traceIndex, b->getSize(1));
+    Value * const traceLogArrayField = b->CreateGEP(traceData, {ZERO, ZERO});
+    Value * entryArray = b->CreateLoad(traceLogArrayField);
+    Value * const traceLogCountField = b->CreateGEP(traceData, {ZERO, ONE});
+    Value * const traceIndex = b->CreateLoad(traceLogCountField);
+    Value * const traceCount = b->CreateAdd(traceIndex, b->getSize(1));
 
-        entryArray = b->CreateRealloc(entryTy, entryArray, traceCount);
-        b->CreateStore(entryArray, traceLogArrayField);
-        b->CreateStore(traceCount, traceLogCountField);
+    entryArray = b->CreateRealloc(entryTy, entryArray, traceCount);
+    b->CreateStore(entryArray, traceLogArrayField);
+    b->CreateStore(traceCount, traceLogCountField);
 
-        // segment num  0
-        b->CreateStore(mSegNo, b->CreateGEP(entryArray, {traceIndex, ZERO}));
-        // new capacity 1
-        b->CreateStore(buffer->getCapacity(b), b->CreateGEP(entryArray, {traceIndex, ONE}));
-        // produced item count 2
-        Value * const produced = mAlreadyProducedPhi[outputPort];
-        b->CreateStore(produced, b->CreateGEP(entryArray, {traceIndex, TWO}));
+    // segment num  0
+    b->CreateStore(mSegNo, b->CreateGEP(entryArray, {traceIndex, ZERO}));
+    // new capacity 1
+    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryArray, {traceIndex, ONE}));
+    // produced item count 2
+    Value * const produced = mAlreadyProducedPhi[outputPort];
+    b->CreateStore(produced, b->CreateGEP(entryArray, {traceIndex, TWO}));
 
-        // consumer processed item count [3,n)
-        Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+    // consumer processed item count [3,n)
+    Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
 
-        const auto n = entryTy->getArrayNumElements(); assert (n > 3);
-        assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
+    const auto n = entryTy->getArrayNumElements(); assert (n > 3);
+    assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
 
-        Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });
-        Value * const logPtr = b->CreateGEP(entryArray, {traceIndex, THREE});
-        unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
-        Constant * const length = b->getSize(sizeTyWidth * (n - 3));
-        b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+    Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });
+    Value * const logPtr = b->CreateGEP(entryArray, {traceIndex, THREE});
+    unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
+    Constant * const length = b->getSize(sizeTyWidth * (n - 3));
+    b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
 
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printOptionalBufferExpansionHistory
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
 
         // Print the title line
         Function * Dprintf = b->GetDprintf();
