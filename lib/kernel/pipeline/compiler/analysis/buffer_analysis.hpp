@@ -86,6 +86,8 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 cannotBePlacedIntoThreadLocalMemory = true;
             }
 
+            BufferNode & bn = mBufferGraph[streamSet];
+
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
                     case AttrId::Add:                        
@@ -120,11 +122,13 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     case AttrId::ManagedBuffer:
                         bp.IsManaged = true;
                         break;
+                    case AttrId::EmptyWriteOverflow:
+                        bn.OverflowCapacity = std::max(bn.OverflowCapacity, 1U);
+                        break;
                     default: break;
                 }
             }
 
-            BufferNode & bn = mBufferGraph[streamSet];
             if (cannotBePlacedIntoThreadLocalMemory) {
                 bn.Locality = BufferLocality::PartitionLocal;
             }
@@ -603,24 +607,29 @@ void PipelineAnalysis::identifyLinearBuffers() {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 
-    const auto firstKernel = out_degree(PipelineInput, mBufferGraph) == 0 ? FirstKernel : PipelineInput;
-    const auto lastKernel = in_degree(PipelineOutput, mBufferGraph) == 0 ? LastKernel : PipelineOutput;
+//    const auto firstKernel = out_degree(PipelineInput, mBufferGraph) == 0 ? FirstKernel : PipelineInput;
+//    const auto lastKernel = in_degree(PipelineOutput, mBufferGraph) == 0 ? LastKernel : PipelineOutput;
     #ifndef TEST_ALL_KERNEL_INPUTS
     auto currentPartitionId = -1U;
     #endif
-    for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+//    flat_set<unsigned> fixedPartitionInputs;
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         #ifndef TEST_ALL_KERNEL_INPUTS
         const auto partitionId = KernelPartitionId[kernel];
         const bool isPartitionRoot = (partitionId != currentPartitionId);
         currentPartitionId = partitionId;
         #endif
+//        assert (fixedPartitionInputs.empty());
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.CanModifySegmentLength = true;
             #else
             if (isPartitionRoot) {
-                // TODO: create symbolic rate ids
+//                const auto id = inputRate.SymbolicRateId;
+//                assert (id > 0);
+//                const auto alreadyTested = fixedPartitionInputs.insert(id).second;
+//                inputRate.CanModifySegmentLength = alreadyTested;
                 inputRate.CanModifySegmentLength = true;
             } else {
                 const auto streamSet = source(e, mBufferGraph);
@@ -629,6 +638,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
+//        if (isPartitionRoot) {
+//            fixedPartitionInputs.clear();
+//        }
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
@@ -750,8 +762,10 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
         auto requiredSize = std::max(reqSize1, reqSize2);
 
-        bn.OverflowCapacity = overflowSize;
-        bn.UnderflowCapacity = underflowSize;
+        assert (requiredSize > 0);
+
+        bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
+        bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
         bn.RequiredCapacity = requiredSize;
 
     }

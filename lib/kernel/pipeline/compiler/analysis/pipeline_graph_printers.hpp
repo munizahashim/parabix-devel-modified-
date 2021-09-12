@@ -450,7 +450,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         }
         // out << " {G" << pd.GlobalPortId << ",L" << pd.LocalPortId << '}';
 
-
+        out << " {" << port.SymbolicRateId << '}';
 
         if (port.IsPrincipal) {
             out << " [P]";

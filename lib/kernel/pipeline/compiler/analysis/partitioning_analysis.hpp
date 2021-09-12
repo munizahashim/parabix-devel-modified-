@@ -633,18 +633,8 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         const auto output = in_edge(streamSet, mBufferGraph);
         const auto & outputPort = mBufferGraph[output];
         const Binding & binding = outputPort.Binding;
-        const auto & rate = binding.getRate();
 
-        bool hasVarOutput = false;
-        switch (rate.getKind()) {
-            case RateId::Fixed:
-            case RateId::Greedy:
-                if (LLVM_LIKELY(!binding.hasAttribute(AttrId::Deferred))) {
-                    break;
-                }
-            default:
-                hasVarOutput = true;
-        }
+        const auto hasVarOutput = isNonSynchronousRate(binding);
 
         const auto producer = source(output, mBufferGraph);
         const auto pid = KernelPartitionId[producer];

@@ -958,9 +958,9 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             Value * const unreadDataPtr = b->CreateInBoundsGEP(virtualBase, consumedChunks);
 
-            Value * const chunksToCopy = b->CreateSub(requiredChunks, consumedChunks);
-            Value * const overwriteUpToPtr = b->CreateInBoundsGEP(mallocAddress, chunksToCopy);
-            Value * const canCopy = b->CreateICmpULE(overwriteUpToPtr, unreadDataPtr);
+            Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
+            Value * const reserveUpToPtr = b->CreateInBoundsGEP(mallocAddress, chunksToReserve);
+            Value * const canCopy = b->CreateICmpULE(reserveUpToPtr, unreadDataPtr);
             b->CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
 
             b->SetInsertPoint(copyBack);
@@ -970,7 +970,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const newInternalCapacity = b->CreateAdd(internalCapacity, b->CreateRoundUp(chunksToCopy, internalCapacity));
+            Value * const newInternalCapacity = b->CreateAdd(internalCapacity, b->CreateRoundUp(chunksToReserve, internalCapacity));
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);

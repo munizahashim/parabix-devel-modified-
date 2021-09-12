@@ -263,11 +263,17 @@ struct BufferNode {
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
-    size_t   BufferStart = 0;
+    unsigned BufferStart = 0;
 
-    size_t   RequiredCapacity = 0;
-    size_t   OverflowCapacity = 0;
-    size_t   UnderflowCapacity = 0;
+    unsigned RequiredCapacity = 0;
+    unsigned OverflowCapacity = 0;
+    unsigned UnderflowCapacity = 0;
+
+    // How many items will the producer permit to be unconsumed
+    // before deciding whether to defer invoking a kernel.
+    // 0 = infinite
+    unsigned MaxUnconsumedThreshold = 0;
+
 
     unsigned OutputItemCountId = 0;
 
@@ -305,9 +311,8 @@ struct BufferPort {
     Rational Maximum;
 
     bool CanModifySegmentLength = false;
-    #ifdef COMPUTE_SYMBOLIC_RATE_IDS
+
     unsigned SymbolicRateId = 0U;
-    #endif
 
     // binding attributes
     unsigned Add = 0;

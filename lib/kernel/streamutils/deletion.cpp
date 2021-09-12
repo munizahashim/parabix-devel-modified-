@@ -14,7 +14,7 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 
 
-#define COMPARISON_STUDY
+// #define COMPARISON_STUDY
 
 using namespace llvm;
 
@@ -288,7 +288,7 @@ StreamCompressKernel::StreamCompressKernel(BuilderRef b
 : MultiBlockKernel(b, "streamCompress" + std::to_string(FieldWidth) + "_" + std::to_string(source->getNumElements()),
 {Binding{"extractionMask", extractionMask, FixedRate(), Principal()},
     Binding{"sourceStreamSet", source, FixedRate(), ZeroExtended()}},
-{Binding{"compressedOutput", compressedOutput, PopcountOf("extractionMask")}},
+{Binding{"compressedOutput", compressedOutput, PopcountOf("extractionMask"), EmptyWriteOverflow()}},
 {}, {}, {})
 , mCompressedFieldWidth(FieldWidth)
 , mStreamCount(source->getNumElements()) {
@@ -487,6 +487,306 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
 
     b->SetInsertPoint(segmentExit);
 }
+
+
+
+#if 0
+
+// alternate sparse-data two-iterator approach to streamcompress; not well tested.
+
+void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+    IntegerType * const fwTy = b->getIntNTy(mCompressedFieldWidth);
+    IntegerType * const sizeTy = b->getSizeTy();
+    const unsigned numFields = b->getBitBlockWidth() / mCompressedFieldWidth;
+    Constant * zeroSplat = Constant::getNullValue(b->fwVectorType(mCompressedFieldWidth));
+    Constant * oneSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, 1));
+    Constant * CFW = ConstantInt::get(fwTy, mCompressedFieldWidth);
+    Constant * fwSplat = ConstantVector::getSplat(numFields, CFW);
+    Constant * numFieldConst = ConstantInt::get(fwTy, numFields);
+    Constant * fwMaskSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, mCompressedFieldWidth - 1));
+    Constant * BLOCK_WIDTH = ConstantInt::get(fwTy, b->getBitBlockWidth());
+    Constant * BLOCK_MASK = ConstantInt::get(fwTy, b->getBitBlockWidth() - 1);
+
+    ConstantInt * const sz_ZERO = ConstantInt::get(sizeTy, 0);
+    ConstantInt * const sz_ONE = ConstantInt::get(sizeTy, 1);
+    ConstantInt * const sz_STEP_SIZE = ConstantInt::get(sizeTy, sizeTy->getBitWidth());
+
+    BasicBlock * const buildIteratorMask = b->CreateBasicBlock("buildIteratorMask");
+    BasicBlock * const checkIteratorMask = b->CreateBasicBlock("checkIteratorMask");
+    BasicBlock * const compressNextStride = b->CreateBasicBlock("compressNextStride");
+
+    BasicBlock * const checkForAnotherStride = b->CreateBasicBlock("checkForAnotherStride");
+
+    BasicBlock * const segmentDone = b->CreateBasicBlock("segmentDone");
+    BasicBlock * const writePartialData = b->CreateBasicBlock("writePartialData");
+    BasicBlock * const segmentExit = b->CreateBasicBlock("segmentExit");
+
+    Value * const produced = b->getProducedItemCount("compressedOutput");
+    Value * const pendingItemCount = b->CreateAnd(b->CreateZExtOrTrunc(produced, fwTy), BLOCK_MASK);
+
+    // TODO: we could make this kernel stateless but would have to use "bitblock_mask_to" on the
+    // input to account for the fact the pipeline doesn't zero out output stream data when it
+    // reuses it.
+
+    SmallVector<Value *, 16> pendingData(mStreamCount);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        pendingData[i] = b->getScalarField("pendingOutputBlock_" + std::to_string(i));
+    }
+
+    Value * const tooFew = b->CreateICmpULT(numOfBlocks, sz_STEP_SIZE);
+    Value * const initialMaxIterationStrides = b->CreateSelect(tooFew, numOfBlocks, sz_STEP_SIZE);
+
+    BasicBlock * const entry = b->GetInsertBlock();
+    b->CreateBr(buildIteratorMask);
+
+    // Main Loop
+    b->SetInsertPoint(buildIteratorMask);
+    PHINode * const inputOffsetPhi = b->CreatePHI(sizeTy, 3);
+    PHINode * const outerOutputOffsetPhi = b->CreatePHI(sizeTy, 3);
+    PHINode * const outerPendingItemsPhi = b->CreatePHI(fwTy, 3);
+    PHINode * const maxIterationStridesPhi = b->CreatePHI(sizeTy, 3);
+
+    SmallVector<PHINode *, 16> outerPendingDataPhi(mStreamCount);
+
+    inputOffsetPhi->addIncoming(sz_ZERO, entry);
+    inputOffsetPhi->addIncoming(inputOffsetPhi, buildIteratorMask);
+
+    outerOutputOffsetPhi->addIncoming(sz_ZERO, entry);
+    outerOutputOffsetPhi->addIncoming(outerOutputOffsetPhi, buildIteratorMask);
+
+    outerPendingItemsPhi->addIncoming(pendingItemCount, entry);
+    outerPendingItemsPhi->addIncoming(outerPendingItemsPhi, buildIteratorMask);
+
+    maxIterationStridesPhi->addIncoming(initialMaxIterationStrides, entry);
+    maxIterationStridesPhi->addIncoming(maxIterationStridesPhi, buildIteratorMask);
+
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        PHINode * const phi = b->CreatePHI(pendingData[i]->getType(), 3);
+        phi->addIncoming(pendingData[i], entry);
+        phi->addIncoming(phi, buildIteratorMask);
+        outerPendingDataPhi[i] = phi;
+    }
+
+    PHINode * const maskOffsetPhi = b->CreatePHI(sizeTy, 3);
+    maskOffsetPhi->addIncoming(sz_ZERO, entry);
+    maskOffsetPhi->addIncoming(sz_ZERO, checkForAnotherStride);
+
+    PHINode * const iteratorMaskPhi = b->CreatePHI(sizeTy, 3);
+    iteratorMaskPhi->addIncoming(sz_ZERO, entry);
+    iteratorMaskPhi->addIncoming(sz_ZERO, checkForAnotherStride);
+
+    Value * const offset = b->CreateOr(inputOffsetPhi, maskOffsetPhi);
+    Value * const pendingMask = b->loadInputStreamBlock("extractionMask", sz_ZERO, offset);
+
+    Value * const hasAnyBit = b->CreateZExt(b->bitblock_any(pendingMask), sizeTy);
+    Value * const maskBit = b->CreateShl(hasAnyBit, maskOffsetPhi);
+    Value * const iteratorMask = b->CreateOr(iteratorMaskPhi, maskBit);
+
+    Value * const nextMaskOffset = b->CreateAdd(maskOffsetPhi, sz_ONE);
+    maskOffsetPhi->addIncoming(nextMaskOffset, buildIteratorMask);
+    iteratorMaskPhi->addIncoming(iteratorMask, buildIteratorMask);
+    Value * const finishedMask = b->CreateICmpNE(nextMaskOffset, maxIterationStridesPhi);
+    b->CreateCondBr(finishedMask, buildIteratorMask, checkIteratorMask);
+
+    b->SetInsertPoint(checkIteratorMask);
+    Value * const hasAnyMarks = b->CreateICmpNE(iteratorMask, sz_ZERO);
+    b->CreateLikelyCondBr(hasAnyMarks, compressNextStride, checkForAnotherStride);
+
+    b->SetInsertPoint(compressNextStride);
+    PHINode * const outputOffsetPhi = b->CreatePHI(sizeTy, 2);
+    PHINode * const pendingItemsPhi = b->CreatePHI(fwTy, 2);
+    PHINode * const currentIteratorMaskPhi = b->CreatePHI(sizeTy, 2);
+    SmallVector<PHINode *, 16> pendingDataPhi(mStreamCount);
+
+    outputOffsetPhi->addIncoming(outerOutputOffsetPhi, checkIteratorMask);
+    pendingItemsPhi->addIncoming(pendingItemCount, checkIteratorMask);
+    currentIteratorMaskPhi->addIncoming(iteratorMask, checkIteratorMask);
+
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        PHINode * const phi = b->CreatePHI(outerPendingDataPhi[i]->getType(), 3);
+        phi->addIncoming(outerPendingDataPhi[i], checkIteratorMask);
+        pendingDataPhi[i] = phi;
+    }
+    Value * const pos = b->CreateCountForwardZeroes(currentIteratorMaskPhi);
+    Value * const bitMark = b->CreateShl(sz_ONE, pos);
+    Value * const nextIteratorMask = b->CreateXor(currentIteratorMaskPhi, bitMark);
+    currentIteratorMaskPhi->addIncoming(nextIteratorMask, compressNextStride);
+
+    Value * const inputOffset = b->CreateOr(inputOffsetPhi, pos);
+    Value * const extractionMask = b->loadInputStreamBlock("extractionMask", sz_ZERO, inputOffset);
+    Value * const fieldPopCounts = b->simd_popcount(mCompressedFieldWidth, extractionMask);
+    // For each field determine the (partial) sum popcount of all fields up to and
+    // including the current field.
+    Value * const partialSum = b->hsimd_partial_sum(mCompressedFieldWidth, fieldPopCounts);
+    Value * const newPendingItems = b->mvmd_extract(mCompressedFieldWidth, partialSum, numFields - 1);
+
+    //
+    // Now determine for each source field the output offset of the first bit.
+    // Note that this depends on the number of pending bits.
+    //
+    Value * pendingOffset = b->CreateURem(pendingItemsPhi, CFW);
+    Value * splatPending = b->simd_fill(mCompressedFieldWidth, b->CreateZExtOrTrunc(pendingOffset, fwTy));
+    Value * pendingFieldIdx = b->CreateUDiv(pendingItemsPhi, CFW);
+    Value * offsets = b->simd_add(mCompressedFieldWidth, b->mvmd_slli(mCompressedFieldWidth, partialSum, 1), splatPending);
+    offsets = b->simd_and(offsets, fwMaskSplat); // parallel URem fw
+
+    // Determine the relative field number for each output field.   Note that the total
+    // number of fields involved is numFields + 1.   However, the first field always
+    // be immediately combined into the current pending data field, so we calculate
+    // field numbers for all subsequent fields, (the fields that receive overflow bits).
+    Value * pendingSum = b->simd_add(mCompressedFieldWidth, partialSum, splatPending);
+    Value * fieldNo = b->simd_srli(mCompressedFieldWidth, pendingSum, std::log2(mCompressedFieldWidth));
+    // Now process the input data block of each stream in the input stream set.
+    //
+    // First load all the stream set blocks and the pending data.
+    SmallVector<Value *, 16> sourceBlock(mStreamCount);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        sourceBlock[i] = b->loadInputStreamBlock("sourceStreamSet", b->getInt32(i), inputOffset);
+    }
+    // Now separate the bits of each field into ones that go into the current field
+    // and ones that go into the overflow field.   Extract the first field separately,
+    // and then shift and combine subsequent fields.
+    SmallVector<Value *, 16> pendingOutput(mStreamCount);
+    SmallVector<Value *, 16> outputFields(mStreamCount);
+    Value * backShift = b->simd_sub(mCompressedFieldWidth, fwSplat, offsets);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        Value * currentFieldBits = b->simd_sllv(mCompressedFieldWidth, sourceBlock[i], offsets);
+        Value * nextFieldBits = b->simd_srlv(mCompressedFieldWidth, sourceBlock[i], backShift);
+        Value * firstField = b->mvmd_extract(mCompressedFieldWidth, currentFieldBits, 0);
+        Value * vec1 = b->CreateInsertElement(zeroSplat, firstField, pendingFieldIdx);
+        pendingOutput[i] = b->simd_or(pendingDataPhi[i], vec1);
+        // shift back currentFieldBits to combine with nextFieldBits.
+        outputFields[i] = b->simd_or(b->mvmd_srli(mCompressedFieldWidth, currentFieldBits, 1), nextFieldBits);
+    }
+    // Now combine forward all fields with the same field number.  This may require
+    // up to log2 numFields steps.
+    for (unsigned j = 1; j < numFields; j*=2) {
+        Value * select = b->simd_eq(mCompressedFieldWidth, fieldNo, b->mvmd_slli(mCompressedFieldWidth, fieldNo, j));
+        for (unsigned i = 0; i < mStreamCount; i++) {
+            Value * fields_fwd = b->mvmd_slli(mCompressedFieldWidth, outputFields[i], j);
+            outputFields[i] = b->simd_or(outputFields[i], b->simd_and(select, fields_fwd));
+       }
+    }
+    // Now compress the data fields, eliminating all but the last field from
+    // each run of consecutive field having the same field number as a subsequent field.
+    // But it may be that last field number is 0 which will compare equal to a 0 shifted in.
+    // So we add 1 to field numbers first.
+    Value * nonZeroFieldNo = b->simd_add(mCompressedFieldWidth, fieldNo, oneSplat);
+    Value * eqNext = b->simd_eq(mCompressedFieldWidth, nonZeroFieldNo, b->mvmd_srli(mCompressedFieldWidth, nonZeroFieldNo, 1));
+    Value * compressMask = b->hsimd_signmask(mCompressedFieldWidth, b->simd_not(eqNext));
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        outputFields[i] = b->mvmd_compress(mCompressedFieldWidth, outputFields[i], compressMask);
+    }
+    //
+    // Finally combine the pendingOutput and outputField data.
+    // (a) shift forward outputField data to fill the pendingOutput values.
+    // (b) shift back outputField data to clear data added to pendingOutput.
+    //
+    // However, we may need to increment pendingFieldIndex if we previously
+    // filled the field with the extracted firstField value.  The first
+    // value of the fieldNo vector will be 0 or 1.
+    // It is possible that pendingFieldIndex will reach the total number
+    // of fields held in register.  mvmd_sll may not handle this if it
+    // translates to an LLVM shl.
+    Value * increment = b->CreateZExtOrTrunc(b->mvmd_extract(mCompressedFieldWidth, fieldNo, 0), fwTy);
+    pendingFieldIdx = b->CreateAdd(pendingFieldIdx, increment);
+    Value * const pendingSpaceFilled = b->CreateICmpEQ(pendingFieldIdx, numFieldConst);
+    Value * shftBack = b->CreateSub(numFieldConst, pendingFieldIdx);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        Value * shiftedField = b->mvmd_sll(mCompressedFieldWidth, outputFields[i], pendingFieldIdx);
+        Value * outputFwd = b->fwCast(mCompressedFieldWidth, shiftedField);
+        shiftedField = b->CreateSelect(pendingSpaceFilled, zeroSplat, outputFwd);
+        pendingOutput[i] = b->simd_or(pendingOutput[i], shiftedField);
+        outputFields[i] = b->mvmd_srl(mCompressedFieldWidth, outputFields[i], shftBack);
+    }
+    //
+    // Write the pendingOutput data to outputStream.
+    // Note: this data may be overwritten later, but we avoid branching.
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        b->storeOutputStreamBlock("compressedOutput", b->getInt32(i), outputOffsetPhi, pendingOutput[i]);
+    }
+    // Now determine the total amount of pending items and whether
+    // the pending data all fits within the pendingOutput.
+    Value * nextPendingItems = b->CreateAdd(pendingItemsPhi, newPendingItems);
+    Value * const doesFit = b->CreateICmpULT(nextPendingItems, BLOCK_WIDTH);
+    // nextPendingItems = b->CreateSelect(doesFit, nextPendingItems, b->CreateSub(nextPendingItems, BLOCK_WIDTH));
+    nextPendingItems = b->CreateAnd(nextPendingItems, BLOCK_MASK);
+    pendingItemsPhi->addIncoming(nextPendingItems, compressNextStride);
+
+
+    //
+    // Prepare Phi nodes for the next iteration.
+    //
+
+
+    // But don't advance the output if all the data does fit into pendingOutput.
+    Value * nextOutputOffset = b->CreateAdd(outputOffsetPhi, sz_ONE);
+    nextOutputOffset = b->CreateSelect(doesFit, outputOffsetPhi, nextOutputOffset);
+    outputOffsetPhi->addIncoming(nextOutputOffset, compressNextStride);
+
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        pendingOutput[i] = b->bitCast(b->CreateSelect(doesFit, pendingOutput[i], outputFields[i]));
+        pendingDataPhi[i]->addIncoming(pendingOutput[i], compressNextStride);
+    }
+    //
+    // Now continue the loop if there are more blocks to process.
+
+    Value * const moreToDo = b->CreateICmpNE(nextIteratorMask, sz_ZERO);
+    b->CreateCondBr(moreToDo, compressNextStride, checkForAnotherStride);
+
+    b->SetInsertPoint(checkForAnotherStride);
+    PHINode * const nextOutputOffsetPhi = b->CreatePHI(sizeTy, 2);
+    PHINode * const nextPendingItemsPhi = b->CreatePHI(fwTy, 2);
+    SmallVector<PHINode *, 16> nextPendingDataPhi(mStreamCount);
+
+    nextOutputOffsetPhi->addIncoming(outerOutputOffsetPhi, checkIteratorMask);
+    nextOutputOffsetPhi->addIncoming(nextOutputOffset, compressNextStride);
+    outerOutputOffsetPhi->addIncoming(nextOutputOffsetPhi, checkForAnotherStride);
+
+    nextPendingItemsPhi->addIncoming(outerPendingItemsPhi, checkIteratorMask);
+    nextPendingItemsPhi->addIncoming(nextPendingItems, compressNextStride);
+    outerPendingItemsPhi->addIncoming(nextPendingItemsPhi, checkForAnotherStride);
+
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        PHINode * const phi = b->CreatePHI(outerPendingDataPhi[i]->getType(), 3);
+        phi->addIncoming(outerPendingDataPhi[i], checkIteratorMask);
+        phi->addIncoming(pendingOutput[i], compressNextStride);
+        nextPendingDataPhi[i] = phi;
+        outerPendingDataPhi[i]->addIncoming(phi, checkForAnotherStride);
+    }
+
+    Value * const nextOuterInputOffset = b->CreateAdd(inputOffsetPhi, sz_STEP_SIZE);
+    inputOffsetPhi->addIncoming(nextOuterInputOffset, checkForAnotherStride);
+
+    Value * const notDone = b->CreateICmpULT(nextOuterInputOffset, numOfBlocks);
+    Value * const remaining = b->CreateSub(numOfBlocks, nextOuterInputOffset);
+    Value * const partialStepRemaining = b->CreateICmpUGT(numOfBlocks, nextOuterInputOffset);
+    Value * const nextMaxIterationStrides = b->CreateSelect(partialStepRemaining, remaining, sz_STEP_SIZE);
+    maxIterationStridesPhi->addIncoming(nextMaxIterationStrides, checkForAnotherStride);
+
+    b->CreateCondBr(notDone, buildIteratorMask, segmentDone);
+
+    b->SetInsertPoint(segmentDone);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        b->setScalarField("pendingOutputBlock_" + std::to_string(i), nextPendingDataPhi[i]);
+    }
+
+    // It's possible that we'll perfectly fill the last block of data on the
+    // last iteration of the loop. If we arbritarily write the pending data,
+    // this could end up incorrectly overwriting unprocessed data with 0s.
+    Value * const hasMore = b->CreateICmpNE(nextPendingItemsPhi, sz_ZERO);
+    b->CreateLikelyCondBr(hasMore, writePartialData, segmentExit);
+
+    b->SetInsertPoint(writePartialData);
+    for (unsigned i = 0; i < mStreamCount; i++) {
+        b->storeOutputStreamBlock("compressedOutput", b->getInt32(i), nextOutputOffsetPhi, nextPendingDataPhi[i]);
+    }
+    b->CreateBr(segmentExit);
+
+    b->SetInsertPoint(segmentExit);
+}
+
+#endif
 
 Bindings makeSwizzledDeleteByPEXTOutputBindings(const std::vector<StreamSet *> & outputStreamSets, const unsigned PEXTWidth) {
     const auto n = outputStreamSets.size();

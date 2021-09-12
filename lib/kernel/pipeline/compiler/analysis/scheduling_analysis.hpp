@@ -1750,10 +1750,10 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                               const PartitionGraph & P,
                               const std::vector<unsigned> & initialDegree,
                               const unsigned numOfUnlinkedPartitions,
-                              random_engine & rng)
+                              random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_ROUNDS,
-                                            JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, rng)
-    , worker(G, P, initialDegree, numOfUnlinkedPartitions, rng) {
+                                            JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, srcRng)
+    , worker(G, P, initialDegree, numOfUnlinkedPartitions, srcRng) {
 
 
     }
@@ -2268,19 +2268,8 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
             const RelationshipNode & rn = Relationships[bindingId];
             assert (rn.Type == RelationshipNode::IsBinding);
             const Binding & binding = rn.Binding;
-            const ProcessingRate & rate = binding.getRate();
 
-            bool addRateId = false;
-
-            switch (rate.getKind()) {
-                case RateId::Fixed:
-                case RateId::Greedy:
-                    if (LLVM_LIKELY(!binding.hasAttribute(AttrId::Deferred))) {
-                        break;
-                    }
-                default:
-                    addRateId = true;
-            }
+            const auto addRateId = isNonSynchronousRate(binding);
 
             const auto h = streamSets.find(streamSet);
             assert (h != streamSets.end());
@@ -2796,6 +2785,29 @@ void PipelineAnalysis::addSchedulingConstraints(const std::vector<unsigned> & pr
 
 
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isNonSynchronousRate
+ ** ------------------------------------------------------------------------------------------------------------- */
+/* static */ bool PipelineAnalysis::isNonSynchronousRate(const Binding & binding) {
+
+    const ProcessingRate & rate = binding.getRate();
+    switch (rate.getKind()) {
+        case RateId::Greedy:
+            if (rate.getLowerBound().numerator() > 0) {
+                 return true;
+            }
+        case RateId::Fixed:
+            if (LLVM_LIKELY(!binding.hasAttribute(AttrId::Deferred))) {
+                return false;
+            }
+        default:
+            return true;
+    }
+
+
+}
+
 
 } // end of namespace kernel
 
