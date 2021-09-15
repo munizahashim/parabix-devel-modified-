@@ -87,6 +87,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    //P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}), SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))}, filteredBasis);
 
     StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
     FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);

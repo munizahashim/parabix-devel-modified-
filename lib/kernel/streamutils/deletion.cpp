@@ -931,17 +931,24 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
     addInternalScalar(b->getSizeTy(), "pendingOffset");
 }
 
-void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     if (!BMI2_available()) {
         llvm::report_fatal_error("FilterByMaskKernel requires PEXT");
     }
-    BasicBlock * entry = kb->GetInsertBlock();
+    Constant * const sz_STRIDE = kb->getSize(mStride);
+    assert ((mStride % kb->getBitBlockWidth()) == 0);
+    Constant * const sz_BLOCKS_PER_STRIDE = kb->getSize(mStride/kb->getBitBlockWidth());
+    Constant * const sz_ZERO = kb->getSize(0);
+    Constant * const sz_ONE = kb->getSize(1);
+    Type * const sizeTy = kb->getSizeTy();
+
+    BasicBlock * const entryBlock = kb->GetInsertBlock();
+    BasicBlock * const stridePrologue = kb->CreateBasicBlock("stridePrologue");
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
+    BasicBlock * const strideEpilogue = kb->CreateBasicBlock("strideEpilogue");
     BasicBlock * finalizeFilter = kb->CreateBasicBlock("finalizeFilter");
-    BasicBlock * saveSwizzles = kb->CreateBasicBlock("saveSwizzles");
     BasicBlock * writeFinal = kb->CreateBasicBlock("writeFinal");
     BasicBlock * done = kb->CreateBasicBlock("done");
-    ConstantInt * const ZERO = kb->getSize(0);
     Function * PEXT_func = nullptr;
     if (mCompressFieldWidth == 64) {
         PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
@@ -956,10 +963,20 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     ConstantInt * const PEXT_WIDTH_MASK = kb->getSize(mCompressFieldWidth - 1);
     Type * const FieldPtrTy = kb->getIntNTy(mCompressFieldWidth)->getPointerTo();
 
+    Value * const initialPos = kb->getProcessedItemCount("extractionMask");
     Value * const baseOutputProduced = kb->getProducedItemCount("outputStreamSet");
     Value * const baseProducedOffset = kb->CreateAnd(baseOutputProduced, BLOCK_WIDTH_MASK);
-            //kb->CallPrintInt("baseProducedOffset", baseProducedOffset);
+
     // There is a separate vector of pending data for each swizzle group.
+    kb->CreateBr(stridePrologue);
+    kb->SetInsertPoint(stridePrologue);
+    PHINode * const strideNo = kb->CreatePHI(sizeTy, 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    PHINode * strideProducedOffset = kb->CreatePHI(sizeTy, 2);
+    strideProducedOffset->addIncoming(baseProducedOffset, entryBlock);
+    Value * stridePos = kb->CreateAdd(initialPos, kb->CreateMul(strideNo, sz_STRIDE));
+    Value * strideBlockOffset = kb->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
+    Value * nextStrideNo = kb->CreateAdd(strideNo, sz_ONE);
     std::vector<Value *> pendingData(mSwizzleSetCount);
     for (unsigned i = 0; i < mSwizzleSetCount; i++) {
         pendingData[i] = kb->getScalarField("pendingSwizzleData" + std::to_string(i));
@@ -969,24 +986,25 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     // For each block iteration, we have the block offset and pending data
     // for each swizzle that are either the initial values or values carried
     // over from the previous iteration.
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
-    blockOffsetPhi->addIncoming(ZERO, entry);
-    PHINode * const producedOffsetPhi = kb->CreatePHI(numOfBlocks->getType(), 2);
-    producedOffsetPhi->addIncoming(baseProducedOffset, entry);
+    PHINode * blockNo = kb->CreatePHI(sizeTy, 2);
+    blockNo->addIncoming(sz_ZERO, stridePrologue);
+    PHINode * const producedOffsetPhi = kb->CreatePHI(sizeTy, 2);
+    producedOffsetPhi->addIncoming(strideProducedOffset, stridePrologue);
     std::vector<PHINode *> pendingDataPhi(mSwizzleSetCount);
     for (unsigned i = 0; i < mSwizzleSetCount; i++) {
         pendingDataPhi[i] = kb->CreatePHI(pendingData[i]->getType(), 2);
-        pendingDataPhi[i]->addIncoming(pendingData[i], entry);
+        pendingDataPhi[i]->addIncoming(pendingData[i], stridePrologue);
         pendingData[i] = pendingDataPhi[i];
     }
+    Value * strideBlockIndex = kb->CreateAdd(strideBlockOffset, blockNo);
 
-    std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, blockOffsetPhi);
+    std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, strideBlockIndex);
     Value * extractionMask = kb->fwCast(mCompressFieldWidth, maskVec[0]);
     std::vector<Value *> mask(mSwizzleFactor);
     for (unsigned i = 0; i < mSwizzleFactor; i++) {
         mask[i] = kb->CreateExtractElement(extractionMask, kb->getInt32(i));
     }
-    std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, blockOffsetPhi);
+    std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, strideBlockIndex);
     for (unsigned j = 0; j < input.size(); ++j) {
         input[j] = kb->fwCast(mCompressFieldWidth, input[j]);
     }
@@ -1054,21 +1072,25 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
         producedOffset = kb->CreateAdd(producedOffset, newItemCount);
     }
     BasicBlock * currentBB = kb->GetInsertBlock();
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
-    blockOffsetPhi->addIncoming(nextBlk, currentBB);
+    Value * nextBlk = kb->CreateAdd(blockNo, sz_ONE);
+    blockNo->addIncoming(nextBlk, currentBB);
     producedOffsetPhi->addIncoming(producedOffset, currentBB);
     for (unsigned i = 0; i < mSwizzleSetCount; i++) {
         pendingDataPhi[i]->addIncoming(pendingData[i], currentBB);
     }
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
-    kb->CreateCondBr(moreToDo, processBlock, finalizeFilter);
-    kb->SetInsertPoint(finalizeFilter);
-    kb->CreateCondBr(kb->isFinal(), writeFinal, saveSwizzles);
-    kb->SetInsertPoint(saveSwizzles);
+    Value * moreBlocksInStride = kb->CreateICmpNE(nextBlk, sz_BLOCKS_PER_STRIDE);
+    kb->CreateCondBr(moreBlocksInStride, processBlock, strideEpilogue);
+
+    kb->SetInsertPoint(strideEpilogue);
     for (unsigned i = 0; i < mSwizzleSetCount; i++) {
         kb->setScalarField("pendingSwizzleData" + std::to_string(i), pendingData[i]);
     }
-    kb->CreateBr(done);
+    strideNo->addIncoming(nextStrideNo, strideEpilogue);
+    strideProducedOffset->addIncoming(producedOffset, strideEpilogue);
+    kb->CreateCondBr(kb->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, finalizeFilter);
+
+    kb->SetInsertPoint(finalizeFilter);
+    kb->CreateCondBr(kb->isFinal(), writeFinal, done);
     kb->SetInsertPoint(writeFinal);
     Value * const finalBlock = kb->CreateLShr(producedOffset, LOG_2_BLOCK_WIDTH);
     Value * const finalField = kb->CreateLShr(kb->CreateAnd(producedOffset, BLOCK_WIDTH_MASK), LOG_2_PEXT_WIDTH);
