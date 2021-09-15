@@ -90,9 +90,6 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
-    std::vector<StreamSet *> combinedMasks;
-    StreamSet * compressedMask = P->CreateStreamSet(1);
-
     StreamSet * WordChars = P->CreateStreamSet(1);
     P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
 
@@ -138,50 +135,84 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     }
 
     StreamSet * u8bytes = codeUnitStream;
-    std::vector<StreamSet *> allSelectedMarks;
     std::vector<StreamSet *> extractionMasks;
-    StreamSet * prevSelected = P->CreateStreamSet(1);
-    StreamSet * prev = P->CreateStreamSet(1);
+    std::vector<StreamSet *> allHashMarks;
 
+    std::vector<StreamSet *> bixnumMarks(4);
     for (unsigned sym = 0; sym < SymCount; sym++) {
-        std::vector<StreamSet *> allHashMarks;
+        StreamSet * lgHashMarks = P->CreateStreamSet(1);
         for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
             StreamSet * groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], overflow, groupMarks);
             //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
             StreamSet * const hashMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<MarkRepeatedHashvalue>(encodingScheme1, i, groupMarks, allHashValues[sym], hashMarks);
-            //P->CreateKernelCall<DebugDisplayKernel>("hashMarks", hashMarks);
-            allHashMarks.push_back(hashMarks);
-            if (sym > 0) {
-                StreamSet * selectedMarks = P->CreateStreamSet(1);
-                // only calculate overlapping marks for k-symbol phrases with k > 1
-                // select the longest phrase between overlapping phrases within a length group
-                P->CreateKernelCall<OverlappingLengthGroupMarker>(encodingScheme1, i, phraseLenBixnum[sym], hashMarks, prevSelected, selectedMarks);
-                //P->CreateKernelCall<DebugDisplayKernel>("selectedMarks", selectedMarks);
-                prevSelected = selectedMarks;
+            //P->CreateKernelCall<DebugDisplayKernel>("hashMarks1", hashMarks);
+            if (i > 0) {
+                StreamSet * selectedHashMarks = P->CreateStreamSet(1);
+                P->CreateKernelCall<InverseStream>(hashMarks, lgHashMarks, i, selectedHashMarks);
+                //P->CreateKernelCall<DebugDisplayKernel>("selectedHashMarks", selectedHashMarks);
+                lgHashMarks = selectedHashMarks;
             }
             else {
-                if (i > 0) {
-                    StreamSet * selected = P->CreateStreamSet(1);
-                    P->CreateKernelCall<InverseStream>(hashMarks, prevSelected, i, selected);
-                    //P->CreateKernelCall<DebugDisplayKernel>("selected", selected);
-                    prevSelected = selected;
-                }
-                else {
-                    prevSelected = hashMarks;
-                }
+                lgHashMarks = hashMarks;
+            }
+            // gather all the lengthGroup bixnum positions
+            if (sym > 0 && i > 0) { // no k-symbol phrases of length 3; start from len 4 phrases
+                LengthGroupInfo groupInfo = encodingScheme1.byLength[i];
+                unsigned lo = groupInfo.lo;
+                unsigned hi = groupInfo.hi;
+                unsigned groupSize = hi - lo + 1;
+                StreamSet * const bixnumLenMarks = P->CreateStreamSet(groupSize);
+                P->CreateKernelCall<LengthSelector>(encodingScheme1, i, phraseLenBixnum[sym], hashMarks, bixnumLenMarks);
+                bixnumMarks[i-1] = bixnumLenMarks;
             }
         }
-        //P->CreateKernelCall<DebugDisplayKernel>("prevSelected", prevSelected);
-        allSelectedMarks.push_back(prevSelected);
+        // identify compressible phrases across length groups
+        if (sym > 0) {
+            StreamSet * lgSelectedUntilNow = P->CreateStreamSet(1);
+            // lgHashMarks -> end pos of all the k-sym phrases with repeated hash codes
+            //P->CreateKernelCall<DebugDisplayKernel>("lgHashMarks-before", lgHashMarks);
+            // selectedBixnum -> 29 x i1 streamset of length-wise accumulated bixnumMarks
+            StreamSet * const selectedBixnum = P->CreateStreamSet(29); // 1+4+8+16
+            P->CreateKernelCall<StreamSelect>(selectedBixnum, Select( { {bixnumMarks[0]}, {bixnumMarks[1]}, {bixnumMarks[2]}, {bixnumMarks[3]} } ));
+            //P->CreateKernelCall<DebugDisplayKernel>("selectedBixnum", selectedBixnum);
+            // contains 29 x i1 stream indicating the hashMarks of each length in the range 4-32
+            phraseLenBixnum[sym] = selectedBixnum;
+            for(int i = 28; i >= 0; i--) {
+                if (i == 28) {
+                    lgSelectedUntilNow = lgHashMarks;
+                }
+                StreamSet * const selectedStep1 = P->CreateStreamSet(1);
+                // 1. select max number of non-overlapping phrases of length i+4 (currLen)
+                // 2. eliminate all the currLen phrases preceeded by longer length phrases
+                P->CreateKernelCall<OverlappingLengthGroupMarker>(i, selectedBixnum, lgHashMarks, lgSelectedUntilNow, selectedStep1);
+                // 3. eliminate all the curLen phrases preceeding longer length phrases
+                StreamSet * const selectedStep2 = P->CreateStreamSet(1);
+                P->CreateKernelCall<OverlappingLookaheadMarker>(i, selectedBixnum, lgSelectedUntilNow, selectedStep1, selectedStep2);
+                lgSelectedUntilNow = selectedStep2;
+            }
+            lgHashMarks = lgSelectedUntilNow;
+        }
+        //P->CreateKernelCall<DebugDisplayKernel>("lgHashMarks-after", lgHashMarks);
+        allHashMarks.push_back(lgHashMarks);
+    }
+
+    for(int i = SymCount-1; i > 0; i--) {
+        StreamSet * hashMarksFinal = P->CreateStreamSet(1);
+        // hashMark positions divided across min through max len values
+        StreamSet * hashMarksBixNum = P->CreateStreamSet(29);
+        P->CreateKernelCall<BixnumHashMarks>(phraseLenBixnum[i], allHashMarks[i], hashMarksBixNum);
+        P->CreateKernelCall<PhraseSelection>(allHashMarks[i], hashMarksBixNum, allHashMarks[i-1], i, hashMarksFinal);
+        allHashMarks[i-1] = hashMarksFinal;
     }
 
     for (int sym = SymCount-1; sym >= 0; sym--) {
         StreamSet * extractionMask = P->CreateStreamSet(1);
         StreamSet * input_bytes = u8bytes;
         StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym+1, allSelectedMarks[sym], allHashValues[sym], input_bytes, extractionMask, output_bytes);
+        //P->CreateKernelCall<DebugDisplayKernel>("allHashMarks["+std::to_string(sym)+"]", allHashMarks[sym]);
+        P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym+1, allHashMarks[sym], allHashValues[sym], input_bytes, extractionMask, output_bytes);
         //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
         extractionMasks.push_back(extractionMask);
         u8bytes = output_bytes;
