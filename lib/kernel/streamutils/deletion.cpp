@@ -1229,6 +1229,7 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
         addInternalScalar(b->getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
     }
     addInternalScalar(b->getSizeTy(), "pendingOffset");
+    setStride(4 * b->getBitBlockWidth());
 }
 
 void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
