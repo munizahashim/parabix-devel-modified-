@@ -147,6 +147,21 @@ private:
     const unsigned mSwizzleSetCount;
 };
 
+// Compress within fields of size fieldWidth.
+class FilterByMaskKernel final : public MultiBlockKernel {
+public:
+    FilterByMaskKernel(BuilderRef b,
+                        SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
+                        unsigned fieldWidth = 64);
+protected:
+    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+private:
+    const unsigned mCompressFieldWidth;
+    SelectedInput mMaskOp;
+    SelectedInputList mInputOps;
+    unsigned mSwizzleFactor;
+    unsigned mSwizzleSetCount;
+};
 
 }
 

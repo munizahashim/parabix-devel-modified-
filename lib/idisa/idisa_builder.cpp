@@ -373,20 +373,64 @@ Value * IDISA_Builder::mvmd_srl(unsigned fw, Value * value, Value * shift, const
 
 Value * IDISA_Builder::simd_slli(unsigned fw, Value * a, unsigned shift) {
     const unsigned vectorWidth = getVectorBitWidth(a);
-    if (fw < 16) {
+    if (fw > MAX_NATIVE_SIMD_SHIFT) {
+        unsigned fullFieldShift = shift / MAX_NATIVE_SIMD_SHIFT;
+        unsigned subFieldShift = shift % MAX_NATIVE_SIMD_SHIFT;
+        Value * fieldShifted = a;
+        if (fullFieldShift > 0) {
+            fieldShifted = mvmd_slli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift);
+            unsigned remaining = fw - fullFieldShift * MAX_NATIVE_SIMD_SHIFT;
+            Constant * mask = Constant::getIntegerValue(getIntNTy(fw),
+                                                        APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, remaining)));
+            fieldShifted = simd_and(fieldShifted, mask);
+        }
+        if (subFieldShift == 0) return fieldShifted;
+        Value * extendedShift = simd_slli(MAX_NATIVE_SIMD_SHIFT, fieldShifted, subFieldShift);
+        if (fw - fullFieldShift < MAX_NATIVE_SIMD_SHIFT) {
+            // No additional bits to combined
+            return extendedShift;
+        }
+        Value * overShifted = mvmd_slli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift + 1);
+        unsigned backShift = MAX_NATIVE_SIMD_SHIFT - subFieldShift;
+        Value * backShifted = simd_srli(MAX_NATIVE_SIMD_SHIFT, overShifted, backShift);
+        return simd_or(extendedShift, backShifted);
+    }
+    if (fw < MIN_NATIVE_SIMD_SHIFT) {
         Constant * value_mask = Constant::getIntegerValue(getIntNTy(vectorWidth),
                                                           APInt::getSplat(vectorWidth, APInt::getLowBitsSet(fw, fw-shift)));
-        return CreateShl(fwCast(32, simd_and(a, value_mask)), shift);
+        return CreateShl(fwCast(MIN_NATIVE_SIMD_SHIFT, simd_and(a, value_mask)), shift);
     }
     return CreateShl(fwCast(fw, a), shift);
 }
 
 Value * IDISA_Builder::simd_srli(unsigned fw, Value * a, unsigned shift) {
     const unsigned vectorWidth = getVectorBitWidth(a);
-    if (fw < 16) {
+    if (fw > MAX_NATIVE_SIMD_SHIFT) {
+        unsigned fullFieldShift = shift / MAX_NATIVE_SIMD_SHIFT;
+        unsigned subFieldShift = shift % MAX_NATIVE_SIMD_SHIFT;
+        Value * fieldShifted = a;
+        if (fullFieldShift > 0) {
+            fieldShifted = mvmd_srli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift);
+            unsigned remaining = fw - fullFieldShift * MAX_NATIVE_SIMD_SHIFT;
+            Constant * mask = Constant::getIntegerValue(getIntNTy(fw),
+                                                        APInt::getSplat(vectorWidth, APInt::getLowBitsSet(fw, remaining)));
+            fieldShifted = simd_and(fieldShifted, mask);
+        }
+        if (subFieldShift == 0) return fieldShifted;
+        Value * extendedShift = simd_srli(MAX_NATIVE_SIMD_SHIFT, fieldShifted, subFieldShift);
+        if (fw - fullFieldShift < MAX_NATIVE_SIMD_SHIFT) {
+            // No additional bits to combined
+            return extendedShift;
+        }
+        Value * overShifted = mvmd_srli(MAX_NATIVE_SIMD_SHIFT, a, fullFieldShift + 1);
+        unsigned backShift = MAX_NATIVE_SIMD_SHIFT - subFieldShift;
+        Value * backShifted = simd_slli(MAX_NATIVE_SIMD_SHIFT, overShifted, backShift);
+        return simd_or(extendedShift, backShifted);
+    }
+    if (fw < MIN_NATIVE_SIMD_SHIFT) {
         Constant * value_mask = Constant::getIntegerValue(getIntNTy(vectorWidth),
                                                           APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, fw-shift)));
-        return CreateLShr(fwCast(32, simd_and(a, value_mask)), shift);
+        return CreateLShr(fwCast(MIN_NATIVE_SIMD_SHIFT, simd_and(a, value_mask)), shift);
     }
     return CreateLShr(fwCast(fw, a), shift);
 }
@@ -394,12 +438,12 @@ Value * IDISA_Builder::simd_srli(unsigned fw, Value * a, unsigned shift) {
 Value * IDISA_Builder::simd_srai(unsigned fw, Value * a, unsigned shift) {
     const unsigned vectorWidth = getVectorBitWidth(a);
     if (shift == 0) return a;
-    if (fw < 16) {
+    if (fw < MIN_NATIVE_SIMD_SHIFT) {
         Constant * sign_mask = Constant::getIntegerValue(getIntNTy(vectorWidth),
                                                        APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, 1)));
         Value * sign = simd_and(sign_mask, a);
-        if (shift == 1) return simd_or(sign, simd_srli(32, sign, 1));
-        return simd_or(sign, simd_sub(16, sign, simd_srli(16, sign, shift)));
+        if (shift == 1) return simd_or(sign, simd_srli(MIN_NATIVE_SIMD_SHIFT, sign, 1));
+        return simd_or(sign, simd_sub(MIN_NATIVE_SIMD_SHIFT, sign, simd_srli(MIN_NATIVE_SIMD_SHIFT, sign, shift)));
     }
     return CreateAShr(fwCast(fw, a), shift);
 }
@@ -438,20 +482,31 @@ Value * IDISA_Builder::simd_srlv(unsigned fw, Value * v, Value * shifts) {
     return w;
 }
 
-Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract_mask) {
+std::vector<Value *> IDISA_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
     Value * delcounts = CreateNot(extract_mask);  // initially deletion counts per 1-bit field
-    Value * w = simd_and(extract_mask, v);
+    std::vector<Value *> w(v.size());
+    for (unsigned i = 0; i < v.size(); i++) {
+        w[i] = simd_and(extract_mask, v[i]);
+    }
     for (unsigned fw = 2; fw < fieldwidth; fw = fw * 2) {
         Value * shift_fwd_amts = simd_srli(fw, simd_select_lo(fw*2, delcounts), fw/2);
         Value * shift_back_amts = simd_select_lo(fw, simd_select_hi(fw*2, delcounts));
-        w = simd_or(simd_sllv(fw, simd_select_lo(fw*2, w), shift_fwd_amts),
-                    simd_srlv(fw, simd_select_hi(fw*2, w), shift_back_amts));
+        for (unsigned i = 0; i < v.size(); i++) {
+            w[i] = simd_or(simd_sllv(fw, simd_select_lo(fw*2, w[i]), shift_fwd_amts),
+                           simd_srlv(fw, simd_select_hi(fw*2, w[i]), shift_back_amts));
+        }
         delcounts = simd_add(fw, simd_select_lo(fw, delcounts), simd_srli(fw, delcounts, fw/2));
     }
     // Now shift back all fw fields.
     Value * shift_back_amts = simd_select_lo(fieldwidth, delcounts);
-    w = simd_srlv(fieldwidth, w, shift_back_amts);
+    for (unsigned i = 0; i < v.size(); i++) {
+        w[i] = simd_srlv(fieldwidth, w[i], shift_back_amts);
+    }
     return w;
+}
+
+Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract_mask) {
+    return simd_pext(fieldwidth, std::vector<Value *>{v}, extract_mask)[0];
 }
 
 Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
@@ -915,7 +970,7 @@ std::pair<llvm::Value *, llvm::Value *> IDISA_Builder::bitblock_subtract_with_bo
     return std::make_pair(bitCast(borrowOut), bitCast(difference));
 }
 
-// full subtrace producing {propagateOut, difference}
+// full subtract producing {propagateOut, difference}
 std::pair<Value *, Value *> IDISA_Builder::bitblock_subtract_with_propagate(Value * a, Value * b, Value * const propagateIn) {
     Value * in = propagateIn;
     if (propagateIn->getType() != mBitBlockType) {
@@ -1123,11 +1178,13 @@ Constant * IDISA_Builder::bit_interleave_byteshuffle_table(unsigned fw) {
     return ConstantVector::get(bit_interleave);
 }
 
-IDISA_Builder::IDISA_Builder(LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth)
+IDISA_Builder::IDISA_Builder(LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw, unsigned minShiftFw)
 : CBuilder(C)
 , mNativeBitBlockWidth(nativeVectorWidth)
 , mBitBlockWidth(vectorWidth)
 , mLaneWidth(laneWidth)
+, MAX_NATIVE_SIMD_SHIFT(maxShiftFw)
+, MIN_NATIVE_SIMD_SHIFT(minShiftFw)
 , mBitBlockType(VectorType::get(IntegerType::get(C, mLaneWidth), vectorWidth / mLaneWidth))
 , mZeroInitializer(Constant::getNullValue(mBitBlockType))
 , mOneInitializer(Constant::getAllOnesValue(mBitBlockType))

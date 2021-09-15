@@ -167,6 +167,20 @@ Value * IDISA_SSE2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
     }
     return IDISA_SSE_Builder::mvmd_shuffle(fw, a, index_vector);
 }
+    
+std::vector<llvm::Value *> IDISA_SSE2_Builder::simd_pext(unsigned fw, std::vector<llvm::Value *> v, llvm::Value * extract_mask) {
+    if (fw <= 8) return IDISA_Builder::simd_pext(fw, v, extract_mask);
+    std::vector<Value *> w = v;
+    w.push_back(extract_mask); // Compress the masks as well.
+    w = simd_pext(fw/2, w, extract_mask);
+    Value * compressed_masks = simd_select_lo(fw, w.back());
+    Value * multiplier = simd_add(fw, compressed_masks, simd_fill(fw, getIntN(fw, 1)));
+    std::vector<Value *> c(v.size());
+    for (unsigned i = 0; i < v.size(); i++) {
+        c[i] = simd_or(simd_mult(fw, multiplier, simd_srli(fw, w[i], fw/2)), simd_select_lo(fw, w[i]));
+    }
+    return c;
+}
 
 Value * IDISA_SSE_Builder::mvmd_compress(unsigned fw, Value * a, Value * selector) {
     if ((mBitBlockWidth == 128) && (fw == 64)) {

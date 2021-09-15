@@ -42,6 +42,7 @@ public:
     llvm::Value * hsimd_packus(unsigned fw, llvm::Value * a, llvm::Value * b) override;
     std::pair<llvm::Value *, llvm::Value *> bitblock_advance(llvm::Value * a, llvm::Value * shiftin, unsigned shift) override;
     llvm::Value * mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) override;
+    virtual std::vector<llvm::Value *> simd_pext(unsigned fw, std::vector<llvm::Value *>, llvm::Value * extract_mask) override;
     ~IDISA_SSE2_Builder() {}
 };
 
