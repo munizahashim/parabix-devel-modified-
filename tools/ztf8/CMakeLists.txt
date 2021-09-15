@@ -57,6 +57,7 @@ SRC
     ztf-logic.cpp
     ztf-scan.cpp
     ztf-hash.cpp
+    common.cpp
 DEPS
     grep
     pablo
@@ -73,7 +74,10 @@ NAME
     ztf-phrase-hash
 SRC
     ztf-logic.cpp
+    common.cpp
     ztf-scan.cpp
+    ztf-phrase-scan.cpp
+    ztf-phrase-logic.cpp
     ztf-phrase-hash.cpp
 DEPS
     grep
