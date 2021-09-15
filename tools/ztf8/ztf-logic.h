@@ -179,22 +179,6 @@ protected:
     unsigned mGroupNo;
 };
 
-// mark overlapping phrases within a length group
-class OverlappingLengthGroupMarker final: public pablo::PabloKernel {
-public:
-    OverlappingLengthGroupMarker(BuilderRef b,
-                 EncodingInfo & encodingScheme,
-                 unsigned groupNo,
-                 StreamSet * groupLenBixnum,
-                 StreamSet * hashMarks,
-                 StreamSet * prevSelected,
-                 StreamSet * selected);
-protected:
-    void generatePabloMethod() override;
-    EncodingInfo & mEncodingScheme;
-    unsigned mGroupNo;
-};
-
 class LengthSorter final: public pablo::PabloKernel {
 public:
     LengthSorter(BuilderRef b,
