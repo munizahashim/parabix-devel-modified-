@@ -81,7 +81,6 @@ public:
         P.determineBufferLayout(b, rng);
 
         P.makeConsumerGraph();
-        P.annotateBufferGraphWithUnconsumedThresholds();
 
         P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
@@ -149,6 +148,7 @@ private:
     static void addKernelRelationshipsInReferenceOrdering(const unsigned kernel, const RelationshipGraph & G,
                                                           std::function<void(PortType, unsigned, unsigned)> insertionFunction);
 
+
     // partitioning analysis
 
     PartitionGraph identifyKernelPartitions();
@@ -201,8 +201,6 @@ private:
     // consumer analysis functions
 
     void makeConsumerGraph();
-
-    void annotateBufferGraphWithUnconsumedThresholds();
 
     // dataflow analysis functions
 

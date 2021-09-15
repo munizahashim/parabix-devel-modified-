@@ -2106,10 +2106,10 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
     ProgramSchedulingAnalysis(const SchedulingGraph & S,
                               const OrderingDAWG & I,
                               const unsigned numOfKernels,
-                              random_engine & rng)
+                              random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_ROUNDS,
-                                            PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, rng)
-    , worker(S, I, numOfKernels, rng) {
+                                            PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, srcRng)
+    , worker(S, I, numOfKernels, srcRng) {
 
     }
 
@@ -2205,32 +2205,10 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
     for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
 
         BitSet & bs = G[partitionId];
-
-        unsigned inDeg = 0;
-        for (const auto e : make_iterator_range(in_edges(partitionId, P))) {
-            const auto streamSet = P[e];
-            if (LLVM_LIKELY(streamSet != 0)) {
-                ++inDeg;
-            }
-        }
-
-        unsigned outDeg = 0;
-        for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
-            const auto streamSet = P[e];
-            if (LLVM_LIKELY(streamSet != 0)) {
-                ++outDeg;
-            }
-        }
-
-        if (inDeg == 0 || outDeg == 0) {
-            const auto rateId = nextRateId++;
-            expandCapacity(bs);
-            bs.set(rateId);
+        if (LLVM_UNLIKELY(out_degree(partitionId, P) == 0)) {
+            bs.reset();
         } else {
-            expandCapacity(bs);
-        }
-
-        if (inDeg != 0) {
+            bool anyFound = false;
             expandCapacity(intersection);
             intersection.set();
             for (const auto e : make_iterator_range(in_edges(partitionId, T))) {
@@ -2241,77 +2219,83 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
                 BitSet & input = G[producerId];
                 expandCapacity(input);
                 intersection &= input;
+                anyFound = true;
             }
-            bs |= intersection;
-        }
+            if (anyFound) {
+                bs |= intersection;
+            }
+            if (bs.none()) {
+                const auto rateId = nextRateId++;
+                expandCapacity(bs);
+                bs.set(rateId);
+            }
 
-        for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
-            const auto streamSet = P[e];
-            // a streamSet with a value 0 denotes a non-I/O ordering constraint
-            if (LLVM_UNLIKELY(streamSet == 0)) continue;
+            for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
+                const auto streamSet = P[e];
+                // a streamSet with a value 0 denotes a non-I/O ordering constraint
+                if (LLVM_UNLIKELY(streamSet == 0)) continue;
 
-            assert (streamSet < num_vertices(Relationships));
-            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-            assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                assert (streamSet < num_vertices(Relationships));
+                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (isa<StreamSet>(Relationships[streamSet].Relationship));
 
-            const auto f = first_in_edge(streamSet, Relationships);
-            assert (Relationships[f].Reason != ReasonType::Reference);
-            const auto bindingId = source(f, Relationships);
+                const auto f = first_in_edge(streamSet, Relationships);
+                assert (Relationships[f].Reason != ReasonType::Reference);
+                const auto bindingId = source(f, Relationships);
 
-            const auto g = first_in_edge(bindingId, Relationships);
-            assert (Relationships[g].Reason != ReasonType::Reference);
-            const unsigned producer = source(g, Relationships);
-            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
-            assert (getPartitionId(producer) == partitionId);
-            kernels.insert(producer);
+                const auto g = first_in_edge(bindingId, Relationships);
+                assert (Relationships[g].Reason != ReasonType::Reference);
+                const unsigned producer = source(g, Relationships);
+                assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+                assert (getPartitionId(producer) == partitionId);
+                kernels.insert(producer);
 
-            const RelationshipNode & rn = Relationships[bindingId];
-            assert (rn.Type == RelationshipNode::IsBinding);
-            const Binding & binding = rn.Binding;
+                const RelationshipNode & rn = Relationships[bindingId];
+                assert (rn.Type == RelationshipNode::IsBinding);
+                const Binding & binding = rn.Binding;
 
-            const auto addRateId = isNonSynchronousRate(binding);
+                const auto addRateId = isNonSynchronousRate(binding);
 
-            const auto h = streamSets.find(streamSet);
-            assert (h != streamSets.end());
-            const auto prodRateId = std::distance(streamSets.begin(), h);
+                const auto h = streamSets.find(streamSet);
+                assert (h != streamSets.end());
+                const auto prodRateId = std::distance(streamSets.begin(), h);
 
-            for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
-                const auto binding = target(e, Relationships);
-                const RelationshipNode & input = Relationships[binding];
-                if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
-                    const auto f = first_out_edge(binding, Relationships);
-                    assert (Relationships[f].Reason != ReasonType::Reference);
-                    const unsigned consumer = target(f, Relationships);
-                    assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
+                for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
+                    const auto binding = target(e, Relationships);
+                    const RelationshipNode & input = Relationships[binding];
+                    if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
+                        const auto f = first_out_edge(binding, Relationships);
+                        assert (Relationships[f].Reason != ReasonType::Reference);
+                        const unsigned consumer = target(f, Relationships);
+                        assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
 
-                    const auto consumerPartitionId = getPartitionId(consumer);
-                    assert (consumerPartitionId >= partitionId);
-                    if (consumerPartitionId > partitionId) {
-                        kernels.insert(consumer);
-                        for (const auto e : make_iterator_range(out_edges(partitionId, G))) {
-                            if (target(e, G) == consumerPartitionId) {
-                                goto partition_already_linked;
+                        const auto consumerPartitionId = getPartitionId(consumer);
+                        assert (consumerPartitionId >= partitionId);
+                        if (consumerPartitionId > partitionId) {
+                            kernels.insert(consumer);
+                            for (const auto e : make_iterator_range(out_edges(partitionId, G))) {
+                                if (target(e, G) == consumerPartitionId) {
+                                    goto partition_already_linked;
+                                }
                             }
-                        }
-                        add_edge(partitionId, consumerPartitionId, G);
-partition_already_linked:
-                        if (addRateId) {
-                            BitSet & bs = G[consumerPartitionId];
-                            expandCapacity(bs);
-                            bs.set(prodRateId);
+                            add_edge(partitionId, consumerPartitionId, G);
+    partition_already_linked:
+                            if (addRateId) {
+                                BitSet & cons = G[consumerPartitionId];
+                                expandCapacity(cons);
+                                cons.set(prodRateId);
+                            }
                         }
                     }
                 }
-            }
 
+            }
         }
     }
 
     for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
         expandCapacity(G[partitionId]);
     }
-
-    G[PartitionCount - 1].reset();
 
     // Now compute the transitive reduction of the partition relationships
     BEGIN_SCOPED_REGION
@@ -2807,7 +2791,6 @@ void PipelineAnalysis::addSchedulingConstraints(const std::vector<unsigned> & pr
 
 
 }
-
 
 } // end of namespace kernel
 

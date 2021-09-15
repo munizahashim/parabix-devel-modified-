@@ -120,14 +120,6 @@ void PipelineAnalysis::makeConsumerGraph() {
 
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief annotateBufferGraphWithUnconsumedThresholds
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::annotateBufferGraphWithUnconsumedThresholds() {
-
-
-}
-
 }
 
 #endif // CONSUMER_ANALYSIS_HPP

@@ -35,6 +35,7 @@ void PipelineCompiler::initializePipelineInputTerminationSignal(BuilderRef b) {
  * @brief setCurrentTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
+    errs() << "setting term signal for " << mCurrentPartitionId << "\n";
     assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
     mPartitionTerminationSignal[mCurrentPartitionId] = signal;
 }
@@ -74,8 +75,12 @@ inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) const {
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
     Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
 
-    for (auto partitionId = 0u; partitionId < PartitionCount; ++partitionId) {
-        Value * const signal = mPartitionTerminationSignal[partitionId];
+    assert (ActivePartitions.size()  > 1);
+    const auto m = ActivePartitions.size() - 1;
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto partitionId = ActivePartitions[i];
+        Value * const signal = mPartitionTerminationSignal[partitionId]; assert (signal);
         const auto type = mTerminationCheck[partitionId];
         if (type & TerminationCheckFlag::Hard) {
             Value * const final = b->CreateICmpEQ(signal, fatal);

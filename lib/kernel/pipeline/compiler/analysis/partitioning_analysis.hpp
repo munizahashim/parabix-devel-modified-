@@ -689,32 +689,92 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
         assert (in_degree(i, J) > 0);
-        intersection.set();
-        for (const auto e : make_iterator_range(in_edges(i, J))) {
-            const unsigned producerId = source(e, J);
-            assert (producerId < i);
-            intersection &= rateDomSet[producerId];
+        auto & ds = rateDomSet[i];
+        if (out_degree(i, J) == 0) {
+            ds.reset();
+        } else {
+            intersection.set();
+            for (const auto e : make_iterator_range(in_edges(i, J))) {
+                const unsigned producerId = source(e, J);
+                assert (producerId < i);
+                intersection &= rateDomSet[producerId];
+            }
+            ds |= intersection;
+            if (ds.none()) {
+                const auto rateId = nextRateId++;
+                for (unsigned i = 0; i < PartitionCount; ++i) {
+                    expandCapacity(rateDomSet[i]);
+                }
+                expandCapacity(intersection);
+                ds.set(rateId);
+            }
         }
-        rateDomSet[i] |= intersection;
+
     }
 
-    mPartitionJumpIndex[0] = 1;
+
+
+    BitVector onHybridThread(PartitionCount);
+
+    if (mPipelineKernel->getNumOfThreads() > 1) {
+        for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+            if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
+                assert ("more than one kernel in a hybrid partition?" && !onHybridThread.test(KernelPartitionId[i]));
+                onHybridThread.set(KernelPartitionId[i]);
+            }
+        }
+    }
+
+    std::vector<unsigned> partList;
+    partList.reserve(PartitionCount);
+    partList.push_back(0);
     for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
-        const BitSet & prior =  rateDomSet[i - 1];
-        const BitSet & current =  rateDomSet[i];
-        unsigned jumpIndex = i + 1;
+        if (LLVM_LIKELY(!onHybridThread.test(i))) {
+            partList.push_back(i);
+        }
+    }
+    partList.push_back(PartitionCount - 1);
+    assert (partList.size() > 2);
+
+    const auto m = partList.size();
+
+    mPartitionJumpIndex[0] = 1;
+    for (unsigned i = 1; i < (m - 1); ++i) {
+        const BitSet & prior =  rateDomSet[partList[i - 1]];
+        const auto b = partList[i];
+        const BitSet & current =  rateDomSet[b];
+        auto jumpIndex = partList[i + 1];
         if (prior != current) {
-            for (unsigned j = (i + 1); j < PartitionCount; ++j) {
-                const BitSet & next =  rateDomSet[j];
+            jumpIndex = -1U;
+            for (unsigned j = (i + 1); j < m; ++j) {
+                const auto k = partList[j];
+                const BitSet & next =  rateDomSet[k];
                 if (!current.is_subset_of(next)) {
-                    jumpIndex = j;
+                    jumpIndex = k;
                     break;
                 }
             }
+            assert (jumpIndex < -1U);
         }
-        mPartitionJumpIndex[i] = jumpIndex;
+        assert (jumpIndex > b);
+        mPartitionJumpIndex[b] = jumpIndex;
     }
     mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
+
+    if (onHybridThread.any()) {
+        partList.clear();
+        for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
+            if (LLVM_LIKELY(onHybridThread.test(i))) {
+                partList.push_back(i);
+            }
+        }
+        const auto m = partList.size();
+        assert (m > 0);
+        partList.push_back(PartitionCount - 1);
+        for (unsigned i = 0; i < m; ++i) {
+            mPartitionJumpIndex[partList[i]] = mPartitionJumpIndex[partList[i + 1]];
+        }
+    }
 
 #endif
 }

@@ -934,7 +934,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
         Value * const producedChunks = b->CreateCeilUDiv(produced, BLOCK_WIDTH);
         Value * const requiredCapacity = b->CreateAdd(produced, required);
         Value * const requiredChunks = b->CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
-        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);
+        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);        
+        Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
 
         indices[1] = b->getInt32(BaseAddress);
         Value * const virtualBaseField = b->CreateInBoundsGEP(handle, indices);
@@ -950,17 +951,16 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * const mallocAddrField = b->CreateInBoundsGEP(handle, indices);
             Value * const mallocAddress = b->CreateLoad(mallocAddrField);
 
-            Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
-
             BasicBlock * const copyBack = BasicBlock::Create(C, "copyBack", func);
             BasicBlock * const expandAndCopyBack = BasicBlock::Create(C, "expandAndCopyBack", func);
             BasicBlock * const updateBaseAddress = BasicBlock::Create(C, "updateBaseAddress", func);
 
             Value * const unreadDataPtr = b->CreateInBoundsGEP(virtualBase, consumedChunks);
 
+
             Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
-            Value * const reserveUpToPtr = b->CreateInBoundsGEP(mallocAddress, chunksToReserve);
-            Value * const canCopy = b->CreateICmpULE(reserveUpToPtr, unreadDataPtr);
+            Value * const wouldWriteUpToPtr = b->CreateInBoundsGEP(mallocAddress, chunksToReserve);
+            Value * const canCopy = b->CreateICmpULE(wouldWriteUpToPtr, unreadDataPtr);
             b->CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
 
             b->SetInsertPoint(copyBack);
@@ -970,7 +970,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const newInternalCapacity = b->CreateAdd(internalCapacity, b->CreateRoundUp(chunksToReserve, internalCapacity));
+            Value * const two_x_Capacity = b->CreateShl(internalCapacity, 1);
+            Value * const newInternalCapacity = b->CreateRoundUp(chunksToReserve, two_x_Capacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
@@ -1019,8 +1020,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const requiredCapacity = b->CreateAdd(newCapacity, additionalCapacity);
 
-            Value * const totalBytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
-
             Value * newBuffer = b->CreatePageAlignedMalloc(mType, requiredCapacity, mAddressSpace);
             newBuffer = b->CreateInBoundsGEP(newBuffer, { underflow });
 
@@ -1043,7 +1042,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             b->CreateCondBr(linearCopy, copyLinear, copyNonLinear);
 
             b->SetInsertPoint(copyLinear);
-            b->CreateMemCpy(newConsumedOffsetPtr, consumedOffsetPtr, totalBytesToCopy, blockSize);
+            b->CreateMemCpy(newConsumedOffsetPtr, consumedOffsetPtr, bytesToCopy, blockSize);
             b->CreateBr(storeNewBuffer);
 
             b->SetInsertPoint(copyNonLinear);
@@ -1059,7 +1058,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * const sourcePtr = b->CreateInBoundsGEP(virtualBase, sourceOffset);
             Value * const targetOffset = b->CreateURem(b->CreateAdd(newConsumedOffset, partialLength1), newCapacity);
             Value * const targetPtr = b->CreateInBoundsGEP(newBuffer, targetOffset);
-            Value * const bytesToCopy2 = b->CreateSub(totalBytesToCopy, bytesToCopy1);
+            Value * const bytesToCopy2 = b->CreateSub(bytesToCopy, bytesToCopy1);
             b->CreateMemCpy(targetPtr, sourcePtr, bytesToCopy2, blockSize);
             b->CreateBr(storeNewBuffer);
 

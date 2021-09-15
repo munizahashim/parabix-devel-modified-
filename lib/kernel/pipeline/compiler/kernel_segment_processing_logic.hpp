@@ -16,6 +16,8 @@ namespace kernel {
 void PipelineCompiler::start(BuilderRef b) {
 
     mCurrentKernelName = mKernelName[PipelineInput];
+    mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
+    mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
 
     makePartitionEntryPoints(b);
 
@@ -67,7 +69,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mPipelineProgress = i1_FALSE;
     mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
-
     branchToInitialPartition(b);
 }
 
@@ -78,9 +79,7 @@ void PipelineCompiler::start(BuilderRef b) {
 inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     clearInternalStateForCurrentKernel();
-
     checkForPartitionEntry(b);
-
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
@@ -89,11 +88,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     mExhaustedPipelineInputAtExit = mExhaustedInput;
 
-
-
     identifyPipelineInputs(mKernelId);
 
-    if (RequiresSynchronization[mKernelId]) {
+    if (RequiresSynchronization[mKernelId] || mCompilingHybridThread) {
         mIsBounded = isBounded();
         mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
         mCheckInputChannels = false;
@@ -127,8 +124,8 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         mMayLoopToEntry = false;
     }
 
-    const auto nextPartitionId = mCurrentPartitionId + 1U;
-    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
+    const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
+    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];    
     const auto canJumpToAnotherPartition = mIsPartitionRoot && (mIsBounded || nextPartitionId == jumpId);
     const auto handleNoUpdateExit = mIsPartitionRoot; // || !canJumpToAnotherPartition;
 
@@ -268,7 +265,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         // If the kernel explicitly terminates, it must set its processed/produced item counts.
         // Otherwise, the pipeline will update any countable rates, even upon termination.
         readCountableItemCountsAfterAbnormalTermination(b);
-        #warning review this
         // TODO: We could have a *fixed-rate* source kernel be a partition root but will need to
         // calculate how many items are the stride "remainder" here.
         signalAbnormalTermination(b);

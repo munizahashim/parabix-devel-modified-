@@ -175,6 +175,8 @@ public:
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
+    void initializeForAllKernels();
+    void clearInternalState();
 
 // partitioning codegen functions
 
@@ -527,6 +529,9 @@ protected:
 
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
+//    const BitVector                             KernelOnHybridThread;
+//    const BitVector                             PartitionOnHybridThread;
+
     const bool                                  ExternallySynchronized;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
@@ -553,6 +558,13 @@ protected:
     const ConsumerGraph                         mConsumerGraph;
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
+
+    // thread state
+    bool                                        mCompilingHybridThread = false;
+    std::vector<unsigned>                       ActiveKernels;
+    std::vector<unsigned>                       ActivePartitions;
+    unsigned                                    ActiveKernelIndex;
+    unsigned                                    ActivePartitionIndex;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -783,6 +795,26 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , PartitionCount(P.PartitionCount)
 
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
+
+//, KernelOnHybridThread([&]() {
+//    BitVector onHybridThread(LastKernel + 1U);
+//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+//        if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
+//            onHybridThread.set(i);
+//        }
+//    }
+//    return onHybridThread;
+//})
+
+//, PartitionOnHybridThread([&]() {
+//    BitVector onHybridThread(PartitionCount);
+//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+//        if (KernelOnHybridThread.test(i)) {
+//            onHybridThread.set(KernelPartitionId[i]);
+//        }
+//    }
+//    return onHybridThread;
+//})
 
 , ExternallySynchronized(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())

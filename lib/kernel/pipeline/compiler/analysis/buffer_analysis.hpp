@@ -340,6 +340,7 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
         bn.Locality = BufferLocality::GloballyShared;
     }
 
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -486,6 +487,9 @@ void PipelineAnalysis::identifyLinearBuffers() {
     // requires that all of its inputs are linear.
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
+
+
+
         bool inputsMustBeLinear = false;
         if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::InternallySynchronized))) {
             // An internally synchronized kernel requires that all I/O is linear
