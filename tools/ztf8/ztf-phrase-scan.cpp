@@ -349,7 +349,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateBr(markCompression);
 
     b->SetInsertPoint(markCompression);
-    maskLength = b->CreateZExt(b->CreateSub(keyLength, lg.ENC_BYTES, "maskLength"), sizeTy);
+    maskLength = b->CreateZExt(b->CreateSub(keyLength, sz_SYM/*lg.ENC_BYTES*/, "maskLength"), sizeTy);
 
     // Compute a mask of bits, with zeroes marking positions to eliminate.
     // The entire symbols will be replaced, but we need to keep the required
@@ -372,12 +372,12 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     //b->CallPrintInt("initialMask", initialMask);
     Value * updated = b->CreateAnd(initialMask, b->CreateNot(mask));
     //b->CallPrintInt("updated", updated);
-    b->CreateAlignedStore(b->CreateAnd(updated, b->CreateNot(mask)), keyBasePtr, 1);
+    b->CreateAlignedStore(updated, keyBasePtr, 1);
     Value * curPos = keyMarkPos;
     Value * curHash = keyHash;  // Add hash extension bits later.
     // Write the suffixes.
     for (unsigned i = 0; i < mNumSym/*lg.groupInfo.encoding_bytes - 1*/; i++) {
-        Value * ZTF_suffix = b->CreateTrunc(/*b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix")*/sz_SYM, b->getInt8Ty());
+        Value * ZTF_suffix = b->CreateTrunc(/*b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix")*/b->getSize(49), b->getInt8Ty());
         b->CreateStore(ZTF_suffix, b->getRawOutputPointer("encodedBytes", curPos));
         curPos = b->CreateSub(curPos, sz_ONE);
         curHash = b->CreateLShr(curHash, lg.SUFFIX_BITS);
