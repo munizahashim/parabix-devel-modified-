@@ -49,6 +49,7 @@ static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing 
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
+static cl::opt<bool> UseFilterByMaskKernel("filter-by-mask-kernel", cl::desc("Use experimental FilterByMaskKernel"), cl::init(false), cl::cat(CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -86,9 +87,12 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
-    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
-    //P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}), SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))}, filteredBasis);
-
+    //FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    if (UseFilterByMaskKernel) {
+        P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}), SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))}, filteredBasis);
+    } else {
+        FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    }
     StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
     FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);
     StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
