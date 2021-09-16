@@ -1571,7 +1571,7 @@ struct ProgramSchedulingJumpAnalysisWorker final {
             const PartitionData & B = P[b];
             const auto v = (A.LinkedGroupId != B.LinkedGroupId);
             add_edge(a, b, v ? 1 : 0, jumpGraph);
-            if (G[a] != G[b]) {
+            if (G[a] != G[b] && in_degree(i, P) > 0) {
                 auto j = i + 1;
                 for (; j < n; ++j) {
                     const auto c = candidate[j];
@@ -2218,10 +2218,13 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
                 const unsigned producerId = source(e, P);
                 BitSet & input = G[producerId];
                 expandCapacity(input);
+                assert (intersection.size() == input.size());
                 intersection &= input;
                 anyFound = true;
             }
             if (anyFound) {
+                expandCapacity(bs);
+                assert (intersection.size() == bs.size());
                 bs |= intersection;
             }
             if (bs.none()) {

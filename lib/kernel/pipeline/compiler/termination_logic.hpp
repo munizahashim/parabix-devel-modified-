@@ -32,20 +32,19 @@ void PipelineCompiler::initializePipelineInputTerminationSignal(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief setCurrentTerminationSignal
+ * @brief readPartitionTerminationSignalFromState
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
-    errs() << "setting term signal for " << mCurrentPartitionId << "\n";
-    assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
-    mPartitionTerminationSignal[mCurrentPartitionId] = signal;
+void PipelineCompiler::readPartitionTerminationSignalFromState(BuilderRef b, const size_t partitionId) {
+    assert (mPartitionTerminationSignal[partitionId] == nullptr);
+    mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getCurrentTerminationSignal
+ * @brief setCurrentTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::getCurrentTerminationSignal() const {
+inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
     assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
-    return mPartitionTerminationSignal[mCurrentPartitionId];
+    mPartitionTerminationSignal[mCurrentPartitionId] = signal;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -187,7 +186,7 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initiallyTerminated
+ * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 inline Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned partitionId) {
     const auto name = TERMINATION_PREFIX + std::to_string(partitionId);

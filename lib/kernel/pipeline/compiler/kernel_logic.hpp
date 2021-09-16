@@ -5,7 +5,7 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief beginKernel
+ * @brief setActiveKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal) {
     assert (kernelId >= FirstKernel && kernelId <= LastKernel);
@@ -26,6 +26,14 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief loadKernelState
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::loadKernelState(BuilderRef b) {
+
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeFullyProcessedItemCounts

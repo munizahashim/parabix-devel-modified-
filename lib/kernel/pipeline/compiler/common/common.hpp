@@ -631,7 +631,6 @@ const Binding & PipelineCommonGraphFunctions::getBinding(const unsigned kernel, 
  * @brief getKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 inline const Kernel * PipelineCommonGraphFunctions::getKernel(const unsigned index) const {
-    // assert (PipelineInput <= index && index <= PipelineOutput);
     return mStreamGraphRef[index].Kernel;
 }
 

@@ -54,7 +54,7 @@ static cl::list<CountOptions> wcOptions(
              clEnumValN(WordOption, "w", "Report the number of words in each input file."),
              clEnumValN(CharOption, "m", "Report the number of characters in each input file (override -c)."),
              clEnumValN(ByteOption, "c", "Report the number of bytes in each input file (override -m).")
-             CL_ENUM_VAL_SENTINEL), cl::cat(wcFlags), cl::Grouping);
+             CL_ENUM_VAL_SENTINEL), cl::cat(wcFlags));
                                                  
 static std::string wc_modes = "";
 

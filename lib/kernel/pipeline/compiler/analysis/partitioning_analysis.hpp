@@ -662,14 +662,6 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     transitive_reduction_dag(ordering, J);
     END_SCOPED_REGION
 
-    if (out_degree(0, J) == 0) {
-        for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
-            if (LLVM_UNLIKELY(in_degree(partitionId, J) == 0)) {
-                add_edge(0, partitionId, J);
-            }
-        }
-    }
-
     if (in_degree(PartitionCount - 1, J) == 0) {
         for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
             if (LLVM_UNLIKELY(out_degree(partitionId, J) == 0)) {
@@ -682,24 +674,23 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         expandCapacity(rateDomSet[i]);
     }
 
-    rateDomSet[PartitionCount - 1].reset();
-
     BitSet intersection;
     expandCapacity(intersection);
 
     for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
-        assert (in_degree(i, J) > 0);
         auto & ds = rateDomSet[i];
         if (out_degree(i, J) == 0) {
             ds.reset();
         } else {
-            intersection.set();
-            for (const auto e : make_iterator_range(in_edges(i, J))) {
-                const unsigned producerId = source(e, J);
-                assert (producerId < i);
-                intersection &= rateDomSet[producerId];
+            if (in_degree(i, J) > 0) {
+                intersection.set();
+                for (const auto e : make_iterator_range(in_edges(i, J))) {
+                    const unsigned producerId = source(e, J);
+                    assert (producerId < i);
+                    intersection &= rateDomSet[producerId];
+                }
+                ds |= intersection;
             }
-            ds |= intersection;
             if (ds.none()) {
                 const auto rateId = nextRateId++;
                 for (unsigned i = 0; i < PartitionCount; ++i) {
@@ -744,7 +735,8 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         const auto b = partList[i];
         const BitSet & current =  rateDomSet[b];
         auto jumpIndex = partList[i + 1];
-        if (prior != current) {
+        if (prior != current && in_degree(i, J) > 0) {
+            assert (current.any());
             jumpIndex = -1U;
             for (unsigned j = (i + 1); j < m; ++j) {
                 const auto k = partList[j];

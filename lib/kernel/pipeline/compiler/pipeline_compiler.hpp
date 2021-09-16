@@ -158,6 +158,7 @@ public:
     void start(BuilderRef b);
     void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal);
     void executeKernel(BuilderRef b);
+    void loadKernelState(BuilderRef b);
     void end(BuilderRef b);
 
     void readPipelineIOItemCounts(BuilderRef b);
@@ -296,6 +297,7 @@ public:
     Value * getLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort) const;
     void setLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort, Value * const available);
 
+    unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
     Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset) const;
     Value * getMaximumNumOfPartialSumStrides(BuilderRef b, const BufferPort &port, Value * const numOfLinearStrides);
 
@@ -303,8 +305,8 @@ public:
 
     void addTerminationProperties(BuilderRef b, const size_t kernel);
     void initializePipelineInputTerminationSignal(BuilderRef b);
+    void readPartitionTerminationSignalFromState(BuilderRef b, const size_t partitionId);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
-    Value * getCurrentTerminationSignal() const;
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort) const;
     Value * isClosed(BuilderRef b, const unsigned streamSet) const;
@@ -529,9 +531,6 @@ protected:
 
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
-//    const BitVector                             KernelOnHybridThread;
-//    const BitVector                             PartitionOnHybridThread;
-
     const bool                                  ExternallySynchronized;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
@@ -558,6 +557,9 @@ protected:
     const ConsumerGraph                         mConsumerGraph;
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
+
+    const BitVector                             KernelOnHybridThread;
+    const BitVector                             PartitionOnHybridThread;
 
     // thread state
     bool                                        mCompilingHybridThread = false;
@@ -796,26 +798,6 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
 
-//, KernelOnHybridThread([&]() {
-//    BitVector onHybridThread(LastKernel + 1U);
-//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-//        if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
-//            onHybridThread.set(i);
-//        }
-//    }
-//    return onHybridThread;
-//})
-
-//, PartitionOnHybridThread([&]() {
-//    BitVector onHybridThread(PartitionCount);
-//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-//        if (KernelOnHybridThread.test(i)) {
-//            onHybridThread.set(KernelPartitionId[i]);
-//        }
-//    }
-//    return onHybridThread;
-//})
-
 , ExternallySynchronized(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
@@ -840,6 +822,27 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mConsumerGraph(std::move(P.mConsumerGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
+
+, KernelOnHybridThread([&]() {
+    BitVector onHybridThread(LastKernel + 1U);
+    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+        if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread))) {
+            onHybridThread.set(i);
+        }
+    }
+    return onHybridThread;
+}())
+
+, PartitionOnHybridThread([&]() {
+    BitVector onHybridThread(PartitionCount);
+    for (unsigned k : KernelOnHybridThread.set_bits()) {
+        assert (k <= LastKernel);
+        const auto p = KernelPartitionId[k];
+        assert (p < PartitionCount);
+        onHybridThread.set(p);
+    }
+    return onHybridThread;
+}())
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

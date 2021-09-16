@@ -71,8 +71,6 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     transitive_reduction_dag(G);
 
-    printGraph(G, errs(), "T1");
-
     if (onHybridThread.any()) {
         using Vertex = TerminationGraph::vertex_descriptor;
         std::vector<Vertex> V;
@@ -98,8 +96,6 @@ void PipelineAnalysis::identifyTerminationChecks() {
                 add_edge(v, terminal, G);
             }
         }
-
-        printGraph(G, errs(), "T2");
     }
 
 

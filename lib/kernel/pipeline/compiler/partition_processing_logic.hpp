@@ -21,8 +21,8 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
     IntegerType * const boolTy = b->getInt1Ty();
     IntegerType * const sizeTy = b->getInt64Ty();
     const auto m = ActivePartitions.size();
-
-    for (auto k = 1U; k < m; ++k) {
+    assert (ActivePartitions[m - 1] == PartitionCount - 1);
+    for (unsigned k = 1; k < m; ++k) {
         const auto i = ActiveKernels[k];
         b->SetInsertPoint(mPartitionEntryPoint[i]);
         assert (mPartitionEntryPoint[i]->getFirstNonPHI() == nullptr);

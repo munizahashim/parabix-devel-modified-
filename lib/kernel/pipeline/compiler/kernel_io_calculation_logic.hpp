@@ -28,10 +28,10 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 
     mKernelId = PipelineInput;
 
-    ConstantInt * const ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b->getSize(0);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        mLocallyAvailableItems[streamSet] = ZERO;
+        mLocallyAvailableItems[streamSet] = sz_ZERO;
     }
 
     // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
@@ -1229,11 +1229,25 @@ Value * PipelineCompiler::getOutputStrideLength(BuilderRef b, const BufferPort &
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getPopCountStepSize
+ ** ------------------------------------------------------------------------------------------------------------- */
+unsigned PipelineCompiler::getPopCountStepSize(const StreamSetPort inputRefPort) const {
+    const auto streamSet = getInputBufferVertex(mKernelId, inputRefPort);
+    const auto refOuput = in_edge(streamSet, mBufferGraph);
+    const BufferPort & refOutputRate = mBufferGraph[refOuput];
+    const BufferPort & refInputRate = getInputPort(mKernelId, inputRefPort);
+    const auto ratio = refInputRate.Minimum / refOutputRate.Minimum;
+    assert (ratio.denominator() == 1 && ratio.numerator() > 0);
+    return ratio.numerator();
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPartialSumItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort & partialSumPort, Value * const previouslyTransferred, Value * const offset) const {
+Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort & partialSumPort, Value * const previouslyTransferred, Value * offset) const {
     const auto port = partialSumPort.Port;
-    const auto ref = getReference(mKernelId, port);
+    const StreamSetPort ref = getReference(mKernelId, port);
     assert (ref.Type == PortType::Input);
     assert (previouslyTransferred);
 
@@ -1251,8 +1265,25 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                             b->GetString(binding.getName()));
         }
 
-        Constant * const sz_ONE = b->getSize(1);
-        position = b->CreateAdd(position, b->CreateSub(offset, sz_ONE));
+        const auto step = getPopCountStepSize(ref);
+        Constant * const sz_STEP = b->getSize(step);
+
+        if (step > 1) {
+
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                const Binding & binding = partialSumPort.Binding;
+                b->CreateAssert(b->CreateICmpEQ(b->CreateURem(position, sz_STEP), sz_ZERO),
+                                "%s.%s: partial sum reference processed count must be a multiple of %" PRIu64,
+                                mCurrentKernelName,
+                                b->GetString(binding.getName()),
+                                sz_STEP);
+            }
+
+            offset = b->CreateMul(offset, sz_STEP);
+        }
+        offset = b->CreateSub(offset, sz_STEP);
+
+        position = b->CreateAdd(position, offset);
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
@@ -1371,12 +1402,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     // get the popcount kernel's input rate so we can calculate the
     // step factor for this kernel's usage of pop count partial sum
     // stream.
-    const auto refOuput = in_edge(refBufferVertex, mBufferGraph);
-    const BufferPort & refOutputRate = mBufferGraph[refOuput];
-    const auto stepFactor = refInputRate.Maximum / refOutputRate.Maximum;
+    const auto step = getPopCountStepSize(ref);
 
-    assert (stepFactor.denominator() == 1);
-    const auto step = stepFactor.numerator();
     if (LLVM_UNLIKELY(step > 1)) {
         offset = b->CreateMul(offset, b->getSize(step));
     }
