@@ -137,7 +137,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * u8bytes = codeUnitStream;
     std::vector<StreamSet *> extractionMasks;
     std::vector<StreamSet *> allHashMarks;
-
+    std::vector<StreamSet *> allSelectedBixnum(SymCount);
     std::vector<StreamSet *> bixnumMarks(4);
     for (unsigned sym = 0; sym < SymCount; sym++) {
         StreamSet * lgHashMarks = P->CreateStreamSet(1);
@@ -178,7 +178,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             P->CreateKernelCall<StreamSelect>(selectedBixnum, Select( { {bixnumMarks[0]}, {bixnumMarks[1]}, {bixnumMarks[2]}, {bixnumMarks[3]} } ));
             //P->CreateKernelCall<DebugDisplayKernel>("selectedBixnum", selectedBixnum);
             // contains 29 x i1 stream indicating the hashMarks of each length in the range 4-32
-            phraseLenBixnum[sym] = selectedBixnum;
+            allSelectedBixnum[sym] = selectedBixnum;
             for(int i = 28; i >= 0; i--) {
                 if (i == 28) {
                     lgSelectedUntilNow = lgHashMarks;
@@ -202,24 +202,32 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         StreamSet * hashMarksFinal = P->CreateStreamSet(1);
         // hashMark positions divided across min through max len values
         StreamSet * hashMarksBixNum = P->CreateStreamSet(29);
-        P->CreateKernelCall<BixnumHashMarks>(phraseLenBixnum[i], allHashMarks[i], hashMarksBixNum);
+        P->CreateKernelCall<BixnumHashMarks>(allSelectedBixnum[i], allHashMarks[i], hashMarksBixNum);
         P->CreateKernelCall<PhraseSelection>(allHashMarks[i], hashMarksBixNum, allHashMarks[i-1], i, hashMarksFinal);
         allHashMarks[i-1] = hashMarksFinal;
     }
 
     for (int sym = SymCount-1; sym >= 0; sym--) {
-        StreamSet * extractionMask = P->CreateStreamSet(1);
-        StreamSet * input_bytes = u8bytes;
-        StreamSet * output_bytes = P->CreateStreamSet(1, 8);
         //P->CreateKernelCall<DebugDisplayKernel>("allHashMarks["+std::to_string(sym)+"]", allHashMarks[sym]);
-        P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym+1, allHashMarks[sym], allHashValues[sym], input_bytes, extractionMask, output_bytes);
-        //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
-        extractionMasks.push_back(extractionMask);
-        u8bytes = output_bytes;
+        //P->CreateKernelCall<DebugDisplayKernel>("phraseLenBixnum["+std::to_string(sym)+"]", phraseLenBixnum[sym]);
+        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+            StreamSet * extractionMask = P->CreateStreamSet(1);
+            StreamSet * input_bytes = u8bytes;
+            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+            StreamSet * groupMarks = P->CreateStreamSet(1);
+            P->CreateKernelCall<HashGroupSelector>(encodingScheme1, i, allHashMarks[sym], phraseLenBixnum[sym], overflow, groupMarks);
+            //P->CreateKernelCall<DebugDisplayKernel>("groupMarks"+std::to_string(i), groupMarks);
+            P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes);
+            //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
+            extractionMasks.push_back(extractionMask);
+            u8bytes = output_bytes;
+        }
     }
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
+    //P->CreateKernelCall<DebugDisplayKernel>("combinedMask", combinedMask);
+
     StreamSet * const encoded = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
 

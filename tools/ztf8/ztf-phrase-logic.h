@@ -96,6 +96,23 @@ protected:
     void generatePabloMethod() override;
 };
 
+class HashGroupSelector final: public pablo::PabloKernel {
+public:
+    HashGroupSelector(BuilderRef b,
+                 EncodingInfo & encodingScheme,
+                    unsigned groupNo,
+                 StreamSet * hashMarks,
+                 StreamSet * const lengthBixNum,
+                 StreamSet * overflow,
+                 StreamSet * selected);
+protected:
+    void generatePabloMethod() override;
+    EncodingInfo & mEncodingScheme;
+    unsigned mGroupNo;
+};
+
+
+
 }
 #endif
 

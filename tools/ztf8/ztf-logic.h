@@ -33,6 +33,7 @@ public:
     unsigned maxSymbolLength() const;
     unsigned maxEncodingBytes() const;
     unsigned prefixLengthOffset(unsigned lgth) const;
+    unsigned prefixLengthMaskBits(unsigned lgth) const;
     std::string uniqueSuffix() const;
 };
 

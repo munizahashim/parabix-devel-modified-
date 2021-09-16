@@ -67,6 +67,18 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
     return suffix_bits_avail < hash_ext_bits ? hash_ext_bits - suffix_bits_avail : 0;
 }
 
+unsigned EncodingInfo::prefixLengthMaskBits(unsigned lgth) const {
+    unsigned groupNo = getLengthGroupNo(lgth);
+    auto g = byLength[groupNo];
+    if (groupNo < 2) {
+        return g.encoding_bytes + 1;
+    }
+    if (groupNo < 4) {
+        return 2;
+    }
+    return g.encoding_bytes;
+}
+
 WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
 : PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 

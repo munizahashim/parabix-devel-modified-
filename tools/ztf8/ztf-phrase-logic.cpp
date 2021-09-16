@@ -232,3 +232,35 @@ void BixnumHashMarks::generatePabloMethod() {
         pb.createAssign(pb.createExtract(getOutputStreamVar("hashMarksBixNum"), pb.getInteger(i)), hashMarksUpdated[i]);
     }
 }
+
+HashGroupSelector::HashGroupSelector(BuilderRef b,
+                           EncodingInfo & encodingScheme,
+                           unsigned groupNo,
+                           StreamSet * hashMarks,
+                           StreamSet * const lengthBixNum,
+                           StreamSet * overflow,
+                           StreamSet * selected)
+: PabloKernel(b, "HashGroupSelector" + groupNo,
+              {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
+                  Binding{"lengthBixNum", lengthBixNum},
+                  Binding{"overflow", overflow}},
+              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
+
+void HashGroupSelector::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
+    std::vector<PabloAST *> lengthBixNum = getInputStreamSet("lengthBixNum");
+    PabloAST * overflow = getInputStreamSet("overflow")[0];
+    //PabloAST* hashMarksFinal = pb.createAnd(hashMarks, pb.createNot(overflow));
+    Var * groupStreamVar = getOutputStreamVar("selected");
+    LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
+    // hashMarks index codes count from 0 on the 2nd byte of a symbol.
+    // So the length is 2 more than the bixnum.
+    unsigned offset = 2;
+    unsigned lo = groupInfo.lo;
+    unsigned hi = groupInfo.hi;
+    std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
+    PabloAST * groupStream = pb.createAnd3(bnc.UGE(lengthBixNum, lo - offset), bnc.ULE(lengthBixNum, hi - offset), hashMarks, groupName);
+    pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
+}

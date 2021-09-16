@@ -46,6 +46,7 @@ struct LengthGroupParameters {
     Constant * MAX_INDEX;
     Constant * PREFIX_BASE;
     Constant * PREFIX_LENGTH_OFFSET;
+    Constant * PREFIX_LENGTH_MASK;
     Constant * LENGTH_MASK;
     Constant * EXTENSION_MASK;
 

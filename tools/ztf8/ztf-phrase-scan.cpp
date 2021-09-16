@@ -204,20 +204,20 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
 // to eliminate compressing any overlapping l-symbol (l < k) sequences
 SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                EncodingInfo encodingScheme,
-                                               unsigned numSym,
+                                               unsigned groupNo,
                                                StreamSet * symbolMarks,
                                                StreamSet * hashValues,
                                                StreamSet * const byteData,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(numSym) /*lengthGroupSuffix(encodingScheme) + (PrefixCheckIsSet() ? "_prefix" : "")*/,
+: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(groupNo) /*lengthGroupSuffix(encodingScheme) + (PrefixCheckIsSet() ? "_prefix" : "")*/,
                    {Binding{"symbolMarks", symbolMarks},
                        Binding{"hashValues", hashValues},
                        Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
                    {}, {}, {},
                    {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"}}),
-mEncodingScheme(encodingScheme), mNumSym(numSym) {
+mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -233,7 +233,7 @@ mEncodingScheme(encodingScheme), mNumSym(numSym) {
 
 void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     ScanWordParameters sw(b, mStride);
-    LengthGroupParameters lg(b, mEncodingScheme, 4); // use lg 4 for all any k-symbol sequence
+    LengthGroupParameters lg(b, mEncodingScheme, mGroupNo);
     Constant * sz_DELAYED = b->getSize(mEncodingScheme.maxSymbolLength());
     Constant * sz_STRIDE = b->getSize(mStride);
     Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
@@ -242,7 +242,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Constant * sz_TWO = b->getSize(2);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
-    Constant * sz_SYM = b->getSize(mNumSym);
     Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
 
     Type * sizeTy = b->getSizeTy();
@@ -349,8 +348,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateBr(markCompression);
 
     b->SetInsertPoint(markCompression);
-    maskLength = b->CreateZExt(b->CreateSub(keyLength, sz_SYM/*lg.ENC_BYTES*/, "maskLength"), sizeTy);
-
+    maskLength = b->CreateZExt(b->CreateSub(keyLength, lg.ENC_BYTES, "maskLength"), sizeTy);
+    //b->CallPrintInt("maskLength", maskLength);
     // Compute a mask of bits, with zeroes marking positions to eliminate.
     // The entire symbols will be replaced, but we need to keep the required
     // number of positions for the encoded ZTF sequence.
@@ -364,28 +363,37 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyBase = b->CreateSelect(b->CreateICmpULT(startBase, markBase), startBase, markBase);
     Value * bitOffset = b->CreateSub(keyStartPos, keyBase);
     //b->CallPrintInt("bitOffset", bitOffset);
+
     mask = b->CreateShl(mask, bitOffset);
-    //b->CallPrintInt("mask", mask);
+
+    Value * markOffset = b->CreateSub(keyMarkPos, markBase);
     Value * const keyBasePtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", keyBase), sizeTy->getPointerTo());
+    //mask = b->CreateShl(mask, markOffset);
 
     Value * initialMask = b->CreateAlignedLoad(keyBasePtr, 1);
     //b->CallPrintInt("initialMask", initialMask);
     Value * updated = b->CreateAnd(initialMask, b->CreateNot(mask));
+    //b->CallPrintInt("mask", mask);
     //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, keyBasePtr, 1);
     Value * curPos = keyMarkPos;
     Value * curHash = keyHash;  // Add hash extension bits later.
     // Write the suffixes.
-    for (unsigned i = 0; i < mNumSym/*lg.groupInfo.encoding_bytes - 1*/; i++) {
+    for (unsigned i = 0; i < lg.groupInfo.encoding_bytes - 1; i++) {
         Value * ZTF_suffix = b->CreateTrunc(/*b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix")*/b->getSize(49), b->getInt8Ty());
         b->CreateStore(ZTF_suffix, b->getRawOutputPointer("encodedBytes", curPos));
         curPos = b->CreateSub(curPos, sz_ONE);
         curHash = b->CreateLShr(curHash, lg.SUFFIX_BITS);
     }
     // Now prepare the prefix - PREFIX_BASE + ... + remaining hash bits.
-    //Value * lgthBase = b->CreateShl(b->CreateSub(keyLength, lg.LO), lg.PREFIX_LENGTH_OFFSET);
-    //Value * ZTF_prefix = b->CreateAdd(b->CreateAdd(lg.PREFIX_BASE, lgthBase), curHash, "ZTF_prefix");
-    //b->CreateStore(b->CreateTrunc(ZTF_prefix, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
+    // (keyLength - lg.LO) + ( (lg.HI - lg.LO + 1) * lastNbits)
+    Value * pfxLgthMask = b->CreateAnd(curHash, lg.PREFIX_LENGTH_MASK);
+    Value * lgthBase = b->CreateAdd(b->CreateSub(keyLength, lg.LO), b->CreateMul(b->CreateAdd(b->CreateSub(lg.HI, lg.LO), sz_ONE), pfxLgthMask));
+    // different offset caclulation for length group 17-32
+    Value * pfxOffset = b->CreateSelect(b->CreateICmpEQ(lg.LO, b->getSize(17)), lgthBase, pfxLgthMask);
+    Value * ZTF_prefix = b->CreateAdd(lg.PREFIX_BASE, pfxOffset, "ZTF_prefix");
+    //b->CallPrintInt("ZTF_prefix", ZTF_prefix);
+    b->CreateStore(b->CreateTrunc(ZTF_prefix, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
 
     //b->CreateBr(nextKey);
     b->CreateBr(tryStore);

@@ -61,6 +61,7 @@ LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encoding
     PREFIX_BASE(b->getSize(groupInfo.prefix_base)),
     PREFIX_LENGTH_OFFSET(b->getSize(encodingScheme.prefixLengthOffset(groupInfo.lo))),
     LENGTH_MASK(b->getSize(2UL * groupHalfLength - 1UL)),
+    PREFIX_LENGTH_MASK(b->getSize((1UL << encodingScheme.prefixLengthMaskBits(groupInfo.lo)) - 1UL)),
     EXTENSION_MASK(b->getSize((1UL << groupInfo.length_extension_bits) - 1UL)) {
         assert(groupInfo.hi <= (1UL << (boost::intrusive::detail::floor_log2(groupInfo.lo) + 1UL)));
     }

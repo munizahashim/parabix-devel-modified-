@@ -32,7 +32,7 @@ class SymbolGroupCompression final : public MultiBlockKernel {
 public:
     SymbolGroupCompression(BuilderRef b,
                            EncodingInfo encodingScheme,
-                           unsigned numSym,
+                           unsigned groupNo,
                            StreamSet * symbolMarks,
                            StreamSet * hashValues,
                            StreamSet * const byteData,
@@ -43,7 +43,7 @@ private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
 
     const EncodingInfo mEncodingScheme;
-    const unsigned mNumSym;
+    const unsigned mGroupNo;
 };
 
 }
