@@ -50,6 +50,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 static cl::opt<bool> UseFilterByMaskKernel("filter-by-mask-kernel", cl::desc("Use experimental FilterByMaskKernel"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<bool> FilterOnly("filter-only", cl::desc("Perform initial CSV filtering only"), cl::init(false), cl::cat(CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -81,8 +82,22 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * toKeep = P->CreateStreamSet(1);
     P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape, toKeep, HeaderSpec == "");
 
-    //P->CreateKernelCall<DebugDisplayKernel>("CSV marks", csvMarks);
-
+// DEBUGGING
+    if (FilterOnly) {
+        StreamSet * filteredBasis = P->CreateStreamSet(8);
+        //FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+        if (UseFilterByMaskKernel) {
+            P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}),
+                                                    SelectOperationList{Select(BasisBits, streamutils::Range(0, 8))},
+                                                    filteredBasis);
+        } else {
+            FilterByMask(P, toKeep, BasisBits, filteredBasis);
+        }
+        StreamSet * filtered = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
+        P->CreateKernelCall<StdOutKernel>(filtered);
+    } else {
+//  NORMAL
     StreamSet * translatedBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
@@ -164,7 +179,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
     //  The StdOut kernel writes a byte stream to standard output.
     P->CreateKernelCall<StdOutKernel>(Instantiated);
-
+    }
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
 
