@@ -944,10 +944,10 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
     Type * pendingType;
     if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
         pendingType = b->getBitBlockType();
-        mPendingSetCount = mStreamCount;
+        mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;;
     } else {
         pendingType = b->getIntNTy(mCompressFieldWidth);
-        mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;
+        mPendingSetCount = mStreamCount;
     }
     for (unsigned i = 0; i < mPendingSetCount; i++) {
         addInternalScalar(pendingType, "pendingData" + std::to_string(i));
