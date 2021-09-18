@@ -161,7 +161,7 @@ private:
     SelectedInputList mInputOps;
     unsigned mFieldsPerBlock;
     unsigned mStreamCount;
-    unsigned mSwizzleSetCount;
+    unsigned mPendingSetCount;
 };
 
 }
