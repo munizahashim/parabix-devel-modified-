@@ -264,3 +264,135 @@ void HashGroupSelector::generatePabloMethod() {
     PabloAST * groupStream = pb.createAnd3(bnc.UGE(lengthBixNum, lo - offset), bnc.ULE(lengthBixNum, hi - offset), hashMarks, groupName);
     pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
 }
+
+ZTF_PhraseExpansionDecoder::ZTF_PhraseExpansionDecoder(BuilderRef b,
+                                           EncodingInfo & encodingScheme,
+                                           StreamSet * const basis,
+                                           StreamSet * insertBixNum,
+                                           StreamSet * countStream)
+: pablo::PabloKernel(b, "ZTF_PhraseExpansionDecoder" + encodingScheme.uniqueSuffix(),
+                     {Binding{"basis", basis, FixedRate(), LookAhead(encodingScheme.maxEncodingBytes() - 1)}},
+                     {Binding{"insertBixNum", insertBixNum}, Binding{"countStream", countStream}}),
+    mEncodingScheme(encodingScheme)  {}
+
+void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    std::vector<PabloAST *> count;
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::vector<PabloAST *> ASCII_lookaheads;
+    PabloAST * ASCII_lookahead = pb.createNot(pb.createLookahead(basis[7], 1)); // for lg 0,1,2
+    ASCII_lookaheads.push_back(ASCII_lookahead);
+    //pb.createDebugPrint(ASCII_lookahead, "ASCII_lookahead");
+    // for lg 3,4
+    for (unsigned i = 2; i < mEncodingScheme.maxEncodingBytes(); i++) {
+        PabloAST * ASCII_lookahead_multibyte = pb.createNot(pb.createLookahead(basis[7], pb.getInteger(i)));
+        ASCII_lookaheads.push_back(ASCII_lookahead_multibyte);
+        //pb.createDebugPrint(pb.createLookahead(basis[7], pb.getInteger(i)), "ASCII_lookahead_multibyte");
+    }
+    /*
+        CODEWORDS                                                    | VALID UTF-8
+        2-byte -> non-ASCII ASCII               > bit 7 -> 1 0       | 2-byte -> non-ASCII 80-BF               > bit 7 -> 1 1
+        3-byte -> non-ASCII ASCII ASCII         > bit 7 -> 1 0 0     | 3-byte -> non-ASCII 80-BF 80-BF         > bit 7 -> 1 1 1
+        3-byte -> non-ASCII ASCII ASCII ASCII   > bit 7 -> 1 0 0 0   | 3-byte -> non-ASCII 80-BF 80-BF 80-BF   > bit 7 -> 1 1 1 1
+        10000000 - 10111111
+    */
+
+    /*
+    3    |  0xC0-0xC7               (192-199) 0000 0001 0010 0011 0100 0101 0110 0111
+    4    |  0xC8-0xCF               (200-208) 1000 1001 1010 1011 1100 1101 1110 1111
+    5    |  0xD0, 0xD4, 0xD8, 0xDC  } - base = 0,4,8,12  0000 0100 1000 1100 // low 2 bits + (lo - encoding_bytes)
+    6    |  0xD1, 0xD5, 0xD9, 0xDD  } - base = 1,5,9,13  0001 0101 1001 1101
+    7    |  0xD2, 0xD6, 0xDA, 0xDE  } - base = 2,6,10,14 0010 0110 1010 1110
+    8    |  0xD3, 0xD7, 0xDB, 0xDF  } - base = 3,7,11,15 0011 0111 1011 1111
+    9-16 |  0xE0 - 0xEF (3-bytes)   } - lo - encoding_bytes = 9 - 3 = 6
+                                        length = low 3 bits + (lo - encoding_bytes)
+    17-32|  0xF0 - 0xFF (4-bytes)   } - lo - encoding_bytes = 17 - 4 = 13
+                                        length = pfx-base + (lo - encoding_bytes)
+    */
+
+    BixNum insertLgth(5, pb.createZeroes());
+    for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
+        BixNum relative(5, pb.createZeroes());
+        BixNum toInsert(5, pb.createZeroes());
+        LengthGroupInfo groupInfo = mEncodingScheme.byLength[i];
+        unsigned lo = groupInfo.lo;
+        unsigned hi = groupInfo.hi;
+        unsigned base = groupInfo.prefix_base;
+        unsigned next_base;
+        PabloAST * inGroup = pb.createZeroes();
+        if (i < 3) {
+            if (i < 2) {
+                next_base = base + 8;
+                inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[0], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
+                count.push_back(inGroup);
+            }
+            else {
+                next_base = base + 16;
+                #if 0
+                for (unsigned c = base; c < base+4; c++) {
+                    PabloAST * countStream = pb.createZeroes();
+                    unsigned c1 = c;
+                    for (unsigned idx = 0; idx < 4; idx++) {
+                         countStream = pb.createOr(countStream, bnc.EQ(basis, c1));
+                         c1 += 4;
+                    }
+                    count.push_back(countStream);
+                }
+                #endif
+                inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[0], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
+                BixNum diff = bnc.SubModular(basis, base); // SubModular range (0-7)
+                for (unsigned extractIdx = 0; extractIdx < 2; extractIdx++) { // extract low 2 bits
+                    relative[extractIdx] = pb.createOr(relative[extractIdx], diff[extractIdx]);
+                }
+            }
+            //pb.createDebugPrint(inGroup, "inGroup["+std::to_string(i)+"]");
+            toInsert = bnc.AddModular(relative, lo - groupInfo.encoding_bytes);
+        }
+        else {
+            next_base = base + 16;
+            inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[i-2], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
+            //pb.createDebugPrint(inGroup, "inGroup["+std::to_string(i)+"]");
+            if (i == 3) {
+                #if 0
+                for (unsigned c = base; c < base+8; c++) {
+                    PabloAST * countStream = pb.createZeroes();
+                    unsigned c1 = c;
+                    for (unsigned idx = 0; idx < 2; idx++) {
+                         countStream = pb.createOr(countStream, bnc.EQ(basis, c1));
+                         c1 += 8;
+                    }
+                    count.push_back(countStream);
+                }
+                #endif
+
+                BixNum diff = bnc.SubModular(basis, base); // 0,8; 1,9; 2,10; etc...
+                for (unsigned extractIdx = 0; extractIdx < 3; extractIdx++) {
+                    relative[extractIdx] = pb.createOr(relative[extractIdx], diff[extractIdx]);
+                }
+            }
+            else {
+                #if 0
+                for (unsigned c = base; c < next_base; c++) {
+                    PabloAST * countStream = bnc.EQ(basis, c);
+                    count.push_back(countStream);
+                }
+                #endif
+                BixNum diff = bnc.SubModular(basis, base); // SubModular range (0-7)
+                for (unsigned extractIdx = 0; extractIdx < 4; extractIdx++) { // extract low 4 bits
+                    relative[extractIdx] = pb.createOr(relative[extractIdx], diff[extractIdx]);
+                }
+            }
+            toInsert = bnc.AddModular(relative, lo - groupInfo.encoding_bytes);
+        }
+        for (unsigned j = 0; j < 5; j++) {
+            insertLgth[j] = pb.createSel(inGroup, toInsert[j], insertLgth[j], "insertLgth[" + std::to_string(j) + "]");
+        }
+    }
+    Var * lengthVar = getOutputStreamVar("insertBixNum");
+    for (unsigned i = 0; i < 5; i++) {
+        //pb.createDebugPrint(insertLgth[i], "insertLgth["+std::to_string(i)+"]");
+        pb.createAssign(pb.createExtract(lengthVar, pb.getInteger(i)), insertLgth[i]);
+    }
+    pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), count[0]);
+}
