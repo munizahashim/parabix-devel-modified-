@@ -150,11 +150,16 @@ DeletionKernel::DeletionKernel(BuilderRef b, StreamSet * input, StreamSet * delM
 , mStreamCount(output->getNumElements()) {
 }
 
-void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
+
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
@@ -222,9 +227,10 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
+    setStride(4 * b->getBitBlockWidth());
 }
 
-void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     Type * fieldTy = kb->getIntNTy(mPEXTWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
     Function * PEXT_func = nullptr;
@@ -238,6 +244,10 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
     const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mPEXTWidth;
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
@@ -295,7 +305,7 @@ StreamCompressKernel::StreamCompressKernel(BuilderRef b
     }
 }
 
-void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     IntegerType * const fwTy = b->getIntNTy(mCompressedFieldWidth);
     IntegerType * const sizeTy = b->getSizeTy();
     const unsigned numFields = b->getBitBlockWidth() / mCompressedFieldWidth;
@@ -315,10 +325,12 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
 
     Constant * const ZERO = ConstantInt::get(sizeTy, 0);
     Constant * const ONE = ConstantInt::get(sizeTy, 1);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
 
     Value * const produced = b->getProducedItemCount("compressedOutput");
-
-
 
     Value * const pendingItemCount = b->CreateAnd(b->CreateZExtOrTrunc(produced, fwTy), BLOCK_MASK);
 
@@ -525,7 +537,7 @@ SwizzledDeleteByPEXTkernel::SwizzledDeleteByPEXTkernel(BuilderRef b,
     }
 }
 
-void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     // We use delMask to apply the same PEXT delete operation to each stream in the input stream set
 
     BasicBlock * const entry = b->GetInsertBlock();
@@ -538,6 +550,10 @@ void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Val
     ConstantInt * const LOG_2_SWIZZLE_FACTOR = b->getSize(std::log2(mSwizzleFactor));
     ConstantInt * const PEXT_WIDTH_MASK = b->getSize(mPEXTWidth - 1);
 
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     // All output groups have the same count.
     Value * const baseOutputProduced = b->getProducedItemCount(getOutputStreamSetBinding(0).getName());
     Value * const baseProducedOffset = b->CreateAnd(baseOutputProduced, BLOCK_WIDTH_MASK);
