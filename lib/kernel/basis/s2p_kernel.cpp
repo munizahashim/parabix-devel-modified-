@@ -128,7 +128,7 @@ Value * s2p_bytes(BuilderRef b, Value * r) {
     return b->simd_if(1, b->simd_himask(64), b->simd_or(b7654, b7654_2), b->simd_or(b3210, b3210_2));
 }
 
-void S2PKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfBlocks) {
+void S2PKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     Module * m = b->getModule();
     DataLayout DL(m);
     IntegerType * const intPtrTy = DL.getIntPtrType(b->getContext());
@@ -140,7 +140,10 @@ void S2PKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfBlocks)
     // Declarations for AbortOnNull mode:
     PHINode * nullCheckPhi = nullptr;
     Value * nonNullSoFar = nullptr;
-
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     b->CreateBr(s2pLoop);
 
     b->SetInsertPoint(s2pLoop);
@@ -271,7 +274,10 @@ void BitPairsKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfSt
     BasicBlock * bitPairLoop = b->CreateBasicBlock("bitPairLoop");
     BasicBlock * bitPairFinalize = b->CreateBasicBlock("bitPairFinalize");
     Constant * const ZERO = b->getSize(0);
-    Value * numOfBlocks = b->CreateMul(numOfStrides, b->getSize(getStride()/b->getBitBlockWidth()));
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     b->CreateBr(bitPairLoop);
     b->SetInsertPoint(bitPairLoop);
     PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2);
@@ -308,7 +314,10 @@ void BitQuadsKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfSt
     BasicBlock * bitQuadLoop = b->CreateBasicBlock("bitQuadLoop");
     BasicBlock * bitQuadFinalize = b->CreateBasicBlock("bitQuadFinalize");
     Constant * const ZERO = b->getSize(0);
-    Value * numOfBlocks = b->CreateMul(numOfStrides, b->getSize(getStride()/b->getBitBlockWidth()));
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     b->CreateBr(bitQuadLoop);
     b->SetInsertPoint(bitQuadLoop);
     PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2);
@@ -346,7 +355,10 @@ void S2P_CompletionKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
     BasicBlock * s2pLoop = b->CreateBasicBlock("s2pLoop");
     BasicBlock * s2pFinalize = b->CreateBasicBlock("s2pFinalize");
     Constant * const ZERO = b->getSize(0);
-    Value * numOfBlocks = b->CreateMul(numOfStrides, b->getSize(getStride()/b->getBitBlockWidth()));
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     b->CreateBr(s2pLoop);
     b->SetInsertPoint(s2pLoop);
     PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
@@ -401,12 +413,16 @@ S2P_21Kernel::S2P_21Kernel(BuilderRef b, StreamSet * const codeUnitStream, Strea
 {Binding{"codeUnitStream", codeUnitStream, FixedRate(), Principal()}},
     {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
 
-void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfBlocks) {
+void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
     BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
     Constant * const ZERO = kb->getSize(0);
 
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
     kb->CreateBr(processBlock);
 
     kb->SetInsertPoint(processBlock);

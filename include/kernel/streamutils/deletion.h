@@ -159,7 +159,8 @@ private:
     const unsigned mCompressFieldWidth;
     SelectedInput mMaskOp;
     SelectedInputList mInputOps;
-    unsigned mSwizzleFactor;
+    unsigned mFieldsPerBlock;
+    unsigned mStreamCount;
     unsigned mSwizzleSetCount;
 };
 
