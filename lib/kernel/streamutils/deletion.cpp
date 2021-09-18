@@ -227,7 +227,7 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
-    setStride(4 * b->getBitBlockWidth());
+    //setStride(4 * b->getBitBlockWidth());
 }
 
 void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
@@ -1221,7 +1221,7 @@ const unsigned MIN_STREAMS_TO_SWIZZLE = 4;
 FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
                                          SelectOperation const & maskOp,
                                          SelectOperationList const & inputOps,
-                                         StreamSet * outputStreamSet,
+                                         StreamSet * filteredOutput,
                                          unsigned fieldWidth)
 : MultiBlockKernel(b, "FilterByMask" + std::to_string(fieldWidth) + "_" +
                    streamutils::genSignature(maskOp) +
@@ -1229,33 +1229,31 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
 {}, {}, {}, {}, {})
 , mCompressFieldWidth(fieldWidth)
 , mFieldsPerBlock(b->getBitBlockWidth() / fieldWidth)
-, mStreamCount(outputStreamSet->getNumElements())
-, mSwizzleSetCount((mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock) {
+, mStreamCount(filteredOutput->getNumElements()) {
     mMaskOp.operation = maskOp.operation;
     mMaskOp.bindings.push_back(std::make_pair("extractionMask", maskOp.bindings[0].second));
     // assert (streamutil::resultStreamCount(maskOp) == 1);
     mInputStreamSets.push_back({"extractionMask", maskOp.bindings[0].first, FixedRate(), Principal()});
-    //assert (streamutil::resultStreamCount(inputOps) == outputStreamSet->getNumElements());
+    //assert (streamutil::resultStreamCount(inputOps) == filteredOutput->getNumElements());
     std::unordered_map<StreamSet *, std::string> inputBindings;
     std::tie(mInputOps, inputBindings) = streamutils::mapOperationsToStreamNames(inputOps);
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
-    mOutputStreamSets.push_back({"outputStreamSet", outputStreamSet, PopcountOf("extractionMask")});
+    mOutputStreamSets.push_back({"filteredOutput", filteredOutput, PopcountOf("extractionMask")});
+    Type * pendingType;
     if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
-        addInternalScalar(b->getBitBlockType(), "pendingSwizzleData0");
-        for (unsigned i = 1; i < mSwizzleSetCount; i++) {
-            addInternalScalar(b->getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
-        }
+        pendingType = b->getBitBlockType();
+        mPendingSetCount = mStreamCount;
     } else {
-        Type * fieldTy = b->getIntNTy(mCompressFieldWidth);
-        addInternalScalar(fieldTy, "pendingField0");
-        for (unsigned i = 1; i < mStreamCount; i++) {
-            addInternalScalar(fieldTy, "pendingField" + std::to_string(i));
-        }
+        pendingType = b->getIntNTy(mCompressFieldWidth);
+        mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;
+    }
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        addInternalScalar(pendingType, "pendingData" + std::to_string(i));
     }
     addInternalScalar(b->getSizeTy(), "pendingOffset");
-    setStride(4 * b->getBitBlockWidth());
+    //setStride(4 * b->getBitBlockWidth());
 }
 
 void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
@@ -1294,7 +1292,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     BasicBlock * done = kb->CreateBasicBlock("done");
 
     Value * const initialPos = kb->getProcessedItemCount("extractionMask");
-    Value * const baseOutputProduced = kb->getProducedItemCount("outputStreamSet");
+    Value * const baseOutputProduced = kb->getProducedItemCount("filteredOutput");
     Value * const baseProducedOffset = kb->CreateAnd(baseOutputProduced, BLOCK_WIDTH_MASK);
 
     kb->CreateBr(stridePrologue);
@@ -1307,16 +1305,9 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     Value * strideBlockOffset = kb->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = kb->CreateAdd(strideNo, sz_ONE);
 
-    unsigned pendingDataSize = (mStreamCount < MIN_STREAMS_TO_SWIZZLE) ? mStreamCount : mSwizzleSetCount;
-    std::vector<Value *> pendingData(pendingDataSize);
-    if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
-        for (unsigned i = 0; i < mStreamCount; i++) {
-            pendingData[i] = kb->getScalarField("pendingField" + std::to_string(i));
-        }
-    } else {
-        for (unsigned i = 0; i < mSwizzleSetCount; i++) {
-            pendingData[i] = kb->getScalarField("pendingSwizzleData" + std::to_string(i));
-        }
+    std::vector<Value *> pendingData(mPendingSetCount);
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        pendingData[i] = kb->getScalarField("pendingData" + std::to_string(i));
     }
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
@@ -1327,8 +1318,8 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     blockNo->addIncoming(sz_ZERO, stridePrologue);
     PHINode * const producedOffsetPhi = kb->CreatePHI(sizeTy, 2);
     producedOffsetPhi->addIncoming(strideProducedOffset, stridePrologue);
-    std::vector<PHINode *> pendingDataPhi(pendingDataSize);
-    for (unsigned i = 0; i < pendingDataSize; i++) {
+    std::vector<PHINode *> pendingDataPhi(mPendingSetCount);
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
         pendingDataPhi[i] = kb->CreatePHI(pendingData[i]->getType(), 2);
         pendingDataPhi[i]->addIncoming(pendingData[i], stridePrologue);
         pendingData[i] = pendingDataPhi[i];
@@ -1368,7 +1359,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                     Use_BMI_PEXT ? kb->CreateCall(PEXT_ty, PEXT_func, {field, mask[i]}) : field;
                 Value * const shiftedItems = kb->CreateShl(compressed, kb->CreateZExtOrTrunc(pendingOffset, fieldTy));
                 Value * const combined = kb->CreateOr(pendingData[j], shiftedItems);
-                Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), outputBlock);
+                Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), outputBlock);
                 outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
                 outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
                 kb->CreateStore(combined, outputPtr);
@@ -1378,7 +1369,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 pendingData[j] = kb->CreateSelect(pendingSpaceFilled, overFlow, combined);
             }
         } else {
-            std::vector<Value *> swizzles(mSwizzleSetCount, ConstantInt::getNullValue(kb->getBitBlockType()));
+            std::vector<Value *> swizzles(mPendingSetCount, ConstantInt::getNullValue(kb->getBitBlockType()));
             for (unsigned j = 0; j < input.size(); ++j) {
                 unsigned swizzleNo = j/mFieldsPerBlock;
                 Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
@@ -1397,7 +1388,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
             Value * spaceVector = kb->simd_fill(mCompressFieldWidth, maskedSpace);
             // Data from the ith swizzle pack of each group is processed
             // according to the same newItemCount, pendingSpace, ...
-            for (unsigned j = 0; j < mSwizzleSetCount; j++) {
+            for (unsigned j = 0; j < mPendingSetCount; j++) {
                 Value * const newItems = swizzles[j];
                 // Combine as many of the new items as possible into the pending group.
                 Value * const shiftedItems = kb->CreateShl(swizzles[j], shiftVector);
@@ -1406,7 +1397,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 // To avoid an unpredictable branch, always store the combined group, whether full or not.
                 for (unsigned k = 0; k < mFieldsPerBlock; k++) {
                     unsigned strmIdx = j * mFieldsPerBlock + k;
-                    Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(strmIdx), outputBlock);
+                    Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), outputBlock);
                     outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
                     outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
                     kb->CreateStore(kb->CreateExtractElement(combinedGroup, kb->getInt32(k)), outputPtr);
@@ -1426,21 +1417,15 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     Value * nextBlk = kb->CreateAdd(blockNo, sz_ONE);
     blockNo->addIncoming(nextBlk, currentBB);
     producedOffsetPhi->addIncoming(producedOffset, currentBB);
-    for (unsigned i = 0; i < pendingDataSize; i++) {
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
         pendingDataPhi[i]->addIncoming(pendingData[i], currentBB);
     }
     Value * moreBlocksInStride = kb->CreateICmpNE(nextBlk, sz_BLOCKS_PER_STRIDE);
     kb->CreateCondBr(moreBlocksInStride, processBlock, strideEpilogue);
 
     kb->SetInsertPoint(strideEpilogue);
-    if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
-        for (unsigned i = 0; i < mStreamCount; i++) {
-            kb->setScalarField("pendingField" + std::to_string(i), pendingData[i]);
-        }
-    } else {
-        for (unsigned i = 0; i < mSwizzleSetCount; i++) {
-            kb->setScalarField("pendingSwizzleData" + std::to_string(i), pendingData[i]);
-        }
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        kb->setScalarField("pendingData" + std::to_string(i), pendingData[i]);
     }
     strideNo->addIncoming(nextStrideNo, strideEpilogue);
     strideProducedOffset->addIncoming(producedOffset, strideEpilogue);
@@ -1453,16 +1438,16 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     Value * const finalField = kb->CreateLShr(kb->CreateAnd(producedOffset, BLOCK_WIDTH_MASK), LOG_2_FIELD_WIDTH);
     if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
         for (unsigned j = 0; j < mStreamCount; j++) {
-            Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), finalBlock);
+            Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), finalBlock);
             outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
             outputPtr = kb->CreateGEP(outputPtr, finalField);
             kb->CreateStore(pendingData[j], outputPtr);
         }
     } else {
-        for (unsigned j = 0; j < mSwizzleSetCount; j++) {
+        for (unsigned j = 0; j < mPendingSetCount; j++) {
             for (unsigned k = 0; k < mFieldsPerBlock; k++) {
                 unsigned strmIdx = j * mFieldsPerBlock + k;
-                Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(strmIdx), finalBlock);
+                Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), finalBlock);
                 outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
                 outputPtr = kb->CreateGEP(outputPtr, finalField);
                 kb->CreateStore(kb->CreateExtractElement(pendingData[j], kb->getInt32(k)), outputPtr);
