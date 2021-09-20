@@ -255,6 +255,7 @@ struct BufferNode {
     StreamSetBuffer * Buffer = nullptr;
     unsigned Type = 0;
     bool IsLinear = false;
+    bool CrossesHybridThreadBarrier = false;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
@@ -268,11 +269,6 @@ struct BufferNode {
     unsigned RequiredCapacity = 0;
     unsigned OverflowCapacity = 0;
     unsigned UnderflowCapacity = 0;
-
-    // How many items will the producer permit to be unconsumed
-    // before deciding whether to defer invoking a kernel.
-    // 0 = infinite
-    unsigned MaxUnconsumedThreshold = 0;
 
 
     unsigned OutputItemCountId = 0;
@@ -374,6 +370,8 @@ struct ConsumerEdge {
 };
 
 using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, ConsumerNode, ConsumerEdge>;
+
+using PartialSumStepFactorGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 
 enum TerminationSignal : unsigned {
     None = KernelBuilder::TerminationCode::None

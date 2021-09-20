@@ -458,6 +458,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mKernelTerminated = nullptr;
     mKernelInitiallyTerminated = nullptr;
     mKernelInitiallyTerminatedExit = nullptr;
+    mInitiallyTerminated = nullptr;
 
     mMaximumNumOfStrides = nullptr;
     mNumOfLinearStridesPhi = nullptr;
@@ -503,6 +504,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProducedDeferredItemCountPtr.reset(numOfOutputs);
     mProducedDeferredItemCount.reset(numOfOutputs);
     mProducedAtTerminationPhi.reset(numOfOutputs);
+    mProducedAtTermination.reset(numOfOutputs);
     mUpdatedProducedPhi.reset(numOfOutputs);
     mUpdatedProducedDeferredPhi.reset(numOfOutputs);
     mFullyProducedItemCount.reset(numOfOutputs);

@@ -1233,12 +1233,9 @@ Value * PipelineCompiler::getOutputStrideLength(BuilderRef b, const BufferPort &
  ** ------------------------------------------------------------------------------------------------------------- */
 unsigned PipelineCompiler::getPopCountStepSize(const StreamSetPort inputRefPort) const {
     const auto streamSet = getInputBufferVertex(mKernelId, inputRefPort);
-    const auto refOuput = in_edge(streamSet, mBufferGraph);
-    const BufferPort & refOutputRate = mBufferGraph[refOuput];
-    const BufferPort & refInputRate = getInputPort(mKernelId, inputRefPort);
-    const auto ratio = refInputRate.Minimum / refOutputRate.Minimum;
-    assert (ratio.denominator() == 1 && ratio.numerator() > 0);
-    return ratio.numerator();
+    const auto p = edge(streamSet, mKernelId, mPartialSumStepFactorGraph);
+    assert (p.second);
+    return mPartialSumStepFactorGraph[p.first];
 }
 
 
@@ -1253,7 +1250,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
 
     const StreamSetBuffer * const buffer = getInputBuffer(mKernelId, ref);
 
-    Constant * const sz_ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b->getSize(0);
     Value * position = mAlreadyProcessedPhi[ref];
 
     if (offset) {
@@ -1265,10 +1262,14 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                             b->GetString(binding.getName()));
         }
 
+        ConstantInt * const sz_ONE = b->getSize(1);
+
         const auto step = getPopCountStepSize(ref);
-        Constant * const sz_STEP = b->getSize(step);
+        ConstantInt * sz_STEP = sz_ONE;
 
         if (step > 1) {
+
+            sz_STEP = b->getSize(step);
 
             if (LLVM_UNLIKELY(CheckAssertions)) {
                 const Binding & binding = partialSumPort.Binding;
@@ -1281,8 +1282,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
 
             offset = b->CreateMul(offset, sz_STEP);
         }
-        offset = b->CreateSub(offset, sz_STEP);
-
+        offset = b->CreateSub(offset, sz_ONE);
         position = b->CreateAdd(position, offset);
     }
 
@@ -1384,6 +1384,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     if (peekableItemCount) {
         cond = b->CreateAnd(cond, b->CreateICmpUGE(sourceItemCount, minimumItemCount));
     }
+
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 
     // TODO: replace this with a parallel icmp check and bitscan? binary search with initial
@@ -1403,7 +1404,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     // step factor for this kernel's usage of pop count partial sum
     // stream.
     const auto step = getPopCountStepSize(ref);
-
     if (LLVM_UNLIKELY(step > 1)) {
         offset = b->CreateMul(offset, b->getSize(step));
     }
@@ -1460,6 +1460,97 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
                         b->GetString(binding.getName()));
     }
     return finalNumOfStrides;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief splatMultiStepPartialSumValues
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
+
+    // For each PopCount rate, a PopCountKernel is created that generates a sequence of partial sum values.
+    // These partial sum streams can be shared amongst multiple kernels whose reference is the same streamset
+    // but when the stride length of the consuming kernel(s) differs from from the stride length of the
+    // PopCountKernel, a step factor must be applied to read the correct value.
+
+    // Upon termination of a PopCountKernel, we must ensure that every step factor will read the same
+    // "final" value but since the PopCountKernel is unaware of the step factor, the pipeline becomes
+    // responsible for splat-ing this value to the appropriate slots.
+
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
+        const auto maxStepFactor = mPartialSumStepFactorGraph[e];
+        assert (maxStepFactor > 1);
+        const auto streamSet = target(e, mPartialSumStepFactorGraph);
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const BufferPort & outputPort = mBufferGraph[output];
+        Value * const produced = mProducedAtTermination[outputPort.Port];
+
+        const auto bw = b->getBitBlockWidth();
+        const auto fw = b->getSizeTy()->getIntegerBitWidth();
+        assert ((bw % fw) == 0 && bw > fw);
+
+        ConstantInt * const sz_stepsPerBlock = b->getSize(bw / fw);
+
+        ConstantInt * const sz_ONE = b->getSize(1);
+        Value * const index = b->CreateSub(produced, sz_ONE);
+
+        Value * const bitblockAlignedStart = b->CreateRoundDown(index, sz_stepsPerBlock);
+
+        StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
+        PointerType * const bbPtrTy = b->getBitBlockType()->getPointerTo();
+        ConstantInt * const sz_ZERO = b->getSize(0);
+        Value * const baseAddr = buffer->getRawItemPointer(b, sz_ZERO, bitblockAlignedStart);
+        Value * const basePtr = b->CreatePointerCast(baseAddr, bbPtrTy);
+
+        Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
+
+        Value * const baseValue = b->fwCast(fw, b->CreateBlockAlignedLoad(basePtr));
+
+        Value * const total = b->CreateExtractElement(baseValue, offset);
+        Value * const splat = b->simd_fill(fw, total);
+        Value * const allOnes = b->simd_fill(fw, ConstantInt::getAllOnesValue(splat->getType()));
+        Value * const mask = b->mvmd_sll(fw, allOnes, offset);
+        Value * const maskedSplat = b->CreateAnd(splat, mask);
+        Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
+
+        b->CreateBlockAlignedStore(b->bitCast(mergedValue), basePtr);
+
+        ConstantInt * const sz_maxStepFactor = b->getSize(maxStepFactor);
+
+        Value * const newProducedCount = b->CreateRoundUp(produced, sz_maxStepFactor);
+
+        const auto spanLength = ceil_udiv(fw * maxStepFactor, bw);
+
+        assert (spanLength > 0);
+        if (spanLength > 1) {
+            const auto prefix = makeBufferName(mKernelId, outputPort.Port);
+            BasicBlock * const splatLoopEntry = b->GetInsertBlock(); assert (splatLoopEntry);
+            BasicBlock * const nextNode = splatLoopEntry->getNextNode();
+            BasicBlock * const splatLoopBody = b->CreateBasicBlock(prefix + "_popCountSplatLoop", nextNode);
+            BasicBlock * const splatLoopExit = b->CreateBasicBlock(prefix + "_popCountSplatExit", nextNode);
+
+            ConstantInt * const sz_spanLength = b->getSize(spanLength);
+            Value * const bitblockSplat = b->bitCast(splat);
+            Value * const start = b->CreateURem(produced, sz_maxStepFactor);
+            Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
+            Value * const cond = b->CreateICmpNE(initial, sz_spanLength);
+            b->CreateCondBr(cond, splatLoopBody, splatLoopExit);
+
+            b->SetInsertPoint(splatLoopBody);
+            PHINode * const indexPhi = b->CreatePHI(b->getSizeTy(), 2);
+            indexPhi->addIncoming(initial, splatLoopEntry);
+            Value * const ptr = b->CreateGEP(basePtr, indexPhi);
+            b->CreateBlockAlignedStore(bitblockSplat, ptr);
+            Value * const nextIndex = b->CreateAdd(indexPhi, sz_ONE);
+            indexPhi->addIncoming(nextIndex, splatLoopBody);
+            Value * const nextCond = b->CreateICmpNE(nextIndex, sz_spanLength);
+            b->CreateCondBr(nextCond, splatLoopBody, splatLoopExit);
+
+            b->SetInsertPoint(splatLoopExit);
+        }
+
+        mProducedAtTermination[outputPort.Port] = newProducedCount;
+    }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -80,7 +80,11 @@ public:
         P.determineBufferSize(b);
         P.determineBufferLayout(b, rng);
 
+        P.identifyCrossHybridThreadStreamSets();
+
         P.makeConsumerGraph();
+
+        P.calculatePartialSumStepFactors();
 
         P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
@@ -200,6 +204,7 @@ private:
 
     // consumer analysis functions
 
+    void identifyCrossHybridThreadStreamSets();
     void makeConsumerGraph();
 
     // dataflow analysis functions
@@ -213,6 +218,8 @@ private:
     void identifyInterPartitionSymbolicRates();
 
     void computeMinimumStrideLengthForConsistentDataflow();
+
+    void calculatePartialSumStepFactors();
 
     // zero extension analysis function
 
@@ -290,6 +297,7 @@ public:
     PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
+    PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
 
     TerminationChecks               mTerminationCheck;
 

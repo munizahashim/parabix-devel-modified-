@@ -5,7 +5,28 @@
 
 namespace kernel {
 
-// TODO: rework consumer logic for external I/O.
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyCrossHybridThreadStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyCrossHybridThreadStreamSets() {
+    flat_set<unsigned> crossThreadStreamSets;
+    for (unsigned kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+        const Kernel * const kernelObj = getKernel(kernel);
+        if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::IsolateOnHybridThread))) {
+            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                BufferNode & streamSet = mBufferGraph[source(e, mBufferGraph)];
+                streamSet.CrossesHybridThreadBarrier = true;
+                assert (streamSet.Locality == BufferLocality::GloballyShared);
+            }
+            for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                BufferNode & streamSet = mBufferGraph[target(e, mBufferGraph)];
+                streamSet.CrossesHybridThreadBarrier = true;
+                assert (streamSet.Locality == BufferLocality::GloballyShared);
+            }
+
+        }
+    }
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeConsumerGraph

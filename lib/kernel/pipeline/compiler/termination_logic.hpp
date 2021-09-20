@@ -167,7 +167,7 @@ bool PipelineCompiler::kernelCanTerminateAbnormally(const unsigned kernel) const
  * @brief checkIfKernelIsAlreadyTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         const auto id = KernelPartitionId[mKernelId];
         Value * const signal = readTerminationSignal(b, id);
         mInitialTerminationSignal = signal; assert (signal);

@@ -300,6 +300,7 @@ public:
     unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
     Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset) const;
     Value * getMaximumNumOfPartialSumStrides(BuilderRef b, const BufferPort &port, Value * const numOfLinearStrides);
+    void splatMultiStepPartialSumValues(BuilderRef b);
 
 // termination codegen functions
 
@@ -555,6 +556,7 @@ protected:
     const std::vector<unsigned>                 PartitionJumpTargetId;
     const PartitionJumpTree                     mPartitionJumpTree;
     const ConsumerGraph                         mConsumerGraph;
+    const PartialSumStepFactorGraph             mPartialSumStepFactorGraph;
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
 
@@ -716,6 +718,7 @@ protected:
     OutputPortVector<Value *>                   mProducedDeferredItemCountPtr;
     OutputPortVector<Value *>                   mProducedDeferredItemCount;
     OutputPortVector<PHINode *>                 mProducedAtTerminationPhi; // exiting after termination
+    OutputPortVector<Value *>                   mProducedAtTermination;
     OutputPortVector<PHINode *>                 mUpdatedProducedPhi; // exiting the kernel
     OutputPortVector<PHINode *>                 mUpdatedProducedDeferredPhi;
     OutputPortVector<PHINode *>                 mFullyProducedItemCount; // *after* exiting the kernel
@@ -820,6 +823,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , PartitionJumpTargetId(std::move(P.mPartitionJumpIndex))
 , mPartitionJumpTree(std::move(P.mPartitionJumpTree))
 , mConsumerGraph(std::move(P.mConsumerGraph))
+, mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
@@ -893,6 +897,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProducedDeferredItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCount(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedAtTerminationPhi(P.MaxNumOfOutputPorts, mAllocator)
+, mProducedAtTermination(P.MaxNumOfOutputPorts, mAllocator)
 , mUpdatedProducedPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mUpdatedProducedDeferredPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mFullyProducedItemCount(P.MaxNumOfOutputPorts, mAllocator)

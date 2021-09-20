@@ -112,7 +112,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
-        if (isRoot) {
+        if (isRoot || getKernel(i)->canSetTerminateSignal()) {
             addTerminationProperties(b, i);
             currentPartitionId = partitionId;
         }

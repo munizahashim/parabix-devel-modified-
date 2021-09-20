@@ -127,7 +127,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
     const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];    
     const auto canJumpToAnotherPartition = mIsPartitionRoot && (mIsBounded || nextPartitionId == jumpId);
-    const auto handleNoUpdateExit = mIsPartitionRoot; // || !canJumpToAnotherPartition;
 
     const auto prefix = makeKernelName(mKernelId);
 
@@ -152,7 +151,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (mCheckInputChannels) {
         mKernelInsufficientInput = b->CreateBasicBlock(prefix + "_insufficientInput", mNextPartitionEntryPoint);
     }
-    if (handleNoUpdateExit) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
     }
     if (canJumpToAnotherPartition) {
@@ -191,7 +190,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     detemineMaximumNumberOfStrides(b);
 
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {
         b->CreateBr(mKernelLoopEntry);
@@ -293,6 +292,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     writeTerminationSignal(b, mTerminatedSignalPhi);
     informInputKernelsOfTermination(b);
     clearUnwrittenOutputData(b);
+    splatMultiStepPartialSumValues(b);
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);
 
@@ -327,7 +327,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL INITIALLY TERMINATED EXIT
     /// -------------------------------------------------------------------------------------
 
-    if (handleNoUpdateExit) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeInitiallyTerminatedPartitionExit(b);
     }
 
@@ -566,7 +566,9 @@ inline void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, outputPort);
-        mProducedAtTerminationPhi[outputPort] = b->CreatePHI(sizeTy, 2, prefix + "_finalProduced");
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_finalProduced");
+        mProducedAtTerminationPhi[outputPort] = phi;
+        mProducedAtTermination[outputPort] = phi;
     }
 }
 
@@ -792,19 +794,16 @@ inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
     mTerminatedAtLoopExitPhi->addIncoming(mTerminatedSignalPhi, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);
     mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedInput, exitBlock);
-    // if (mTotalNumOfStridesAtLoopExitPhi) {
     if (mIsPartitionRoot) {
         Value * finalNumOfStrides = mUpdatedNumOfStrides; assert (mUpdatedNumOfStrides);
-        //if (mIsPartitionRoot) {
-            if (mFinalPartialStrideFixedRateRemainderPhi) {
-                const Rational fixedRateFactor = mFixedRateLCM * Rational{mKernel->getStride()};
-                Value * fixedRateItems = b->CreateMulRational(finalNumOfStrides, fixedRateFactor);
-                fixedRateItems = b->CreateAdd(fixedRateItems, mFinalPartialStrideFixedRateRemainderPhi);
-                finalNumOfStrides = b->CreateMulRational(fixedRateItems, mPartitionStrideRateScalingFactor / fixedRateFactor);
-            } else {
-                finalNumOfStrides = b->CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);
-            }
-        //}
+        if (mFinalPartialStrideFixedRateRemainderPhi) {
+            const Rational fixedRateFactor = mFixedRateLCM * Rational{mKernel->getStride()};
+            Value * fixedRateItems = b->CreateMulRational(finalNumOfStrides, fixedRateFactor);
+            fixedRateItems = b->CreateAdd(fixedRateItems, mFinalPartialStrideFixedRateRemainderPhi);
+            finalNumOfStrides = b->CreateMulRational(fixedRateItems, mPartitionStrideRateScalingFactor / fixedRateFactor);
+        } else {
+            finalNumOfStrides = b->CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);
+        }
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(finalNumOfStrides, exitBlock);
     }
     if (mIsPartitionRoot) {
@@ -821,7 +820,7 @@ inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
-        Value * const produced = mProducedAtTerminationPhi[port];
+        Value * const produced = mProducedAtTermination[port];
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, makeBufferName(mKernelId, port) + "_producedAtTermination = %" PRIu64, produced);

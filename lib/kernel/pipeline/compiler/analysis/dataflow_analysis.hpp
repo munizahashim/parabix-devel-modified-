@@ -583,6 +583,58 @@ void PipelineAnalysis::computeMinimumStrideLengthForConsistentDataflow() {
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculatePartialSumStepFactors
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::calculatePartialSumStepFactors() {
+
+    PartialSumStepFactorGraph G(LastStreamSet + 1);
+
+    for (auto kernel = LastKernel; kernel >= FirstKernel; --kernel) {
+
+        auto checkForPopCountRef = [&](const BufferGraph::edge_descriptor io) {
+            const BufferPort & port = mBufferGraph[io];
+            const Binding & binding = port.Binding;
+            const ProcessingRate & rate = binding.getRate();
+            if (LLVM_UNLIKELY(rate.isPartialSum())) {
+                const auto inputRefPort = getReference(kernel, port.Port);
+                const auto streamSet = getInputBufferVertex(kernel, inputRefPort);
+                assert (streamSet > LastKernel);
+                const auto refOuput = in_edge(streamSet, mBufferGraph);
+                const BufferPort & refOutputRate = mBufferGraph[refOuput];
+                const BufferPort & refInputRate = getInputPort(kernel, inputRefPort);
+                const auto ratio = refInputRate.Minimum / refOutputRate.Minimum;
+                assert (ratio.denominator() == 1 && ratio.numerator() > 0);
+                assert (!edge(streamSet, kernel, G).second);
+                add_edge(streamSet, kernel, ratio.numerator(), G);
+            }
+        };
+
+        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+            checkForPopCountRef(input);
+        }
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            checkForPopCountRef(output);
+        }
+
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const auto streamSet = target(output, mBufferGraph);
+            if (out_degree(streamSet, G) != 0) {
+                unsigned maxStepFactor = 0;
+                for (const auto e : make_iterator_range(out_edges(streamSet, G))) {
+                    maxStepFactor = std::max(maxStepFactor, G[e]);
+                }
+                assert (maxStepFactor > 0);
+                if (maxStepFactor > 1) {
+                    add_edge(kernel, streamSet, maxStepFactor, G);
+                }
+            }
+        }
+    }
+
+    mPartialSumStepFactorGraph = G;
+}
+
 } // end of kernel namespace
 
 #endif // DATAFLOW_ANALYSIS_HPP
