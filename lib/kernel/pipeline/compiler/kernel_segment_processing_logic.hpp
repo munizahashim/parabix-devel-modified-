@@ -151,7 +151,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (mCheckInputChannels) {
         mKernelInsufficientInput = b->CreateBasicBlock(prefix + "_insufficientInput", mNextPartitionEntryPoint);
     }
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
     }
     if (canJumpToAnotherPartition) {
@@ -190,7 +190,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     detemineMaximumNumberOfStrides(b);
 
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {
         b->CreateBr(mKernelLoopEntry);
@@ -327,7 +327,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL INITIALLY TERMINATED EXIT
     /// -------------------------------------------------------------------------------------
 
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    if (mIsPartitionRoot) { //  || mKernelCanTerminateEarly
         writeInitiallyTerminatedPartitionExit(b);
     }
 
