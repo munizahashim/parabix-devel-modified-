@@ -1435,9 +1435,15 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     for (unsigned i = 0; i < mPendingSetCount; i++) {
         kb->setScalarField("pendingData" + std::to_string(i), kb->CreateLoad(pendingDataPtr[i]));
     }
-    kb->CreateCondBr(kb->isFinal(), writeFinal, done);
-    kb->SetInsertPoint(writeFinal);
+    // If we are in the final stride of the input stream, we must write
+    // out any pending data.   However, if the producedOffset ends on
+    // a field boundary, there is no data to write.   We avoid the
+    // write in this case to ensure that we do not write past the end
+    // of the allocated buffer.
     Value * producedOffset = kb->CreateLoad(produceOffsetPtr);
+    Value * havePendingFieldData = kb->CreateIsNotNull(kb->CreateAnd(producedOffset, FIELD_WIDTH_MASK));
+    kb->CreateCondBr(kb->CreateAnd(kb->isFinal(), havePendingFieldData), writeFinal, done);
+    kb->SetInsertPoint(writeFinal);
     Value * const finalBlock = kb->CreateLShr(producedOffset, LOG_2_BLOCK_WIDTH);
     Value * const finalField = kb->CreateLShr(kb->CreateAnd(producedOffset, BLOCK_WIDTH_MASK), LOG_2_FIELD_WIDTH);
     if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
