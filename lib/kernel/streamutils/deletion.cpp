@@ -13,6 +13,9 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
+
+#define COMPARISON_STUDY
+
 using namespace llvm;
 
 inline size_t ceil_udiv(const size_t n, const size_t m) {
@@ -27,9 +30,9 @@ void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
                   unsigned extractionFieldWidth) {
-    Scalar * base = P->CreateConstant(P->getDriver().getBuilder()->getSize(streamOffset));
     StreamSet * const compressed = P->CreateStreamSet(outputs->getNumElements());
-    P->CreateKernelCall<FieldCompressKernel>(mask, inputs, compressed, base, extractionFieldWidth);
+    std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
+    P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
     P->CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
 }
 
@@ -64,8 +67,50 @@ inline Value * apply_parallel_prefix_deletion(BuilderRef kb, const unsigned fw, 
 // Kernel inputs: stream_count data streams plus one del_mask stream
 // Outputs: the deleted streams, plus a partial sum popcount
 
+
+#ifdef COMPARISON_STUDY
+
+
+inline Value * partial_sum_popcount(const std::unique_ptr<KernelBuilder> & iBuilder, const unsigned fw, Value * mask) {
+    Value * field = iBuilder->simd_popcount(fw, mask);
+    const auto count = iBuilder->getBitBlockWidth() / fw;
+    for (unsigned move = 1; move < count; move *= 2) {
+        field = iBuilder->simd_add(fw, field, iBuilder->mvmd_slli(fw, field, move));
+    }
+    return field;
+}
+
+void DeletionKernel::generateDoBlockMethod(const std::unique_ptr<KernelBuilder> & iBuilder) {
+    Value * delMask = iBuilder->loadInputStreamBlock("delMaskSet", iBuilder->getInt32(0));
+    const auto move_masks = parallel_prefix_deletion_masks(iBuilder, mDeletionFieldWidth, delMask);
+    for (unsigned j = 0; j < mStreamCount; ++j) {
+        Value * input = iBuilder->loadInputStreamBlock("inputStreamSet", iBuilder->getInt32(j));
+        Value * output = apply_parallel_prefix_deletion(iBuilder, mDeletionFieldWidth, delMask, move_masks, input);
+        iBuilder->storeOutputStreamBlock("outputStreamSet", iBuilder->getInt32(j), output);
+    }
+    Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
+    iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
+}
+
+void DeletionKernel::generateFinalBlockMethod(const std::unique_ptr<KernelBuilder> & iBuilder, Value * remainingBytes) {
+    IntegerType * vecTy = iBuilder->getIntNTy(iBuilder->getBitBlockWidth());
+    Value * remaining = iBuilder->CreateZExt(remainingBytes, vecTy);
+    Value * EOF_del = iBuilder->bitCast(iBuilder->CreateShl(Constant::getAllOnesValue(vecTy), remaining));
+    Value * delMask = iBuilder->CreateOr(EOF_del, iBuilder->loadInputStreamBlock("delMaskSet", iBuilder->getInt32(0)));
+    const auto move_masks = parallel_prefix_deletion_masks(iBuilder, mDeletionFieldWidth, delMask);
+    for (unsigned j = 0; j < mStreamCount; ++j) {
+        Value * input = iBuilder->loadInputStreamBlock("inputStreamSet", iBuilder->getInt32(j));
+        Value * output = apply_parallel_prefix_deletion(iBuilder, mDeletionFieldWidth, delMask, move_masks, input);
+        iBuilder->storeOutputStreamBlock("outputStreamSet", iBuilder->getInt32(j), output);
+    }
+    Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
+    iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
+}
+#else
+
 void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
     Value * delMask = kb->loadInputStreamBlock("delMaskSet", kb->getInt32(0));
+    kb->CallPrintRegister("delMask", delMask);
     const auto move_masks = parallel_prefix_deletion_masks(kb, mDeletionFieldWidth, delMask);
     for (unsigned j = 0; j < mStreamCount; ++j) {
         Value * input = kb->loadInputStreamBlock("inputStreamSet", kb->getInt32(j));
@@ -73,6 +118,7 @@ void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
         kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), output);
     }
     Value * unitCount = kb->simd_popcount(mDeletionFieldWidth, kb->simd_not(delMask));
+    kb->CallPrintRegister("unitCount", unitCount);
     kb->storeOutputStreamBlock("unitCounts", kb->getInt32(0), kb->bitCast(unitCount));
 }
 
@@ -91,64 +137,65 @@ void DeletionKernel::generateFinalBlockMethod(BuilderRef kb, Value * remainingBy
     kb->storeOutputStreamBlock("unitCounts", kb->getInt32(0), kb->bitCast(unitCount));
 }
 
-DeletionKernel::DeletionKernel(BuilderRef b, const unsigned fieldWidth, const unsigned streamCount)
-: BlockOrientedKernel(b, "del" + std::to_string(fieldWidth) + "_" + std::to_string(streamCount),
-{Binding{b->getStreamSetTy(streamCount), "inputStreamSet"},
-  Binding{b->getStreamSetTy(), "delMaskSet"}},
-{Binding{b->getStreamSetTy(streamCount), "outputStreamSet"},
-  Binding{b->getStreamSetTy(), "unitCounts", FixedRate(), RoundUpTo(b->getBitBlockWidth())}},
+#endif
+
+DeletionKernel::DeletionKernel(BuilderRef b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts)
+: BlockOrientedKernel(b, "del" + std::to_string(b->getBitBlockWidth()/output->getNumElements()) + "_" + std::to_string(output->getNumElements()),
+{Binding{"inputStreamSet", input},
+  Binding{"delMaskSet", delMask}},
+{Binding{"outputStreamSet", output},
+  Binding{"unitCounts", unitCounts, FixedRate(), RoundUpTo(b->getBitBlockWidth())}},
 {}, {}, {})
-, mDeletionFieldWidth(fieldWidth)
-, mStreamCount(streamCount) {
+, mDeletionFieldWidth(b->getBitBlockWidth() / output->getNumElements())
+, mStreamCount(output->getNumElements()) {
 }
 
-void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
-    Value * const baseOffset = kb->getScalarField("base");
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
+
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
+    std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, blockOffsetPhi);
+    std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, blockOffsetPhi);
     if (BMI2_available() && ((mCompressFieldWidth == 32) || (mCompressFieldWidth == 64))) {
         Type * fieldTy = kb->getIntNTy(mCompressFieldWidth);
         Type * fieldPtrTy = PointerType::get(fieldTy, 0);
-        Constant * PEXT_func = nullptr;
+        Function * PEXT_func = nullptr;
         if (mCompressFieldWidth == 64) {
             PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
         } else if (mCompressFieldWidth == 32) {
             PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
         }
+        FunctionType * fTy = PEXT_func->getFunctionType();
         const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mCompressFieldWidth;
+        Value * extractionMask = kb->fwCast(mCompressFieldWidth, maskVec[0]);
         std::vector<Value *> mask(fieldsPerBlock);
-        Value * extractionMaskPtr = kb->getInputStreamBlockPtr("extractionMask", ZERO, blockOffsetPhi);
-        extractionMaskPtr = kb->CreatePointerCast(extractionMaskPtr, fieldPtrTy);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
-            mask[i] = kb->CreateLoad(kb->CreateGEP(extractionMaskPtr, kb->getInt32(i)));
+            mask[i] = kb->CreateExtractElement(extractionMask, kb->getInt32(i));
         }
-        for (unsigned j = 0; j < mStreamCount; ++j) {
-            Value * const streamIndex = kb->CreateAdd(baseOffset, ConstantInt::get(baseOffset->getType(), j));
-            Value * inputPtr = kb->getInputStreamBlockPtr("inputStreamSet", streamIndex, blockOffsetPhi);
-            inputPtr = kb->CreatePointerCast(inputPtr, fieldPtrTy);
+        for (unsigned j = 0; j < input.size(); ++j) {
+            Value * fieldVec = kb->fwCast(mCompressFieldWidth, input[j]);
             Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), blockOffsetPhi);
             outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
-                Value * field = kb->CreateLoad(kb->CreateGEP(inputPtr, kb->getInt32(i)));
-                Value * compressed = kb->CreateCall(PEXT_func, {field, mask[i]});
+                Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
+                Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
                 kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
             }
         }
     } else {
-        Value * extractionMask = kb->loadInputStreamBlock("extractionMask", ZERO, blockOffsetPhi);
-        Value * delMask = kb->simd_not(extractionMask);
-        const auto move_masks = parallel_prefix_deletion_masks(kb, mCompressFieldWidth, delMask);
-        for (unsigned j = 0; j < mStreamCount; ++j) {
-            Value * const streamIndex = kb->CreateAdd(baseOffset, ConstantInt::get(baseOffset->getType(), j));
-            Value * input = kb->loadInputStreamBlock("inputStreamSet", streamIndex, blockOffsetPhi);
-            Value * output = apply_parallel_prefix_deletion(kb, mCompressFieldWidth, delMask, move_masks, input);
-            kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), blockOffsetPhi, output);
+        std::vector<Value *> output = kb->simd_pext(mCompressFieldWidth, input, maskVec[0]);
+        for (unsigned j = 0; j < output.size(); ++j) {
+            kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), blockOffsetPhi, output[j]);
         }
     }
     Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
@@ -159,37 +206,48 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
 }
 
 FieldCompressKernel::FieldCompressKernel(BuilderRef b,
-                                         StreamSet * extractionMask, StreamSet * inputStreamSet, StreamSet * outputStreamSet,
-                                         Scalar * inputBase, unsigned fieldWidth)
+                                         SelectOperation const & maskOp,
+                                         SelectOperationList const & inputOps,
+                                         StreamSet * outputStreamSet,
+                                         unsigned fieldWidth)
 : MultiBlockKernel(b, "fieldCompress" + std::to_string(fieldWidth) + "_" +
-                   std::to_string(inputStreamSet->getNumElements()) +
-                   ":" + std::to_string(outputStreamSet->getNumElements()) ,
-// input streams
-{Binding{"extractionMask", extractionMask},
-Binding{"inputStreamSet", inputStreamSet, FixedRate(), ZeroExtended()}},
-// output stream
+                   streamutils::genSignature(maskOp) +
+                   ":" + streamutils::genSignature(inputOps),
+{},
 {Binding{"outputStreamSet", outputStreamSet}},
-// input scalar
-{Binding{"base", inputBase}},
-{}, {})
-, mCompressFieldWidth(fieldWidth)
-, mStreamCount(outputStreamSet->getNumElements()) {
-
+{}, {}, {})
+, mCompressFieldWidth(fieldWidth) {
+    mMaskOp.operation = maskOp.operation;
+    mMaskOp.bindings.push_back(std::make_pair("extractionMask", maskOp.bindings[0].second));
+    // assert (streamutil::resultStreamCount(maskOp) == 1);
+    mInputStreamSets.push_back({"extractionMask", maskOp.bindings[0].first, FixedRate(), Principal()});
+    // assert (streamutil::resultStreamCount(inputOps) == outputStreamSet->getNumElements());
+    std::unordered_map<StreamSet *, std::string> inputBindings;
+    std::tie(mInputOps, inputBindings) = streamutils::mapOperationsToStreamNames(inputOps);
+    for (auto const & kv : inputBindings) {
+        mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
+    }
+    //setStride(4 * b->getBitBlockWidth());
 }
 
-void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     Type * fieldTy = kb->getIntNTy(mPEXTWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
-    Constant * PEXT_func = nullptr;
+    Function * PEXT_func = nullptr;
     if (mPEXTWidth == 64) {
         PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
     } else if (mPEXTWidth == 32) {
         PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
     }
+    FunctionType * fTy = PEXT_func->getFunctionType();
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
     const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mPEXTWidth;
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
@@ -208,7 +266,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
         outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
             Value * field = kb->CreateLoad(kb->CreateGEP(inputPtr, kb->getInt32(i)));
-            Value * compressed = kb->CreateCall(PEXT_func, {field, mask[i]});
+            Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
             kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
         }
     }
@@ -247,7 +305,7 @@ StreamCompressKernel::StreamCompressKernel(BuilderRef b
     }
 }
 
-void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     IntegerType * const fwTy = b->getIntNTy(mCompressedFieldWidth);
     IntegerType * const sizeTy = b->getSizeTy();
     const unsigned numFields = b->getBitBlockWidth() / mCompressedFieldWidth;
@@ -267,10 +325,12 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
 
     Constant * const ZERO = ConstantInt::get(sizeTy, 0);
     Constant * const ONE = ConstantInt::get(sizeTy, 1);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
 
     Value * const produced = b->getProducedItemCount("compressedOutput");
-
-
 
     Value * const pendingItemCount = b->CreateAnd(b->CreateZExtOrTrunc(produced, fwTy), BLOCK_MASK);
 
@@ -456,7 +516,7 @@ SwizzledDeleteByPEXTkernel::SwizzledDeleteByPEXTkernel(BuilderRef b,
 
 : MultiBlockKernel(b, "PEXTdel" + std::to_string(PEXTWidth) + "_" + std::to_string(inputStreamSet->getNumElements()),
 {Binding{"selectors", selectors}, Binding{"inputStreamSet", inputStreamSet}},
-makeSwizzledDeleteByPEXTOutputBindings(outputStreamSets, PEXTWidth),
+ makeSwizzledDeleteByPEXTOutputBindings(outputStreamSets, PEXTWidth),
 {}, {}, {})
 , mStreamCount(inputStreamSet->getNumElements())
 , mSwizzleFactor(b->getBitBlockWidth() / PEXTWidth)
@@ -477,7 +537,7 @@ makeSwizzledDeleteByPEXTOutputBindings(outputStreamSets, PEXTWidth),
     }
 }
 
-void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     // We use delMask to apply the same PEXT delete operation to each stream in the input stream set
 
     BasicBlock * const entry = b->GetInsertBlock();
@@ -490,8 +550,12 @@ void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Val
     ConstantInt * const LOG_2_SWIZZLE_FACTOR = b->getSize(std::log2(mSwizzleFactor));
     ConstantInt * const PEXT_WIDTH_MASK = b->getSize(mPEXTWidth - 1);
 
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     // All output groups have the same count.
-    Value * const baseOutputProduced = b->getProducedItemCount("outputSwizzle0");
+    Value * const baseOutputProduced = b->getProducedItemCount(getOutputStreamSetBinding(0).getName());
     Value * const baseProducedOffset = b->CreateAnd(baseOutputProduced, BLOCK_WIDTH_MASK);
 
     // There is a separate vector of pending data for each swizzle group.
@@ -548,7 +612,7 @@ void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(BuilderRef b, llvm::Val
             Value * const shiftedItems = b->CreateShl(newItems, shiftVector);
             Value * const combinedGroup = b->CreateOr(pendingData[j], shiftedItems);
             // To avoid an unpredictable branch, always store the combined group, whether full or not.
-            b->storeOutputStreamBlock("outputSwizzle" + std::to_string(j), swizzleIndex, blockOffset, combinedGroup);
+            b->storeOutputStreamBlock(getOutputStreamSetBinding(j).getName(), swizzleIndex, blockOffset, combinedGroup);
             // Any items in excess of the space available in the current pending group overflow for the next group.
             Value * overFlowGroup = b->CreateLShr(newItems, spaceVector);
             // If we filled the space, then the overflow group becomes the new pending group and the index is updated.
@@ -622,12 +686,13 @@ Returns:
 
 SwizzledDeleteByPEXTkernel::SwizzleSets SwizzledDeleteByPEXTkernel::makeSwizzleSets(BuilderRef b, llvm::Value * const selectors, Value * const strideIndex) {
 
-    Constant * pext = nullptr;
+    Function * pext = nullptr;
     if (mPEXTWidth == 64) {
         pext = Intrinsic::getDeclaration(b->getModule(), Intrinsic::x86_bmi_pext_64);
     } else if (mPEXTWidth == 32) {
         pext = Intrinsic::getDeclaration(b->getModule(), Intrinsic::x86_bmi_pext_32);
     }
+    FunctionType * fTy = pext->getFunctionType();
 
     Value * const m = b->fwCast(mPEXTWidth, selectors);
 
@@ -667,7 +732,7 @@ SwizzledDeleteByPEXTkernel::SwizzleSets SwizzledDeleteByPEXTkernel::makeSwizzleS
                 // Load block j,k
                 Value * const field = b->CreateExtractElement(input[j], k);
                 // Apply PEXT deletion
-                Value * const selected = b->CreateCall(pext, {field, masks[k]});
+                Value * const selected = b->CreateCall(fTy, pext, {field, masks[k]});
                 // Then store it as our k,j-th output
                 output[k] = b->CreateInsertElement(output[k], selected, j);
             }
@@ -697,12 +762,13 @@ void DeleteByPEXTkernel::generateFinalBlockMethod(BuilderRef kb, Value * remaini
 }
 
 void DeleteByPEXTkernel::generateProcessingLoop(BuilderRef kb, Value * delMask) {
-    Constant * PEXT_func = nullptr;
+    Function * PEXT_func = nullptr;
     if (mPEXTWidth == 64) {
         PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
     } else if (mPEXTWidth == 32) {
         PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
     }
+    FunctionType * fTy = PEXT_func->getFunctionType();
     std::vector<Value *> masks(mSwizzleFactor);
     Value * const m = kb->fwCast(mPEXTWidth, kb->simd_not(delMask));
     for (unsigned i = 0; i < mSwizzleFactor; i++) {
@@ -715,7 +781,7 @@ void DeleteByPEXTkernel::generateProcessingLoop(BuilderRef kb, Value * delMask) 
         Value * output = UndefValue::get(value->getType());
         for (unsigned j = 0; j < mSwizzleFactor; j++) {
             Value * field = kb->CreateExtractElement(value, j);
-            Value * compressed = kb->CreateCall(PEXT_func, {field, masks[j]});
+            Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, masks[j]});
             output = kb->CreateInsertElement(output, compressed, j);
         }
         kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(i), output);
@@ -849,6 +915,251 @@ void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(BuilderRef kb, V
         kb->CreateBlockAlignedStore(pendingData, kb->CreateGEP(outputStreamPtr, outputIndex));
     }
 //    kb->setProducedItemCount("outputSwizzle0", kb->CreateAdd(pendingOffset, outputProduced));
+}
+
+const unsigned MIN_STREAMS_TO_SWIZZLE = 4;
+FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
+                                         SelectOperation const & maskOp,
+                                         SelectOperationList const & inputOps,
+                                         StreamSet * filteredOutput,
+                                         unsigned fieldWidth)
+: MultiBlockKernel(b, "FilterByMask" + std::to_string(fieldWidth) + "_" +
+                   streamutils::genSignature(maskOp) +
+                   ":" + streamutils::genSignature(inputOps),
+{}, {}, {}, {}, {})
+, mCompressFieldWidth(fieldWidth)
+, mFieldsPerBlock(b->getBitBlockWidth() / fieldWidth)
+, mStreamCount(filteredOutput->getNumElements()) {
+    mMaskOp.operation = maskOp.operation;
+    mMaskOp.bindings.push_back(std::make_pair("extractionMask", maskOp.bindings[0].second));
+    // assert (streamutil::resultStreamCount(maskOp) == 1);
+    mInputStreamSets.push_back({"extractionMask", maskOp.bindings[0].first, FixedRate(), Principal()});
+    //assert (streamutil::resultStreamCount(inputOps) == filteredOutput->getNumElements());
+    std::unordered_map<StreamSet *, std::string> inputBindings;
+    std::tie(mInputOps, inputBindings) = streamutils::mapOperationsToStreamNames(inputOps);
+    for (auto const & kv : inputBindings) {
+        mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
+    }
+    mOutputStreamSets.push_back({"filteredOutput", filteredOutput, PopcountOf("extractionMask")});
+    Type * pendingType;
+    if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
+        pendingType = b->getBitBlockType();
+        mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;;
+    } else {
+        pendingType = b->getIntNTy(mCompressFieldWidth);
+        mPendingSetCount = mStreamCount;
+    }
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        addInternalScalar(pendingType, "pendingData" + std::to_string(i));
+    }
+    addInternalScalar(b->getSizeTy(), "pendingOffset");
+    //setStride(4 * b->getBitBlockWidth());
+}
+
+void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
+    bool Use_BMI_PEXT = BMI2_available();
+    assert ((mStride % kb->getBitBlockWidth()) == 0);
+    Constant * const sz_BLOCKS_PER_STRIDE = kb->getSize(mStride/kb->getBitBlockWidth());
+    Constant * const sz_ZERO = kb->getSize(0);
+    Constant * const sz_ONE = kb->getSize(1);
+    Type * const sizeTy = kb->getSizeTy();
+    Type * const fieldTy = kb->getIntNTy(mCompressFieldWidth);
+    Type * const FieldPtrTy = fieldTy->getPointerTo();
+
+    Function * PEXT_func = nullptr;
+    FunctionType * PEXT_ty = nullptr;
+    if (Use_BMI_PEXT) {
+        if (mCompressFieldWidth == 64) {
+            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
+        } else if (mCompressFieldWidth == 32) {
+            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
+        }
+        PEXT_ty = PEXT_func->getFunctionType();
+    }
+    ConstantInt * const LOG_2_BLOCK_WIDTH = kb->getSize(std::log2(kb->getBitBlockWidth()));
+    ConstantInt * const BLOCK_WIDTH_MASK = kb->getSize(kb->getBitBlockWidth() - 1);
+    ConstantInt * const FIELD_WIDTH = kb->getSize(mCompressFieldWidth);
+    ConstantInt * const LOG_2_FIELD_WIDTH = kb->getSize(std::log2(mCompressFieldWidth));
+    ConstantInt * const FIELD_WIDTH_MASK = kb->getSize(mCompressFieldWidth - 1);
+
+    BasicBlock * const entryBlock = kb->GetInsertBlock();
+    BasicBlock * const stridePrologue = kb->CreateBasicBlock("stridePrologue");
+    BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
+    BasicBlock * doExtract = kb->CreateBasicBlock("doExtract");
+    BasicBlock * noExtract = kb->CreateBasicBlock("noExtract");
+    BasicBlock * const strideEpilogue = kb->CreateBasicBlock("strideEpilogue");
+    BasicBlock * finalizeFilter = kb->CreateBasicBlock("finalizeFilter");
+    BasicBlock * writeFinal = kb->CreateBasicBlock("writeFinal");
+    BasicBlock * done = kb->CreateBasicBlock("done");
+
+    Value * const baseOutputProduced = kb->getProducedItemCount("filteredOutput");
+    Value * const baseProducedOffset = kb->CreateAnd(baseOutputProduced, BLOCK_WIDTH_MASK);
+    std::vector<Value *> pendingDataPtr(mPendingSetCount);
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        Value * pending = kb->getScalarField("pendingData" + std::to_string(i));
+        pendingDataPtr[i] = kb->CreateAlloca(pending->getType());
+        kb->CreateStore(pending, pendingDataPtr[i]);
+    }
+    Value * produceOffsetPtr = kb->CreateAlloca(baseProducedOffset->getType());
+    kb->CreateStore(baseProducedOffset, produceOffsetPtr);
+
+    kb->CreateBr(stridePrologue);
+    kb->SetInsertPoint(stridePrologue);
+    PHINode * const strideNo = kb->CreatePHI(sizeTy, 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    Value * strideBlockOffset = kb->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
+    Value * nextStrideNo = kb->CreateAdd(strideNo, sz_ONE);
+
+    kb->CreateBr(processBlock);
+    kb->SetInsertPoint(processBlock);
+    // For each block iteration, we have the block offset and pending data
+    // for each swizzle that are either the initial values or values carried
+    // over from the previous iteration.
+    PHINode * blockNo = kb->CreatePHI(sizeTy, 2);
+    blockNo->addIncoming(sz_ZERO, stridePrologue);
+    Value * nextBlk = kb->CreateAdd(blockNo, sz_ONE);
+    Value * moreBlocksInStride = kb->CreateICmpNE(nextBlk, sz_BLOCKS_PER_STRIDE);
+
+    Value * strideBlockIndex = kb->CreateAdd(strideBlockOffset, blockNo);
+
+    std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, strideBlockIndex);
+    Value * extractionMask = kb->fwCast(mCompressFieldWidth, maskVec[0]);
+    kb->CreateCondBr(kb->bitblock_any(extractionMask), doExtract, noExtract);
+
+    kb->SetInsertPoint(noExtract);
+    blockNo->addIncoming(nextBlk, noExtract);
+    kb->CreateCondBr(moreBlocksInStride, processBlock, strideEpilogue);
+
+    kb->SetInsertPoint(doExtract);
+    std::vector<Value *> mask(mFieldsPerBlock);
+    for (unsigned i = 0; i < mFieldsPerBlock; i++) {
+        mask[i] = kb->CreateExtractElement(extractionMask, kb->getInt32(i));
+    }
+    std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, strideBlockIndex);
+    for (unsigned j = 0; j < input.size(); ++j) {
+        if (!Use_BMI_PEXT) {
+            input[j] = kb->simd_pext(mCompressFieldWidth, input[j], extractionMask);
+        }
+        input[j] = kb->fwCast(mCompressFieldWidth, input[j]);
+    }
+    Value * const newItemCounts = kb->simd_popcount(mCompressFieldWidth, extractionMask);
+    //kb->CallPrintRegister("extractionMask", extractionMask);
+    // For each swizzle containing mFieldsPerBlock fields.
+    for (unsigned i = 0; i < mFieldsPerBlock; i++) {
+        Value * producedOffset = kb->CreateLoad(produceOffsetPtr);
+        std::vector<Value *> pendingData(mPendingSetCount);
+        for (unsigned i = 0; i < mPendingSetCount; i++) {
+            pendingData[i] = kb->CreateLoad(pendingDataPtr[i]);
+        }
+        Value * const pendingOffset = kb->CreateAnd(producedOffset, FIELD_WIDTH_MASK);
+        Value * const newItemCount = kb->CreateExtractElement(newItemCounts, i);
+        //kb->CallPrintInt("newItemCount", newItemCount);
+        Value * const pendingSpace = kb->CreateSub(FIELD_WIDTH, pendingOffset);
+        Value * const maskedSpace = kb->CreateAnd(pendingSpace, FIELD_WIDTH_MASK);
+        Value * const pendingSpaceFilled = kb->CreateICmpUGE(newItemCount, pendingSpace);
+        Value * const outputBlock = kb->CreateLShr(producedOffset, LOG_2_BLOCK_WIDTH);
+        Value * const fieldIndex = kb->CreateLShr(kb->CreateAnd(producedOffset, BLOCK_WIDTH_MASK), LOG_2_FIELD_WIDTH);
+        if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
+            for (unsigned j = 0; j < input.size(); ++j) {
+                Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
+                Value * compressed =
+                    Use_BMI_PEXT ? kb->CreateCall(PEXT_ty, PEXT_func, {field, mask[i]}) : field;
+                Value * const shiftedItems = kb->CreateShl(compressed, kb->CreateZExtOrTrunc(pendingOffset, fieldTy));
+                Value * const combined = kb->CreateOr(pendingData[j], shiftedItems);
+                Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), outputBlock);
+                outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
+                outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
+                kb->CreateStore(combined, outputPtr);
+                Value * overFlow = kb->CreateLShr(compressed, kb->CreateZExtOrTrunc(maskedSpace, fieldTy));
+                overFlow = kb->CreateSelect(kb->CreateIsNull(maskedSpace), ConstantInt::getNullValue(overFlow->getType()), overFlow);
+                // If we filled the space, then the overflow group becomes the new pending group and the index is updated.
+                Value * newPending = kb->CreateSelect(pendingSpaceFilled, overFlow, combined);
+                kb->CreateStore(newPending, pendingDataPtr[j]);
+            }
+        } else {
+            std::vector<Value *> swizzles(mPendingSetCount, ConstantInt::getNullValue(kb->getBitBlockType()));
+            for (unsigned j = 0; j < input.size(); ++j) {
+                unsigned swizzleNo = j/mFieldsPerBlock;
+                Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
+                Value * compressed =
+                    Use_BMI_PEXT ? kb->CreateCall(PEXT_ty, PEXT_func, {field, mask[i]}) : field;
+                swizzles[swizzleNo] = kb->CreateInsertElement(swizzles[swizzleNo], compressed, j%mFieldsPerBlock);
+                //kb->CallPrintRegister("swizzles" + std::to_string(swizzleNo), swizzles[swizzleNo]);
+            }
+            // Field compression into the swizzles is now complete.   Next we apply
+            // stream compression to compress the fields of each swizzle and generate the
+            // output.
+            // Generate code for each of the mFieldsPerBlock fields making up a block.
+            // We load the count for the field and process all swizzle groups accordingly.
+
+            Value * const shiftVector = kb->simd_fill(mCompressFieldWidth, pendingOffset);
+            Value * spaceVector = kb->simd_fill(mCompressFieldWidth, maskedSpace);
+            // Data from the ith swizzle pack of each group is processed
+            // according to the same newItemCount, pendingSpace, ...
+            for (unsigned j = 0; j < mPendingSetCount; j++) {
+                Value * const newItems = swizzles[j];
+                // Combine as many of the new items as possible into the pending group.
+                Value * const shiftedItems = kb->CreateShl(swizzles[j], shiftVector);
+                Value * const combinedGroup = kb->CreateOr(pendingData[j], shiftedItems);
+                //kb->CallPrintRegister("combinedGroup" + std::to_string(j), combinedGroup);
+                // To avoid an unpredictable branch, always store the combined group, whether full or not.
+                for (unsigned k = 0; k < mFieldsPerBlock; k++) {
+                    unsigned strmIdx = j * mFieldsPerBlock + k;
+                    Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), outputBlock);
+                    outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
+                    outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
+                    kb->CreateStore(kb->CreateExtractElement(combinedGroup, kb->getInt32(k)), outputPtr);
+                }
+                // Any items in excess of the space available in the current pending group overflow for the next group.
+                // However, we need to avoid a poison value arising from a shift by more than mCompressFieldWidth-1.
+                Value * overFlowGroup = kb->CreateLShr(newItems, spaceVector);
+                overFlowGroup = kb->CreateSelect(kb->CreateIsNull(maskedSpace), ConstantInt::getNullValue(overFlowGroup->getType()), overFlowGroup);
+                // If we filled the space, then the overflow group becomes the new pending group and the index is updated.
+                Value * newPending = kb->CreateSelect(pendingSpaceFilled, overFlowGroup, combinedGroup);
+                kb->CreateStore(newPending, pendingDataPtr[j]);
+                //kb->CallPrintRegister("pendingData" + std::to_string(j), pendingData[j]);
+            }
+        }
+        producedOffset = kb->CreateAdd(producedOffset, newItemCount);
+        kb->CreateStore(producedOffset, produceOffsetPtr);
+   }
+    BasicBlock * currentBB = kb->GetInsertBlock();
+    blockNo->addIncoming(nextBlk, currentBB);
+    kb->CreateCondBr(moreBlocksInStride, processBlock, strideEpilogue);
+
+    kb->SetInsertPoint(strideEpilogue);
+    strideNo->addIncoming(nextStrideNo, strideEpilogue);
+    kb->CreateCondBr(kb->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, finalizeFilter);
+
+    kb->SetInsertPoint(finalizeFilter);
+    for (unsigned i = 0; i < mPendingSetCount; i++) {
+        kb->setScalarField("pendingData" + std::to_string(i), kb->CreateLoad(pendingDataPtr[i]));
+    }
+    kb->CreateCondBr(kb->isFinal(), writeFinal, done);
+    kb->SetInsertPoint(writeFinal);
+    Value * producedOffset = kb->CreateLoad(produceOffsetPtr);
+    Value * const finalBlock = kb->CreateLShr(producedOffset, LOG_2_BLOCK_WIDTH);
+    Value * const finalField = kb->CreateLShr(kb->CreateAnd(producedOffset, BLOCK_WIDTH_MASK), LOG_2_FIELD_WIDTH);
+    if (mStreamCount < MIN_STREAMS_TO_SWIZZLE) {
+        for (unsigned j = 0; j < mStreamCount; j++) {
+            Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), finalBlock);
+            outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
+            outputPtr = kb->CreateGEP(outputPtr, finalField);
+            kb->CreateStore(kb->CreateLoad(pendingDataPtr[j]), outputPtr);
+        }
+    } else {
+        for (unsigned j = 0; j < mPendingSetCount; j++) {
+            for (unsigned k = 0; k < mFieldsPerBlock; k++) {
+                unsigned strmIdx = j * mFieldsPerBlock + k;
+                Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), finalBlock);
+                outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
+                outputPtr = kb->CreateGEP(outputPtr, finalField);
+                kb->CreateStore(kb->CreateExtractElement(kb->CreateLoad(pendingDataPtr[j]), kb->getInt32(k)), outputPtr);
+            }
+        }
+    }
+    kb->CreateBr(done);
+    kb->SetInsertPoint(done);
 }
 
 }

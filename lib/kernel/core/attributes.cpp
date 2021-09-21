@@ -29,6 +29,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME_AMOUNT(RoundUpTo);
         NAME_AMOUNT(Delayed);
         NAME(ManagedBuffer);
+        NAME(SharedManagedBuffer);
         NAME(Misaligned);
         NAME_AMOUNT(BlockSize);
         NAME(ReverseAdapter);
@@ -40,6 +41,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(SideEffecting);
         NAME(Family);
         NAME(InternallySynchronized);
+        NAME(IsolateOnHybridThread);
         NAME(InfrequentlyUsed);
         NAME(Linear);
         NAME(None);

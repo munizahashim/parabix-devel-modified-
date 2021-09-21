@@ -7,12 +7,17 @@
 #include <kernel/core/kernel_compiler.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <boost/container/flat_set.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Format.h>
-#include <util/sha1.hpp>
-
+#if BOOST_VERSION < 106600
+#include <boost/uuid/sha1.hpp>
+#else
+#include <boost/uuid/detail/sha1.hpp>
+#endif
 using namespace llvm;
 using namespace boost;
+using boost::container::flat_set;
 
 namespace kernel {
 
@@ -25,6 +30,8 @@ using PortType = Kernel::PortType;
 
 const static auto INITIALIZE_SUFFIX = "_Initialize";
 const static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
+const static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
+const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
 const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
 const static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
 const static auto FINALIZE_SUFFIX = "_Finalize";
@@ -38,36 +45,51 @@ const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::isLocalBuffer(const Binding & output) {
-    return output.getRate().isUnknown() || output.hasAttribute(AttrId::ManagedBuffer);
+/* static */ bool Kernel::isLocalBuffer(const Binding & output, const bool includeShared) {
+    // NOTE: if this function is modified, fix the PipelineCompiler to match it.
+    if (LLVM_UNLIKELY(output.hasAttribute(AttrId::ManagedBuffer) || output.getRate().isUnknown())) {
+        return true;
+    }
+    if (LLVM_UNLIKELY(output.hasAttribute(AttrId::SharedManagedBuffer))) {
+        return includeShared;
+    }
+    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief requiresExplicitPartialFinalStride
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::requiresExplicitPartialFinalStride(const Kernel * const kernel) {
-    if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::InternallySynchronized))) {
+bool Kernel::requiresExplicitPartialFinalStride() const {
+    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
         return false;
-    }
-    return true;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasFixedRate
- ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasFixedRate() const {
-    const auto n = getNumOfStreamInputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & input = getInputStreamSetBinding(i);
-        const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
-            return true;
-        }
     }
     const auto m = getNumOfStreamOutputs();
     for (unsigned i = 0; i < m; ++i) {
         const Binding & output = getOutputStreamSetBinding(i);
-        const ProcessingRate & rate = output.getRate();
+        for (const Attribute & attr : output.getAttributes()) {
+            switch (attr.getKind()) {
+                case AttrId::Add:
+                case AttrId::Delayed:
+                    if (LLVM_LIKELY(attr.amount() > 0)) {
+                        return true;
+                    }
+                case AttrId::Deferred:
+                    return true;
+                default: break;
+            }
+        }
+    }
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasFixedRateInput
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool Kernel::hasFixedRateInput() const {
+    const auto n = getNumOfStreamInputs();
+    for (unsigned i = 0; i < n; ++i) {
+        const Binding & input = getInputStreamSetBinding(i);
+        const ProcessingRate & rate = input.getRate();
         if (LLVM_LIKELY(rate.isFixed())) {
             return true;
         }
@@ -76,30 +98,18 @@ bool Kernel::hasFixedRate() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getFixedRateLCM
+ * @brief isGreedy
  ** ------------------------------------------------------------------------------------------------------------- */
-Rational Kernel::getFixedRateLCM() const {
-    Rational rateLCM(1);
-    bool hasFixedRate = false;
+bool Kernel::isGreedy() const {
     const auto n = getNumOfStreamInputs();
     for (unsigned i = 0; i < n; ++i) {
         const Binding & input = getInputStreamSetBinding(i);
         const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
-            rateLCM = lcm(rateLCM, rate.getRate());
-            hasFixedRate = true;
+        if (LLVM_LIKELY(!rate.isGreedy())) {
+            return false;
         }
     }
-    const auto m = getNumOfStreamOutputs();
-    for (unsigned i = 0; i < m; ++i) {
-        const Binding & output = getOutputStreamSetBinding(i);
-        const ProcessingRate & rate = output.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
-            rateLCM = lcm(rateLCM, rate.getRate());
-            hasFixedRate = true;
-        }
-    }
-    return hasFixedRate ? rateLCM : Rational{0};
+    return (n > 0);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -121,8 +131,8 @@ bool Kernel::canSetTerminateSignal() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<KernelCompiler> Kernel::instantiateKernelCompiler(BuilderRef /* b */) const noexcept {
-    return llvm::make_unique<KernelCompiler>(const_cast<Kernel *>(this));
+std::unique_ptr<KernelCompiler> Kernel::instantiateKernelCompiler(BuilderRef /* b */) const {
+    return std::make_unique<KernelCompiler>(const_cast<Kernel *>(this));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -231,39 +241,142 @@ void Kernel::constructStateTypes(BuilderRef b) {
     auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
     mThreadLocalStateType = m->getTypeByName(strThreadLocal);
     if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
-        SmallVector<Type *, 64> shared;
-        SmallVector<Type *, 64> threadLocal;
-        shared.reserve(mInputScalars.size() + mOutputScalars.size() + mInternalScalars.size());
-        for (const auto & scalar : mInputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        for (const auto & scalar : mOutputScalars) {
-            assert (scalar.getType());
-            shared.push_back(scalar.getType());
-        }
-        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-        // within the kernel state to hide the complexity from the user?
+
+        flat_set<unsigned> sharedGroups;
+        flat_set<unsigned> threadLocalGroups;
+
         for (const auto & scalar : mInternalScalars) {
             assert (scalar.getValueType());
             switch (scalar.getScalarType()) {
                 case ScalarType::Internal:
-                    shared.push_back(scalar.getValueType());
+                    sharedGroups.insert(scalar.getGroup());
                     break;
                 case ScalarType::ThreadLocal:
-                    threadLocal.push_back(scalar.getValueType());
+                    threadLocalGroups.insert(scalar.getGroup());
                     break;
                 default: break;
             }
         }
+
+        const auto sharedGroupCount = sharedGroups.size();
+        const auto threadLocalGroupCount = threadLocalGroups.size();
+
+        std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
+        std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+        for (const auto & scalar : mInputScalars) {
+            assert (scalar.getType());
+            shared[0].push_back(scalar.getType());
+        }
+
+        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
+        // within the kernel state to hide the complexity from the user?
+        for (const auto & scalar : mInternalScalars) {
+            assert (scalar.getValueType());
+
+            auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+                const auto f = groups.find(scalar.getGroup());
+                assert (f != groups.end());
+                return std::distance(groups.begin(), f);
+            };
+
+            switch (scalar.getScalarType()) {
+                case ScalarType::Internal:
+                    shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                    break;
+                case ScalarType::ThreadLocal:
+                    threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                    break;
+                default: break;
+            }
+        }
+
+        assert (shared[sharedGroupCount + 1].empty());
+        for (const auto & scalar : mOutputScalars) {
+            assert (scalar.getType());
+            shared[sharedGroupCount + 1].push_back(scalar.getType());
+        }
+
+        DataLayout dl(m);
+
+        IntegerType * const int8Ty = b->getInt8Ty();
+
+        auto getTypeSize = [&](Type * const type) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+            return dl.getTypeAllocSize(type);
+            #else
+            return dl.getTypeAllocSize(type).getFixedSize();
+            #endif
+        };
+
+        const auto cacheAlignment = b->getCacheAlignment();
+
+        auto makeGroupedStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
+                                         StringRef name, const bool addGroupCacheLinePadding) {
+
+            const auto n = structTypeVec.size();
+            if (n == 0) {
+                return StructType::create(b->getContext(), name);
+            }
+
+            std::vector<Type *> structTypes(n * 2);
+
+            if (addGroupCacheLinePadding) {
+                // TODO: review LLVM code; I'm worried that I cannot rely on struct size to
+                // always account for internal struct alignments.
+
+                unsigned offset = 0;
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * const sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    const auto typeSize = getTypeSize(sty);
+                    const auto paddingOffset = (typeSize % cacheAlignment);
+                    unsigned padding = 0;
+                    if (paddingOffset != 0) {
+                        padding = (cacheAlignment - paddingOffset);
+                    }
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = ArrayType::get(int8Ty, padding);
+                    offset += typeSize + padding;
+                }
+            } else {
+                Type * const emptyTy = ArrayType::get(int8Ty, 0);
+                assert (emptyTy->isSized());
+                assert (getTypeSize(emptyTy) == 0);
+                for (unsigned i = 0; i != n; ++i) {
+                    const auto & vec = structTypeVec[i];
+                    StructType * sty = StructType::create(b->getContext(), vec);
+                    assert (sty->isSized());
+                    structTypes[(i * 2)] = sty;
+                    structTypes[(i * 2) + 1] = emptyTy;
+                }
+            }
+
+            StructType * const st = StructType::create(b->getContext(), structTypes, name);
+
+            #ifndef NDEBUG
+            if (addGroupCacheLinePadding) {
+                const StructLayout * const sl = dl.getStructLayout(st);
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto offset = sl->getElementOffset(i * 2);
+                    assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                }
+            }
+            #endif
+
+            return st;
+        };
+
         // NOTE: StructType::create always creates a new type even if an identical one exists.
-        StructType * const sharedTy = StructType::create(b->getContext(), shared, strShared);
+        StructType * const sharedTy = makeGroupedStructType(shared, strShared, sharedGroupCount > 1);
         assert (mSharedStateType == nullptr || mSharedStateType == nullIfEmpty(sharedTy));
         mSharedStateType = sharedTy;
 
-        StructType * const threadLocalTy = StructType::create(b->getContext(), threadLocal, strThreadLocal);
+        StructType * const threadLocalTy = makeGroupedStructType(threadLocal, strThreadLocal, false);
         assert (mThreadLocalStateType == nullptr || mThreadLocalStateType == nullIfEmpty(threadLocalTy));
         mThreadLocalStateType = threadLocalTy;
+
     }
     mSharedStateType = nullIfEmpty(mSharedStateType);
     mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
@@ -274,7 +387,9 @@ void Kernel::constructStateTypes(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::addKernelDeclarations(BuilderRef b) {
     addInitializeDeclaration(b);
+    addAllocateSharedInternalStreamSetsDeclaration(b);
     addInitializeThreadLocalDeclaration(b);
+    addAllocateThreadLocalInternalStreamSetsDeclaration(b);
     addDoSegmentDeclaration(b);
     addFinalizeThreadLocalDeclaration(b);
     addFinalizeDeclaration(b);
@@ -324,11 +439,13 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
             std::advance(arg, 1);
         };
         if (LLVM_LIKELY(isStateful())) {
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("shared");
         }
         for (const Binding & binding : mInputScalars) {
             setNextArgName(binding.getName());
         }
+        // TODO: name family args?
     }
     return initFunc;
 }
@@ -384,6 +501,7 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
                 std::advance(arg, 1);
             };
             if (LLVM_LIKELY(isStateful())) {
+                arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
                 setNextArgName("shared");
             }
             assert (arg == func->arg_end());
@@ -391,6 +509,138 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
         assert (func);
     }
     return func;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasInternalStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool Kernel::allocatesInternalStreamSets() const {
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getAllocateInternalStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::getAllocateSharedInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration) const {
+    const Module * const module = b->getModule();
+    SmallVector<char, 256> tmp;
+    Function * f = module->getFunction(concat(getName(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX, tmp));
+    if (LLVM_UNLIKELY(f == nullptr && alwayReturnDeclaration)) {
+        f = addAllocateSharedInternalStreamSetsDeclaration(b);
+    }
+    return f;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addAllocateInternalStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) const {
+    Function * func = nullptr;
+    if (allocatesInternalStreamSets()) {
+        SmallVector<char, 256> tmp;
+        const auto funcName = concat(getName(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX, tmp);
+        Module * const m = b->getModule();
+        func = m->getFunction(funcName);
+
+        if (LLVM_LIKELY(func == nullptr)) {
+
+            SmallVector<Type *, 2> params;
+            if (LLVM_LIKELY(isStateful())) {
+                params.push_back(getSharedStateType()->getPointerTo());
+            }
+            params.push_back(b->getSizeTy());
+
+            FunctionType * const funcType = FunctionType::get(b->getVoidTy(), params, false);
+            func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
+            func->setCallingConv(CallingConv::C);
+            func->setDoesNotRecurse();
+
+            auto arg = func->arg_begin();
+            auto setNextArgName = [&](const StringRef name) {
+                assert (arg != func->arg_end());
+                arg->setName(name);
+                std::advance(arg, 1);
+            };
+            if (LLVM_LIKELY(isStateful())) {
+                arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+                setNextArgName("shared");
+            }
+            setNextArgName("expectedNumOfStrides");
+            assert (arg == func->arg_end());
+        }
+        assert (func);
+    }
+    return func;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief generateAllocateSharedInternalStreamSetsMethod
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::generateAllocateSharedInternalStreamSetsMethod(BuilderRef /* b */, Value * /* expectedNumOfStrides */) {
+    report_fatal_error("Kernel::generateAllocateSharedInternalStreamSetsMethod is not handled yet");
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getAllocateThreadLocalInternalStreamSetsFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::getAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration) const {
+    const Module * const module = b->getModule();
+    SmallVector<char, 256> tmp;
+    Function * f = module->getFunction(concat(getName(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX, tmp));
+    if (LLVM_UNLIKELY(f == nullptr && alwayReturnDeclaration)) {
+        f = addAllocateThreadLocalInternalStreamSetsDeclaration(b);
+    }
+    return f;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addAllocateThreadLocalInternalStreamSetsDeclaration
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(BuilderRef b) const {
+    Function * func = nullptr;
+    if (allocatesInternalStreamSets() && hasThreadLocal()) {
+        SmallVector<char, 256> tmp;
+        const auto funcName = concat(getName(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX, tmp);
+        Module * const m = b->getModule();
+        func = m->getFunction(funcName);
+        if (LLVM_LIKELY(func == nullptr)) {
+
+            SmallVector<Type *, 3> params;
+            if (LLVM_LIKELY(isStateful())) {
+                params.push_back(getSharedStateType()->getPointerTo());
+            }
+            params.push_back(getThreadLocalStateType()->getPointerTo());
+            params.push_back(b->getSizeTy());
+
+            FunctionType * const funcType = FunctionType::get(b->getVoidTy(), params, false);
+            func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
+            func->setCallingConv(CallingConv::C);
+            func->setDoesNotRecurse();
+
+            auto arg = func->arg_begin();
+            auto setNextArgName = [&](const StringRef name) {
+                assert (arg != func->arg_end());
+                arg->setName(name);
+                std::advance(arg, 1);
+            };
+            if (LLVM_LIKELY(isStateful())) {
+                arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+                setNextArgName("shared");
+            }
+            setNextArgName("threadLocal");
+            setNextArgName("expectedNumOfStrides");
+            assert (arg == func->arg_end());
+        }
+        assert (func);
+    }
+    return func;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief generateAllocateThreadLocalInternalStreamSetsMethod
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef /* b */, Value * /* expectedNumOfStrides */) {
+    report_fatal_error("Kernel::generateAllocateThreadLocalInternalStreamSetsMethod is not handled yet");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -410,35 +660,48 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
     std::vector<Type *> fields;
     fields.reserve(4 + 3 * (n + m));
 
+    const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+    const auto greedy = isGreedy();
+
     if (LLVM_LIKELY(isStateful())) {
         fields.push_back(getSharedStateType()->getPointerTo());  // handle
     }
     if (LLVM_UNLIKELY(hasThreadLocal())) {
         fields.push_back(getThreadLocalStateType()->getPointerTo());  // handle
     }
-    fields.push_back(sizeTy); // numOfStrides
-    if (LLVM_LIKELY(!requiresExplicitPartialFinalStride(this))) {
+
+    // NOTE: although we could pass fixed rate item counts by numOfStrides + fixedRateFactor,
+    // that would require the outer pipeline to actually reason about the current state of
+    // this kernel. We want to avoid that and simply treat invoking an internally synchronized
+    // kernel as a "function call" and allow this kernel to update its own internal state.
+
+    if (LLVM_LIKELY(internallySynchronized || greedy)) {
+        if (internallySynchronized) {
+            fields.push_back(sizeTy); // external SegNo
+        }
         fields.push_back(b->getInt1Ty()); // isFinal
+    } else {
+        fields.push_back(sizeTy); // numOfStrides
+        if (hasFixedRateInput()) {
+            fields.push_back(sizeTy); // fixed rate factor
+        }
     }
-    if (LLVM_UNLIKELY(supportsInternalSynchronization())) {
-        fields.push_back(sizeTy); // external segNo for any internal synchronization
-    }
-    if (LLVM_LIKELY(hasFixedRate())) {
-        fields.push_back(sizeTy); // fixedRateFactor
-    }
+
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
+
     for (unsigned i = 0; i < n; ++i) {
         const Binding & input = mInputStreamSets[i];
-        auto const bufferType = StreamSetBuffer::resolveType(b, input.getType())->getPointerTo();
         // virtual base input address
-        fields.push_back(bufferType);
+        fields.push_back(voidPtrTy);
         // processed input items
-        if (isAddressable(input)) {
+        if (internallySynchronized || isAddressable(input)) {
             fields.push_back(sizePtrTy); // updatable
         } else if (isCountable(input)) {
             fields.push_back(sizeTy); // constant
         }
+
         // accessible input items
-        if (requiresItemCount(input)) {
+        if (internallySynchronized || requiresItemCount(input)) {
             fields.push_back(sizeTy);
         }
     }
@@ -447,29 +710,42 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
 
     for (unsigned i = 0; i < m; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        // virtual base output address
-        const auto isLocal = isLocalBuffer(output);
-        auto const bufferType = StreamSetBuffer::resolveType(b, output.getType())->getPointerTo();
-        auto bufferParamType = bufferType;
-        if (LLVM_UNLIKELY(isLocal)) {
-            // If this buffer is owned by this kernel, it is responsible for
-            // informing the calling kernel what its virtual base address is.
-            bufferParamType = bufferType->getPointerTo();
+
+        const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
+        const auto isLocal = internallySynchronized || Kernel::isLocalBuffer(output, false);
+
+        // shared dynamic buffer handle or virtual base output address
+        if (LLVM_UNLIKELY(isShared)) {
+            fields.push_back(voidPtrTy);
+        } else if (LLVM_UNLIKELY(isLocal)) {
+            fields.push_back(voidPtrTy->getPointerTo());
+        } else {
+            fields.push_back(voidPtrTy);
         }
-        fields.push_back(bufferParamType);
+
+        #warning if an I/O rate is deferred and this is internally synchronized, we need both item counts
+
         // produced output items
-        if (hasTerminationSignal|| isAddressable(output)) {
+        if (internallySynchronized || hasTerminationSignal || isAddressable(output)) {
+            // NOTE: if this kernel is an internally synchronized kernel, we pass a pointer in for
+            // it to update. However, it should not update a shared memory address as multiple threads
+            // could update it simultaneously, leading to degenerate (or potentially incorrect)
+            // behaviour in the outer kernel.
             fields.push_back(sizePtrTy); // updatable
         } else if (isCountable(output)) {
             fields.push_back(sizeTy); // constant
         }
-        // writable / requested item count
-        if (requiresItemCount(output)) {
-            fields.push_back(sizeTy);
-        }
-        // consumed item count
-        if (LLVM_UNLIKELY(isLocal)) {
-            fields.push_back(sizeTy);
+        // Although local buffers are considered to be owned by (and thus the memory managed by) this
+        // kernel, the OptimizationBranch kernel delegates owned buffer management to its branch
+        // pipelines. This means there are at least two seperate owners for a buffer; however, we know
+        // by construction only one branch can be executing and any kernels within the pipelines must
+        // be synchronized; thus at most one branch could resize a buffer at any particular moment.
+        // However, we need to share the current state of the buffer between the branches to ensure
+        // that we are not using an old buffer allocation.
+        if (isShared || isLocal) {
+            fields.push_back(sizeTy); // consumed
+        } else if (requiresItemCount(output)) {
+            fields.push_back(sizeTy); // writable item count
         }
     }
     return fields;
@@ -499,31 +775,38 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         auto setNextArgName = [&](const StringRef name) {
             assert (arg != doSegment->arg_end());
             arg->setName(name);
+            // TODO: add WriteOnly attributes for the appropriate I/O parameters?
             std::advance(arg, 1);
         };
         if (LLVM_LIKELY(isStateful())) {
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("shared");
         }
         if (LLVM_UNLIKELY(hasThreadLocal())) {
-            setNextArgName("thread_local");
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+            setNextArgName("threadLocal");
         }
-        setNextArgName("numOfStrides");
-        if (LLVM_LIKELY(!requiresExplicitPartialFinalStride(this))) {
+        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+        const auto greedy = isGreedy();
+        if (LLVM_UNLIKELY(internallySynchronized || greedy)) {
+            if (internallySynchronized) {
+                setNextArgName("segNo");
+            }
             setNextArgName("isFinal");
+        } else {
+            setNextArgName("numOfStrides");
+            if (hasFixedRateInput()) {
+                setNextArgName("fixedRateFactor");
+            }
         }
-        if (hasAttribute(AttrId::InternallySynchronized)) {
-            setNextArgName("externalSegNo");
-        }
-        if (LLVM_LIKELY(hasFixedRate())) {
-            setNextArgName("fixedRateFactor");
-        }
+
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {
             const Binding & input = mInputStreamSets[i];
             setNextArgName(input.getName());
-            if (LLVM_LIKELY(isAddressable(input) || isCountable(input))) {
+            if (LLVM_LIKELY(internallySynchronized || isAddressable(input) || isCountable(input))) {
                 setNextArgName(input.getName() + "_processed");
             }
-            if (requiresItemCount(input)) {
+            if (internallySynchronized || requiresItemCount(input)) {
                 setNextArgName(input.getName() + "_accessible");
             }
         }
@@ -533,15 +816,16 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         for (unsigned i = 0; i < mOutputStreamSets.size(); ++i) {
             const Binding & output = mOutputStreamSets[i];
             setNextArgName(output.getName());
-            if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
+            if (LLVM_LIKELY(internallySynchronized || hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (requiresItemCount(output)) {
+            const auto isLocal = internallySynchronized || isLocalBuffer(output);
+            if (LLVM_UNLIKELY(isLocal)) {
+                setNextArgName(output.getName() + "_consumed");
+            } else if (requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output))) {
-                setNextArgName(output.getName() + "_consumed");
-            }
+
         }
         assert (arg == doSegment->arg_end());
     }
@@ -673,8 +957,13 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
  * @brief addOrDeclareMainFunction
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const {
-
-    const auto suppliedArgs = 1U + (isStateful() ? 1U : 0U) + (hasThreadLocal() ? 1U : 0U);
+    auto suppliedArgs = 1U;
+    if (LLVM_LIKELY(isStateful())) {
+        suppliedArgs += 1;
+    }
+    if (hasThreadLocal()) {
+        suppliedArgs += 1;
+    }
 
     Module * const m = b->getModule();
     Function * const doSegment = getDoSegmentFunction(b, false); assert (doSegment);
@@ -719,7 +1008,8 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     }
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        report_fatal_error("main cannot be externally synchronized");
+        assert (false);
+        report_fatal_error(doSegment->getName() + " cannot be externally synchronized");
     }
 
     assert (main->empty());
@@ -734,7 +1024,6 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     };
 
     SmallVector<Value *, 16> segmentArgs(doSegment->arg_size());
-    segmentArgs[suppliedArgs - 1] = b->getSize(1); // numOfStrides
     for (unsigned i = 0; i < numOfDoSegArgs; ++i) {
         segmentArgs[suppliedArgs + i] = nextArg();
     }
@@ -752,15 +1041,40 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     END_SCOPED_REGION
     assert (isStateful() || sharedHandle == nullptr);
 
+    auto suppliedArgCount = 0U;
     if (LLVM_LIKELY(isStateful())) {
-        assert ((hasThreadLocal() && suppliedArgs == 3) || (!hasThreadLocal() && suppliedArgs == 2));
-        segmentArgs[0] = sharedHandle;
+        segmentArgs[suppliedArgCount++] = sharedHandle;
     }
     Value * threadLocalHandle = nullptr;
-    if (LLVM_UNLIKELY(hasThreadLocal())) {
+    if (hasThreadLocal()) {
         threadLocalHandle = initializeThreadLocalInstance(b, sharedHandle);
-        assert ((isStateful() && suppliedArgs == 3) || (!isStateful() && suppliedArgs == 2));
-        segmentArgs[suppliedArgs - 2] = threadLocalHandle;
+        segmentArgs[suppliedArgCount++] = threadLocalHandle;
+    }
+    Value * const ONE = b->getSize(1);
+    segmentArgs[suppliedArgCount++] = ONE; // numOfStrides
+    assert (suppliedArgCount == suppliedArgs);
+
+    // allocate any internal stream sets
+    if (LLVM_LIKELY(allocatesInternalStreamSets())) {
+        Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
+        SmallVector<Value *, 2> allocArgs;
+        if (LLVM_LIKELY(isStateful())) {
+            allocArgs.push_back(sharedHandle);
+        }
+        // pass in the desired number of segments
+        #warning fix this so BufferSegments is an argument to main
+        allocArgs.push_back(b->getSize(codegen::BufferSegments));
+        b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
+        if (hasThreadLocal()) {
+            Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
+            SmallVector<Value *, 3> allocArgs;
+            if (LLVM_LIKELY(isStateful())) {
+                allocArgs.push_back(sharedHandle);
+            }
+            allocArgs.push_back(threadLocalHandle);
+            allocArgs.push_back(ONE);
+            b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
+        }
     }
 
     #ifdef NDEBUG
@@ -787,8 +1101,10 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         b->SetInsertPoint(handleCatch);
         LandingPadInst * const caughtResult = b->CreateLandingPad(caughtResultType, 0);
         caughtResult->addClause(ConstantPointerNull::get(int8PtrTy));
-        b->CreateCall(b->getBeginCatch(), {b->CreateExtractValue(caughtResult, 0)});
-        b->CreateCall(b->getEndCatch());
+        Function * catchFn = b->getBeginCatch();
+        Function * catchEndFn = b->getEndCatch();
+        b->CreateCall(catchFn->getFunctionType(), catchFn, {b->CreateExtractValue(caughtResult, 0)});
+        b->CreateCall(catchEndFn->getFunctionType(), catchEndFn, {});
         BasicBlock * const afterCatch = b->GetInsertBlock();
         b->CreateBr(handleDeallocation);
 
@@ -797,7 +1113,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         successPhi->addIncoming(b->getTrue(), beforeInvoke);
         successPhi->addIncoming(b->getFalse(), afterCatch);
     } else {
-        b->CreateCall(doSegment, segmentArgs);
+        b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
     if (hasThreadLocal()) {
         SmallVector<Value *, 2> args;
@@ -832,7 +1148,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b->CreateCacheAlignedMalloc(getSharedStateType());
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
@@ -841,12 +1157,12 @@ Value * Kernel::createInstance(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeInstance
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::initializeInstance(BuilderRef b, llvm::ArrayRef<Value *> args) const {
+void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
     assert (args.size() == getNumOfScalarInputs() + 1);
     assert (args[0] && "cannot initialize before creation");
     assert (args[0]->getType()->getPointerElementType() == getSharedStateType());
     Function * const init = getInitializeFunction(b);
-    b->CreateCall(init, args);
+    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -857,9 +1173,11 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, Value * const handle
     if (hasThreadLocal()) {
         Function * const init = getInitializeThreadLocalFunction(b);
         if (handle) {
-            instance = b->CreateCall(init, handle);
+            FixedArray<Value *, 1> args;
+            args[0] = handle;
+            instance = b->CreateCall(init->getFunctionType(), init, args);
         } else {
-            instance = b->CreateCall(init);
+            instance = b->CreateCall(init->getFunctionType(), init, {});
         }
     }
     return instance;
@@ -868,10 +1186,10 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, Value * const handle
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::finalizeThreadLocalInstance(BuilderRef b, llvm::ArrayRef<Value *> args) const {
+void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
     assert (args.size() == (isStateful() ? 2 : 1));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
-    b->CreateCall(init, args);
+    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -881,9 +1199,9 @@ Value * Kernel::finalizeInstance(BuilderRef b, Value * const handle) const {
     Value * result = nullptr;
     Function * const termFunc = getFinalizeFunction(b);
     if (LLVM_LIKELY(isStateful())) {
-        result = b->CreateCall(termFunc, { handle });
+        result = b->CreateCall(termFunc->getFunctionType(), termFunc, { handle });
     } else {
-        result = b->CreateCall(termFunc);
+        result = b->CreateCall(termFunc->getFunctionType(), termFunc, {});
     }
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
@@ -927,12 +1245,21 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         initArgs.push_back(f->second); assert (initArgs.back());
     }
     recursivelyConstructFamilyKernels(b, initArgs, params);
-    b->CreateCall(getInitializeFunction(b), initArgs);
+    Function * init = getInitializeFunction(b);
+    b->CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
 
     if (LLVM_LIKELY(hasFamilyName())) {
-        if (hasThreadLocal()) {
+        const auto tl = hasThreadLocal();
+        const auto ai = allocatesInternalStreamSets();
+        if (ai) {
+            addHostArg(getAllocateSharedInternalStreamSetsFunction(b));
+        }
+        if (tl) {
             addHostArg(getInitializeThreadLocalFunction(b));
+            if (ai) {
+                addHostArg(getAllocateThreadLocalInternalStreamSetsFunction(b));
+            }
         }
         addHostArg(getDoSegmentFunction(b));
         if (hasThreadLocal()) {
@@ -947,6 +1274,13 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */) const {
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief runOptimizationPasses
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::runOptimizationPasses(BuilderRef /* b */) const {
 
 }
 
@@ -971,41 +1305,6 @@ std::string Kernel::getStringHash(const StringRef str) {
     out.flush();
 
     return buffer;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief supportsInternalSynchronization
- ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::supportsInternalSynchronization() const {
-    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        if (LLVM_UNLIKELY(canSetTerminateSignal())) {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << getName() <<
-                   " cannot be internally synchronized and be permitted to terminate early";
-            report_fatal_error(out.str());
-        }
-
-        auto checkValidRate = [this](const Binding & binding) {
-            if (LLVM_LIKELY(isCountable(binding) && !isLocalBuffer(binding))) return;
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << getName() << ":" << binding.getName() <<
-                   " must be a non-local non-deferred countable rate"
-                   " to support internal synchronization";
-            report_fatal_error(out.str());
-        };
-
-        for (const Binding & input : mInputStreamSets) {
-            checkValidRate(input);
-        }
-
-        for (const Binding & output : mOutputStreamSets) {
-            checkValidRate(output);
-        }
-        return true;
-    }
-    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

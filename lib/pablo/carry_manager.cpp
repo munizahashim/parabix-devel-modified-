@@ -306,7 +306,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->SetInsertPoint(reallocExisting);
         Value * const capacitySize = b->CreateMul(capacity, carryStateWidth);
         Value * const newCapacitySize = b->CreateShl(capacitySize, 1); // x 2
-        Value * const newArray = b->CreateCacheAlignedMalloc(newCapacitySize);
+        Value * const newArray = b->CreatePageAlignedMalloc(newCapacitySize);
         b->CreateMemCpy(newArray, array, capacitySize, b->getCacheAlignment());
         b->CreateFree(array);
         b->CreateStore(newArray, arrayPtr);
@@ -332,7 +332,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         Constant * const initialCapacity = ConstantExpr::getShl(ONE, initialLog2Capacity);
         b->CreateStore(initialCapacity, capacityPtr);
         Constant * const initialCapacitySize = ConstantExpr::getMul(initialCapacity, carryStateWidth);
-        Value * initialArray = b->CreateCacheAlignedMalloc(initialCapacitySize);
+        Value * initialArray = b->CreatePageAlignedMalloc(initialCapacitySize);
         b->CreateMemZero(initialArray, initialCapacitySize, BlockWidth);
         initialArray = b->CreatePointerCast(initialArray, array->getType());
         b->CreateStore(initialArray, arrayPtr);
@@ -1093,10 +1093,10 @@ StructType * CarryManager::analyse(BuilderRef b, const PabloBlock * const scope,
                 unsigned required = blocks;
                 if (loopDepth > 0) {
                     required++;
-                    mIndexedLongAdvanceTotal++;
                 }
                 if (LLVM_UNLIKELY(isa<IndexedAdvance>(stmt))) {
                     required++;
+                    mIndexedLongAdvanceTotal++;
                 }
                 type = ArrayType::get(blockTy, nearest_pow2(required));
                 if (LLVM_UNLIKELY(blocks != 1 && (ifDepth > 0 || loopDepth > 0))) {

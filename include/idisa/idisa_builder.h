@@ -43,7 +43,7 @@ class IDISA_Builder : public CBuilder {
 
 public:
 
-    IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth);
+    IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
 
     virtual ~IDISA_Builder();
 
@@ -140,7 +140,7 @@ public:
     //    1      0     c
     //    1      1     d
     llvm::Value * simd_binary(unsigned char mask, llvm::Value * bit_1, llvm::Value * bit_0);
-    
+
     //
     // Return a logic expression in terms of bitwise And, Or and Not for an
     // arbitrary three-operand boolean function corresponding to an 8-bit truth table mask.
@@ -163,7 +163,8 @@ public:
     virtual llvm::Value * simd_sllv(unsigned fw, llvm::Value * a, llvm::Value * shifts);
     virtual llvm::Value * simd_srlv(unsigned fw, llvm::Value * a, llvm::Value * shifts);
 
-    virtual llvm::Value * simd_pext(unsigned fw, llvm::Value * v, llvm::Value * extract_mask);
+    virtual std::vector<llvm::Value *> simd_pext(unsigned fw, std::vector<llvm::Value *>, llvm::Value * extract_mask);
+    llvm::Value * simd_pext(unsigned fw, llvm::Value * v, llvm::Value * extract_mask);
     virtual llvm::Value * simd_pdep(unsigned fw, llvm::Value * v, llvm::Value * deposit_mask);
     virtual llvm::Value * simd_any(unsigned fw, llvm::Value * a);
     virtual llvm::Value * simd_popcount(unsigned fw, llvm::Value * a);
@@ -244,8 +245,7 @@ public:
         return getStreamSetTy(getContext(), NumElements, FieldWidth);
     }
 
-    void CallPrintRegisterCond(llvm::StringRef regName, llvm::Value * const value, llvm::Value * const cond, const STD_FD fd = STD_FD::STD_ERR);
-    void CallPrintRegister(llvm::StringRef regName, llvm::Value * const value, const STD_FD fd = STD_FD::STD_ERR);
+    llvm::CallInst * CallPrintRegister(llvm::StringRef regName, llvm::Value * const value, const STD_FD fd = STD_FD::STD_ERR);
 
 protected:
     LLVM_ATTRIBUTE_NORETURN void UnsupportedFieldWidthError(const unsigned FieldWidth, std::string op_name);
@@ -255,6 +255,8 @@ protected:
     const unsigned              mNativeBitBlockWidth;
     const unsigned              mBitBlockWidth;
     const unsigned              mLaneWidth;
+    const unsigned              MAX_NATIVE_SIMD_SHIFT;
+    const unsigned              MIN_NATIVE_SIMD_SHIFT;
     llvm::VectorType * const    mBitBlockType;
     llvm::Constant * const      mZeroInitializer;
     llvm::Constant * const      mOneInitializer;

@@ -131,6 +131,16 @@ struct Attribute {
         // that a particular output stream needs both the consumed item count and a pointer
         // to each of its consumers logical segment number for its internal logic.
 
+        SharedManagedBuffer,
+
+        // A shared buffer is a managed buffer that is not owned strictly by one kernel.
+        // For example, an output of an OptimizationBranch kernel may be owned by the
+        // OptimizationBranch; however, each branch contains some kernel that may write
+        // to the output and could have to expand it to fit the produced data. While the
+        // synchronization will prevent two kernels from simultaneously writing/expanding
+        // the buffers, both must be coordinated to ensure that every possible writer
+        // sees the same view.
+
         Delayed,
 
         // Similar to Deferred, a consumer of a stream of N items with a Delayed attribute
@@ -243,6 +253,15 @@ struct Attribute {
 
         // NOTE: this means either the kernel must either internally handle synchronization
         // or that any interleaving of segments is valid.
+
+        IsolateOnHybridThread,
+
+        // By using a hybrid-linear pipeline, some programs can improve their throughput by
+        // executing a heavyweight kernel on a fixed-code thread. Automatically deciding
+        // which kernels can be moved to it would require both a data and code oracle to
+        // determine the expected behaviour of the kernel itself and such oracles cannot
+        // exist for Family kernels. Thus this programmer attribute statically marks
+        // such kernels for hybrid execution.
 
         InfrequentlyUsed,
 
@@ -363,12 +382,20 @@ inline Attribute Add1() {
     return Attribute(Attribute::KindId::Add, 1);
 }
 
+inline Attribute Truncate(const unsigned k = 1) {
+    return Attribute(Attribute::KindId::Truncate, k);
+}
+
 inline Attribute RoundUpTo(const unsigned k) {
     return Attribute(Attribute::KindId::RoundUpTo, k);
 }
 
 inline Attribute ManagedBuffer() {
     return Attribute(Attribute::KindId::ManagedBuffer, 0);
+}
+
+inline Attribute SharedManagedBuffer() {
+    return Attribute(Attribute::KindId::SharedManagedBuffer, 0);
 }
 
 inline Attribute Principal() {
@@ -450,6 +477,10 @@ inline Attribute Family() {
 
 inline Attribute InternallySynchronized() {
     return Attribute(Attribute::KindId::InternallySynchronized, 0);
+}
+
+inline Attribute IsolateOnHybridThread() {
+    return Attribute(Attribute::KindId::IsolateOnHybridThread, 0);
 }
 
 inline Attribute InfrequentlyUsed() {
