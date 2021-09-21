@@ -418,6 +418,11 @@ add_test(
   WORKING_DIRECTORY ${QA_DIR}/gb18030
   COMMAND ./run_all "${BIN_DIR}/gb18030 -thread-num=2")
 
+add_test(
+  NAME json_test
+  WORKING_DIRECTORY ${QA_DIR}/json
+  COMMAND ./run_all "${BIN_DIR}/json")
+
 
 SET_PROPERTY(TEST proptest PROPERTY TIMEOUT 1500)
 SET_PROPERTY(TEST abc_test PROPERTY TIMEOUT 100)
@@ -485,3 +490,6 @@ add_custom_target (xml_test
     WORKING_DIRECTORY ${QA_DIR}/xml
     COMMAND python3 run_test_suite.py "${BIN_DIR}/xml")
 
+add_custom_target (json_test
+    WORKING_DIRECTORY ${QA_DIR}/json
+    COMMAND ./run_all "${BIN_DIR}/json")
