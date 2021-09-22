@@ -76,6 +76,7 @@ const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string EXTERNAL_IO_PRIOR_ITEM_COUNT_SUFFIX = ".EP";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
+const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 const static std::string DEBUG_CONSUMED_ITEM_COUNT_SUFFIX = ".DCON";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCY";
@@ -158,7 +159,6 @@ public:
     void start(BuilderRef b);
     void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal);
     void executeKernel(BuilderRef b);
-    void loadKernelState(BuilderRef b);
     void end(BuilderRef b);
 
     void readPipelineIOItemCounts(BuilderRef b);
@@ -177,7 +177,7 @@ public:
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void initializeForAllKernels();
-    void clearInternalState();
+    void clearInternalState(BuilderRef b);
 
 // partitioning codegen functions
 
@@ -194,8 +194,8 @@ public:
 
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(BuilderRef b) const;
 
-    void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint);
-    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint);
+    void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint, const unsigned debugNum);
+    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint, const unsigned debugNum);
 
     Value * acquireAndReleaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned partitionId);
 
@@ -307,6 +307,7 @@ public:
     void addTerminationProperties(BuilderRef b, const size_t kernel);
     void initializePipelineInputTerminationSignal(BuilderRef b);
     void readPartitionTerminationSignalFromState(BuilderRef b, const size_t partitionId);
+    void loadTerminationSignalsBetweenKernels(BuilderRef b, unsigned firstKernel, unsigned lastKernel);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort) const;
@@ -328,13 +329,13 @@ public:
 // consumer codegen functions
 
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
-    void initializeConsumedItemCount(BuilderRef b, const StreamSetPort outputPort, Value * const produced);
+    void initializeConsumedItemCount(BuilderRef b, const unsigned kernelId, const StreamSetPort outputPort, Value * const produced);
     void initializePipelineInputConsumedPhiNodes(BuilderRef b);
     void readExternalConsumerItemCounts(BuilderRef b);
     void createConsumedPhiNodes(BuilderRef b);
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
-    Value * readConsumedItemCount(BuilderRef b, const size_t streamSet, const bool useFinalCount = false);
+    Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t bufferVertex, not_null<Value *> consumed, const unsigned slot) const;
     void writeExternalConsumedItemCounts(BuilderRef b);
 
@@ -347,6 +348,8 @@ public:
     void releaseOwnedBuffers(BuilderRef b, const bool nonLocal);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
+
+    void loadCrossHybridThreadProducedItemCounts(BuilderRef b, unsigned firstKernel, unsigned lastKernel);
 
     void prepareLinearThreadLocalOutputBuffers(BuilderRef b);
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, Value * isFinal, const bool prefetch, const bool write) const;
@@ -552,7 +555,6 @@ protected:
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
-    const PartitionIOGraph                      mPartitionIOGraph;
     const std::vector<unsigned>                 PartitionJumpTargetId;
     const PartitionJumpTree                     mPartitionJumpTree;
     const ConsumerGraph                         mConsumerGraph;
@@ -560,8 +562,8 @@ protected:
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
 
-    const BitVector                             KernelOnHybridThread;
-    const BitVector                             PartitionOnHybridThread;
+    BitVector                                   KernelOnHybridThread;
+    BitVector                                   PartitionOnHybridThread;
 
     // thread state
     bool                                        mCompilingHybridThread = false;
@@ -609,7 +611,7 @@ protected:
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
-    FixedVector<bool>                           RequiresSynchronization;
+    BitVector                                   RequiresSynchronization;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -717,6 +719,7 @@ protected:
     OutputPortVector<Value *>                   mProducedItemCount;
     OutputPortVector<Value *>                   mProducedDeferredItemCountPtr;
     OutputPortVector<Value *>                   mProducedDeferredItemCount;
+    OutputPortVector<PHINode *>                 mProducedAtJumpPhi;
     OutputPortVector<PHINode *>                 mProducedAtTerminationPhi; // exiting after termination
     OutputPortVector<Value *>                   mProducedAtTermination;
     OutputPortVector<PHINode *>                 mUpdatedProducedPhi; // exiting the kernel
@@ -819,7 +822,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
-, mPartitionIOGraph(std::move(P.mPartitionIOGraph))
+
 , PartitionJumpTargetId(std::move(P.mPartitionJumpIndex))
 , mPartitionJumpTree(std::move(P.mPartitionJumpTree))
 , mConsumerGraph(std::move(P.mConsumerGraph))
@@ -827,32 +830,14 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
-, KernelOnHybridThread([&]() {
-    BitVector onHybridThread(LastKernel + 1U);
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread))) {
-            onHybridThread.set(i);
-        }
-    }
-    return onHybridThread;
-}())
-
-, PartitionOnHybridThread([&]() {
-    BitVector onHybridThread(PartitionCount);
-    for (unsigned k : KernelOnHybridThread.set_bits()) {
-        assert (k <= LastKernel);
-        const auto p = KernelPartitionId[k];
-        assert (p < PartitionCount);
-        onHybridThread.set(p);
-    }
-    return onHybridThread;
-}())
+, KernelOnHybridThread(std::move(P.KernelOnHybridThread))
+, PartitionOnHybridThread(std::move(P.PartitionOnHybridThread))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
-, RequiresSynchronization(PipelineInput, PipelineOutput, mAllocator)
+, RequiresSynchronization(PipelineOutput + 1)
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 
@@ -896,6 +881,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProducedItemCount(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCount(P.MaxNumOfOutputPorts, mAllocator)
+, mProducedAtJumpPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedAtTerminationPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedAtTermination(P.MaxNumOfOutputPorts, mAllocator)
 , mUpdatedProducedPhi(P.MaxNumOfOutputPorts, mAllocator)

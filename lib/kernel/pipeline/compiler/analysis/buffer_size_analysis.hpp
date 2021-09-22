@@ -219,11 +219,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                     assert (typeSize > 0);
                     const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
 
-                    if (c == 0) {
-                        errs() << "streamSet " << streamSet << " c is 0?\n\n";
-                        printBufferGraph(errs());
-                    }
-
                     assert (c > 0);
                     const auto w = c * typeSize;
                     assert (w > 0);

@@ -325,6 +325,38 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief loadCrossHybridThreadProducedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::loadCrossHybridThreadProducedItemCounts(BuilderRef b, const unsigned firstKernel, const unsigned lastKernel) {
+
+    if (KernelOnHybridThread.any()) {
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+            if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
+                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    const auto streamSet = source(input, mBufferGraph);
+                    const auto output = in_edge(streamSet, mBufferGraph);
+                    const auto producer = source(output, mBufferGraph);
+                    assert (producer < kernel);
+                    if (KernelOnHybridThread.test(producer) != mCompilingHybridThread) {
+                        const BufferPort & outputPort = mBufferGraph[output];
+                        Value * produced = nullptr;
+                        const auto prefix = makeBufferName(producer, outputPort.Port);
+                        if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                            produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                        } else {
+                            produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                        }
+                        mLocallyAvailableItems[streamSet] = produced;
+                        initializeConsumedItemCount(b, producer, outputPort.Port, produced);
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeLocallyAvailableItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeLocallyAvailableItemCounts(BuilderRef b, BasicBlock * const entryBlock) {
@@ -429,7 +461,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
         #endif
 
         setLocallyAvailableItemCount(b, outputPort, fullyProduced);
-        initializeConsumedItemCount(b, outputPort, fullyProduced);
+        initializeConsumedItemCount(b, mKernelId, outputPort, fullyProduced);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto streamSet = getOutputBufferVertex(outputPort);
         Value * const producedDelta = b->CreateSub(fullyProduced, mInitiallyProducedItemCount[streamSet]);

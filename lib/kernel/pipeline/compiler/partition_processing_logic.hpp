@@ -145,7 +145,8 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartiti
 void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel,
                                                  const unsigned targetPartitionId,
                                                  const bool fromKernelEntryBlock,
-                                                 BasicBlock * const entryPoint) {
+                                                 BasicBlock * const entryPoint,
+                                                 const unsigned debugNum) {
 
     BasicBlock * const exitPoint = b->GetInsertBlock();
 
@@ -176,16 +177,27 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
         // Select/compute/load the appropriate produced item count
         Value * produced = nullptr;
 
-        if (kernel < mKernelId && !mCompilingHybridThread) {
+
+        if (kernel < mKernelId) {
             produced = mLocallyAvailableItems[streamSet];
         } else if (kernel == mKernelId) {
 
+            if (fromKernelEntryBlock) {
+                if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    produced = mInitiallyProducedDeferredItemCount[streamSet];
+                } else {
+                    produced = mInitiallyProducedItemCount[streamSet];
+                }
+            } else {
+                produced = mProducedAtJumpPhi[br.Port];
+            }
+
+#if 0
             if (LLVM_UNLIKELY(br.IsDeferred)) {
                 produced = mInitiallyProducedDeferredItemCount[streamSet];
             } else {
                 produced = mInitiallyProducedItemCount[streamSet];
             }
-
 
             assert (produced);
 
@@ -197,7 +209,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                     if (LLVM_UNLIKELY(br.IsDeferred)) {
                         produced = mAlreadyProducedDeferredPhi[br.Port];
                     } else {
-                        produced = mAlreadyProducedPhi[br.Port];
+                        produced = mProducedAtJumpPhi[br.Port]; // mAlreadyProducedPhi[br.Port];
                     }
                 }
 
@@ -222,8 +234,8 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                     produced = phi;
                     b->restoreIP(ip);
                 }
-
             }
+#endif
 
         } else { // if (kernel > mKernelId) {
             const auto prefix = makeBufferName(kernel, br.Port);
@@ -234,7 +246,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             }
         }
 
-        assert (produced);
+        assert (isFromCurrentFunction(b, produced, false));
 
         #ifdef PRINT_DEBUG_MESSAGES
         SmallVector<char, 256> tmp;
@@ -263,7 +275,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             } else {
                 consumed = mInitialConsumedItemCount[streamSet];
             }            
-            assert (consumed);
+            assert (isFromCurrentFunction(b, consumed, false));
 
             #ifdef PRINT_DEBUG_MESSAGES
             SmallVector<char, 256> tmp;
@@ -280,19 +292,21 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
     auto phiOut = [&](const PhiDataSet & set, PartitionPhiNodeTable & tbl, const StringRef prefix) {
 
         for (const PhiData & item : set) {
+            assert (isFromCurrentFunction(b, item.ItemCount, false));
             PHINode *& phi = tbl[targetPartitionId][item.StreamSet - FirstStreamSet];
             if (phi == nullptr) {
                 BasicBlock * const entryPoint = mPartitionEntryPoint[targetPartitionId];
+                assert (entryPoint);
                 assert (entryPoint->getFirstNonPHI() == nullptr);
                 const auto expected = in_degree(targetPartitionId, mPartitionJumpTree) + 2;
 
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream nm(tmp);
-                nm << prefix << "_" << item.StreamSet << "@" << targetPartitionId;
+                nm << prefix << "_" << item.StreamSet << "@" << targetPartitionId << "." << debugNum;
 
                 phi = PHINode::Create(b->getSizeTy(), expected, nm.str(), entryPoint);
-                assert (tbl[targetPartitionId][item.StreamSet - FirstStreamSet] == phi);
             }
+            assert (isFromCurrentFunction(b, phi, false));
             phi->addIncoming(item.ItemCount, exitPoint);
         }
 
@@ -307,7 +321,10 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId,
                                                   const bool /* fromKernelEntry */,
-                                                  BasicBlock * const /* entryPoint */) {
+                                                  BasicBlock * const /* entryPoint */,
+                                                  const unsigned debugNum) {
+
+    assert (PartitionOnHybridThread.test(targetPartitionId) == mCompilingHybridThread || targetPartitionId == KernelPartitionId[PipelineOutput]);
 
     BasicBlock * const exitPoint = b->GetInsertBlock();
 
@@ -321,30 +338,36 @@ void PipelineCompiler::phiOutPartitionStatusFlags(BuilderRef b, const unsigned t
 
             SmallVector<char, 256> tmp;
             raw_svector_ostream nm(tmp);
-            nm << prefix << "_" << partitionId << "@" << targetPartitionId;
+            nm << prefix << "_" << partitionId << "@" << targetPartitionId << "." << debugNum;
 
             phi = PHINode::Create(b->getSizeTy(), expected, nm.str(), entryPoint);
 
             assert (tbl[targetPartitionId][partitionId] == phi);
         }
+        assert (isFromCurrentFunction(b, phi));
         return phi;
     };
 
     const auto firstPartition = KernelPartitionId[FirstKernel];
 
     for (auto partitionId = firstPartition; partitionId != targetPartitionId; ++partitionId) {
-        PHINode * const termPhi = findOrAddPhi(mPartitionTerminationSignalPhi, partitionId, "partitionTerminationSignalPhi");
-        Value * term = nullptr;
-        if (partitionId < mCurrentPartitionId) {
-            term = mPartitionTerminationSignal[partitionId]; assert (term);
-        } else {
-            term = readTerminationSignal(b, partitionId); assert (term);
+        if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread || partitionId == KernelPartitionId[PipelineOutput]) {
+            PHINode * const termPhi = findOrAddPhi(mPartitionTerminationSignalPhi, partitionId, "partitionTerminationSignalPhi");
+            Value * term = nullptr;
+            if (partitionId < mCurrentPartitionId) {
+                term = mPartitionTerminationSignal[partitionId]; assert (term);
+            } else {
+                term = readTerminationSignal(b, partitionId); assert (term);
+            }
+            assert (isFromCurrentFunction(b, term));
+            termPhi->addIncoming(term, exitPoint);
         }
-        termPhi->addIncoming(term, exitPoint);
     }
 
-    PHINode * const progressPhi = mPartitionPipelineProgressPhi[targetPartitionId]; assert (progressPhi);
+    PHINode * const progressPhi = mPartitionPipelineProgressPhi[targetPartitionId];
+    assert (isFromCurrentFunction(b, progressPhi, false));
     Value * const progress = mPipelineProgress; // fromKernelEntry ? mPipelineProgress : mAlreadyProgressedPhi;
+    assert (isFromCurrentFunction(b, progress, false));
     progressPhi->addIncoming(progress, exitPoint);
 
 }
@@ -361,10 +384,10 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
     if (mCompilingHybridThread) return nullptr;
 
-    assert (std::is_sorted(ActiveKernels.begin(), ActiveKernels.end()));
     assert (std::find(ActivePartitions.begin(), ActivePartitions.end(), partitionId) != ActivePartitions.end());
 
     auto firstKernelInTargetPartition = mKernelId;
+    assert (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread);
     auto lastConsumer = mKernelId;
     const auto m = ActiveKernels.size();
     auto k = ActiveKernelIndex;
@@ -375,8 +398,8 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
             const auto streamSet = target(e, mBufferGraph);
             for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const auto consumer = target(e, mBufferGraph);
-                const auto f = std::lower_bound(ActiveKernels.begin(), ActiveKernels.end(), consumer);
-                if (f != ActiveKernels.end() && *f == consumer) {
+                if (RequiresSynchronization.test(consumer)) {
+                    assert (KernelOnHybridThread.test(consumer) == mCompilingHybridThread);
                     lastConsumer = std::max<unsigned>(lastConsumer, consumer);
                 }
             }
@@ -384,6 +407,7 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
         #endif
         if (KernelPartitionId[kernel] == partitionId) {
             firstKernelInTargetPartition = kernel;
+            assert (KernelOnHybridThread.test(kernel) == mCompilingHybridThread);
             break;
         }
         assert (KernelPartitionId[kernel] < partitionId);
@@ -424,9 +448,10 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
 
         const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1U];
         assert (mCurrentPartitionId < nextPartitionId);
+        assert (PartitionOnHybridThread.test(nextPartitionId) == mCompilingHybridThread || nextPartitionId == KernelPartitionId[PipelineOutput]);
         const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
         assert (nextPartitionId <= jumpId);       
-
+        assert (PartitionOnHybridThread.test(jumpId) == mCompilingHybridThread || nextPartitionId == KernelPartitionId[PipelineOutput]);
 
         if (LLVM_LIKELY(nextPartitionId != jumpId)) {
 
@@ -441,31 +466,47 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             exhaustedInputPhi->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
 
             for (auto kernel = PipelineInput; kernel <= mKernelId; ++kernel) {
-                phiOutPartitionItemCounts(b, kernel, nextPartitionId, true, mKernelInitiallyTerminated);
+                phiOutPartitionItemCounts(b, kernel, nextPartitionId, true, mKernelInitiallyTerminated, 0);
             }
             for (auto kernel = mKernelId + 1U; kernel <= LastKernel; ++kernel) {
                 if (KernelPartitionId[kernel] != mCurrentPartitionId) {
                     break;
                 }
-                phiOutPartitionItemCounts(b, kernel, nextPartitionId, true, mKernelInitiallyTerminated);
+                phiOutPartitionItemCounts(b, kernel, nextPartitionId, true, mKernelInitiallyTerminated, 1);
             }
-            phiOutPartitionStatusFlags(b, nextPartitionId, true, mKernelInitiallyTerminated);
+            phiOutPartitionStatusFlags(b, nextPartitionId, true, mKernelInitiallyTerminated, 2);
 
             updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
             #endif
 
-             b->CreateBr(mNextPartitionEntryPoint);
+            b->CreateBr(mNextPartitionEntryPoint);
         } else {
             mKernelInitiallyTerminatedExit = b->GetInsertBlock();
             if (mExhaustedInputAtJumpPhi) {
                 mExhaustedInputAtJumpPhi->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
             }
+            if (mKernelJumpToNextUsefulPartition != mKernelInitiallyTerminated) {
+                for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+                    const auto streamSet = target(e, mBufferGraph);
+
+                    const auto & br = mBufferGraph[e];
+                    Value * produced = nullptr;
+                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                        produced = mInitiallyProducedDeferredItemCount[streamSet];
+                    } else {
+                        produced = mInitiallyProducedItemCount[streamSet];
+                    }
+                    const auto port = br.Port;
+                    assert (isFromCurrentFunction(b, produced, false));
+
+                    assert (isFromCurrentFunction(b, mInitiallyProducedItemCount[streamSet], false));
+                    mProducedAtJumpPhi[port]->addIncoming(produced, mKernelInitiallyTerminatedExit);
+                }
+            }
             b->CreateBr(mKernelJumpToNextUsefulPartition);
         }
-
-
 
     } else { // if (!mIsPartitionRoot) {
 
@@ -484,7 +525,8 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 
     b->SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto nextPartitionId = PartitionJumpTargetId[mCurrentPartitionId];
-    assert(std::find(ActivePartitions.begin(), ActivePartitions.end(), nextPartitionId) != ActivePartitions.end());
+    assert (PartitionOnHybridThread.test(nextPartitionId) == mCompilingHybridThread || nextPartitionId == KernelPartitionId[PipelineOutput]);
+    assert(std::find(ActivePartitions.begin(), ActivePartitions.end(), nextPartitionId) != ActivePartitions.end());    
     assert (mCurrentPartitionId < nextPartitionId);
 
     Value * const startTime = acquireAndReleaseAllSynchronizationLocksUntil(b, nextPartitionId);
@@ -494,22 +536,24 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     }
 
     PHINode * const exhaustedInputPhi = mExhaustedPipelineInputAtPartitionEntry[nextPartitionId];
-    if (exhaustedInputPhi) {       
+    if (exhaustedInputPhi) {
+        assert (isFromCurrentFunction(b, exhaustedInputPhi, false));
         Value * const exhausted = mIsBounded ? mExhaustedInputAtJumpPhi : mExhaustedInput;
+        assert (isFromCurrentFunction(b, exhausted, false));
         exhaustedInputPhi->addIncoming(exhausted, exitBlock); assert (exhausted);
     }
     for (auto kernel = PipelineInput; kernel <= mKernelId; ++kernel) {
-        phiOutPartitionItemCounts(b, kernel, nextPartitionId, false, mKernelJumpToNextUsefulPartition);
+        phiOutPartitionItemCounts(b, kernel, nextPartitionId, false, mKernelJumpToNextUsefulPartition, 5);
     }
     // NOTE: break condition differs from "writeInitiallyTerminatedPartitionExit"
     for (auto kernel = mKernelId + 1U; kernel <= LastKernel; ++kernel) {
         const auto partId = KernelPartitionId[kernel];
         const auto jumpId = PartitionJumpTargetId[partId];
         if (jumpId <= nextPartitionId) {
-            phiOutPartitionItemCounts(b, kernel, nextPartitionId, false, mKernelJumpToNextUsefulPartition);
+            phiOutPartitionItemCounts(b, kernel, nextPartitionId, false, mKernelJumpToNextUsefulPartition, 6);
         }
     }
-    phiOutPartitionStatusFlags(b, nextPartitionId, false, mKernelJumpToNextUsefulPartition);
+    phiOutPartitionStatusFlags(b, nextPartitionId, false, mKernelJumpToNextUsefulPartition, 7);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
@@ -580,7 +624,9 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         for (unsigned i = 0; i != n; ++i) {
             PHINode * const phi = mPartitionProducedItemCountPhi[nextPartitionId][i];
             if (phi) {
+                assert (isFromCurrentFunction(b, phi, false));
                 const auto streamSet = FirstStreamSet + i;
+                assert (isFromCurrentFunction(b, mLocallyAvailableItems[streamSet], false));
                 phi->addIncoming(mLocallyAvailableItems[streamSet], exitBlock);
                 mLocallyAvailableItems[streamSet] = phi;
             }
@@ -589,9 +635,10 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         for (unsigned i = 0; i != n; ++i) {
             PHINode * const phi = mPartitionConsumedItemCountPhi[nextPartitionId][i];
             if (phi) {
+                assert (isFromCurrentFunction(b, phi, false));
                 const auto streamSet = FirstStreamSet + i;
                 const ConsumerNode & cn = mConsumerGraph[streamSet];
-                assert (cn.Consumed);
+                assert (isFromCurrentFunction(b, cn.Consumed, false));
                 phi->addIncoming(cn.Consumed, exitBlock);
                 cn.Consumed = phi;
                 assert (cn.PhiNode == nullptr);
@@ -609,7 +656,8 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
             const auto i = ActivePartitions[j];
             PHINode * const termPhi = mPartitionTerminationSignalPhi[nextPartitionId][i];
             if (termPhi) {
-                assert (mPartitionTerminationSignal[i]);
+                assert (isFromCurrentFunction(b, termPhi, false));
+                assert (isFromCurrentFunction(b, mPartitionTerminationSignal[i], false));
                 termPhi->addIncoming(mPartitionTerminationSignal[i], exitBlock);
                 mPartitionTerminationSignal[i] = termPhi;
             }
@@ -617,37 +665,6 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
        ++ActivePartitionIndex;
     }
 }
-
-#if 0
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief setPartitionVariablesToPipelineEnd
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::setPartitionVariablesToPipelineEnd(BuilderRef /* b */) {
-
-    const auto nextPartitionId = KernelPartitionId[LastKernel];
-
-    mExhaustedInput = mExhaustedPipelineInputAtPartitionEntry[nextPartitionId];
-
-    const auto n = LastStreamSet - FirstStreamSet + 1U;
-
-    for (unsigned i = 0; i != n; ++i) {
-        PHINode * const phi = mPartitionProducedItemCountPhi[nextPartitionId][i];
-        const auto streamSet = FirstStreamSet + i;
-        mLocallyAvailableItems[streamSet] = phi;
-    }
-
-    for (unsigned i = 0; i != n; ++i) {
-        PHINode * const phi = mPartitionConsumedItemCountPhi[nextPartitionId][i];
-        const auto streamSet = FirstStreamSet + i;
-        mInitialConsumedItemCount[streamSet] = phi;
-    }
-
-    for (unsigned i = 0; i != nextPartitionId; ++i) {
-        mPartitionTerminationSignal[i] = mPartitionTerminationSignalPhi[nextPartitionId][i];
-    }
-
-}
-#endif
 
 }
 

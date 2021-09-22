@@ -40,10 +40,18 @@ namespace kernel {
  * @brief identifyAllInternallySynchronizedKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
-    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-        const Kernel * const kernelObj = getKernel(kernel);
-        const auto flag = kernelObj->hasAttribute(AttrId::InternallySynchronized);
-        RequiresSynchronization[kernel] = !flag;
+    if (mNumOfThreads > 1 || ExternallySynchronized) {
+        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+            if (KernelOnHybridThread.test(kernel)) {
+                continue;
+            }
+            const Kernel * const kernelObj = getKernel(kernel);
+            if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
+                continue;
+            }
+
+            RequiresSynchronization.set(kernel);
+        }
     }
 }
 
@@ -63,7 +71,6 @@ void PipelineCompiler::readFirstSegmentNumber(BuilderRef b) {
  * @brief obtainCurrentSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
-    if (LLVM_LIKELY(mCompilingHybridThread)) return;
     ConstantInt * const ONE = b->getSize(1);
     if (!ExternallySynchronized) {
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
@@ -88,7 +95,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
     #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (LLVM_LIKELY(ExternallySynchronized || mCompilingHybridThread)) {
+    if (LLVM_LIKELY(ExternallySynchronized)) {
         return;
     }
     assert (mNumOfThreads > 0);
@@ -109,8 +116,7 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId) {
-    if (LLVM_LIKELY(mCompilingHybridThread)) return;
-    if (LLVM_LIKELY(RequiresSynchronization[kernelId] && (mNumOfThreads > 1 || ExternallySynchronized))) {
+    if (LLVM_LIKELY(RequiresSynchronization.test(kernelId))) {
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
@@ -152,8 +158,7 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId) {
-    if (LLVM_LIKELY(mCompilingHybridThread)) return;
-    const auto required = RequiresSynchronization[kernelId] && (mNumOfThreads > 1 || ExternallySynchronized);
+    const auto required = RequiresSynchronization.test(kernelId);
     if (LLVM_LIKELY(required || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
@@ -180,9 +185,8 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  * @brief verifyCurrentSynchronizationLock
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::verifyCurrentSynchronizationLock(BuilderRef b) const {
-    if (LLVM_LIKELY(mCompilingHybridThread)) return;
     if (CheckAssertions) {
-        const auto required = RequiresSynchronization[mKernelId] && (mNumOfThreads > 1 || ExternallySynchronized);
+        const auto required = RequiresSynchronization.test(mKernelId);
         if (required) {
             const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
             const unsigned waitingOnIdx = serialize ? LastKernel : mKernelId;

@@ -635,6 +635,29 @@ void PipelineAnalysis::calculatePartialSumStepFactors() {
     mPartialSumStepFactorGraph = G;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyKernelsOnHybridThread
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyKernelsOnHybridThread() {
+    KernelOnHybridThread.resize(PipelineOutput + 1U);
+    KernelOnHybridThread.reset();
+    PartitionOnHybridThread.resize(PartitionCount);
+    PartitionOnHybridThread.reset();
+    if (mPipelineKernel->getNumOfThreads() > 1) {
+        for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+            if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread))) {
+                KernelOnHybridThread.set(i);
+            }
+        }
+        for (unsigned k : KernelOnHybridThread.set_bits()) {
+            assert (k <= LastKernel);
+            const auto p = KernelPartitionId[k];
+            assert (p < PartitionCount);
+            PartitionOnHybridThread.set(p);
+        }
+    }
+}
+
 } // end of kernel namespace
 
 #endif // DATAFLOW_ANALYSIS_HPP

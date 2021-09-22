@@ -420,25 +420,6 @@ struct PartitionData {
 
 using PartitionGraph = adjacency_list<vecS, vecS, bidirectionalS, PartitionData, StreamSetId>;
 
-
-struct PartitionIOData {
-
-    // RefWrapper<const BufferPort> Port;
-    BufferPort Port;
-    unsigned Kernel;
-
-    PartitionIOData() = default;
-
-    PartitionIOData(BufferPort & port, unsigned kernel)
-    : Port(port)
-    , Kernel(kernel) {
-
-    }
-
-};
-
-using PartitionIOGraph =  adjacency_list<vecS, vecS, bidirectionalS, no_property, PartitionIOData>;
-
 using PartitionDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
 struct PartitionDataflowEdge {

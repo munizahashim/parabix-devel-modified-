@@ -179,9 +179,11 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         if (mKernelIsInternallySynchronized) {
             addNextArg(mSegNo);
         }
+        assert (mIsFinalInvocation);
         isFinal = b->CreateIsNotNull(mIsFinalInvocation);
         addNextArg(isFinal);
     } else {
+        assert (mNumOfLinearStrides);
         isFinal = b->CreateIsNull(mNumOfLinearStrides);
         addNextArg(mNumOfLinearStrides);
         #ifdef PRINT_DEBUG_MESSAGES

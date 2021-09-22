@@ -55,6 +55,8 @@ public:
 
         P.generateInitialBufferGraph();
 
+        P.identifyKernelsOnHybridThread();
+
         P.identifyOutputNodeIds();
 
         P.computeMaximumExpectedDataflow();
@@ -194,7 +196,6 @@ private:
 
     void identifyLinearBuffers();
     void markInterPartitionStreamSetsAsGloballyShared();
-    void identifyLocalPortIds();
 
     void identifyOutputNodeIds();
 
@@ -236,7 +237,7 @@ private:
 
     // IO analysis functions
 
-    void makeKernelIOGraph();
+    void identifyKernelsOnHybridThread();
 
     // Input truncation analysis functions
 
@@ -292,7 +293,9 @@ public:
 
     BufferGraph                     mBufferGraph;
 
-    PartitionIOGraph                mPartitionIOGraph;
+    BitVector                       KernelOnHybridThread;
+    BitVector                       PartitionOnHybridThread;
+
     std::vector<unsigned>           mPartitionJumpIndex;
     PartitionJumpTree               mPartitionJumpTree;
 

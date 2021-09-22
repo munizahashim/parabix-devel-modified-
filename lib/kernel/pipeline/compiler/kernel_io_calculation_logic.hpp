@@ -40,7 +40,7 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
         assert (inputPort.Type == PortType::Output);
         Value * const available = getAvailableInputItems(inputPort.Number);
         setLocallyAvailableItemCount(b, inputPort, available);
-        initializeConsumedItemCount(b, inputPort, available);
+        initializeConsumedItemCount(b, PipelineInput, inputPort, available);
     }
 
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
@@ -176,7 +176,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     }
 
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
-
+    assert (numOfLinearStrides);
     mNumOfLinearStrides = numOfLinearStrides;
 
     if (mMayLoopToEntry) {
@@ -212,11 +212,14 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         BasicBlock * const exitBlock = b->GetInsertBlock();
         for (unsigned i = 0; i < numOfInputs; ++i) {
             const auto port = StreamSetPort{ PortType::Input, i };
+            assert (mLinearInputItemsPhi[port] && accessibleItems[i]);
             mLinearInputItemsPhi[port]->addIncoming(accessibleItems[i], exitBlock);
+            assert (mInputVirtualBaseAddressPhi[port] && inputVirtualBaseAddress[i]);
             mInputVirtualBaseAddressPhi[port]->addIncoming(inputVirtualBaseAddress[i], exitBlock);
         }
         for (unsigned i = 0; i < numOfOutputs; ++i) {
             const auto port = StreamSetPort{ PortType::Output, i };
+            assert (writableItems[i]);
             mLinearOutputItemsPhi[port]->addIncoming(writableItems[i], exitBlock);
         }
         if (mFixedRateFactorPhi) { assert (fixedRateFactor);
