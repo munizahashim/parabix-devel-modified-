@@ -238,7 +238,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             Value * addr = nullptr;
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
                 assert ("internally synchronized I/O must be linear!" && bn.IsLinear);
-                addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr);
+                addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr, bn.isNonThreadLocal(), false);
             } else {
                 addr = mInputVirtualBaseAddressPhi[rt.Port];
             }
@@ -300,7 +300,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         } else if (LLVM_UNLIKELY(managed)) {
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = addVirtualBaseAddressArg(buffer);
         } else {
-            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal);
+            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal, bn.isNonThreadLocal(), true);
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 
@@ -459,6 +459,28 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Output, i});
         debugPrint(b, prefix + "_produced' = %" PRIu64, produced);
         #endif
+
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (mReturnedProducedItemCountPtr[outputPort]) {
+                const auto port = getOutput(mKernelId, outputPort);
+                const auto streamSet = target(port, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_LIKELY(bn.isInternal() && bn.isOwned())) {
+
+                    Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
+                    Value * const delta = b->CreateSub(produced, mAlreadyProducedPhi[outputPort]);
+                    Value * const withinCapacity = b->CreateICmpULE(delta, writable);
+                    const Binding & output = getOutputBinding(outputPort);
+                    b->CreateAssert(withinCapacity,
+                                    "%s.%s: reported produced item count delta (%" PRIu64 ") "
+                                    "exceeds writable items (%" PRIu64 ")",
+                                    mCurrentKernelName,
+                                    b->GetString(output.getName()),
+                                    delta, writable);
+                }
+            }
+        }
+
         mProducedItemCount[outputPort] = produced;
     }
 

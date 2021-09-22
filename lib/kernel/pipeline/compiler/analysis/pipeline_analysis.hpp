@@ -42,87 +42,32 @@ public:
 
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
 
-        #ifdef PRINT_STAGES
-        errs() << "generateInitialPipelineGraph\n";
-        #endif
-
         P.generateInitialPipelineGraph(b);
 
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
-        #ifdef PRINT_STAGES
-        errs() << "identifyKernelPartitions\n";
-        #endif
         auto partitionGraph = P.identifyKernelPartitions();
-
-        #ifdef PRINT_STAGES
-        errs() << "computeExpectedDataFlowRates\n";
-        #endif
-
         P.computeMinimumExpectedDataflow(partitionGraph);
-
-        #ifdef PRINT_STAGES
-        errs() << "schedulePartitionedProgram\n";
-        #endif
-
         P.schedulePartitionedProgram(partitionGraph, rng);
-
-        #ifdef PRINT_STAGES
-        errs() << "transcribeRelationshipGraph\n";
-        #endif
-
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);
-
-
-        #ifdef PRINT_STAGES
-        errs() << "generateInitialBufferGraph\n";
-        #endif
 
         P.generateInitialBufferGraph();
 
         P.identifyOutputNodeIds();
 
-        #ifdef PRINT_STAGES
-        errs() << "computeMaximumExpectedDataflow\n";
-        #endif
-
         P.computeMaximumExpectedDataflow();
-
-        #ifdef PRINT_STAGES
-        errs() << "computeMinimumStrideLengthForConsistentDataflow\n";
-        #endif
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
-        #ifdef PRINT_STAGES
-        errs() << "identifyInterPartitionSymbolicRates\n";
-        #endif
-
         P.identifyInterPartitionSymbolicRates();
 
-        #ifdef PRINT_STAGES
-        errs() << "markInterPartitionStreamSetsAsGloballyShared\n";
-        #endif
-
-        P.markInterPartitionStreamSetsAsGloballyShared(); // linkedPartitions
-
-        #ifdef PRINT_STAGES
-        errs() << "identifyTerminationChecks\n";
-        #endif
+        P.markInterPartitionStreamSetsAsGloballyShared();
 
         P.identifyTerminationChecks();
 
-        #ifdef PRINT_STAGES
-        errs() << "determinePartitionJumpIndices\n";
-        #endif
-
         P.determinePartitionJumpIndices();
-
-        #ifdef PRINT_STAGES
-        errs() << "annotateBufferGraphWithAddAttributes\n";
-        #endif
 
         P.annotateBufferGraphWithAddAttributes();
 
@@ -132,33 +77,16 @@ public:
         P.identifyPortsThatModifySegmentLength();
         P.identifyZeroExtendedStreamSets();
 
-        #ifdef PRINT_STAGES
-        errs() << "determineBufferSize\n";
-        #endif
-
         P.determineBufferSize(b);
-
-        #ifdef PRINT_STAGES
-        errs() << "determineBufferLayout\n";
-        #endif
-
         P.determineBufferLayout(b, rng);
 
-        #ifdef PRINT_STAGES
-        errs() << "makeConsumerGraph\n";
-        #endif
+        P.identifyCrossHybridThreadStreamSets();
 
-        // Make the remaining graphs
         P.makeConsumerGraph();
 
-        #ifdef PRINT_STAGES
-        errs() << "makePartitionJumpTree\n";
-        #endif
-        P.makePartitionJumpTree();
+        P.calculatePartialSumStepFactors();
 
-        #ifdef PRINT_STAGES
-        errs() << "makeTerminationPropagationGraph\n";
-        #endif
+        P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
 
         // Finish the buffer graph
@@ -224,6 +152,7 @@ private:
     static void addKernelRelationshipsInReferenceOrdering(const unsigned kernel, const RelationshipGraph & G,
                                                           std::function<void(PortType, unsigned, unsigned)> insertionFunction);
 
+
     // partitioning analysis
 
     PartitionGraph identifyKernelPartitions();
@@ -250,6 +179,8 @@ private:
 
     void addSchedulingConstraints(const std::vector<unsigned> & program);
 
+    static bool isNonSynchronousRate(const Binding & binding);
+
     // buffer management analysis functions
 
     void addStreamSetsToBufferGraph(BuilderRef b);
@@ -273,6 +204,7 @@ private:
 
     // consumer analysis functions
 
+    void identifyCrossHybridThreadStreamSets();
     void makeConsumerGraph();
 
     // dataflow analysis functions
@@ -286,6 +218,8 @@ private:
     void identifyInterPartitionSymbolicRates();
 
     void computeMinimumStrideLengthForConsistentDataflow();
+
+    void calculatePartialSumStepFactors();
 
     // zero extension analysis function
 
@@ -307,6 +241,9 @@ private:
     // Input truncation analysis functions
 
     void makeInputTruncationGraph();
+
+
+
 
 public:
 
@@ -360,6 +297,7 @@ public:
     PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
+    PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
 
     TerminationChecks               mTerminationCheck;
 

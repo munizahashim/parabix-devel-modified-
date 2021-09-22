@@ -115,9 +115,15 @@ public:
 
     llvm::Value * CreateAlignedMalloc(llvm::Value * const size, const unsigned alignment);
 
-    llvm::Value * CreatePageAlignedMalloc(llvm::Value * const size);
+    llvm::Value * CreateAlignedMalloc(llvm::Type * const type, llvm::Value * const ArraySize, const unsigned addressSpace, const unsigned alignment);
 
     llvm::Value * CreatePageAlignedMalloc(llvm::Type * const type, llvm::Value * const ArraySize = nullptr, const unsigned addressSpace = 0);
+
+    llvm::Value * CreatePageAlignedMalloc(llvm::Value * const size);
+
+    llvm::Value * CreateCacheAlignedMalloc(llvm::Type * const type, llvm::Value * const ArraySize = nullptr, const unsigned addressSpace = 0);
+
+    llvm::Value * CreateCacheAlignedMalloc(llvm::Value * const size);
 
     void CreateFree(llvm::Value * const ptr);
 

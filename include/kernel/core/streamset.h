@@ -136,7 +136,7 @@ public:
 
     virtual void copyBackLinearOutputBuffer(BuilderPtr b, llvm::Value * consumed) const = 0;
 
-    virtual void reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const = 0;
+    virtual llvm::Value * reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const = 0;
 
     static llvm::Type * resolveType(BuilderPtr b, llvm::Type * const streamSetType);
 
@@ -201,7 +201,7 @@ public:
 
     void copyBackLinearOutputBuffer(BuilderPtr b, llvm::Value * produced) const override;
 
-    void reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
@@ -277,7 +277,7 @@ public:
 
     void copyBackLinearOutputBuffer(BuilderPtr b, llvm::Value * consumed) const override;
 
-    void reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
 
     size_t getCapacity() const {
         return mCapacity;
@@ -319,7 +319,7 @@ public:
 
     void copyBackLinearOutputBuffer(BuilderPtr b, llvm::Value * consumed) const override;
 
-    void reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * reserveCapacity(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * overflowItems = nullptr) const override;
 
     size_t getInitialCapacity() const {
         return mInitialCapacity;

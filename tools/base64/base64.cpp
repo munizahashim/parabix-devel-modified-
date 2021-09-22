@@ -75,8 +75,8 @@ int main(int argc, char *argv[]) {
     CPUDriver pxDriver("base64");
     auto fn_ptr = base64PipelineGen(pxDriver);
     #ifdef REPORT_PAPI_TESTS
-    // papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
-    papi::PapiCounter<3> jitExecution{{PAPI_FUL_ICY, PAPI_STL_CCY, PAPI_RES_STL}};
+    papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
+    // papi::PapiCounter<3> jitExecution{{PAPI_FUL_ICY, PAPI_STL_CCY, PAPI_RES_STL}};
     jitExecution.start();
     #endif
     for (unsigned i = 0; i != inputFiles.size(); ++i) {

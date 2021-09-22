@@ -146,6 +146,16 @@ struct Attribute {
         // Similar to Deferred, a consumer of a stream of N items with a Delayed attribute
         // of K indicates only N - K items can be safely read.
 
+        EmptyWriteOverflow,
+
+        // To avoid branching, some kernels (e.g., StreamCompress) will write zeros to
+        // an output buffer without incrementing the produced position. When such writes
+        // occur after the end of a streamset, this can cause a segfault the pipeline
+        // has not created an overflow region for it to write into.
+
+        // This attribute will inform the pipeline an overflow is needed but will not
+        // actually be used w.r.t. useful data.
+
         Expandable, /// NOT DONE
 
         // Indicates that the number of stream sets in this buffer can increase.
@@ -416,6 +426,11 @@ inline Attribute LookBehind(const unsigned k) {
 
 inline Attribute Delayed(const unsigned k) {
     return Attribute(Attribute::KindId::Delayed, k);
+}
+
+
+inline Attribute EmptyWriteOverflow() {
+    return Attribute(Attribute::KindId::EmptyWriteOverflow, 0);
 }
 
 inline Attribute Deferred() {

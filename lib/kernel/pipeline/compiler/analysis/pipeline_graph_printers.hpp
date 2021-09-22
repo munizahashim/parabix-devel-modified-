@@ -234,9 +234,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         const StreamSetBuffer * const buffer = bn.Buffer;
 
         out << "label=\"" << streamSet;
-        if (buffer) {
-            out << " (" << buffer->getId() << ")";
-        }
         out << " |{";
 
 
@@ -278,6 +275,12 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << ty->getIntegerBitWidth();
         }
 
+        if (bn.Locality == BufferLocality::ThreadLocal) {
+            out << " [0x";
+            out.write_hex(bn.BufferStart);
+            out << "]";
+        }
+
         out << "|{";
 
         if (buffer && buffer->getBufferKind() != BufferId::ExternalBuffer) {
@@ -312,6 +315,8 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
     auto currentPartition = PartitionCount;
     bool closePartition = false;
 
+    std::vector<unsigned> firstKernelOfPartition(PartitionCount);
+
     auto checkClosePartitionLabel = [&]() {
         if (closePartition) {
             out << "}\n";
@@ -332,6 +337,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
                        "\n";
                 closePartition = true;
                 currentPartition = partitionId;
+                firstKernelOfPartition[partitionId] = kernel;
             }
         }        
     };
@@ -388,6 +394,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
            "\n";
 
     printKernel(PipelineInput, "P_{in}", true);
+    firstKernelOfPartition[0] = PipelineInput;
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i); assert (kernel);
         auto name = kernel->getName().str();
@@ -395,6 +402,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         printKernel(i, name, false);
     }
     printKernel(PipelineOutput, "P_{out}", true);
+    firstKernelOfPartition[PartitionCount - 1] = PipelineOutput;
 
     for (auto e : make_iterator_range(edges(mBufferGraph))) {
         const auto s = source(e, mBufferGraph);
@@ -442,7 +450,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         }
         // out << " {G" << pd.GlobalPortId << ",L" << pd.LocalPortId << '}';
 
-
+        out << " {" << port.SymbolicRateId << '}';
 
         if (port.IsPrincipal) {
             out << " [P]";
@@ -479,6 +487,20 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << " style=bold";
         }
         out << "];\n";
+    }
+
+    for (const auto e : make_iterator_range(edges(mPartitionJumpTree))) {
+        const auto a = source(e, mPartitionJumpTree);
+        const auto b = target(e, mPartitionJumpTree);
+        if (b > (a + 1)) {
+            const auto s = firstKernelOfPartition[a];
+            const auto t = firstKernelOfPartition[b];
+            out << "v" << s << " -> v" << t <<
+                   " ["
+                      "style=\"dashed,bold\","
+                      "color=\"purple\""
+                   "];\n";
+        }
     }
 
     out << "}\n\n";

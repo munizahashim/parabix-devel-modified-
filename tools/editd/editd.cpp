@@ -38,7 +38,7 @@
 // #define REPORT_PAPI_TESTS
 #endif
 
-#define USE_MULTI_EDITD_MERGE_GROUPS
+// #define USE_MULTI_EDITD_MERGE_GROUPS
 
 using namespace llvm;
 
