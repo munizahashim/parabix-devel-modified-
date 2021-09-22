@@ -68,7 +68,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
     // 1. Lexical analysis on basis stream
-    StreamSet * const lexStream = P->CreateStreamSet(14);
+    StreamSet * const lexStream = P->CreateStreamSet(15);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
         jsonPabloSrc,
@@ -129,11 +129,11 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     // 7. Clean lexers (in case there's special chars inside string)
     // Note: this will clone previous lkex stream
-    StreamSet * const finalLexStream = P->CreateStreamSet(14);
+    StreamSet * const finalLexStream = P->CreateStreamSet(15);
     P->CreateKernelCall<JSONLexSanitizer>(stringSpan, lexStream, finalLexStream);
 
     // 8. Validate rest of the output (check for extraneous chars)
-    const size_t COMBINED_STREAM_COUNT = 14;
+    const size_t COMBINED_STREAM_COUNT = 15;
     StreamSet * const allSpans = P->CreateStreamSet(COMBINED_STREAM_COUNT, 1);
     P->CreateKernelCall<StreamsMerge>(
         std::vector<StreamSet *>{finalLexStream, stringSpan, keywordSpan, numberSpan},
@@ -145,9 +145,11 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     // 9. Validate objects and arrays
     StreamSet * const kwLexCollapsed = su::Collapse(P, keywordLex);
-    StreamSet * const allLex = P->CreateStreamSet(10, 1);
+    StreamSet * const allLex = P->CreateStreamSet(11, 1);
+    StreamSet * const eof = su::Select(P, finalLexStream, Lex::eof);
+    StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{su::Select(P, finalLexStream, su::Range(0, 7)), kwLexCollapsed, numberLex},
+        std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex, eof},
         allLex
     );
     StreamSet * const collapsedLex = su::Collapse(P, allLex);

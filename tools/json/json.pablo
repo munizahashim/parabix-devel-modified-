@@ -10,7 +10,7 @@ type Err = <i1>[2] {
     utf8
 }
 
-type Lex = <i1>[14] {
+type Lex = <i1>[15] {
     lCurly,
     rCurly,
     lBracket,
@@ -24,7 +24,8 @@ type Lex = <i1>[14] {
     n, # first letter of null
     f, # first letter of false
     t, # first letter of true
-    ws
+    ws,
+    eof
 }
 
 # ClassifyBytes the bytes of a basis stream.
@@ -132,6 +133,14 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
     temp55 = ~temp53 & temp54
     temp56 = temp51 | temp55
     lex.ws = InFile(temp56)
+
+    temp57 = ~basis[0] & ~basis[1]
+    temp58 = temp57 & ~basis[2]
+    temp59 = temp58 & ~basis[3]
+    temp60 = temp59 & ~basis[4]
+    temp61 = temp60 & ~basis[5]
+    temp62 = temp61 & ~basis[6]
+    lex.eof = temp62 & ~basis[7]
 }
 
 type UTF8Err = <i1>[1]

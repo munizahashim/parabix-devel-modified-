@@ -52,11 +52,29 @@ enum JSONState {
 static llvm::SmallVector<const u_int8_t *, 32> stack{};
 static JSONState currentState = JInit;
 
-static std::string postproc_getLineAndColumnInfo(const std::string str, const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum) {
+static ptrdiff_t postproc_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
+    return column;
+}
+
+static std::string postproc_getLineAndColumnInfo(const std::string str, const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum) {
+    ptrdiff_t column = postproc_getColumn(ptr, lineBegin);
     std::stringstream ss;
     ss << str << " at line " << lineNum << " column " << column << " starting in:\n\n" << ptr;
+    return ss.str();
+}
+
+static std::string postproc_getCustomLineAndColumnInfo(
+    const std::string str,
+    const std::string butStr,
+    const uint8_t * ptr,
+    const uint8_t * lineBegin,
+    uint64_t lineNum)
+{
+    ptrdiff_t column = postproc_getColumn(ptr, lineBegin);
+    std::stringstream ss;
+    ss << "Found" << str << " at line " << lineNum << " column " << column << " " << butStr;
     return ss.str();
 }
 
@@ -171,8 +189,17 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
     }
 }
 
+static void postproc_eof(const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
+    if (stack.empty()) {
+        currentState = JDone;
+	return;
+    }
+    llvm::report_fatal_error(postproc_getCustomLineAndColumnInfo("EOF", "but the JSON is missing elements", ptr, lineBegin, lineNum));
+}
+
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
-    if (currentState == JInit) {
+printf("%c\n", *ptr);
+    	if (currentState == JInit) {
         postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
         postproc_parseStrOrPop(true, ptr, lineBegin, lineNum, position);
@@ -186,6 +213,8 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         postproc_parseValue(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JVStrEnd || currentState == JValue || currentState == JNextComma) {
         postproc_parseCommaOrPop(ptr, lineBegin, lineNum, position);
+    } else if (*ptr == EOF) {
+        postproc_eof(ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
         llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
@@ -196,8 +225,7 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
     const uint8_t UTF8_CODE = 0x2;
     const uint8_t NUMBER_CODE = 0x4;
     const uint8_t EXTRA_CODE = 0x8;
-    // TODO: need to clear input from whitespaces...
-    if (*ptr == '\n' || *ptr == '\r' || *ptr == EOF) {
+    if (*ptr == '\n' || *ptr == '\r') {
         return;
     }
 
