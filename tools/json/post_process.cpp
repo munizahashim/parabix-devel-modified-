@@ -179,7 +179,7 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
 void postproc_doneCallback() {
     if (stack.empty()) {
         currentState = JDone;
-	return;
+        return;
     }
     llvm::report_fatal_error("Found EOF but the JSON is missing elements");
 }
