@@ -161,6 +161,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
     scan::Reader(P, driver,
         SCAN_CALLBACK(postproc_validateObjectsAndArrays),
+        SCAN_CALLBACK(postproc_doneCallback),
         codeUnitStream,
         { Indices, Spans },
         { LineNumbers, Indices });

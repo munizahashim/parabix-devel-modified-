@@ -14,4 +14,6 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code);
 
+void postproc_doneCallback();
+
 } // extern "C"

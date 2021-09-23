@@ -65,19 +65,6 @@ static std::string postproc_getLineAndColumnInfo(const std::string str, const ui
     return ss.str();
 }
 
-static std::string postproc_getCustomLineAndColumnInfo(
-    const std::string str,
-    const std::string butStr,
-    const uint8_t * ptr,
-    const uint8_t * lineBegin,
-    uint64_t lineNum)
-{
-    ptrdiff_t column = postproc_getColumn(ptr, lineBegin);
-    std::stringstream ss;
-    ss << "Found" << str << " at line " << lineNum << " column " << column << " " << butStr;
-    return ss.str();
-}
-
 static bool isControl(const uint8_t * ptr) {
     if (*ptr == '}' || *ptr == ']' || *ptr == ',' || *ptr == ':') {
         return true;
@@ -189,17 +176,16 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
     }
 }
 
-static void postproc_eof(const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
+void postproc_doneCallback() {
     if (stack.empty()) {
         currentState = JDone;
 	return;
     }
-    llvm::report_fatal_error(postproc_getCustomLineAndColumnInfo("EOF", "but the JSON is missing elements", ptr, lineBegin, lineNum));
+    llvm::report_fatal_error("Found EOF but the JSON is missing elements");
 }
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
-printf("%c\n", *ptr);
-    	if (currentState == JInit) {
+    if (currentState == JInit) {
         postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
         postproc_parseStrOrPop(true, ptr, lineBegin, lineNum, position);
@@ -213,8 +199,6 @@ printf("%c\n", *ptr);
         postproc_parseValue(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JVStrEnd || currentState == JValue || currentState == JNextComma) {
         postproc_parseCommaOrPop(ptr, lineBegin, lineNum, position);
-    } else if (*ptr == EOF) {
-        postproc_eof(ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
         llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }

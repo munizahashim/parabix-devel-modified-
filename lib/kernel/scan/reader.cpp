@@ -68,6 +68,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
             llvm::report_fatal_error(mKernelName + ": failed to get function: " + mDoneCallbackName);
         }
         b->CreateCall(fTy, callback, ArrayRef<Value *>({}));
+        b->CreateBr(exitBlock);
     }
 
     b->SetInsertPoint(exitBlock);
