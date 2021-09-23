@@ -4,18 +4,17 @@
 
 namespace kernel {
 
-#warning CACHE ACTIVE KERNEL VALUES AT ENTRY BLOCK
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief beginKernel
+ * @brief setActiveKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal) {
-    assert (index >= FirstKernel && index <= LastKernel);
-    mKernelId = index;
-    mKernel = getKernel(index);
+void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal) {
+    assert (kernelId >= FirstKernel && kernelId <= LastKernel);
+    assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), kernelId) != ActiveKernels.end());
+    mKernelId = kernelId;
+    mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
-        Value * handle = b->getScalarField(makeKernelName(index));
+        Value * handle = b->getScalarField(makeKernelName(kernelId));
         if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
             handle = b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo());
         }
@@ -27,6 +26,14 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned index, const
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief loadKernelState
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::loadKernelState(BuilderRef b) {
+
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeFullyProcessedItemCounts
@@ -451,6 +458,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mKernelTerminated = nullptr;
     mKernelInitiallyTerminated = nullptr;
     mKernelInitiallyTerminatedExit = nullptr;
+    mInitiallyTerminated = nullptr;
 
     mMaximumNumOfStrides = nullptr;
     mNumOfLinearStridesPhi = nullptr;
@@ -496,6 +504,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProducedDeferredItemCountPtr.reset(numOfOutputs);
     mProducedDeferredItemCount.reset(numOfOutputs);
     mProducedAtTerminationPhi.reset(numOfOutputs);
+    mProducedAtTermination.reset(numOfOutputs);
     mUpdatedProducedPhi.reset(numOfOutputs);
     mUpdatedProducedDeferredPhi.reset(numOfOutputs);
     mFullyProducedItemCount.reset(numOfOutputs);

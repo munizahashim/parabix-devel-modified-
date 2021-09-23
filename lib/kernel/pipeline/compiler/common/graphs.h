@@ -255,6 +255,7 @@ struct BufferNode {
     StreamSetBuffer * Buffer = nullptr;
     unsigned Type = 0;
     bool IsLinear = false;
+    bool CrossesHybridThreadBarrier = false;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
@@ -263,11 +264,12 @@ struct BufferNode {
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
-    size_t   BufferStart = 0;
+    unsigned BufferStart = 0;
 
-    size_t   RequiredCapacity = 0;
-    size_t   OverflowCapacity = 0;
-    size_t   UnderflowCapacity = 0;
+    unsigned RequiredCapacity = 0;
+    unsigned OverflowCapacity = 0;
+    unsigned UnderflowCapacity = 0;
+
 
     unsigned OutputItemCountId = 0;
 
@@ -305,9 +307,8 @@ struct BufferPort {
     Rational Maximum;
 
     bool CanModifySegmentLength = false;
-    #ifdef COMPUTE_SYMBOLIC_RATE_IDS
+
     unsigned SymbolicRateId = 0U;
-    #endif
 
     // binding attributes
     unsigned Add = 0;
@@ -369,6 +370,8 @@ struct ConsumerEdge {
 };
 
 using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, ConsumerNode, ConsumerEdge>;
+
+using PartialSumStepFactorGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 
 enum TerminationSignal : unsigned {
     None = KernelBuilder::TerminationCode::None

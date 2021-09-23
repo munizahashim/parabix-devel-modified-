@@ -28,10 +28,10 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 
     mKernelId = PipelineInput;
 
-    ConstantInt * const ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b->getSize(0);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        mLocallyAvailableItems[streamSet] = ZERO;
+        mLocallyAvailableItems[streamSet] = sz_ZERO;
     }
 
     // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
@@ -100,8 +100,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         debugPrint(b, + "%s_maximumNumOfStrides = %" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
         #endif
     } else {
-        const Rational strideRateFactor{MaximumNumOfStrides[mKernelId], MaximumNumOfStrides[FirstKernelInPartition]};
-        const auto factor = strideRateFactor; // / mPartitionStrideRateScalingFactor;
+
+        const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
+        const auto factor = ratio / mPartitionStrideRateScalingFactor;
         mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
@@ -155,7 +156,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
                 numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
             }
         }
-    } else {
+    } else if (in_degree(mKernelId, mBufferGraph) > 0) {
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
@@ -265,9 +266,11 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
             isFinalSegment = mAnyClosed;
+            assert ("partition has no inputs?" && isFinalSegment);
         } else {
             isFinalSegment = mFinalPartitionSegment;
         }
+
 
         BasicBlock * const nonZeroExtendExit = b->GetInsertBlock();
 
@@ -769,6 +772,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     return accessible;
 }
 
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ensureSufficientOutputSpace
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -785,6 +789,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     const auto prefix = makeBufferName(mKernelId, outputPort);
     const StreamSetBuffer * const buffer = bn.Buffer;
 
+    assert (isa<DynamicBuffer>(buffer));
+
     getWritableOutputItems(b, port, true);
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
@@ -792,6 +798,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
     debugPrint(b, prefix + "_addr [%" PRIx64 ",%" PRIx64 ")",
                buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
+    debugPrint(b, prefix + "_capacity = %" PRIu64, buffer->getCapacity(b));
     #endif
 
     BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_expandBuffer", mKernelLoopCall);
@@ -819,14 +826,21 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
-
-    buffer->reserveCapacity(b, produced, consumed, required);
-
-    recordBufferExpansionHistory(b, outputPort, buffer);
+    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
     #endif
+
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers && isa<DynamicBuffer>(buffer))) {
+        BasicBlock * const recordHistory = b->CreateBasicBlock(prefix + "recordExpansion", mKernelLoopCall);
+        BasicBlock * const resumeAfterRecording = b->CreateBasicBlock(prefix + "_resumeAfterRecording", mKernelLoopCall);
+        b->CreateCondBr(mallocRequired, recordHistory, resumeAfterRecording);
+        b->SetInsertPoint(recordHistory);
+        recordBufferExpansionHistory(b, outputPort, buffer);
+        b->CreateBr(resumeAfterRecording);
+        b->SetInsertPoint(resumeAfterRecording);
+    }
 
     auto & afterExpansion = mWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;
@@ -1215,17 +1229,28 @@ Value * PipelineCompiler::getOutputStrideLength(BuilderRef b, const BufferPort &
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getPopCountStepSize
+ ** ------------------------------------------------------------------------------------------------------------- */
+unsigned PipelineCompiler::getPopCountStepSize(const StreamSetPort inputRefPort) const {
+    const auto streamSet = getInputBufferVertex(mKernelId, inputRefPort);
+    const auto p = edge(streamSet, mKernelId, mPartialSumStepFactorGraph);
+    assert (p.second);
+    return mPartialSumStepFactorGraph[p.first];
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPartialSumItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort & partialSumPort, Value * const previouslyTransferred, Value * const offset) const {
+Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort & partialSumPort, Value * const previouslyTransferred, Value * offset) const {
     const auto port = partialSumPort.Port;
-    const auto ref = getReference(mKernelId, port);
+    const StreamSetPort ref = getReference(mKernelId, port);
     assert (ref.Type == PortType::Input);
     assert (previouslyTransferred);
 
     const StreamSetBuffer * const buffer = getInputBuffer(mKernelId, ref);
 
-    Constant * const sz_ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b->getSize(0);
     Value * position = mAlreadyProcessedPhi[ref];
 
     if (offset) {
@@ -1237,8 +1262,28 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                             b->GetString(binding.getName()));
         }
 
-        Constant * const sz_ONE = b->getSize(1);
-        position = b->CreateAdd(position, b->CreateSub(offset, sz_ONE));
+        ConstantInt * const sz_ONE = b->getSize(1);
+
+        const auto step = getPopCountStepSize(ref);
+        ConstantInt * sz_STEP = sz_ONE;
+
+        if (step > 1) {
+
+            sz_STEP = b->getSize(step);
+
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                const Binding & binding = partialSumPort.Binding;
+                b->CreateAssert(b->CreateICmpEQ(b->CreateURem(position, sz_STEP), sz_ZERO),
+                                "%s.%s: partial sum reference processed count must be a multiple of %" PRIu64,
+                                mCurrentKernelName,
+                                b->GetString(binding.getName()),
+                                sz_STEP);
+            }
+
+            offset = b->CreateMul(offset, sz_STEP);
+        }
+        offset = b->CreateSub(offset, sz_ONE);
+        position = b->CreateAdd(position, offset);
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
@@ -1282,7 +1327,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     const StreamSetBuffer * sourceBuffer = nullptr;
 
-    unsigned numOfPeekableItems = 0;
+//    unsigned numOfPeekableItems = 0;
 
     if (port.Type == PortType::Input) {
         initialItemCount = mAlreadyProcessedPhi[port];
@@ -1291,7 +1336,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyForwards) {
             sourceBuffer = bn.Buffer;
-            numOfPeekableItems = bn.CopyForwards;
+//            numOfPeekableItems = bn.CopyForwards;
 
             nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
@@ -1308,7 +1353,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyBack) {
             sourceBuffer = bn.Buffer;
-            numOfPeekableItems = bn.CopyBack;
+//            numOfPeekableItems = bn.CopyBack;
 
             nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
@@ -1339,6 +1384,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     if (peekableItemCount) {
         cond = b->CreateAnd(cond, b->CreateICmpUGE(sourceItemCount, minimumItemCount));
     }
+
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 
     // TODO: replace this with a parallel icmp check and bitscan? binary search with initial
@@ -1357,12 +1403,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     // get the popcount kernel's input rate so we can calculate the
     // step factor for this kernel's usage of pop count partial sum
     // stream.
-    const auto refOuput = in_edge(refBufferVertex, mBufferGraph);
-    const BufferPort & refOutputRate = mBufferGraph[refOuput];
-    const auto stepFactor = refInputRate.Maximum / refOutputRate.Maximum;
-
-    assert (stepFactor.denominator() == 1);
-    const auto step = stepFactor.numerator();
+    const auto step = getPopCountStepSize(ref);
     if (LLVM_UNLIKELY(step > 1)) {
         offset = b->CreateMul(offset, b->getSize(step));
     }
@@ -1421,161 +1462,96 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     return finalNumOfStrides;
 }
 
-
-#if 0
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getMaximumNumOfPartialSumStrides
+ * @brief splatMultiStepPartialSumValues
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
-                                                           const BufferPort & partialSumPort,
-                                                           Value * const numOfLinearStrides) {
+void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
-    IntegerType * const sizeTy = b->getSizeTy();
-    Constant * const sz_ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-    Constant * const MAX_INT = ConstantInt::getAllOnesValue(sizeTy);
+    // For each PopCount rate, a PopCountKernel is created that generates a sequence of partial sum values.
+    // These partial sum streams can be shared amongst multiple kernels whose reference is the same streamset
+    // but when the stride length of the consuming kernel(s) differs from from the stride length of the
+    // PopCountKernel, a step factor must be applied to read the correct value.
 
+    // Upon termination of a PopCountKernel, we must ensure that every step factor will read the same
+    // "final" value but since the PopCountKernel is unaware of the step factor, the pipeline becomes
+    // responsible for splat-ing this value to the appropriate slots.
 
-    Value * initialItemCount = nullptr;
-    Value * sourceItemCount = nullptr;
-    Value * peekableItemCount = nullptr;
-    Value * minimumItemCount = MAX_INT;
-    Value * nonOverflowItems = nullptr;
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
+        const auto maxStepFactor = mPartialSumStepFactorGraph[e];
+        assert (maxStepFactor > 1);
+        const auto streamSet = target(e, mPartialSumStepFactorGraph);
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const BufferPort & outputPort = mBufferGraph[output];
+        Value * const produced = mProducedAtTermination[outputPort.Port];
 
-    const auto port = partialSumPort.Port;
+        const auto bw = b->getBitBlockWidth();
+        const auto fw = b->getSizeTy()->getIntegerBitWidth();
+        assert ((bw % fw) == 0 && bw > fw);
 
-    if (port.Type == PortType::Input) {
-        initialItemCount = mAlreadyProcessedPhi[port];
-        Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
-        const auto streamSet = getInputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyForwards) {
-            nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = b->CreateAdd(initialItemCount, accessible);
-            minimumItemCount = getInputStrideLength(b, partialSumPort);
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, accessible);
+        ConstantInt * const sz_stepsPerBlock = b->getSize(bw / fw);
+
+        ConstantInt * const sz_ONE = b->getSize(1);
+        Value * const index = b->CreateSub(produced, sz_ONE);
+
+        Value * const bitblockAlignedStart = b->CreateRoundDown(index, sz_stepsPerBlock);
+
+        StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
+        PointerType * const bbPtrTy = b->getBitBlockType()->getPointerTo();
+        ConstantInt * const sz_ZERO = b->getSize(0);
+        Value * const baseAddr = buffer->getRawItemPointer(b, sz_ZERO, bitblockAlignedStart);
+        Value * const basePtr = b->CreatePointerCast(baseAddr, bbPtrTy);
+
+        Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
+
+        Value * const baseValue = b->fwCast(fw, b->CreateBlockAlignedLoad(basePtr));
+
+        Value * const total = b->CreateExtractElement(baseValue, offset);
+        Value * const splat = b->simd_fill(fw, total);
+        Value * const allOnes = b->simd_fill(fw, ConstantInt::getAllOnesValue(splat->getType()));
+        Value * const mask = b->mvmd_sll(fw, allOnes, offset);
+        Value * const maskedSplat = b->CreateAnd(splat, mask);
+        Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
+
+        b->CreateBlockAlignedStore(b->bitCast(mergedValue), basePtr);
+
+        ConstantInt * const sz_maxStepFactor = b->getSize(maxStepFactor);
+
+        Value * const newProducedCount = b->CreateRoundUp(produced, sz_maxStepFactor);
+
+        const auto spanLength = ceil_udiv(fw * maxStepFactor, bw);
+
+        assert (spanLength > 0);
+        if (spanLength > 1) {
+            const auto prefix = makeBufferName(mKernelId, outputPort.Port);
+            BasicBlock * const splatLoopEntry = b->GetInsertBlock(); assert (splatLoopEntry);
+            BasicBlock * const nextNode = splatLoopEntry->getNextNode();
+            BasicBlock * const splatLoopBody = b->CreateBasicBlock(prefix + "_popCountSplatLoop", nextNode);
+            BasicBlock * const splatLoopExit = b->CreateBasicBlock(prefix + "_popCountSplatExit", nextNode);
+
+            ConstantInt * const sz_spanLength = b->getSize(spanLength);
+            Value * const bitblockSplat = b->bitCast(splat);
+            Value * const start = b->CreateURem(produced, sz_maxStepFactor);
+            Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
+            Value * const cond = b->CreateICmpNE(initial, sz_spanLength);
+            b->CreateCondBr(cond, splatLoopBody, splatLoopExit);
+
+            b->SetInsertPoint(splatLoopBody);
+            PHINode * const indexPhi = b->CreatePHI(b->getSizeTy(), 2);
+            indexPhi->addIncoming(initial, splatLoopEntry);
+            Value * const ptr = b->CreateGEP(basePtr, indexPhi);
+            b->CreateBlockAlignedStore(bitblockSplat, ptr);
+            Value * const nextIndex = b->CreateAdd(indexPhi, sz_ONE);
+            indexPhi->addIncoming(nextIndex, splatLoopBody);
+            Value * const nextCond = b->CreateICmpNE(nextIndex, sz_spanLength);
+            b->CreateCondBr(nextCond, splatLoopBody, splatLoopExit);
+
+            b->SetInsertPoint(splatLoopExit);
         }
-        sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
-    } else { // if (port.Type == PortType::Output) {
-        initialItemCount = mAlreadyProducedPhi[port];
-        Value * const writable = getWritableOutputItems(b, partialSumPort, true);
-        const auto streamSet = getOutputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyBack) {
-            nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = b->CreateAdd(initialItemCount, writable);
-            minimumItemCount = getOutputStrideLength(b, partialSumPort);
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, writable);
-        }
+
+        mProducedAtTermination[outputPort.Port] = newProducedCount;
     }
 
-    const auto ref = getReference(port);
-    assert (ref.Type == PortType::Input);
-    const auto prefix = makeBufferName(mKernelId, ref) + "_readPartialSum";
-
-    // get the popcount kernel's input rate so we can calculate the
-    // step factor for this kernel's usage of pop count partial sum
-    // stream.
-    const auto refInput = getInput(mKernelId, ref);
-    const BufferPort & refInputRate = mBufferGraph[refInput];
-    const auto refBufferVertex = getInputBufferVertex(ref);
-    const auto refOuput = in_edge(refBufferVertex, mBufferGraph);
-    const BufferPort & refOutputRate = mBufferGraph[refOuput];
-    const auto stepFactor = refInputRate.Maximum / refOutputRate.Maximum;
-
-    assert (stepFactor.denominator() == 1);
-    const auto step = stepFactor.numerator();
-    Constant * const STEP = b->getSize(step);
-
-    const StreamSetBuffer * const buffer = mBufferGraph[refBufferVertex].Buffer;
-    BasicBlock * const popCountLoop =
-        b->CreateBasicBlock(prefix + "Loop", mKernelCheckOutputSpace);
-    BasicBlock * const popCountLoopExit =
-        b->CreateBasicBlock(prefix + "LoopExit", mKernelCheckOutputSpace);
-    Value * const baseOffset = mAlreadyProcessedPhi[ref];
-
-
-    Value * const baseAddress = buffer->getRawItemPointer(b, sz_ZERO, baseOffset);
-    BasicBlock * const popCountEntry = b->GetInsertBlock();
-    Value * const initialStrideCount = b->CreateMul(numOfLinearStrides, STEP);
-
-    Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
-    if (peekableItemCount) {
-        cond = b->CreateAnd(cond, b->CreateICmpUGE(sourceItemCount, minimumItemCount));
-    }
-    b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
-
-    // TODO: replace this with a parallel icmp check and bitscan? binary search with initial
-    // check on the rightmost entry?
-
-    b->SetInsertPoint(popCountLoop);
-    PHINode * const numOfStrides = b->CreatePHI(sizeTy, 2);
-    numOfStrides->addIncoming(initialStrideCount, popCountEntry);
-    PHINode * const nextRequiredItems = b->CreatePHI(sizeTy, 2);
-    nextRequiredItems->addIncoming(MAX_INT, popCountEntry);
-
-    Value * const strideIndex = b->CreateSub(numOfStrides, STEP);
-    Value * const ptr = b->CreateInBoundsGEP(baseAddress, strideIndex);
-    Value * const requiredItems = b->CreateLoad(ptr);
-    Value * const hasEnough = b->CreateICmpULE(requiredItems, sourceItemCount);
-    Value * const done = b->CreateOr(hasEnough, b->CreateICmpULE(strideIndex, STEP));
-
-    // NOTE: popcount streams are produced with a 1 element lookbehind window.
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-        const Binding & input = getInputBinding(ref);
-        Value * const inputName = b->GetString(input.getName());
-        b->CreateAssert(b->CreateOr(b->CreateICmpUGE(numOfStrides, STEP), hasEnough),
-                        "%s.%s: attempting to read invalid popcount entry",
-                        mCurrentKernelName, inputName);
-        b->CreateAssert(b->CreateICmpULE(initialItemCount, requiredItems),
-                        "%s.%s: partial sum is not non-decreasing at %" PRIu64
-                        " (prior %" PRIu64 " > current %" PRIu64 ")",
-                        mCurrentKernelName, inputName,
-                        strideIndex, initialItemCount, requiredItems);
-    }
-
-    nextRequiredItems->addIncoming(requiredItems, popCountLoop);
-    numOfStrides->addIncoming(strideIndex, popCountLoop);
-    b->CreateCondBr(done, popCountLoopExit, popCountLoop);
-
-    b->SetInsertPoint(popCountLoopExit);
-    PHINode * const numOfStridesPhi = b->CreatePHI(sizeTy, 2);
-    numOfStridesPhi->addIncoming(sz_ZERO, popCountEntry);
-    numOfStridesPhi->addIncoming(numOfStrides, popCountLoop);
-    PHINode * const requiredItemsPhi = b->CreatePHI(sizeTy, 2);
-    requiredItemsPhi->addIncoming(sz_ZERO, popCountEntry);
-    requiredItemsPhi->addIncoming(requiredItems, popCountLoop);
-    PHINode * const nextRequiredItemsPhi = b->CreatePHI(sizeTy, 2);
-    nextRequiredItemsPhi->addIncoming(minimumItemCount, popCountEntry);
-    nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
-    Value * finalNumOfStrides = numOfStridesPhi;
-    if (peekableItemCount) {
-        // Since we want to allow the stream to peek into the overflow but not start
-        // in it, check to see if we can support one more stride by using it.
-        Value * const endedPriorToBufferEnd = b->CreateICmpNE(requiredItemsPhi, sourceItemCount);
-        Value * const canPeekIntoOverflow = b->CreateICmpULE(nextRequiredItemsPhi, peekableItemCount);
-        Value * const useOverflow = b->CreateAnd(endedPriorToBufferEnd, canPeekIntoOverflow);
-        Value * const plusOne = b->CreateAdd(finalNumOfStrides, ONE);
-        finalNumOfStrides = b->CreateSelect(useOverflow, plusOne, finalNumOfStrides);
-    }
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-        const Binding & binding = getInputBinding(ref);
-        b->CreateAssert(b->CreateICmpNE(finalNumOfStrides, MAX_INT),
-                        "%s.%s: attempting to use sentinal popcount entry",
-                        mCurrentKernelName,
-                        b->GetString(binding.getName()));
-    }
-    return finalNumOfStrides;
 }
-
-#endif
-
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief calculateStrideLength

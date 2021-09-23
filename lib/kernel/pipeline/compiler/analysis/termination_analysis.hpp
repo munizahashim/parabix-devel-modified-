@@ -10,6 +10,17 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyTerminationChecks() {
 
+    BitVector onHybridThread(PartitionCount);
+
+    if (mPipelineKernel->getNumOfThreads() > 1) {
+        for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+            if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
+                assert ("more than one kernel in a hybrid partition?" && !onHybridThread.test(KernelPartitionId[i]));
+                onHybridThread.set(KernelPartitionId[i]);
+            }
+        }
+    }
+
     using TerminationGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
 
     TerminationGraph G(PartitionCount);
@@ -59,6 +70,34 @@ void PipelineAnalysis::identifyTerminationChecks() {
     assert ("pipeline has no observable outputs?" && (in_degree(terminal, G) > 0));
 
     transitive_reduction_dag(G);
+
+    if (onHybridThread.any()) {
+        using Vertex = TerminationGraph::vertex_descriptor;
+        std::vector<Vertex> V;
+        V.reserve(num_vertices(G));
+        topological_sort(G, std::back_inserter(V));
+        // V is a reverse topologogical ordering of G
+        for (const auto v : V) {
+            const auto threadType = onHybridThread.test(v);
+            std::function<bool(Vertex)> dfs_check = [&](const Vertex u) {
+                if (u == terminal) {
+                    return true;
+                }
+                if (onHybridThread.test(u) == threadType) {
+                    for (auto e : make_iterator_range(out_edges(u, G))) {
+                        if (dfs_check(target(e, G))) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
+            if (!dfs_check(v)) {
+                add_edge(v, terminal, G);
+            }
+        }
+    }
+
 
     mTerminationCheck.resize(PartitionCount, 0U);
 
