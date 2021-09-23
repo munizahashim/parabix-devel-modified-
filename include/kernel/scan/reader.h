@@ -85,16 +85,31 @@ public:
         StreamSet * scanIndices,
         std::string const & callbackName);
 
+    ScanReader(BuilderRef b,
+        StreamSet * source,
+        StreamSet * scanIndices,
+        std::string const & callbackName,
+        std::string const & doneCallbackName);
+
     ScanReader(
         BuilderRef b,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::initializer_list<StreamSet *> additionalStreams);
+
+    ScanReader(
+        BuilderRef b,
+        StreamSet * source,
+        StreamSet * scanIndices,
+        std::string const & callbackName,
+        std::string const & doneCallbackName,
+        std::initializer_list<StreamSet *> additionalStreams);
 protected:
     void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
 private:
     std::string              mCallbackName;
+    std::string              mDoneCallbackName;
     std::vector<std::string> mAdditionalStreamNames;
     const uint32_t           mNumScanStreams;
 };
@@ -201,6 +216,25 @@ void Reader(
     reader->link<Fn>(callback.name, *callback.func);
 }
 
+template<typename... Args, typename... Args2>
+inline
+void Reader(
+    const std::unique_ptr<ProgramBuilder> & P,
+    BaseDriver & driver,
+    CallbackPair<Args...> callback,
+    CallbackPair<Args2...> doneCallback,
+    StreamSet * source,
+    StreamSet * scanIndices)
+{
+    using Fn = typename CallbackPair<Args...>::FunctionType;
+    using Fn2 = typename CallbackPair<Args2...>::FunctionType;
+    assert(scanIndices->getFieldWidth() == 64);
+    assert(source->getFieldWidth() != 1);
+    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name);
+    reader->link<Fn>(callback.name, *callback.func);
+    reader->link<Fn2>(doneCallback.name, &doneCallback.func);
+}
+
 /**
  * An overload of `scan::Reader` allowing additional streams to pass items to
  * the callback.
@@ -241,6 +275,24 @@ void Reader(
     reader->link<Fn>(callback.name, *callback.func);
 }
 
+template<typename... Args, typename... Args2>
+inline
+void Reader(
+    const std::unique_ptr<ProgramBuilder> & P,
+    BaseDriver & driver,
+    CallbackPair<Args...> callback,
+    CallbackPair<Args2...> doneCallback,
+    StreamSet * source,
+    StreamSet * scanIndices,
+    std::initializer_list<StreamSet *> additionalStreams)
+{
+    using Fn = typename CallbackPair<Args...>::FunctionType;
+    using Fn2 = typename CallbackPair<Args2...>::FunctionType;
+    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name, std::move(additionalStreams));
+    reader->link<Fn>(callback.name, *callback.func);
+    reader->link<Fn2>(doneCallback.name, *doneCallback.func);
+}
+
 /**
  * An overloaded `scan::Reader` allowing multiple stream sets to be passed as
  * scan indicies.
@@ -262,6 +314,25 @@ void Reader(
     StreamSet * const indices = su::Select(P, std::vector<StreamSet *>(ptrStreams));
     Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name);
     reader->link<Fn>(callback.name, *callback.func);
+}
+
+template<typename... Args, typename... Args2>
+inline
+void Reader(
+    const std::unique_ptr<ProgramBuilder> & P,
+    BaseDriver & driver,
+    CallbackPair<Args...> callback,
+    CallbackPair<Args2...> doneCallback,
+    StreamSet * source,
+    std::initializer_list<StreamSet *> ptrStreams)
+{
+    namespace su = kernel::streamutils;
+    using Fn = typename CallbackPair<Args...>::FunctionType;
+    using Fn2 = typename CallbackPair<Args2...>::FunctionType;
+    StreamSet * const indices = su::Select(P, std::vector<StreamSet *>(ptrStreams));
+    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name);
+    reader->link<Fn>(callback.name, *callback.func);
+    reader->link<Fn2>(doneCallback.name, *doneCallback.func);
 }
 
 /**
@@ -286,6 +357,26 @@ void Reader(
     StreamSet * const indices = su::Select(P, std::move(ptrStreams));
     Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, std::move(additionalStreams));
     reader->link<Fn>(callback.name, *callback.func);
+}
+
+template<typename... Args, typename... Args2>
+inline
+void Reader(
+    const std::unique_ptr<ProgramBuilder> & P,
+    BaseDriver & driver,
+    CallbackPair<Args...> callback,
+    CallbackPair<Args2...> doneCallback,
+    StreamSet * source,
+    std::initializer_list<StreamSet *> ptrStreams,
+    std::initializer_list<StreamSet *> additionalStreams)
+{
+    namespace su = kernel::streamutils;
+    using Fn = typename CallbackPair<Args...>::FunctionType;
+    using Fn2 = typename CallbackPair<Args2...>::FunctionType;
+    StreamSet * const indices = su::Select(P, std::move(ptrStreams));
+    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name, std::move(additionalStreams));
+    reader->link<Fn>(callback.name, *callback.func);
+    reader->link<Fn2>(doneCallback.name, *doneCallback.func);
 }
 
 } // namespace kernel::scan
