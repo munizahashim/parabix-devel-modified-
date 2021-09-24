@@ -108,6 +108,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     } else {
         FilterByMask(P, toKeep, translatedBasis, filteredBasis);
     }
+
     StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
     FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);
     StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
@@ -133,7 +134,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
     SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
 
-    //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
+    // P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
 
     std::vector<unsigned> insertionAmts;
     unsigned maxInsertAmt = 0;
@@ -149,6 +150,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
 
+
+
     // Baais bit streams expanded with 0 bits for each string to be inserted.
     StreamSet * ExpandedBasis = P->CreateStreamSet(8);
     SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis);
@@ -163,7 +166,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     // bixnum sequentially numbering the string insert positions.
     StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
     P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-    //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+    // P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
     StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
     SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum);

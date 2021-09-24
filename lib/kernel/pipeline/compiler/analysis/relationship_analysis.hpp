@@ -1032,7 +1032,11 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 
     for (auto i = numOfKernels; i < n; ++i) {
 
+
         size_t strideLength = 0;
+        #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
+        strideLength = b->getBitBlockWidth();
+        #endif
         CountingType type = CountingType::Unknown;
         for (const auto e : make_iterator_range(out_edges(i, H))) {
             const Edge & ed = H[e];

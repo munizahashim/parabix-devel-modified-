@@ -265,6 +265,7 @@ struct BufferNode {
     unsigned MaxAdd = 0;
 
     unsigned BufferStart = 0;
+    unsigned BufferEnd = 0;
 
     unsigned RequiredCapacity = 0;
     unsigned OverflowCapacity = 0;

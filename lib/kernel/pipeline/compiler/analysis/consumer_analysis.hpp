@@ -74,11 +74,13 @@ void PipelineAnalysis::makeConsumerGraph() {
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
             const auto consPartId = KernelPartitionId[consumer];
+
+            const auto onHybrid = KernelOnHybridThread.test(consumer);
+            const auto type = onHybrid ? 1 : 0;
+            auto & lastConsumer = lastThreadConsumer[type];
+            lastConsumer = std::max<unsigned>(lastConsumer, consumer);
+
             if (KernelPartitionId[consumer] != partitionId) {
-                const auto onHybrid = KernelOnHybridThread.test(consumer);
-                const auto type = onHybrid ? 1 : 0;
-                auto & lastConsumer = lastThreadConsumer[type];
-                lastConsumer = std::max<unsigned>(lastConsumer, consumer);
                 const BufferPort & input = mBufferGraph[ce];
                 add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdatePhi}, mConsumerGraph);
             }
@@ -91,6 +93,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         // consumed item count until the very last consumer reads the data.
 
         for (unsigned type = 0; type < 2; ++type) {
+            // const auto lastConsumer = LastKernel;
             const auto lastConsumer = lastThreadConsumer[type];
             if (lastConsumer) {
                 ConsumerGraph::edge_descriptor e;
@@ -101,7 +104,7 @@ void PipelineAnalysis::makeConsumerGraph() {
                     ConsumerEdge & cn = mConsumerGraph[e];
                     cn.Flags |= flags;
                 } else {
-                    add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, 0, flags}, mConsumerGraph);
+                    add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, ++index, flags}, mConsumerGraph);
                 }
             }
         }

@@ -1253,7 +1253,7 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
         addInternalScalar(pendingType, "pendingData" + std::to_string(i));
     }
     addInternalScalar(b->getSizeTy(), "pendingOffset");
-    setStride(4 * b->getBitBlockWidth());
+    setStride(16 * b->getBitBlockWidth());
 }
 
 void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
