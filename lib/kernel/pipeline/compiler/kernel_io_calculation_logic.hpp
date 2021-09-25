@@ -132,13 +132,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
-    Value * numOfLinearStrides = nullptr;
-
-    if (mMayLoopToEntry) {
-        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-    } else {
-        numOfLinearStrides = mMaximumNumOfStrides;
-    }
 
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
@@ -146,6 +139,19 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
         }
+    }
+
+    Value * numOfLinearStrides = nullptr;
+
+    const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
+
+    if (isSourceKernel || !mIsPartitionRoot) {
+        if (mMayLoopToEntry) {
+            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        } else {
+            numOfLinearStrides = mMaximumNumOfStrides;
+        }
+        assert (numOfLinearStrides);
     }
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
@@ -156,8 +162,9 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
                 numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
             }
         }
-        assert (numOfLinearStrides);
-    } else if (in_degree(mKernelId, mBufferGraph) > 0) {
+        assert ("no non-greedy input?" && numOfLinearStrides);
+    } else if (!isSourceKernel) {
+        assert (!mMayLoopToEntry);
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
@@ -184,6 +191,14 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
     } else {
         mUpdatedNumOfStrides = numOfLinearStrides;
+    }
+
+    if (LLVM_UNLIKELY(CheckAssertions && mIsPartitionRoot)) {
+        Value * const check = b->CreateICmpULE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
+        b->CreateAssert(check,
+                        "%s: number of strides (%" PRIu64 ") exceeds maximum bound (%" PRIu64 ")",
+                        mCurrentKernelName,
+                        mUpdatedNumOfStrides, mMaximumNumOfStrides);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
