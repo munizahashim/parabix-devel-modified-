@@ -19,36 +19,6 @@
 using namespace pablo;
 using namespace kernel;
 
-// This enum MUST reflect the type Lex on json.pablo file
-enum Lex {
-    lCurly = 0,
-    rCurly,
-    lBracket,
-    rBracket,
-    colon,
-    comma,
-    dQuote,
-    hyphen,
-    digit,
-    backslash,
-    n, // # first letter of null
-    f, // # first letter of false
-    t, // # first letter of true
-    ws
-};
-
-enum KwMarker {
-    kwNull = 0,
-    kwTrue,
-    kwFalse,
-};
-
-enum KwLex {
-    nMarker = 0,
-    tMarker,
-    fMarker
-};
-
 void JSONStringMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> lex = getInputStreamSet("lex");
@@ -281,4 +251,15 @@ void JSONLexSanitizer::generatePabloMethod() {
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::t)), lexIn[Lex::t]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::f)), lexIn[Lex::f]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::ws)), lexIn[Lex::ws]);
+}
+
+void JSONErrsSanitizer::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * ws = getInputStreamSet("ws")[0];
+    PabloAST * errsIn = getInputStreamSet("errsIn")[0];
+    Var * const errsOut = getOutputStreamVar("errsOut");
+
+    PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, errsIn);
+
+    pb.createAssign(pb.createExtract(errsOut, pb.getInteger(0)), sanitizedErr);
 }

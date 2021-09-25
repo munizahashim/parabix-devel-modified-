@@ -209,9 +209,6 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
     const uint8_t UTF8_CODE = 0x2;
     const uint8_t NUMBER_CODE = 0x4;
     const uint8_t EXTRA_CODE = 0x8;
-    if (*ptr == '\n' || *ptr == '\r') {
-        return;
-    }
 
     if (code == KEYWORD_CODE) {
         fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal keyword", ptr, lineBegin, lineNum).c_str());
@@ -221,6 +218,8 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
         fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal number", ptr, lineBegin, lineNum).c_str());
     } else if (code == EXTRA_CODE) {
         fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal char in json", ptr, lineBegin, lineNum).c_str());
+    } else {
+        llvm::report_fatal_error("Unprocessed error stream");
     }
     fprintf(stderr, "\n");
 }

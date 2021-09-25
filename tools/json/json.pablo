@@ -118,20 +118,31 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
     # 00 00 1010 = lf
     # 00 00 1001 = tab
     # 00 00 1101 = cr
-    temp46 = basis[0] & ~basis[1]
-    temp47 = basis[4] | basis[5]
-    temp48 = basis[6] | basis[7]
-    temp49 = temp47 | temp48
-    temp50 = basis[3] & temp46
-    temp51 = ~temp49 & temp50
-    temp52 = basis[2] | basis[3]
-    temp31 = basis[0] | basis[1]
-    temp53 = temp31 | temp52
-    temp33 = basis[5] & ~basis[4]
-    temp54 = ~temp48 & temp33
-    temp55 = ~temp53 & temp54
-    temp56 = temp51 | temp55
-    lex.ws = InFile(temp56)
+    temp46 = ~basis[7] & ~basis[6]
+    temp47 = temp46 & ~basis[4]
+
+    other2nibs = temp47 & ~basis[5]
+    space2nib = temp47 & basis[5]
+
+    temp48 = ~basis[0] & ~basis[1]
+    temp49 = ~basis[2] & ~basis[3]
+    space1nib = temp48 & temp49
+    space = space1nib & space2nib
+
+    other5bits = other2nibs & basis[3]
+    lfTabCommon = other5bits & ~basis[2]
+    temp50 = ~basis[0] & basis[1]
+    temp51 = basis[0] & ~basis[1]
+    lf = lfTabCommon & temp50
+    tab = lfTabCommon & temp51
+
+    temp52 = temp51 & basis[2]
+    cr = other5bits & temp52
+
+    lfTab = lf | tab
+    crSpace = cr | space
+
+    lex.ws = lfTab | crSpace
 }
 
 type UTF8Err = <i1>[1]

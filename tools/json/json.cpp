@@ -171,7 +171,9 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         std::vector<StreamSet *>{keywordErr, utf8Err, numberErr, extraErr},
         Errors
     );
-    StreamSet * const Errs = su::Collapse(P, Errors);
+    StreamSet * const ErrsIn = su::Collapse(P, Errors);
+    StreamSet * const Errs = P->CreateStreamSet(1);
+    P->CreateKernelCall<JSONErrsSanitizer>(su::Select(P, lexStream, Lex::ws), ErrsIn, Errs);
     StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
     StreamSet * const Codes = su::Multiplex(P, Errs);
     scan::Reader(P, driver,
@@ -179,6 +181,24 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         codeUnitStream,
         { ErrIndices, Spans },
         { LineNumbers, Codes });
+
+    /*
+    StreamSet * filteredBasis = P->CreateStreamSet(8);
+     P->CreateKernelCall<PabloSourceKernel>(
+        parser,
+        jsonPabloSrc,
+        "SpanLocations",
+        Bindings { // Input Stream Bindings
+            Binding {"span", Errs}
+        },
+        Bindings { // Output Stream Bindings
+            Binding {"output", filteredBasis}
+        }
+    );
+    StreamSet * filtered = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
+       P->CreateKernelCall<StdOutKernel>(filtered);
+    */
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }

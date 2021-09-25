@@ -11,6 +11,36 @@
 
 namespace kernel {
 
+// This enum MUST reflect the type Lex on json.pablo file
+enum Lex {
+    lCurly = 0,
+    rCurly,
+    lBracket,
+    rBracket,
+    colon,
+    comma,
+    dQuote,
+    hyphen,
+    digit,
+    backslash,
+    n, // # first letter of null
+    f, // # first letter of false
+    t, // # first letter of true
+    ws
+};
+
+enum KwMarker {
+    kwNull = 0,
+    kwTrue,
+    kwFalse,
+};
+
+enum KwLex {
+    nMarker = 0,
+    tMarker,
+    fMarker
+};
+
 /*
     Given the JSON lex for characters backslash and double quotes,
     this kernel returns the marker of a JSON string, based on paper
@@ -117,6 +147,19 @@ public:
                          "jsonLexSanitizer",
                          {Binding{"strSpan", stringSpan}, Binding{"lexIn", lexIn}},
                          {Binding{"lexOut", lexOut}}) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+protected:
+    void generatePabloMethod() override;
+};
+
+class JSONErrsSanitizer : public pablo::PabloKernel {
+public:
+    JSONErrsSanitizer(const std::unique_ptr<KernelBuilder> & b, StreamSet * const ws, StreamSet * const errsIn, StreamSet * errsOut)
+    : pablo::PabloKernel(b,
+                         "jsonErrsSanitizer",
+                         {Binding{"ws", ws}, Binding{"errsIn", errsIn}},
+                         {Binding{"errsOut", errsOut}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
