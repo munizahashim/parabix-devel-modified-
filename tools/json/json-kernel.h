@@ -142,10 +142,12 @@ protected:
 */
 class JSONLexSanitizer : public pablo::PabloKernel {
 public:
-    JSONLexSanitizer(const std::unique_ptr<KernelBuilder> & b, StreamSet * const stringSpan, StreamSet * const lexIn, StreamSet * lexOut)
+    JSONLexSanitizer(const std::unique_ptr<KernelBuilder> & b,
+                     StreamSet * const stringSpan, StreamSet * const validDQuotes, StreamSet * const lexIn,
+                     StreamSet * lexOut)
     : pablo::PabloKernel(b,
                          "jsonLexSanitizer",
-                         {Binding{"strSpan", stringSpan}, Binding{"lexIn", lexIn}},
+                         {Binding{"strSpan", stringSpan}, Binding{"validDQuotes", validDQuotes}, Binding{"lexIn", lexIn}},
                          {Binding{"lexOut", lexOut}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }

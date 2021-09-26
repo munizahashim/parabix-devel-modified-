@@ -223,6 +223,7 @@ void JSONLexSanitizer::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> lexIn = getInputStreamSet("lexIn");
     PabloAST * strSpan = getInputStreamSet("strSpan")[0];
+    PabloAST * validDQuotes = getInputStreamSet("validDQuotes")[0];
     Var * const lexOut = getOutputStreamVar("lexOut");
 
     PabloAST * sanitizelCurly = sanitizeLexInput(pb, strSpan, lexIn[Lex::lCurly]);
@@ -243,7 +244,8 @@ void JSONLexSanitizer::generatePabloMethod() {
     PabloAST * sanitizeComma = sanitizeLexInput(pb, strSpan, lexIn[Lex::comma]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::comma)), sanitizeComma);
 
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::dQuote)), lexIn[Lex::dQuote]);
+    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::dQuote)), validDQuotes);
+
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::hyphen)), lexIn[Lex::hyphen]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::digit)), lexIn[Lex::digit]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::backslash)), lexIn[Lex::backslash]);
