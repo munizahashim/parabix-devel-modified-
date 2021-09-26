@@ -19,6 +19,11 @@
 using namespace pablo;
 using namespace kernel;
 
+static PabloAST * sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloAST * lexInMarker) {
+    PabloAST * conflict = pb.createAnd(strSpan, lexInMarker);
+    return pb.createXor(lexInMarker, conflict);
+}
+
 void JSONStringMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> lex = getInputStreamSet("lex");
@@ -114,12 +119,16 @@ void JSONKeywordMarker::generatePabloMethod() {
         itFALS.createAssign(seqFALSE, advFALSE);
     }
 
+    PabloAST * initValidToken = pb.createOr(lex[Lex::rCurly], lex[Lex::rBracket]);
+    PabloAST * nextValidToken = pb.createOr(initValidToken, lex[Lex::comma]);
+
     pb.createAssign(pb.createExtract(kwMarker, pb.getInteger(KwMarker::kwNull)), seqNULL);
     pb.createAssign(pb.createExtract(kwMarker, pb.getInteger(KwMarker::kwFalse)), seqFALSE);
     pb.createAssign(pb.createExtract(kwMarker, pb.getInteger(KwMarker::kwTrue)), seqTRUE);
     pb.createAssign(pb.createExtract(kwLex, pb.getInteger(KwLex::nMarker)), N);
     pb.createAssign(pb.createExtract(kwLex, pb.getInteger(KwLex::tMarker)), T);
     pb.createAssign(pb.createExtract(kwLex, pb.getInteger(KwLex::fMarker)), F);
+    pb.createAssign(pb.createExtract(kwLex, pb.getInteger(KwLex::nextLexMarker)), nextValidToken);
 }
 
 void JSONKeywordSpan::generatePabloMethod() {
@@ -153,7 +162,8 @@ void JSONKeywordSpan::generatePabloMethod() {
     PabloAST * invalidT = pb.createXor(lex[KwLex::tMarker], lookAheadT);
     PabloAST * lookAheadF = pb.createLookahead(marker[KwMarker::kwFalse], 4);
     PabloAST * invalidF = pb.createXor(lex[KwLex::fMarker], lookAheadF);
-    PabloAST * err = pb.createOr3(invalidN, invalidF, invalidT);
+    PabloAST * potentialErr = pb.createOr3(invalidN, invalidF, invalidT);
+    PabloAST * err = sanitizeLexInput(pb, lex[KwLex::nextLexMarker], potentialErr);
 
     pb.createAssign(pb.createExtract(kwSpan, pb.getInteger(KwMarker::kwNull)), seqNULL);
     pb.createAssign(pb.createExtract(kwSpan, pb.getInteger(KwMarker::kwTrue)), seqTRUE);
@@ -196,7 +206,11 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * errPlusMinus = pb.createAnd(pb.createAdvance(plusMinus, 1), nondigit);
     PabloAST * eENotPlusMinus = pb.createAnd(pb.createAdvance(eE, 1), pb.createNot(plusMinus));
     PabloAST * erreENotPlusMinus = pb.createAnd(eENotPlusMinus, nondigit);
-    PabloAST * err = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
+    PabloAST * potentialErr = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
+
+    PabloAST * initValidToken = pb.createOr(lex[Lex::rCurly], lex[Lex::rBracket]);
+    PabloAST * nextValidToken = pb.createOr(initValidToken, lex[Lex::comma]);
+    PabloAST * err = sanitizeLexInput(pb, nextValidToken, potentialErr);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 
     PabloAST * fstPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {beginNbr, digit});
@@ -212,11 +226,6 @@ void JSONExtraneousChars::generatePabloMethod() {
     Var * const nbrErr = getOutputStreamVar("extraErr");
     PabloAST * extraneousChars = pb.createNot(combinedSpans);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), extraneousChars);
-}
-
-static PabloAST * sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloAST * lexInMarker) {
-    PabloAST * conflict = pb.createAnd(strSpan, lexInMarker);
-    return pb.createXor(lexInMarker, conflict);
 }
 
 void JSONLexSanitizer::generatePabloMethod() {

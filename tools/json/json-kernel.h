@@ -38,7 +38,8 @@ enum KwMarker {
 enum KwLex {
     nMarker = 0,
     tMarker,
-    fMarker
+    fMarker,
+    nextLexMarker
 };
 
 /*

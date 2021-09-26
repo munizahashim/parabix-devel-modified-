@@ -101,7 +101,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     // 4. Mark keywords (true, false, null)
     StreamSet * const keywordMarker = P->CreateStreamSet(3);
-    StreamSet * const keywordLex = P->CreateStreamSet(3);
+    StreamSet * const keywordLex = P->CreateStreamSet(4);
     P->CreateKernelCall<JSONKeywordMarker>(u8basis, lexStream, stringSpan, keywordMarker, keywordLex);
     StreamSet * const keywordSpan = P->CreateStreamSet(3);
     StreamSet * const keywordErr = P->CreateStreamSet(1);
@@ -182,14 +182,15 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         { ErrIndices, Spans },
         { LineNumbers, Codes });
 
-/*    
+// uncomment lines below for debugging
+/*
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", stringMarker}
+            Binding {"span", numberErr}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}
@@ -198,7 +199,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
     P->CreateKernelCall<StdOutKernel>(filtered);
-*/    
+*/
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }
