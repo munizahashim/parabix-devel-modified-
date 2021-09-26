@@ -457,8 +457,7 @@ IDISAtestFunctionType pipelineGen(CPUDriver & pxDriver) {
 }
 
 int main(int argc, char *argv[]) {
-    cl::ParseCommandLineOptions(argc, argv);
-    //codegen::SegmentSize = 1;
+    codegen::ParseCommandLineOptions(argc, argv, {&testFlags, codegen::codegen_flags()});
     CPUDriver pxDriver("idisa_test");
     if (ShiftMask == 0) {
         ShiftMask = TestFieldWidth - 1;
