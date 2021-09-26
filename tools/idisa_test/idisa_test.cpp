@@ -39,33 +39,33 @@ static cl::opt<std::string> Operand1TestFile(cl::Positional, cl::desc("Operand 1
 static cl::opt<std::string> Operand2TestFile(cl::Positional, cl::desc("Operand 2 data file."), cl::Required, cl::cat(testFlags));
 static cl::opt<std::string> TestOutputFile("o", cl::desc("Test output file."), cl::cat(testFlags));
 static cl::opt<bool> QuietMode("q", cl::desc("Suppress output, set the return code only."), cl::cat(testFlags));
-static cl::opt<int> ShiftLimit("ShiftLimit", cl::desc("Upper limit for the shift operand (2nd operand) of sllv, srlv, srav."), cl::init(0));
+static cl::opt<int> ShiftMask("ShiftMask", cl::desc("Mask applied to the shift operand (2nd operand) of simd_sllv, srlv, srav, rotl, rotr"), cl::init(0));
 static cl::opt<int> Immediate("i", cl::desc("Immediate value for mvmd_dslli"), cl::init(1));
 
-class ShiftLimitKernel : public BlockOrientedKernel {
+class ShiftMaskKernel : public BlockOrientedKernel {
 public:
-    ShiftLimitKernel(BuilderRef b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
+    ShiftMaskKernel(BuilderRef b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(BuilderRef kb) override;
 private:
     const unsigned mTestFw;
-    const unsigned mShiftLimit;
+    const unsigned mShiftMask;
 };
 
-ShiftLimitKernel::ShiftLimitKernel(BuilderRef b, unsigned fw, unsigned limit, StreamSet *input, StreamSet *output)
-: BlockOrientedKernel(b, "shiftLimit" + std::to_string(fw) + "_" + std::to_string(limit),
+ShiftMaskKernel::ShiftMaskKernel(BuilderRef b, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
+: BlockOrientedKernel(b, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
                               {Binding{"shiftOperand", input}},
                               {Binding{"limitedShift", output}},
                               {}, {}, {}),
-mTestFw(fw), mShiftLimit(limit) {}
+mTestFw(fw), mShiftMask(mask) {}
 
-void ShiftLimitKernel::generateDoBlockMethod(BuilderRef kb) {
+void ShiftMaskKernel::generateDoBlockMethod(BuilderRef kb) {
     Type * fwTy = kb->getIntNTy(mTestFw);
     Constant * const ZeroConst = kb->getSize(0);
     Value * shiftOperand = kb->loadInputStreamBlock("shiftOperand", ZeroConst);
     unsigned fieldCount = kb->getBitBlockWidth()/mTestFw;
-    Value * limited = kb->simd_umin(mTestFw, shiftOperand, ConstantVector::getSplat(fieldCount, ConstantInt::get(fwTy, mShiftLimit)));
-    kb->storeOutputStreamBlock("limitedShift", ZeroConst, limited);
+    Value * masked = kb->simd_and(shiftOperand, ConstantVector::getSplat(fieldCount, ConstantInt::get(fwTy, mShiftMask)));
+    kb->storeOutputStreamBlock("limitedShift", ZeroConst, masked);
 }
 
 class IdisaBinaryOpTestKernel : public MultiBlockKernel {
@@ -138,6 +138,10 @@ void IdisaBinaryOpTestKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
         result = kb->simd_sllv(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_srlv") {
         result = kb->simd_srlv(mTestFw, operand1, operand2);
+    } else if (mIdisaOperation == "simd_rotl") {
+        result = kb->simd_rotl(mTestFw, operand1, operand2);
+    } else if (mIdisaOperation == "simd_rotr") {
+        result = kb->simd_rotr(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_pext") {
         result = kb->simd_pext(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_pdep") {
@@ -274,6 +278,18 @@ void IdisaBinaryOpCheckKernel::generateDoBlockMethod(BuilderRef kb) {
                         expected = kb->CreateSelect(kb->CreateAnd(operand_i_isSet, mask_i_isSet), kb->CreateOr(expected, out_bit), expected);
                         out_bit = kb->CreateSelect(mask_i_isSet, kb->CreateAdd(out_bit, out_bit), out_bit);
                     }
+                } else if (mIdisaOperation == "simd_rotl") {
+                    Constant * fwConst = ConstantInt::get(fwTy, mTestFw);
+                    Constant * fwMaskConst = ConstantInt::get(fwTy, mTestFw - 1);
+                    Value * shl = kb->CreateShl(operand1, kb->CreateAnd(operand2, fwMaskConst));
+                    Value * shr = kb->CreateLShr(operand1, kb->CreateAnd(kb->CreateSub(fwConst, operand2), fwMaskConst));
+                    expected = kb->CreateOr(shl, shr);
+                } else if (mIdisaOperation == "simd_rotr") {
+                    Constant * fwConst = ConstantInt::get(fwTy, mTestFw);
+                    Constant * fwMaskConst = ConstantInt::get(fwTy, mTestFw - 1);
+                    Value * shl = kb->CreateShl(operand1, kb->CreateAnd(kb->CreateSub(fwConst, operand2), fwMaskConst));
+                    Value * shr = kb->CreateLShr(operand1, kb->CreateAnd(operand2, fwMaskConst));
+                    expected = kb->CreateOr(shl, shr);
                 } else if (mIdisaOperation == "simd_pdep") {
                     Constant * zeroConst = ConstantInt::getNullValue(fwTy);
                     Constant * oneConst = ConstantInt::get(fwTy, 1);
@@ -389,10 +405,10 @@ StreamSet * readHexToBinary(std::unique_ptr<ProgramBuilder> & P, const std::stri
     return bitStream;
 }
 
-inline StreamSet * applyShiftLimit(std::unique_ptr<ProgramBuilder> & P, StreamSet * const input) {
-    if (ShiftLimit > 0) {
+inline StreamSet * applyShiftMask(std::unique_ptr<ProgramBuilder> & P, StreamSet * input) {
+    if (ShiftMask > 0) {
         StreamSet * output = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<ShiftLimitKernel>(TestFieldWidth, ShiftLimit, input, output);
+        P->CreateKernelCall<ShiftMaskKernel>(TestFieldWidth, ShiftMask, input, output);
         return output;
     }
     return input;
@@ -415,10 +431,10 @@ IDISAtestFunctionType pipelineGen(CPUDriver & pxDriver) {
     auto P = pxDriver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
 
 
-    StreamSet * const Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");
-    StreamSet * const Operand2BitStream = applyShiftLimit(P, readHexToBinary(P, "operand2FileDecriptor"));
+    StreamSet * Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");
+    StreamSet * Operand2BitStream = applyShiftMask(P, readHexToBinary(P, "operand2FileDecriptor"));
 
-    StreamSet * const ResultBitStream = P->CreateStreamSet(1, 1);
+    StreamSet * ResultBitStream = P->CreateStreamSet(1, 1);
 
     P->CreateKernelCall<IdisaBinaryOpTestKernel>(TestOperation, TestFieldWidth, Immediate
                                                  , Operand1BitStream, Operand2BitStream
@@ -444,6 +460,9 @@ int main(int argc, char *argv[]) {
     cl::ParseCommandLineOptions(argc, argv);
     //codegen::SegmentSize = 1;
     CPUDriver pxDriver("idisa_test");
+    if (ShiftMask == 0) {
+        ShiftMask = TestFieldWidth - 1;
+    }
     auto idisaTestFunction = pipelineGen(pxDriver);
 
     const int32_t fd1 = openFile(Operand1TestFile, llvm::outs());
