@@ -7,3 +7,4 @@ u32TestFiles/
 /testfiles/
 gb18030/TestOutput
 json/TestOutput
+json_perf/TestOutput

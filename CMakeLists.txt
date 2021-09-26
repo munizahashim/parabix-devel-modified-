@@ -494,6 +494,6 @@ add_custom_target (json_test
     WORKING_DIRECTORY ${QA_DIR}/json
     COMMAND ./run_all "${BIN_DIR}/json")
 
-add_custom_target (json_performance_test
+add_custom_target (json_perf
     WORKING_DIRECTORY ${QA_DIR}/json_perf
-    COMMAND ./run_all "${BIN_DIR}/json_perf")
+    COMMAND ./run_all "${BIN_DIR}/json")
