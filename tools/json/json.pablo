@@ -239,21 +239,15 @@ kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
 type StringMarker = <i1>[1]
 type StringSpan = <i1>[1]
 
-# TODO: See if we can get the string span not sequentially (EveryNth)
+# Get the string span not sequentially (EveryNth)
 #          json: { "key1": value1, "key2"  : null }
 # input example: ..1....1..........1....1..........
 #        output: ...1111............1111...........
 #
 kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
     mStream = marker[0]
-    endStream = <0>
-    cursor = ScanTo(~Advance(<1>, 1), mStream)
-    while cursor {
-        nextPos = Advance(cursor, 1)
-        endSpan = ScanTo(nextPos, mStream)
-        endStream |= endSpan
-        cursor = ScanTo(Advance(endSpan, 1), mStream)
-    }
+    every2 = EveryNth(mStream, 2)
+    endStream = every2 ^ mStream
     beginStream = endStream ^ mStream
     inSpan = InclusiveSpan(beginStream, endStream)
     span[0] = inSpan
