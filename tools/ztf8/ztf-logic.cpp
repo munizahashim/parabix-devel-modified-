@@ -41,6 +41,16 @@ unsigned EncodingInfo::maxSymbolLength() const {
     return maxSoFar;
 }
 
+unsigned EncodingInfo::minSymbolLength() const {
+    unsigned minSoFar = UINT_MAX;
+    for (unsigned i = 0; i < byLength.size(); i++) {
+        if (byLength[i].lo < minSoFar) {
+            minSoFar = byLength[i].hi;
+        }
+    }
+    return minSoFar;
+}
+
 unsigned EncodingInfo::maxEncodingBytes() const {
     unsigned enc_bytes = 0;
     for (auto g : byLength) {

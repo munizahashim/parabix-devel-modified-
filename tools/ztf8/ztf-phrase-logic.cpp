@@ -88,33 +88,32 @@ LengthSelector::LengthSelector(BuilderRef b,
                            unsigned groupNo,
                            StreamSet * groupLenBixnum,
                            StreamSet * hashMarks,
-                           StreamSet * bixnumLenMarks)
+                           StreamSet * selectedHashMarksPos)
 : PabloKernel(b, "LengthSelector" + std::to_string(groupNo),
               {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
                Binding{"groupLenBixnum", groupLenBixnum}},
-              {Binding{"bixnumLenMarks", bixnumLenMarks}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
+              {Binding{"selectedHashMarksPos", selectedHashMarksPos}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
 
 void LengthSelector::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
-    Var * bixnumLenMarksStreamVar = getOutputStreamVar("bixnumLenMarks");
+    Var * selectedHashMarksPosStreamVar = getOutputStreamVar("selectedHashMarksPos");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
     std::vector<PabloAST *> selectedLengthMarks;
     unsigned offset = 2;
-    unsigned lo = groupInfo.lo;
-    unsigned hi = groupInfo.hi;
+    unsigned lo = mEncodingScheme.minSymbolLength();
+    unsigned hi = mEncodingScheme.maxSymbolLength();
     unsigned groupSize = hi - lo + 1;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
-    hashMarks = pb.createNot(hashMarks);
     for (unsigned i = lo; i <= hi; i++) {
         PabloAST * lenBixnum = bnc.EQ(groupLenBixnum, i - offset);
         selectedLengthMarks.push_back(lenBixnum);
         //pb.createDebugPrint(pb.createCount(pb.createInFile(lenBixnum)), "count"+std::to_string(i));
     }
     for (unsigned i = 0; i < groupSize; i++) {
-        pb.createAssign(pb.createExtract(bixnumLenMarksStreamVar, pb.getInteger(i)), pb.createAnd(hashMarks, selectedLengthMarks[i]));
+        pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i)), pb.createAnd(hashMarks, selectedLengthMarks[i]));
     }
 }
 

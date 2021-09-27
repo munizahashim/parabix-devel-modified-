@@ -42,6 +42,11 @@ protected:
     unsigned mGroupNum;
 };
 
+/*
+Input : hashMarks, bixnum indicating length of k-symbol phrases
+Output: Split the hashMarks across mEncodingScheme.minSymbolLength() and mEncodingScheme.maxSymbolLength()
+Each stream in selectedHashMarksPos contains the hashMarks positions of phrases of same length.
+*/
 class LengthSelector final: public pablo::PabloKernel {
 public:
     LengthSelector(BuilderRef b,
@@ -49,7 +54,7 @@ public:
                  unsigned groupNo,
                  StreamSet * groupLenBixnum,
                  StreamSet * hashMarks,
-                 StreamSet * selected);
+                 StreamSet * selectedHashMarksPos);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;

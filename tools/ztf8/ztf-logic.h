@@ -31,6 +31,7 @@ public:
 public:
     unsigned getLengthGroupNo(unsigned lgth) const;
     unsigned maxSymbolLength() const;
+    unsigned minSymbolLength() const;
     unsigned maxEncodingBytes() const;
     unsigned prefixLengthOffset(unsigned lgth) const;
     unsigned prefixLengthMaskBits(unsigned lgth) const;
