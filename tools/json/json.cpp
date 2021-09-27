@@ -38,6 +38,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include "json-kernel.h"
 #include "post_process.h"
+#include "json2csv_process.h"
 
 namespace su = kernel::streamutils;
 
@@ -49,6 +50,9 @@ using namespace codegen;
 
 static cl::OptionCategory jsonOptions("json Options", "json options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(jsonOptions));
+bool ToCSVFlag;
+static cl::opt<bool, true> ToCSVOption("c", cl::location(ToCSVFlag), cl::desc("Print equivalent CSV"), cl::cat(jsonOptions));
+static cl::alias ToCSVAlias("to-csv", cl::desc("Alias for -s"), cl::aliasopt(ToCSVOption)); 
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
@@ -181,6 +185,10 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         codeUnitStream,
         { ErrIndices, Spans },
         { LineNumbers, Codes });
+    
+    if (ToCSVFlag) {
+        llvm_unreachable("should convert to csv");
+    }
 
 // uncomment lines below for debugging
 /*

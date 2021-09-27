@@ -11,6 +11,7 @@ NAME
 SRC
     json.cpp
     post_process.cpp
+    json2csv_process.cpp
     json-kernel.cpp
 DEPS
     grep
