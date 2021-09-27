@@ -144,7 +144,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     P->CreateKernelCall<JSONExtraneousChars>(combinedSpans, extraErr);
 
     // 9. Validate objects and arrays
-    StreamSet * const kwLexCollapsed = su::Collapse(P, keywordLex);
+    StreamSet * const kwLexCollapsed = su::Collapse(P, su::Select(P, keywordLex, su::Range(0, 3)));
     StreamSet * const allLex = P->CreateStreamSet(10, 1);
     StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
     P->CreateKernelCall<StreamsMerge>(
@@ -190,7 +190,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", numberErr}
+            Binding {"span", kwLexCollapsed}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}
