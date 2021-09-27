@@ -1083,5 +1083,15 @@ Unterminated</datafile>
 -->
 
 <grepcase regexp="[AI].*(?i:[AI])" datafile="simple1" greplines="2"/>
-</greptest>
 
+<datafile id="Chinese">别看那些的曲线很像你走的蜿蜒的小路,
+最后还要特别强调的是,
+'''它们都不表示物体走过的路径。'''
+当信息是属于网络蜘蛛（spider)
+或者网络机器人（bot）所产生的页面浏览
+并且必须举例说明它的传播或者解决技术问题.
+中国的毒蛇可分为两类：
+蝰蛇科和眼睛蛇科
+</datafile>
+<grepcase regexp="虫虫" datafile="Chinese" greplines="1 4 8"/>
+</greptest>
