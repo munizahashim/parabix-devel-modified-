@@ -134,99 +134,87 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         //P->CreateKernelCall<DebugDisplayKernel>("allHashValues["+std::to_string(i)+"]", allHashValues[i]);
     }
 
-    StreamSet * u8bytes = codeUnitStream;
-    std::vector<StreamSet *> extractionMasks;
+    // Mark all the repeated hashCodes 
     std::vector<StreamSet *> allHashMarks;
-    std::vector<StreamSet *> allSelectedBixnum(SymCount);
     std::vector<StreamSet *> bixnumMarks(4);
     for (unsigned sym = 0; sym < SymCount; sym++) {
-        StreamSet * lgHashMarks = P->CreateStreamSet(1);
+        StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
         for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
-            StreamSet * groupMarks = P->CreateStreamSet(1);
+            StreamSet * const groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], overflow, groupMarks);
-            //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
             StreamSet * const hashMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<MarkRepeatedHashvalue>(encodingScheme1, i, groupMarks, allHashValues[sym], hashMarks);
-            //P->CreateKernelCall<DebugDisplayKernel>("hashMarks1", hashMarks);
             if (i > 0) {
-                StreamSet * selectedHashMarks = P->CreateStreamSet(1);
-                P->CreateKernelCall<InverseStream>(hashMarks, lgHashMarks, i, selectedHashMarks);
-                //P->CreateKernelCall<DebugDisplayKernel>("selectedHashMarks", selectedHashMarks);
-                lgHashMarks = selectedHashMarks;
+                StreamSet * lgHashMarks = P->CreateStreamSet(1);
+                P->CreateKernelCall<InverseStream>(hashMarks, hashMarksNonFinal, i, lgHashMarks);
+                hashMarksNonFinal = lgHashMarks;
             }
             else {
-                lgHashMarks = hashMarks;
-            }
-            // gather all the lengthGroup bixnum positions
-            if (sym > 0 && i > 0) { // no k-symbol phrases of length 3; start from len 4 phrases
-                LengthGroupInfo groupInfo = encodingScheme1.byLength[i];
-                unsigned lo = groupInfo.lo;
-                unsigned hi = groupInfo.hi;
-                unsigned groupSize = hi - lo + 1;
-                StreamSet * const bixnumLenMarks = P->CreateStreamSet(groupSize);
-                P->CreateKernelCall<LengthSelector>(encodingScheme1, i, phraseLenBixnum[sym], hashMarks, bixnumLenMarks);
-                bixnumMarks[i-1] = bixnumLenMarks;
+                hashMarksNonFinal = hashMarks;
             }
         }
-        // identify compressible phrases across length groups
-        if (sym > 0) {
-            StreamSet * lgSelectedUntilNow = P->CreateStreamSet(1);
-            // lgHashMarks -> end pos of all the k-sym phrases with repeated hash codes
-            //P->CreateKernelCall<DebugDisplayKernel>("lgHashMarks-before", lgHashMarks);
-            // selectedBixnum -> 29 x i1 streamset of length-wise accumulated bixnumMarks
-            StreamSet * const selectedBixnum = P->CreateStreamSet(29); // 1+4+8+16
-            P->CreateKernelCall<StreamSelect>(selectedBixnum, Select( { {bixnumMarks[0]}, {bixnumMarks[1]}, {bixnumMarks[2]}, {bixnumMarks[3]} } ));
-            //P->CreateKernelCall<DebugDisplayKernel>("selectedBixnum", selectedBixnum);
-            // contains 29 x i1 stream indicating the hashMarks of each length in the range 4-32
-            allSelectedBixnum[sym] = selectedBixnum;
-            for(int i = 28; i >= 0; i--) {
-                if (i == 28) {
-                    lgSelectedUntilNow = lgHashMarks;
+        allHashMarks.push_back(hashMarksNonFinal);
+    }
+    for (unsigned sym = 1; sym < SymCount; sym++) {
+            StreamSet * const selectedHashMarks = P->CreateStreamSet(29); // 1+4+8+16
+            P->CreateKernelCall<LengthSelector>(encodingScheme1, 0, phraseLenBixnum[sym], allHashMarks[sym], selectedHashMarks);
+            //P->CreateKernelCall<DebugDisplayKernel>("selectedHashMarks", selectedHashMarks);
+            StreamSet * hmSelectedSoFar = P->CreateStreamSet(1);
+            for(unsigned i = encodingScheme1.maxSymbolLength(); i > encodingScheme1.minSymbolLength(); i--) {
+                if (i == encodingScheme1.maxSymbolLength()) {
+                    hmSelectedSoFar = allHashMarks[sym];
                 }
                 StreamSet * const selectedStep1 = P->CreateStreamSet(1);
-                // 1. select max number of non-overlapping phrases of length i+4 (currLen)
+                // 1. select max number of non-overlapping phrases of length i+3 (currLen)
                 // 2. eliminate all the currLen phrases preceeded by longer length phrases
-                P->CreateKernelCall<OverlappingLengthGroupMarker>(i, selectedBixnum, lgHashMarks, lgSelectedUntilNow, selectedStep1);
+                P->CreateKernelCall<OverlappingLengthGroupMarker>(i-4, selectedHashMarks, hmSelectedSoFar, selectedStep1);
+                //P->CreateKernelCall<DebugDisplayKernel>("selectedStep1", selectedStep1);
                 // 3. eliminate all the curLen phrases preceeding longer length phrases
+
+                /*if (i == 32) {
+                    hmSelectedSoFar = selectedStep1;
+                }
+                unsigned toUpdateHashMarksCount = encodingScheme1.maxSymbolLength() - i + 1;
+                StreamSet * accumHashMarks = P->CreateStreamSet(toUpdateHashMarksCount);
+                P->CreateKernelCall<BixnumHashMarks>(encodingScheme1, selectedHashMarks, hmSelectedSoFar, i, accumHashMarks);
+                P->CreateKernelCall<DebugDisplayKernel>("accumHashMarks", accumHashMarks);*/
+                // without accumHashMarks, more than expected hashMarks from selectedStep1 may be eliminated
                 StreamSet * const selectedStep2 = P->CreateStreamSet(1);
-                P->CreateKernelCall<OverlappingLookaheadMarker>(i, selectedBixnum, lgSelectedUntilNow, selectedStep1, selectedStep2);
-                lgSelectedUntilNow = selectedStep2;
+                P->CreateKernelCall<OverlappingLookaheadMarker>(i-4, selectedHashMarks, hmSelectedSoFar, selectedStep1, selectedStep2);
+                hmSelectedSoFar = selectedStep2;
             }
-            lgHashMarks = lgSelectedUntilNow;
-        }
-        //P->CreateKernelCall<DebugDisplayKernel>("lgHashMarks-after", lgHashMarks);
-        allHashMarks.push_back(lgHashMarks);
+            allHashMarks[sym] = hmSelectedSoFar;
     }
 
-    for(int i = SymCount-1; i > 0; i--) {
-        StreamSet * hashMarksFinal = P->CreateStreamSet(1);
-        // hashMark positions divided across min through max len values
-        StreamSet * hashMarksBixNum = P->CreateStreamSet(29);
-        P->CreateKernelCall<BixnumHashMarks>(allSelectedBixnum[i], allHashMarks[i], hashMarksBixNum);
-        P->CreateKernelCall<PhraseSelection>(allHashMarks[i], hashMarksBixNum, allHashMarks[i-1], i, hashMarksFinal);
-        allHashMarks[i-1] = hashMarksFinal;
-    }
-
+    StreamSet * u8bytes = codeUnitStream;
+    std::vector<StreamSet *> extractionMasks;
+    StreamSet * compressionBytes;
     for (int sym = SymCount-1; sym >= 0; sym--) {
         //P->CreateKernelCall<DebugDisplayKernel>("allHashMarks["+std::to_string(sym)+"]", allHashMarks[sym]);
         //P->CreateKernelCall<DebugDisplayKernel>("phraseLenBixnum["+std::to_string(sym)+"]", phraseLenBixnum[sym]);
         for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
-            StreamSet * extractionMask = P->CreateStreamSet(1);
-            StreamSet * input_bytes = u8bytes;
-            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-            StreamSet * groupMarks = P->CreateStreamSet(1);
+            StreamSet * const extractionMask = P->CreateStreamSet(1);
+            StreamSet * const input_bytes = u8bytes;
+            StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
+            StreamSet * const groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<HashGroupSelector>(encodingScheme1, i, allHashMarks[sym], phraseLenBixnum[sym], overflow, groupMarks);
             //P->CreateKernelCall<DebugDisplayKernel>("groupMarks"+std::to_string(i), groupMarks);
             P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes);
-            //P->CreateKernelCall<DebugDisplayKernel>("extractionMask", extractionMask);
+            compressionBytes = extractionMask;
             extractionMasks.push_back(extractionMask);
             u8bytes = output_bytes;
+            //Update sym-1 hashMarks to avoid compressing sub-phrases of any of the already compressed phrases
+            for (unsigned j = 0; j < sym; j++) {
+                StreamSet * const updatedHashMark = P->CreateStreamSet(1);
+                P->CreateKernelCall<UpdateNextHashMarks>(extractionMask, allHashMarks[j], i, updatedHashMark);
+                //P->CreateKernelCall<DebugDisplayKernel>("updatedHashMark", updatedHashMark);
+                allHashMarks[j] = updatedHashMark;
+            }
         }
     }
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
-    //P->CreateKernelCall<DebugDisplayKernel>("combinedMask", combinedMask);
 
     StreamSet * const encoded = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(u8bytes, encoded);

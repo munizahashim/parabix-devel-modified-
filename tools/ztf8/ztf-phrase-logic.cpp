@@ -60,6 +60,54 @@ void PhraseSelection::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("updatedHashMark"), pb.getInteger(0)), pb.createAnd(result, toUpdateHashMarks));
 }
 
+
+UpdateNextHashMarks::UpdateNextHashMarks(BuilderRef kb,
+                    StreamSet * extractionMask,
+                    StreamSet * hashMarksToUpdate,
+                    unsigned groupNo,
+                    StreamSet * hashMarksUpdated)
+: PabloKernel(kb, "UpdateNextHashMarks"+std::to_string(groupNo),
+            {Binding{"extractionMask", extractionMask},
+             Binding{"hashMarksToUpdate", hashMarksToUpdate}},
+            {Binding{"hashMarksUpdated", hashMarksUpdated}}), mGroupNo(groupNo) { }
+
+void UpdateNextHashMarks::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * extractionMask = getInputStreamSet("extractionMask")[0]; // marks all the compressible byte positions with 0
+    PabloAST * hashMarksToUpdate = getInputStreamSet("hashMarksToUpdate")[0];
+    PabloAST * result = hashMarksToUpdate;
+
+    PabloAST * compressedMarks = pb.createNot(extractionMask);
+    // eliminate any (k-1)-sym phrases in the region of compressed bytes
+    result = pb.createAnd(extractionMask, result);
+    // eliminate any direct overlapping hashMarks between k-sym and (k-1)-sym phrases
+    // every compressedMark in compressedMarks has 2/3/4 byte codewords written at the last 2/3/4 bytes of the phrase
+    // Advance compressedMarks by 2,3,4 pos and check if any hashMarksToUpdate marked in the codeword position
+    unsigned advPos = 0;
+    if (mGroupNo < 3) {
+        advPos = 2;
+    }
+    else if (mGroupNo == 3) {
+        advPos = 3;
+    }
+    else { //mGroupNo = 4
+        advPos = 4;
+    }
+    extractionMask = pb.createAdvance(extractionMask, advPos); // min codeword sequence length
+    result = pb.createAnd(result, extractionMask, "result");
+    //pb.createDebugPrint(result, "result");
+    /*
+        1111............11 => extractionMask
+        111111............ => adv(extractionMask,2)
+        ....111111111111.. => compressedMarks
+        ...1.....1.......1 => hashMarksToUpdate
+        ...1.............1 => result
+        ...1.............. => codewordPositions
+    */
+    // figure out what hashmarks need to be eliminated and XOR with received hashmarks
+    pb.createAssign(pb.createExtract(getOutputStreamVar("hashMarksUpdated"), pb.getInteger(0)), result);
+}
+
 InverseStream::InverseStream(BuilderRef kb,
                 StreamSet * hashMarks,
                 StreamSet * prevMarks,

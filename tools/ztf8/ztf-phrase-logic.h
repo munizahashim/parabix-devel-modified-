@@ -30,6 +30,20 @@ protected:
     unsigned mSymNum;
 };
 
+
+class UpdateNextHashMarks : public pablo::PabloKernel {
+public:
+    UpdateNextHashMarks(BuilderRef kb,
+                StreamSet * extractionMask,
+                StreamSet * hashMarksToUpdate,
+                unsigned groupNo,
+                StreamSet * hashMarksUpdated);
+protected:
+    void generatePabloMethod() override;
+    unsigned mGroupNo;
+};
+
+
 class InverseStream : public pablo::PabloKernel {
 public:
     InverseStream(BuilderRef kb,
