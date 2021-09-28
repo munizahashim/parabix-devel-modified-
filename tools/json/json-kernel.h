@@ -26,7 +26,8 @@ enum Lex {
     n, // # first letter of null
     f, // # first letter of false
     t, // # first letter of true
-    ws
+    ws,
+    eof
 };
 
 enum KwMarker {
@@ -75,7 +76,7 @@ public:
     : pablo::PabloKernel(b,
                          "jsonKeywordMarker",
                          {Binding{"basis", basis}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
-                         {Binding{"kwMarker", kwMarker}, Binding{"kwLex", kwLex}}) {}
+                         {Binding{"kwMarker", kwMarker}, Binding{"kwLex", kwLex, FixedRate(1), Add1()}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -110,7 +111,7 @@ public:
     : pablo::PabloKernel(b,
                          "jsonNumberMarker",
                          {Binding{"basis", basis, FixedRate(1), LookAhead(1)}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
-                         {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
+                         {Binding{"nbrLex", nbrLex, FixedRate(1), Add1()}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
