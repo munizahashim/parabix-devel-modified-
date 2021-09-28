@@ -103,7 +103,7 @@ void LengthSelector::generatePabloMethod() {
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
     std::vector<PabloAST *> selectedLengthMarks;
     unsigned offset = 2;
-    unsigned lo = mEncodingScheme.minSymbolLength();
+    unsigned lo = mEncodingScheme.minSymbolLength()+1;
     unsigned hi = mEncodingScheme.maxSymbolLength();
     unsigned groupSize = hi - lo + 1;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
@@ -119,52 +119,46 @@ void LengthSelector::generatePabloMethod() {
 
 OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
                            unsigned groupNo,
-                           StreamSet * groupLenBixnum,
-                           StreamSet * hashMarks,
+                           StreamSet * lengthwiseHashMarks,
                            StreamSet * prevSelected,
                            StreamSet * selected)
 : PabloKernel(b, "OverlappingLengthGroupMarker" + std::to_string(groupNo),
-              {Binding{"groupLenBixnum", groupLenBixnum},
-               Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
+              {Binding{"lengthwiseHashMarks", lengthwiseHashMarks},
                Binding{"prevSelected", prevSelected}},
               {Binding{"selected", selected}}), mGroupNo(groupNo) { }
 
 void OverlappingLengthGroupMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    BixNumCompiler bnc(pb);
-    PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     Var * selectedStreamVar = getOutputStreamVar("selected");
-    std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
+    std::vector<PabloAST *> lengthwiseHashMarks = getInputStreamSet("lengthwiseHashMarks");
     PabloAST * prevSelected = getInputStreamSet("prevSelected")[0];
-    /// TODO: add an assertion to check mGroupNo is valid array index
-    PabloAST * curLenPos = pb.createAnd(groupLenBixnum[mGroupNo], hashMarks);
+    unsigned offset = 4;
+    unsigned curPhraseLen = mGroupNo+offset;
+    PabloAST * curLenPos = lengthwiseHashMarks[mGroupNo];
     PabloAST * selected = pb.createZeroes();
     PabloAST * toAdvance = curLenPos;
-    for (unsigned loop = 0; loop < 2; loop++) { // depends on the number of consecutive phrases of same length?
+    for (unsigned loop = 0; loop < 2; loop++) { // loop depends on the max number of consecutive phrases of same length?
         PabloAST * notSelected = pb.createZeroes();
-        for (unsigned i = 1; i < mGroupNo+4; i++) {
+        for (unsigned i = 1; i < curPhraseLen; i++) {
             toAdvance = pb.createAdvance(toAdvance, 1);
             notSelected = pb.createOr(notSelected, pb.createAnd(toAdvance, curLenPos));
         }
         selected = pb.createOr(selected, pb.createXor(curLenPos, notSelected));
         toAdvance = selected;
     }
-    // non-overlapping phrases of length mGroupNo
-    selected = toAdvance;
 
     PabloAST * toEliminate = pb.createZeroes();
-    for (unsigned i = mGroupNo+1; i <= 28; i++) {
-        PabloAST * phrasePos = groupLenBixnum[i];
-        phrasePos = pb.createAnd(phrasePos, prevSelected);
+    for (unsigned i = mGroupNo+1; i < lengthwiseHashMarks.size(); i++) {
+        PabloAST * phrasePos = lengthwiseHashMarks[i];
+        phrasePos = pb.createAnd(phrasePos, prevSelected); // update prevSelected correctly
         PabloAST * preceededByLongerPhrase = pb.createZeroes();
-        for (unsigned j = 1; j < mGroupNo+4; j++) {
+        for (unsigned j = 0; j < curPhraseLen-1; j++) {
            phrasePos = pb.createAdvance(phrasePos, 1);
            preceededByLongerPhrase = pb.createOr(preceededByLongerPhrase, pb.createAnd(phrasePos, selected));
         }
         toEliminate = pb.createOr(toEliminate, preceededByLongerPhrase);
     }
-    selected = pb.createXor(selected, toEliminate);
-    pb.createAssign(pb.createExtract(selectedStreamVar, pb.getInteger(0)), selected);
+    pb.createAssign(pb.createExtract(selectedStreamVar, pb.getInteger(0)), pb.createXor(selected, toEliminate));
 }
 
 
@@ -172,63 +166,67 @@ OverlappingLookaheadMarker::OverlappingLookaheadMarker(BuilderRef b,
                            unsigned groupNo,
                            StreamSet * groupLenBixnum,
                            StreamSet * longerHashMarks,
-                           StreamSet * prevSelected,
+                           StreamSet * selectedPart1,
                            StreamSet * selected)
 : PabloKernel(b, "OverlappingLookaheadMarker" + std::to_string(groupNo),
               {Binding{"groupLenBixnum", groupLenBixnum, FixedRate(), LookAhead(32)},
                Binding{"longerHashMarks", longerHashMarks},
-               Binding{"prevSelected", prevSelected}},
+               Binding{"selectedPart1", selectedPart1}},
               {Binding{"selected", selected}}), mGroupNo(groupNo) { }
 
 void OverlappingLookaheadMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    BixNumCompiler bnc(pb);
     PabloAST * longerHashMarks = getInputStreamSet("longerHashMarks")[0];
     Var * selectedStreamVar = getOutputStreamVar("selected");
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
-    PabloAST * prevSelected = getInputStreamSet("prevSelected")[0];
-    PabloAST * selected = prevSelected;
+    PabloAST * selectedPart1 = getInputStreamSet("selectedPart1")[0];
+    PabloAST * selected = selectedPart1;
+    unsigned offset = 4;
     if (mGroupNo < 28) {
         PabloAST * eliminateFinal = pb.createZeroes();
         for (unsigned i = mGroupNo+1; i < 29; i++) {
+            unsigned groupIdx = i - (mGroupNo + 1);
             PabloAST * toEliminate = pb.createZeroes();
-            PabloAST * lookaheadPos = groupLenBixnum[i];
-            //pb.createDebugPrint(lookaheadPos, "lookaheadPos"+std::to_string(i));
-            for (unsigned j = 1; j < i+4; j++) {
-                toEliminate = pb.createOr(toEliminate, pb.createAnd(prevSelected, pb.createLookahead(lookaheadPos, j)));
+            PabloAST * lookaheadStream = groupLenBixnum[groupIdx];
+            //pb.createDebugPrint(lookaheadStream, "lookaheadStream"+std::to_string(i));
+            for (unsigned j = 1; j < i+offset; j++) {
+                toEliminate = pb.createOr(toEliminate, pb.createAnd(selectedPart1, pb.createLookahead(lookaheadStream, j)));
             }
             eliminateFinal = pb.createOr(eliminateFinal, toEliminate);
         }
-        //pb.createDebugPrint(prevSelected, "prevSelected");
+        //pb.createDebugPrint(selectedPart1, "selectedPart1");
         //pb.createDebugPrint(eliminateFinal, "eliminateFinal");
-        selected = pb.createOr(longerHashMarks, pb.createXor(prevSelected, eliminateFinal));
+        selected = pb.createOr(longerHashMarks, pb.createXor(selectedPart1, eliminateFinal));
     }
     pb.createAssign(pb.createExtract(selectedStreamVar, pb.getInteger(0)), selected);
 }
 
 BixnumHashMarks::BixnumHashMarks(BuilderRef kb,
+                EncodingInfo & encodingScheme,
                 StreamSet * phraseLenBixnum,
                 StreamSet * hashMarks,
-                StreamSet * hashMarksBixNum)
-: PabloKernel(kb, "BixnumHashMarks",
+                unsigned toUpdateHashMarks,
+                StreamSet * accumHashMarks)
+: PabloKernel(kb, "BixnumHashMarks"+std::to_string(toUpdateHashMarks),
             {Binding{"phraseLenBixnum", phraseLenBixnum},
              Binding{"hashMarks", hashMarks}},
-            {Binding{"hashMarksBixNum", hashMarksBixNum}}) { }
+            {Binding{"accumHashMarks", accumHashMarks}}), mUpdateCount(toUpdateHashMarks), mEncodingScheme(encodingScheme) { }
 
 void BixnumHashMarks::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> phraseLenBixnum = getInputStreamSet("phraseLenBixnum");
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     std::vector<PabloAST *> hashMarksUpdated;
-    for (unsigned i = 0; i < 29; i++) {
-        PabloAST * curHashMarksBixnum = phraseLenBixnum[i];
-        for (unsigned j = i; j < 29; j++) {
-            curHashMarksBixnum = pb.createOr(curHashMarksBixnum, pb.createAnd(hashMarks, phraseLenBixnum[j]));
-        }
+    unsigned maxLength = mEncodingScheme.maxSymbolLength();
+    unsigned toUpdateHashMarks = maxLength - mUpdateCount + 1;
+    unsigned offset = 4;
+    for (unsigned i = mUpdateCount; i <= maxLength; i++) {
+        PabloAST * curHashMarksBixnum = pb.createZeroes();
+        curHashMarksBixnum = pb.createOr(curHashMarksBixnum, pb.createAnd(hashMarks, phraseLenBixnum[i-offset]));
         hashMarksUpdated.push_back(curHashMarksBixnum);
     }
-    for (unsigned i = 0; i < 29; i++) {
-        pb.createAssign(pb.createExtract(getOutputStreamVar("hashMarksBixNum"), pb.getInteger(i)), hashMarksUpdated[i]);
+    for (unsigned i = 0; i < toUpdateHashMarks; i++) {
+        pb.createAssign(pb.createExtract(getOutputStreamVar("accumHashMarks"), pb.getInteger(i)), hashMarksUpdated[i]);
     }
 }
 

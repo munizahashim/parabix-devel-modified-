@@ -61,13 +61,13 @@ protected:
     unsigned mGroupNo;
 };
 
-// mark overlapping phrases within a length group
+// 1. select non-overlapping phrases of same length
+// 2. If any curLen phrase is overlapping prevSelected longer phrase, eliminate such phrase
 class OverlappingLengthGroupMarker final: public pablo::PabloKernel {
 public:
     OverlappingLengthGroupMarker(BuilderRef b,
                  unsigned groupNo,
-                 StreamSet * groupLenBixnum,
-                 StreamSet * hashMarks,
+                 StreamSet * lengthwiseHashMarks,
                  StreamSet * prevSelected,
                  StreamSet * selected);
 protected:
@@ -81,7 +81,7 @@ public:
                  unsigned groupNo,
                  StreamSet * groupLenBixnum,
                  StreamSet * longerHashMarks,
-                 StreamSet * prevSelected,
+                 StreamSet * selectedPart1,
                  StreamSet * selected);
 protected:
     void generatePabloMethod() override;
@@ -89,16 +89,20 @@ protected:
 };
 
 /*
-hashMarksBixNum[i] contains the hashMarks for phrases in the length range(i+4, 32)
+hashMarksBixNum[i] contains the hashMarks for phrases in the length range(i+offset, 32)
 */
 class BixnumHashMarks final: public pablo::PabloKernel {
 public:
     BixnumHashMarks(BuilderRef b,
+                 EncodingInfo & encodingScheme,
                  StreamSet * phraseLenBixnum,
                  StreamSet * hashMarks,
+                 unsigned toUpdateHashMarks,
                  StreamSet * hashMarksBixNum);
 protected:
     void generatePabloMethod() override;
+    EncodingInfo & mEncodingScheme;
+    unsigned mUpdateCount;
 };
 
 class HashGroupSelector final: public pablo::PabloKernel {
