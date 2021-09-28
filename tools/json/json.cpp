@@ -151,9 +151,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const kwLexCollapsed = su::Collapse(P, su::Select(P, keywordLex, su::Range(0, 3)));
     StreamSet * const allLex = P->CreateStreamSet(10, 1);
     StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
-    StreamSet * const EOFBit = su::Select(P, finalLexStream, Lex::eof);
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex, EOFBit},
+        std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex},
         allLex
     );
     StreamSet * const collapsedLex = su::Collapse(P, allLex);
@@ -165,6 +164,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
     scan::Reader(P, driver,
         SCAN_CALLBACK(postproc_validateObjectsAndArrays),
+	SCAN_CALLBACK(postproc_doneCallback),
         codeUnitStream,
         { Indices, Spans },
         { LineNumbers, Indices });
@@ -191,7 +191,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     }
 
 // uncomment lines below for debugging
-
+/*
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
@@ -207,7 +207,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
     P->CreateKernelCall<StdOutKernel>(filtered);
-
+*/
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }

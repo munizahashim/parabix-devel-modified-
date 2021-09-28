@@ -23,7 +23,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     BasicBlock * const doneBlock = mDoneCallbackName.empty() ? exitBlock :  b->CreateBasicBlock("doneBlock");
     Value * const initialStride = b->getProcessedItemCount("scan");
     Value * const isInvalidFinalItem = b->CreateAnd(b->isFinal(), b->CreateICmpEQ(b->getSize(0), b->getAccessibleItemCount("scan")));
-    b->CreateCondBr(isInvalidFinalItem, exitBlock, readItem);
+    b->CreateCondBr(isInvalidFinalItem, doneBlock, readItem);
 
     b->SetInsertPoint(readItem);
     PHINode * const strideNo = b->CreatePHI(sizeTy, 2);
@@ -58,7 +58,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         llvm::report_fatal_error(mKernelName + ": failed to get function: " + mCallbackName);
     }
     b->CreateCall(fTy, callback, ArrayRef<Value *>(callbackParams));
-    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, doneBlock);
+    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, exitBlock);
 
     if (doneBlock != exitBlock) {
         b->SetInsertPoint(doneBlock);

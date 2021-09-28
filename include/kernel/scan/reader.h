@@ -275,6 +275,12 @@ void Reader(
     reader->link<Fn>(callback.name, *callback.func);
 }
 
+/**
+ * An overloaded `scan::Reader` that allows a callback that is called
+ * when the kernel is finishing processing.
+ *
+ * Note: You should not mark the EOFbit - it should be unset or will not work.
+ */
 template<typename... Args, typename... Args2>
 inline
 void Reader(
@@ -316,6 +322,12 @@ void Reader(
     reader->link<Fn>(callback.name, *callback.func);
 }
 
+/**
+ * An overloaded `scan::Reader` that allows a callback that is called
+ * when the kernel is finishing processing.
+ *
+ * Note: You should not mark the EOFbit - it should be unset or will not work.
+ */
 template<typename... Args, typename... Args2>
 inline
 void Reader(
@@ -359,6 +371,12 @@ void Reader(
     reader->link<Fn>(callback.name, *callback.func);
 }
 
+/**
+ * An overloaded `scan::Reader` that allows a callback that is called
+ * when the kernel is finishing processing.
+ *
+ * Note: You should not mark the EOFbit - it should be unset or will not work.
+ */
 template<typename... Args, typename... Args2>
 inline
 void Reader(
