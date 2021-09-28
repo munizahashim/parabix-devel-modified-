@@ -10,7 +10,7 @@ type Err = <i1>[2] {
     utf8
 }
 
-type Lex = <i1>[15] {
+type Lex = <i1>[14] {
     lCurly,
     rCurly,
     lBracket,
@@ -24,8 +24,7 @@ type Lex = <i1>[15] {
     n, # first letter of null
     f, # first letter of false
     t, # first letter of true
-    ws,
-    eof
+    ws
 }
 
 # ClassifyBytes the bytes of a basis stream.
@@ -144,9 +143,6 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
     crSpace = cr | space
 
     lex.ws = lfTab | crSpace
-
-    # EOF
-    lex.eof = AtEOF(<1>)
 }
 
 type UTF8Err = <i1>[1]

@@ -262,7 +262,6 @@ void JSONLexSanitizer::generatePabloMethod() {
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::t)), lexIn[Lex::t]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::f)), lexIn[Lex::f]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::ws)), lexIn[Lex::ws]);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::eof)), lexIn[Lex::eof]);
 }
 
 void JSONErrsSanitizer::generatePabloMethod() {
