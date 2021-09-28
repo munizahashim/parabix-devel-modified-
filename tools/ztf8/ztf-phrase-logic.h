@@ -134,8 +134,24 @@ protected:
     unsigned mGroupNo;
 };
 
+class ZTF_PhraseExpansionDecoder final: public pablo::PabloKernel {
+public:
+    ZTF_PhraseExpansionDecoder(BuilderRef b,
+                         EncodingInfo & encodingScheme,
+                         StreamSet * const basis,
+                         StreamSet * insertBixNum,
+                         StreamSet * countStream);
+protected:
+    void generatePabloMethod() override;
+    EncodingInfo & mEncodingScheme;
+};
 
+class codeword_index : public pablo::PabloKernel {
+public:
+    codeword_index(BuilderRef kb, StreamSet * Source, StreamSet * cwIndex);
+protected:
+    void generatePabloMethod() override;
+};
 
 }
 #endif
-
