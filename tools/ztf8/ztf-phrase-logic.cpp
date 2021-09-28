@@ -152,7 +152,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
         PabloAST * phrasePos = lengthwiseHashMarks[i];
         phrasePos = pb.createAnd(phrasePos, prevSelected); // update prevSelected correctly
         PabloAST * preceededByLongerPhrase = pb.createZeroes();
-        for (unsigned j = 0; j < curPhraseLen-1; j++) {
+        for (unsigned j = 1; j < curPhraseLen; j++) {
            phrasePos = pb.createAdvance(phrasePos, 1);
            preceededByLongerPhrase = pb.createOr(preceededByLongerPhrase, pb.createAnd(phrasePos, selected));
         }
@@ -185,9 +185,9 @@ void OverlappingLookaheadMarker::generatePabloMethod() {
     if (mGroupNo < 28) {
         PabloAST * eliminateFinal = pb.createZeroes();
         for (unsigned i = mGroupNo+1; i < 29; i++) {
-            unsigned groupIdx = i - (mGroupNo + 1);
+            //unsigned groupIdx = i - (mGroupNo + 1); ---> only when BixnumHashMarks kernel is used
             PabloAST * toEliminate = pb.createZeroes();
-            PabloAST * lookaheadStream = groupLenBixnum[groupIdx];
+            PabloAST * lookaheadStream = groupLenBixnum[i];
             //pb.createDebugPrint(lookaheadStream, "lookaheadStream"+std::to_string(i));
             for (unsigned j = 1; j < i+offset; j++) {
                 toEliminate = pb.createOr(toEliminate, pb.createAnd(selectedPart1, pb.createLookahead(lookaheadStream, j)));
