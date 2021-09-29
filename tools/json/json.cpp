@@ -148,6 +148,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     P->CreateKernelCall<JSONExtraneousChars>(combinedSpans, extraErr);
 
     // 9. Validate objects and arrays
+    //    If flag -c is provided, parse for CSV
     StreamSet * const kwLexCollapsed = su::Collapse(P, su::Select(P, keywordLex, su::Range(0, 3)));
     StreamSet * const allLex = P->CreateStreamSet(10, 1);
     StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
@@ -162,12 +163,21 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const LineSpans = scan::LineSpans(P, LineBreaks);
     StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
     StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
-    scan::Reader(P, driver,
-        SCAN_CALLBACK(postproc_validateObjectsAndArrays),
-	SCAN_CALLBACK(postproc_doneCallback),
-        codeUnitStream,
-        { Indices, Spans },
-        { LineNumbers, Indices });
+    if (ToCSVFlag) {
+        scan::Reader(P, driver,
+            SCAN_CALLBACK(json2csv_validateObjectsAndArrays),
+	    SCAN_CALLBACK(json2csv_doneCallback),
+            codeUnitStream,
+            { Indices, Spans },
+            { LineNumbers, Indices });
+    } else {
+        scan::Reader(P, driver,
+            SCAN_CALLBACK(postproc_validateObjectsAndArrays),
+            SCAN_CALLBACK(postproc_doneCallback),
+            codeUnitStream,
+            { Indices, Spans },
+            { LineNumbers, Indices });
+    }
 
     // 10. Output whether or not it is valid
     StreamSet * const Errors = P->CreateStreamSet(4, 1);
@@ -186,10 +196,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         { ErrIndices, Spans },
         { LineNumbers, Codes });
     
-    if (ToCSVFlag) {
-        llvm_unreachable("should convert to csv");
-    }
-
 // uncomment lines below for debugging
 /*
     StreamSet * filteredBasis = P->CreateStreamSet(8);

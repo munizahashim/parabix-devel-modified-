@@ -66,6 +66,8 @@ static void json2csv_popAndFindNewState() {
     const uint8_t last = *stack.back();
     if (last == '{') {
         currentState = JNextComma;
+    } else if (last == '['){
+        currentState = JDone;
     } else {
         llvm_unreachable("The stack has an unknown char");
     }
@@ -161,7 +163,7 @@ static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
 }
 
 void json2csv_doneCallback() {
-    if (stack.empty()) {
+    if (stack.empty() || currentState == JDone) {
         currentState = JDone;
         return;
     }
@@ -183,7 +185,7 @@ void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         json2csv_parseStrValue(ptr, lineBegin, lineNum, position);
     } else if (currentState == JVStrEnd || currentState == JNextComma) {
         json2csv_parseCommaOrPop(ptr, lineBegin, lineNum, position);
-    } else if (currentState == JDone) {
+    } else if (currentState == JDone && *ptr != ']') {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
 }
