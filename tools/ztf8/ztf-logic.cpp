@@ -80,13 +80,14 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
 unsigned EncodingInfo::prefixLengthMaskBits(unsigned lgth) const {
     unsigned groupNo = getLengthGroupNo(lgth);
     auto g = byLength[groupNo];
-    if (groupNo < 2) {
-        return g.encoding_bytes + 1;
+    switch(groupNo) {
+        case 0: return g.encoding_bytes + 1;
+        case 1: return g.encoding_bytes + 1;
+        case 2: return g.encoding_bytes;
+        case 3: return 1;
+        case 4: return 0;
+        default: return 0;
     }
-    if (groupNo < 4) {
-        return 2;
-    }
-    return g.encoding_bytes;
 }
 
 WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)

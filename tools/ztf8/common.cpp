@@ -51,6 +51,7 @@ LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encoding
     HALF_LENGTH(b->getSize(groupHalfLength)),
     LO(b->getSize(groupInfo.lo)),
     HI(b->getSize(groupInfo.hi)),
+    RANGE(b->getSize((groupInfo.hi - groupInfo.lo) + 1UL)),
     // All subtables are sized the same.
     SUBTABLE_SIZE(b->getSize((1UL << groupInfo.hash_bits) * groupInfo.hi)),
     HASH_BITS(b->getSize(groupInfo.hash_bits)),

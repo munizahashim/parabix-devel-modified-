@@ -12,25 +12,6 @@
 
 namespace kernel {
 
-/*
-Input: hashMarks, kSymBixnum, prevHashMask, phraseRuns
-Output: hashMask
-*/
-
-class PhraseSelection : public pablo::PabloKernel {
-public:
-    PhraseSelection(BuilderRef kb,
-                StreamSet * hashMarks,
-                StreamSet * hashMarksBixNum,
-                StreamSet * prevHashMarks,
-                unsigned symNum,
-                StreamSet * updatedHashMark);
-protected:
-    void generatePabloMethod() override;
-    unsigned mSymNum;
-};
-
-
 class UpdateNextHashMarks : public pablo::PabloKernel {
 public:
     UpdateNextHashMarks(BuilderRef kb,
@@ -65,14 +46,12 @@ class LengthSelector final: public pablo::PabloKernel {
 public:
     LengthSelector(BuilderRef b,
                  EncodingInfo & encodingScheme,
-                 unsigned groupNo,
                  StreamSet * groupLenBixnum,
                  StreamSet * hashMarks,
                  StreamSet * selectedHashMarksPos);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;
-    unsigned mGroupNo;
 };
 
 // 1. select non-overlapping phrases of same length

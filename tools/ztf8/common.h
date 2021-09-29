@@ -37,6 +37,7 @@ struct LengthGroupParameters {
     Constant * HALF_LENGTH;
     Constant * LO;
     Constant * HI;
+    Constant * RANGE;
     // All subtables are sized the same.
     Constant * SUBTABLE_SIZE;
     Constant * HASH_BITS;
