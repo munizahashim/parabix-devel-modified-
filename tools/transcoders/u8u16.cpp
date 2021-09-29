@@ -37,8 +37,9 @@
 #include <util/papi_helper.hpp>
 // #define REPORT_PAPI_TESTS
 #endif
-
-// #define COMPARISION_STUDY
+#ifdef REPORT_PAPI_TESTS
+#define COMPARISION_STUDY
+#endif
 
 using namespace pablo;
 using namespace kernel;

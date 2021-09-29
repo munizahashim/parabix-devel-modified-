@@ -38,6 +38,7 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
                 } else {
                     mTarget->addNonPersistentScalar(countTy, name);
                 }
+
             }
         }
     }
@@ -61,7 +62,10 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
         #endif
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
-            Value * const valid = b->CreateOr(b->CreateICmpULE(consumed, produced), mInitiallyTerminated);
+            Value * valid = b->CreateICmpULE(consumed, produced);
+            if (mInitiallyTerminated) {
+                valid = b->CreateOr(valid, mInitiallyTerminated);
+            }
             constexpr auto msg =
                 "Consumed item count (%" PRId64 ") of %s.%s exceeded its produced item count (%" PRId64 ").";
             const ConsumerEdge & c = mConsumerGraph[e];

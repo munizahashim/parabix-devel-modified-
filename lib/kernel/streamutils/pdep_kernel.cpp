@@ -56,9 +56,11 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 {}, {})
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements()),
-    mOptimization(opt) {}
+    mOptimization(opt) {
+        //setStride(4 * b->getBitBlockWidth());
+    }
 
-void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     Type * fieldWidthTy = b->getIntNTy(mFieldWidth);
     Type * sizeTy = b->getSizeTy();
     const unsigned numFields = b->getBitBlockWidth() / mFieldWidth;
@@ -72,6 +74,10 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     BasicBlock * entry = b->GetInsertBlock();
     BasicBlock * expandLoop = b->CreateBasicBlock("expandLoop");
     BasicBlock * expansionDone = b->CreateBasicBlock("expansionDone");
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     Value * processedSourceItems = b->getProcessedItemCount("source");
     Value * initialSourceOffset = b->CreateURem(processedSourceItems, BLOCK_WIDTH);
 
@@ -203,16 +209,20 @@ FieldDepositKernel::FieldDepositKernel(BuilderRef b
 
 }
 
-void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfBlocks, unsigned fieldWidth, unsigned streamCount);
+void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsigned fieldWidth, unsigned streamCount, unsigned stride);
 
-void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
+void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     if (AVX2_available() && BMI2_available() && ((mFieldWidth == 32) || (mFieldWidth == 64))) {
-        PDEPFieldDepositLogic(kb, numOfBlocks, mFieldWidth, mStreamCount);
+        PDEPFieldDepositLogic(kb, numOfStrides, mFieldWidth, mStreamCount, getStride());
     } else {
         BasicBlock * entry = kb->GetInsertBlock();
         BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
         BasicBlock * done = kb->CreateBasicBlock("done");
         Constant * const ZERO = kb->getSize(0);
+        Value * numOfBlocks = numOfStrides;
+        if (getStride() != kb->getBitBlockWidth()) {
+            numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+        }
         kb->CreateBr(processBlock);
         kb->SetInsertPoint(processBlock);
         PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
@@ -231,7 +241,7 @@ void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     }
 }
 
-void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfBlocks, unsigned fieldWidth, unsigned streamCount) {
+void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsigned fieldWidth, unsigned streamCount, unsigned stride) {
     Type * fieldTy = kb->getIntNTy(fieldWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
     Function * PDEP_func = nullptr;
@@ -246,6 +256,10 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfBlocks, unsig
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
     const unsigned fieldsPerBlock = kb->getBitBlockWidth()/fieldWidth;
+    Value * numOfBlocks = numOfStrides;
+    if (stride != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(stride/kb->getBitBlockWidth())));
+    }
     kb->CreateBr(processBlock);
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
@@ -325,8 +339,8 @@ PDEPFieldDepositKernel::PDEPFieldDepositKernel(BuilderRef b
         llvm::report_fatal_error("Unsupported PDEP width for PDEPFieldDepositKernel");
 }
 
-void PDEPFieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
-    PDEPFieldDepositLogic(kb, numOfBlocks, mPDEPWidth, mStreamCount);
+void PDEPFieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
+    PDEPFieldDepositLogic(kb, numOfStrides, mPDEPWidth, mStreamCount, getStride());
 }
 
 
@@ -341,7 +355,7 @@ PDEPkernel::PDEPkernel(BuilderRef b, const unsigned swizzleFactor, std::string n
 , mSwizzleFactor(swizzleFactor) {
 }
 
-void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfBlocks) {
+void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     BasicBlock * const entry = b->GetInsertBlock();
     BasicBlock * const processBlock = b->CreateBasicBlock("processBlock");
     BasicBlock * const finishedStrides = b->CreateBasicBlock("finishedStrides");
@@ -352,6 +366,10 @@ void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfBlocks
     Constant * const ZERO = b->getSize(0);
     Value * const sourceItemCount = b->getProcessedItemCount("source");
 
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    }
     Value * const initialSourceOffset = b->CreateURem(sourceItemCount, BLOCK_WIDTH);
     b->CreateBr(processBlock);
 

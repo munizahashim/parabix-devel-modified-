@@ -407,7 +407,7 @@ void PipelineCompiler::checkPAPIRetValAndExitOnError(BuilderRef b, StringRef sou
     args[1] = b->GetString("Error: %s returned %s\n");
     args[2] = b->GetString(source);
     args[3] = strerr;
-    Value * Dprintf = b->GetDprintf();
+    Function * const Dprintf = b->GetDprintf();
     b->CreateCall(Dprintf->getFunctionType(), Dprintf, args);
     b->CreateExit(-1);
     b->CreateBr(onSuccess);

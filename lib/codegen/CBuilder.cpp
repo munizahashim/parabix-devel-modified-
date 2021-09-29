@@ -408,21 +408,35 @@ Value * CBuilder::CreateMalloc(Value * size) {
 }
 
 Value * CBuilder::CreatePageAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace) {
+    return CreateAlignedMalloc(type, ArraySize, addressSpace, NON_HUGE_PAGE_SIZE);
+}
+
+llvm::Value * CBuilder::CreatePageAlignedMalloc(llvm::Value * const size) {
+    const auto alignment = NON_HUGE_PAGE_SIZE;
+    Constant * align = ConstantInt::get(size->getType(), alignment);
+    Value * const alignedSize = CreateRoundUp(size, align);
+    return CreateAlignedMalloc(alignedSize, alignment);
+}
+
+Value * CBuilder::CreateCacheAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace) {
+    return CreateAlignedMalloc(type, ArraySize, addressSpace, getCacheAlignment());
+}
+
+llvm::Value * CBuilder::CreateCacheAlignedMalloc(llvm::Value * const size) {
+    const auto alignment = getCacheAlignment();
+    Constant * align = ConstantInt::get(size->getType(), alignment);
+    Value * const alignedSize = CreateRoundUp(size, align);
+    return CreateAlignedMalloc(alignedSize, alignment);
+}
+
+Value * CBuilder::CreateAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace, const unsigned alignment) {
     Value * size = ConstantExpr::getSizeOf(type);
     if (ArraySize) {
         size = CreateMul(size, CreateZExtOrTrunc(ArraySize, size->getType()));
     }
-    return CreatePointerCast(CreatePageAlignedMalloc(size), type->getPointerTo(addressSpace));
-}
-
-Value * CBuilder::CreatePageAlignedMalloc(llvm::Value * const size) {
-    Constant * align = ConstantInt::get(size->getType(), NON_HUGE_PAGE_SIZE);
+    Constant * align = ConstantInt::get(size->getType(), alignment);
     Value * const alignedSize = CreateRoundUp(size, align);
-    Value * const ptr = CreateAlignedMalloc(alignedSize, NON_HUGE_PAGE_SIZE);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        CreateMProtect(ptr, alignedSize, Protect::READ);
-    }
-    return ptr;
+    return CreatePointerCast(CreateAlignedMalloc(alignedSize, alignment), type->getPointerTo(addressSpace));
 }
 
 Value * CBuilder::CreateAlignedMalloc(Value * size, const unsigned alignment) {

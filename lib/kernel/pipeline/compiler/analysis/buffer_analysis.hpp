@@ -86,6 +86,8 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 cannotBePlacedIntoThreadLocalMemory = true;
             }
 
+            BufferNode & bn = mBufferGraph[streamSet];
+
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
                     case AttrId::Add:                        
@@ -120,11 +122,13 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     case AttrId::ManagedBuffer:
                         bp.IsManaged = true;
                         break;
+                    case AttrId::EmptyWriteOverflow:
+                        bn.OverflowCapacity = std::max(bn.OverflowCapacity, 1U);
+                        break;
                     default: break;
                 }
             }
 
-            BufferNode & bn = mBufferGraph[streamSet];
             if (cannotBePlacedIntoThreadLocalMemory) {
                 bn.Locality = BufferLocality::PartitionLocal;
             }
@@ -336,6 +340,7 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
         bn.Locality = BufferLocality::GloballyShared;
     }
 
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -464,7 +469,6 @@ void PipelineAnalysis::identifyOwnedBuffers() {
  * @brief identifyLinearBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyLinearBuffers() {
-#ifndef FORCE_ALL_STREAMSETS_TO_BE_LINEAR
 
     // All pipeline I/O must be linear
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
@@ -483,6 +487,9 @@ void PipelineAnalysis::identifyLinearBuffers() {
     // requires that all of its inputs are linear.
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
+
+
+
         bool inputsMustBeLinear = false;
         if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::InternallySynchronized))) {
             // An internally synchronized kernel requires that all I/O is linear
@@ -521,7 +528,8 @@ void PipelineAnalysis::identifyLinearBuffers() {
                 default: break;
             }
         }
-        return false;
+        const ProcessingRate & rate = binding.getRate();
+        return !rate.isFixed();
     };
 
     // If the binding attributes of the producer/consumer(s) of a streamSet indicate
@@ -529,6 +537,10 @@ void PipelineAnalysis::identifyLinearBuffers() {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & N = mBufferGraph[streamSet];
+        #if defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR) && defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR)
+        N.IsLinear = true;
+        #else
+
         if (N.IsLinear) {
             continue;
         }
@@ -537,7 +549,7 @@ void PipelineAnalysis::identifyLinearBuffers() {
         const BufferPort & producerRate = mBufferGraph[binding];
         const Binding & output = producerRate.Binding;
 
-        #ifdef FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR
+        #if defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR) || defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR)
         const auto producer = source(binding, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
         #endif
@@ -552,15 +564,22 @@ void PipelineAnalysis::identifyLinearBuffers() {
                     N.IsLinear = true;
                     break;
                 }
+                #ifdef FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR
+                if (KernelPartitionId[target(binding, mBufferGraph)] == partitionId) {
+                    N.IsLinear = true;
+                    break;
+                }
+                #endif
                 #ifdef FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR
-                const auto consumer = target(binding, mBufferGraph);
-                if (KernelPartitionId[consumer] != partitionId) {
+                if (KernelPartitionId[target(binding, mBufferGraph)] != partitionId) {
                     N.IsLinear = true;
                     break;
                 }
                 #endif
            }
         }
+
+        #endif
     }
 
 #if 0
@@ -584,12 +603,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
     }
 #endif
 
-#else
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & N = mBufferGraph[streamSet];
-        N.IsLinear = true;
-    }
-#endif
 }
 
 
@@ -598,24 +611,29 @@ void PipelineAnalysis::identifyLinearBuffers() {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 
-    const auto firstKernel = out_degree(PipelineInput, mBufferGraph) == 0 ? FirstKernel : PipelineInput;
-    const auto lastKernel = in_degree(PipelineOutput, mBufferGraph) == 0 ? LastKernel : PipelineOutput;
+//    const auto firstKernel = out_degree(PipelineInput, mBufferGraph) == 0 ? FirstKernel : PipelineInput;
+//    const auto lastKernel = in_degree(PipelineOutput, mBufferGraph) == 0 ? LastKernel : PipelineOutput;
     #ifndef TEST_ALL_KERNEL_INPUTS
     auto currentPartitionId = -1U;
     #endif
-    for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+//    flat_set<unsigned> fixedPartitionInputs;
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         #ifndef TEST_ALL_KERNEL_INPUTS
         const auto partitionId = KernelPartitionId[kernel];
         const bool isPartitionRoot = (partitionId != currentPartitionId);
         currentPartitionId = partitionId;
         #endif
+//        assert (fixedPartitionInputs.empty());
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.CanModifySegmentLength = true;
             #else
             if (isPartitionRoot) {
-                // TODO: create symbolic rate ids
+//                const auto id = inputRate.SymbolicRateId;
+//                assert (id > 0);
+//                const auto alreadyTested = fixedPartitionInputs.insert(id).second;
+//                inputRate.CanModifySegmentLength = alreadyTested;
                 inputRate.CanModifySegmentLength = true;
             } else {
                 const auto streamSet = source(e, mBufferGraph);
@@ -624,6 +642,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
+//        if (isPartitionRoot) {
+//            fixedPartitionInputs.clear();
+//        }
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
@@ -745,8 +766,10 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
         auto requiredSize = std::max(reqSize1, reqSize2);
 
-        bn.OverflowCapacity = overflowSize;
-        bn.UnderflowCapacity = underflowSize;
+        assert (requiredSize > 0);
+
+        bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
+        bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
         bn.RequiredCapacity = requiredSize;
 
     }

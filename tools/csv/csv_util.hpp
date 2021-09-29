@@ -131,8 +131,8 @@ void CSVparser::generatePabloMethod() {
     toDelete = pb.createOr(toDelete, csvMarks[markEOF]);
     PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
     recordMarks = pb.createAnd(recordMarks, toKeep);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), recordMarks);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("fieldSeparators"), pb.getInteger(0)), fieldMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), pb.createAnd(recordMarks, toKeep));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("fieldSeparators"), pb.getInteger(0)), pb.createAnd(fieldMarks, toKeep));
     pb.createAssign(pb.createExtract(getOutputStreamVar("quoteEscape"), pb.getInteger(0)), quote_escape);
     pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
 }
