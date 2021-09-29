@@ -98,26 +98,37 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         P->CreateKernelCall<StdOutKernel>(filtered);
     } else {
 //  NORMAL
+    StreamSet * recordsByField = P->CreateStreamSet(1);
+    if (UseFilterByMaskKernel) {
+        P->CreateKernelCall<FilterByMaskKernel>
+            (Select(fieldSeparators, {0}),
+             SelectOperationList{Select(recordSeparators, {0})},
+             recordsByField);
+    } else {
+        FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
+    }
+
     StreamSet * translatedBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
-    //FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
     if (UseFilterByMaskKernel) {
-        P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}), SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))}, filteredBasis);
+        P->CreateKernelCall<FilterByMaskKernel>
+            (Select(toKeep, {0}),
+             SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))},
+             filteredBasis);
+        P->CreateKernelCall<FilterByMaskKernel>
+            (Select(toKeep, {0}),
+             SelectOperationList{Select(fieldSeparators, {0})},
+             filteredFieldSeparators);
     } else {
         FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+        FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
     }
-    StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
-    FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);
-    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
 
     //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
     //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
-
-    StreamSet * recordsByField = P->CreateStreamSet(1);
-    FilterByMask(P, filteredFieldSeparators, filteredRecordSeparators, recordsByField);
 
     const unsigned fieldCount = templateStrs.size();
     const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
