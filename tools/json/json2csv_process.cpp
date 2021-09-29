@@ -45,25 +45,7 @@ enum JSONState {
 
 static llvm::SmallVector<const u_int8_t *, 32> stack{};
 static JSONState currentState = JInit;
-
-
-/*
- * JSON input:
- *     [{ "key1" : "Luiz"}, {"wow": "value"}, {"key1": "ooh", "wow": "foo"}]
- *
- *  map = {
- *     "key1": {0: "Luiz"}, {2: "ooh"},
- *     "wow": {1: "value"}, {2: "foo"}
- *  }
- *
- *  CSV output:
- *
- *  key1, wow
- *  Luiz,
- *  ,value
- *  ooh,foo
- */
-static std::map<std::string, std::map<int, std::string>> m;
+static std::map<std::string, std::map<int, std::string>> info;
 static uint64_t currentIndex = 0;
 static llvm::SmallVector<u_int8_t, 32> keyVector{};
 static llvm::SmallVector<u_int8_t, 32> valueVector{};
@@ -74,6 +56,50 @@ static void json2csv_resetVector() {
     } else if (currentState == JVStrBegin) {
         valueVector.clear();
     }
+}
+
+static void json2csv_resetAll() {
+    keyVector.clear();
+    valueVector.clear();
+    info.clear();
+    currentIndex = 0;
+}
+
+static void json2csv_printCSV() {
+    std::map<std::string, std::map<int, std::string>>::iterator it;
+    std::map<std::string, std::map<int, std::string>>::iterator nextIt;
+    for (it = info.begin(); it != info.end(); it++) {
+        nextIt = it;
+        const char * sep = ++nextIt == info.end() ? "" : ",";
+	printf("%s%s", it->first.c_str(), sep);
+    }
+    for (uint64_t idx = 0; idx < currentIndex + 1; idx++) {
+        printf("\n");
+        for (it = info.begin(); it != info.end(); it++) {
+            nextIt = it;
+            const char * sep = ++nextIt == info.end() ? "" : ",";
+            std::map<int, std::string> innerMap = it->second;
+            std::map<int, std::string>::const_iterator pos = innerMap.find(idx);
+            if (pos != innerMap.end()) {
+                printf("%s", pos->second.c_str());
+            }
+            printf("%s", sep);
+        }
+    }
+}
+
+static void json2csv_saveKeyValuePair() {
+     std::string key = std::string(keyVector.begin(), keyVector.end());
+     std::string value = std::string(valueVector.begin(), valueVector.end());
+     std::map<std::string, std::map<int, std::string>>::const_iterator pos = info.find(key);
+
+     if (pos == info.end()) {
+         std::map<int, std::string> innerMap{};
+         info[key][currentIndex] = value;
+     } else {
+         std::map<int, std::string> innerMap = pos->second;
+         info[key][currentIndex] = value;
+     }
 }
 
 static ptrdiff_t json2csv_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
@@ -130,7 +156,6 @@ static void json2csv_parseStrOrPop(bool popAllowed, const uint8_t * ptr, const u
     if (*ptr == '"') {
         currentState = JKStrBegin;
     } else if (*ptr == '}' && popAllowed) {
-	printf("vrau");
         json2csv_popAndFindNewState();
     } else {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
@@ -168,7 +193,7 @@ static void json2csv_parseStr(const uint8_t * ptr, const uint8_t * lineBegin, ui
         currentState = JKStrEnd;
     } else if (*ptr == '"' && (currentState == JVStrBegin || currentState == JReadVStr)) {
         currentState = JVStrEnd;
-	printf("%s %s ", std::string(keyVector.begin(), keyVector.end()).c_str(), std::string(valueVector.begin(), valueVector.end()).c_str());
+        json2csv_saveKeyValuePair();
     } else {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
     }
@@ -190,7 +215,6 @@ static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
 
     const uint8_t last = *stack.back();
     if (*ptr == ',' && last == '[') {
-        printf("\n");
         currentIndex += 1;
         currentState = JArrInit;
     } else if (*ptr == ',' && last == '{') {
@@ -204,6 +228,7 @@ static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
 
 void json2csv_doneCallback() {
     if (stack.empty() || currentState == JDone) {
+        json2csv_printCSV();
         currentState = JDone;
         return;
     }
@@ -212,6 +237,7 @@ void json2csv_doneCallback() {
 
 void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
     if (currentState == JInit) {
+        json2csv_resetAll();
         json2csv_parseArr(ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
         json2csv_parseStrOrPop(true, ptr, lineBegin, lineNum, position);
