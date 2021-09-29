@@ -150,12 +150,22 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 9. Validate objects and arrays
     //    If flag -c is provided, parse for CSV
     StreamSet * const kwLexCollapsed = su::Collapse(P, su::Select(P, keywordLex, su::Range(0, 3)));
-    StreamSet * const allLex = P->CreateStreamSet(10, 1);
     StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
-    P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex},
-        allLex
-    );
+    StreamSet * allLex;
+    if (ToCSVFlag) {
+        allLex = P->CreateStreamSet(11, 1);
+        P->CreateKernelCall<StreamsMerge>(
+            std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex, stringSpan},
+            allLex
+        );
+    } else {
+        allLex = P->CreateStreamSet(10, 1);
+        P->CreateKernelCall<StreamsMerge>(
+            std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex},
+            allLex
+        );
+    }
+
     StreamSet * const collapsedLex = su::Collapse(P, allLex);
     auto const LineBreaks = P->CreateStreamSet(1);
     P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);

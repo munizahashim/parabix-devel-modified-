@@ -7,6 +7,7 @@
 #include <llvm/Support/Compiler.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/ADT/SmallVector.h>
+#include <map>
 
 /*
  * <Json2CSV> ::= <Array>
@@ -37,11 +38,43 @@ enum JSONState {
     JObjColon,
     JArrInit,
     JNextComma,
-    JDone
+    JDone,
+    JReadKStr,
+    JReadVStr
 };
 
-static llvm::SmallVector<const u_int8_t *, 2> stack{};
+static llvm::SmallVector<const u_int8_t *, 32> stack{};
 static JSONState currentState = JInit;
+
+
+/*
+ * JSON input:
+ *     [{ "key1" : "Luiz"}, {"wow": "value"}, {"key1": "ooh", "wow": "foo"}]
+ *
+ *  map = {
+ *     "key1": {0: "Luiz"}, {2: "ooh"},
+ *     "wow": {1: "value"}, {2: "foo"}
+ *  }
+ *
+ *  CSV output:
+ *
+ *  key1, wow
+ *  Luiz,
+ *  ,value
+ *  ooh,foo
+ */
+static std::map<std::string, std::map<int, std::string>> m;
+static uint64_t currentIndex = 0;
+static llvm::SmallVector<u_int8_t, 32> keyVector{};
+static llvm::SmallVector<u_int8_t, 32> valueVector{};
+
+static void json2csv_resetVector() {
+    if (currentState == JKStrBegin) {
+        keyVector.clear();
+    } else if (currentState == JVStrBegin) {
+        valueVector.clear();
+    }
+}
 
 static ptrdiff_t json2csv_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
     ptrdiff_t column = ptr - lineBegin;
@@ -59,15 +92,15 @@ static std::string json2csv_getLineAndColumnInfo(const std::string str, const ui
 static void json2csv_popAndFindNewState() {
     assert(!stack.empty());
     stack.pop_back();
+
     if (stack.empty()) {
         currentState = JDone;
         return;
     }
+ 
     const uint8_t last = *stack.back();
-    if (last == '{') {
+    if (last == '[') {
         currentState = JNextComma;
-    } else if (last == '['){
-        currentState = JDone;
     } else {
         llvm_unreachable("The stack has an unknown char");
     }
@@ -97,6 +130,7 @@ static void json2csv_parseStrOrPop(bool popAllowed, const uint8_t * ptr, const u
     if (*ptr == '"') {
         currentState = JKStrBegin;
     } else if (*ptr == '}' && popAllowed) {
+	printf("vrau");
         json2csv_popAndFindNewState();
     } else {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
@@ -124,10 +158,17 @@ static void json2csv_parseObjOrPop(bool popAllowed, const uint8_t * ptr, const u
 }
 
 static void json2csv_parseStr(const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
-    if (*ptr == '"' && currentState == JKStrBegin) {
+    if (*ptr != '"' && (currentState == JKStrBegin || currentState == JReadKStr)) {
+        keyVector.push_back(*ptr);
+	currentState = JReadKStr;
+    } else if (*ptr != '"' && (currentState == JVStrBegin || currentState == JReadVStr)) {
+        valueVector.push_back(*ptr);
+	currentState = JReadVStr;
+    } else if (*ptr == '"' && (currentState == JKStrBegin || currentState == JReadKStr)) {
         currentState = JKStrEnd;
-    } else if (*ptr == '"' && currentState == JVStrBegin) {
+    } else if (*ptr == '"' && (currentState == JVStrBegin || currentState == JReadVStr)) {
         currentState = JVStrEnd;
+	printf("%s %s ", std::string(keyVector.begin(), keyVector.end()).c_str(), std::string(valueVector.begin(), valueVector.end()).c_str());
     } else {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
     }
@@ -146,16 +187,15 @@ static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Stack is empty", ptr, lineBegin, lineNum));
         return;
     }
+
     const uint8_t last = *stack.back();
-    if (*ptr == ',') {
-        if (last == '{') {
-            currentState = JObjInit;
-        } else {
-            llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Wrong char in stack", ptr, lineBegin, lineNum));
-        }
-    } else if (*ptr == '}' && last == '{') {
-        json2csv_popAndFindNewState();
-    } else if (*ptr == ']' && last == '[') {
+    if (*ptr == ',' && last == '[') {
+        printf("\n");
+        currentIndex += 1;
+        currentState = JArrInit;
+    } else if (*ptr == ',' && last == '{') {
+        currentState = JObjInit;
+    } else if (*ptr == '}' || *ptr == ']') {
         json2csv_popAndFindNewState();
     } else {
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
@@ -178,6 +218,9 @@ void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
     } else if (currentState == JArrInit) {
         json2csv_parseObjOrPop(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JKStrBegin || currentState == JVStrBegin) {
+        json2csv_resetVector();
+        json2csv_parseStr(ptr, lineBegin, lineNum, position);
+    } else if (currentState == JReadKStr || currentState == JReadVStr) {
         json2csv_parseStr(ptr, lineBegin, lineNum, position);
     } else if (currentState == JKStrEnd) {
         json2csv_parseColon(ptr, lineBegin, lineNum, position);
