@@ -983,7 +983,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(PriorAddress);
             Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
             Value * priorBuffer = b->CreateLoad(priorBufferField);
-           //  b->CreateFree(b->CreateInBoundsGEP(priorBuffer, b->CreateNeg(underflow)));
+            b->CreateFree(b->CreateInBoundsGEP(priorBuffer, b->CreateNeg(underflow)));
             b->CreateStore(mallocAddress, priorBufferField);
             b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
             b->CreateStore(expandedBuffer, mallocAddrField);
@@ -1000,6 +1000,14 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             PHINode * const retValPhi = b->CreatePHI(b->getInt1Ty(), 2);
             retValPhi->addIncoming(b->getFalse(), copyBackExit);
             retValPhi->addIncoming(b->getTrue(), expandAndCopyBackExit);
+
+//            Function * fSleep = m->getFunction("usleep");
+//            if (fSleep == nullptr) {
+//                FunctionType * fty = FunctionType::get(b->getInt32Ty(), {b->getInt32Ty()}, false);
+//                fSleep = Function::Create(fty, Function::ExternalLinkage, "usleep", m);
+//                fSleep->setCallingConv(CallingConv::C);
+//            }
+//            b->CreateCall(fSleep, b->getInt32(10));
 
             Value * const effectiveCapacity = b->CreateAdd(consumedChunks, internalCapacityPhi);
             indices[1] = b->getInt32(EffectiveCapacity);
@@ -1073,7 +1081,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             b->CreateStore(newBuffer, virtualBaseField);
             b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
             b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth)->setOrdering(AtomicOrdering::Release);
-           // b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
+            b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
 
             b->CreateRet(b->getTrue());
         }
