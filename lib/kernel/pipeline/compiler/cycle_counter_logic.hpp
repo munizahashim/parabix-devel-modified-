@@ -762,7 +762,6 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                 }
             }
         }
-
     }
 }
 
@@ -804,16 +803,15 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSe
     b->CreateStore(produced, b->CreateGEP(entryArray, {traceIndex, TWO}));
 
     // consumer processed item count [3,n)
-    Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+    Value * const historyPtr = b->getScalarFieldPtr(STATISTICS_BUFFER_EXPANSION_TEMP_STACK);
 
     const auto n = entryTy->getArrayNumElements(); assert (n > 3);
-    assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
+ //   assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
 
-    Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });
     Value * const logPtr = b->CreateGEP(entryArray, {traceIndex, THREE});
     unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
     Constant * const length = b->getSize(sizeTyWidth * (n - 3));
-    b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+    b->CreateMemCpy(logPtr, historyPtr, length, sizeTyWidth);
 
 }
 

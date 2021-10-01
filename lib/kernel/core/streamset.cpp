@@ -945,6 +945,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
 
+        const auto sizeTyWidth = sizeTy->getBitWidth() / 8;
+
         if (mLinear) {
 
             indices[1] = b->getInt32(MallocedAddress);
@@ -970,7 +972,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const newInternalCapacity = b->CreateRoundUp(b->CreateAdd(chunksToReserve, internalCapacity), internalCapacity);
+            Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
+            Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
@@ -980,10 +983,10 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(PriorAddress);
             Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
             Value * priorBuffer = b->CreateLoad(priorBufferField);
-            b->CreateFree(b->CreateInBoundsGEP(priorBuffer, b->CreateNeg(underflow)));
+           //  b->CreateFree(b->CreateInBoundsGEP(priorBuffer, b->CreateNeg(underflow)));
             b->CreateStore(mallocAddress, priorBufferField);
-            b->CreateStore(expandedBuffer, mallocAddrField);
             b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
+            b->CreateStore(expandedBuffer, mallocAddrField);
             BasicBlock * const expandAndCopyBackExit = b->GetInsertBlock();
             b->CreateBr(updateBaseAddress);
 
@@ -998,12 +1001,14 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             retValPhi->addIncoming(b->getFalse(), copyBackExit);
             retValPhi->addIncoming(b->getTrue(), expandAndCopyBackExit);
 
-            Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
-            b->CreateStore(newBaseAddress, virtualBaseField);
             Value * const effectiveCapacity = b->CreateAdd(consumedChunks, internalCapacityPhi);
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
-            b->CreateStore(effectiveCapacity, effCapacityField);
+            b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
+
+            Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
+            b->CreateAlignedStore(newBaseAddress, virtualBaseField, sizeTyWidth)->setOrdering(AtomicOrdering::Release);
+
             b->CreateRet(retValPhi);
 
         } else { // Circular
@@ -1065,10 +1070,10 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(PriorAddress);
             Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
             Value * const priorBuffer = b->CreateLoad(priorBufferField);
-            b->CreateStore(newCapacity, intCapacityField);
-            b->CreateStore(virtualBase, priorBufferField);
             b->CreateStore(newBuffer, virtualBaseField);
-            b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
+            b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth)->setOrdering(AtomicOrdering::Release);
+           // b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
 
             b->CreateRet(b->getTrue());
         }

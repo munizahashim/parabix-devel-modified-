@@ -476,8 +476,6 @@ struct SchedulingNode {
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
 
-using PartitionJumpTree = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property, no_property>;
-
 }
 
 #endif // PIPELINE_KERNEL_HEADER_GRAPHS_H

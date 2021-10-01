@@ -63,11 +63,11 @@ public:
 
 //        P.computeMaximumDataflow(true);
 
-        errs() << "-- max f\n";
+//        errs() << "-- max f\n";
 
         P.computeMaximumDataflow(false);
 
-        errs() << "-- xx\n";
+//        errs() << "-- xx\n";
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
@@ -92,12 +92,11 @@ public:
 
         P.identifyCrossHybridThreadStreamSets();
 
+        P.makeConsumerGraph();
+
         P.calculatePartialSumStepFactors();
 
-        P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
-
-        P.makeConsumerGraph();
 
         // Finish the buffer graph
         // P.identifyDirectUpdatesToStateObjects();
@@ -120,7 +119,10 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mNumOfThreads(pipelineKernel->getNumOfThreads())
-    , mLengthAssertions(pipelineKernel->getLengthAssertions()) {
+    , mLengthAssertions(pipelineKernel->getLengthAssertions())
+    , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
+    , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+    , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers) {
 
     }
 
@@ -270,6 +272,10 @@ private:
 
 public:
 
+    const bool                      mTraceProcessedProducedItemCounts;
+    const bool                      mTraceDynamicBuffers;
+    const bool                      mTraceIndividualConsumedItemCounts;
+
     static const unsigned           PipelineInput = 0U;
     static const unsigned           FirstKernel = 1U;
     unsigned                        LastKernel = 0;
@@ -306,7 +312,7 @@ public:
     BitVector                       PartitionOnHybridThread;
 
     std::vector<unsigned>           mPartitionJumpIndex;
-    PartitionJumpTree               mPartitionJumpTree;
+//    PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;

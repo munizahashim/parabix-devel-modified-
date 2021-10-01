@@ -71,11 +71,11 @@ void PipelineCompiler::start(BuilderRef b) {
     b->SetInsertPoint(mPipelineLoop);
     mMadeProgressInLastSegment = b->CreatePHI(b->getInt1Ty(), 2, "madeProgressInLastSegment");
     mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
-    initializeLocallyAvailableItemCounts(b, entryBlock);
     Constant * const i1_FALSE = b->getFalse();
     mPipelineProgress = i1_FALSE;
     mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
+    readAllConsumerItemCounts(b);
     branchToInitialPartition(b);
 }
 
@@ -353,10 +353,10 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     b->SetInsertPoint(mKernelExit);
-    writeConsumedItemCounts(b);
     recordFinalProducedItemCounts(b);
     recordStridesPerSegment(b);
     recordProducedItemCountDeltas(b);
+    writeConsumedItemCounts(b);
     setCurrentTerminationSignal(b, mTerminatedAtExitPhi);
 
     // chain the progress state so that the next one carries on from this one
@@ -368,11 +368,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         assert (mFinalPartitionSegmentAtExitPhi);
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
     }
-
-    updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
-    #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
-    #endif
 
     if (LLVM_UNLIKELY(CheckAssertions)) {        
         verifyPostInvocationTerminationSignal(b);
@@ -903,7 +898,6 @@ void PipelineCompiler::end(BuilderRef b) {
         }
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-        updateLocallyAvailableItemCounts(b, exitBlock);
         incrementCurrentSegNo(b, exitBlock);
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
