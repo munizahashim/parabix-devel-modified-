@@ -211,7 +211,7 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(groupNo) /*lengthGroupSuffix(encodingScheme) + (PrefixCheckIsSet() ? "_prefix" : "")*/,
+: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
                        Binding{"hashValues", hashValues},
                        Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
@@ -287,6 +287,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
+    ///TODO: optimize if there are no hashmarks in the keyMasks stream
     std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, strideMasksReady);
     Value * keyMask = keyMasks[0];
     b->SetInsertPoint(strideMasksReady);
@@ -328,7 +329,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
 
     Value * tableIdxHash = b->CreateAnd(hashValue, sz_TABLEMASK, "tableIdx");
-    Value * tblEntryPtr = b->CreateGEP(hashTableBasePtr, b->CreateAdd(tableIdxHash, b->getSize(15)));
+    Value * tblEntryPtr = b->CreateInBoundsGEP(hashTableBasePtr, tableIdxHash);
     //Value * tblEntryPtr = b->CreateGEP(hashTablePtr, b->CreateMul(keyHash, lg.HI));
     // Use two 8-byte loads to get hash and symbol values.
     //b->CallPrintInt("tblEntryPtr", tblEntryPtr);
@@ -342,13 +343,12 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * entry1 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr1);
     Value * entry2 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr2);
     Value * symIsEqEntry = b->CreateAnd(b->CreateICmpEQ(entry1, sym1), b->CreateICmpEQ(entry2, sym2));
-    Value * maskLength = nullptr;
 
     //b->CreateCondBr(symIsEqEntry, markCompression, tryStore);
     b->CreateBr(markCompression);
 
     b->SetInsertPoint(markCompression);
-    maskLength = b->CreateZExt(b->CreateSub(keyLength, lg.ENC_BYTES, "maskLength"), sizeTy);
+    Value * maskLength = b->CreateZExt(b->CreateSub(keyLength, lg.ENC_BYTES, "maskLength"), sizeTy);
     //b->CallPrintInt("maskLength", maskLength);
     // Compute a mask of bits, with zeroes marking positions to eliminate.
     // The entire symbols will be replaced, but we need to keep the required
@@ -371,9 +371,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     //mask = b->CreateShl(mask, markOffset);
 
     Value * initialMask = b->CreateAlignedLoad(keyBasePtr, 1);
-    //b->CallPrintInt("initialMask", initialMask);
     Value * updated = b->CreateAnd(initialMask, b->CreateNot(mask));
-    //b->CallPrintInt("mask", mask);
     //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, keyBasePtr, 1);
     Value * curPos = keyMarkPos;
@@ -386,14 +384,39 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
         curHash = b->CreateLShr(curHash, lg.SUFFIX_BITS);
     }
     // Now prepare the prefix - PREFIX_BASE + ... + remaining hash bits.
-    // (keyLength - lg.LO) + ( (lg.HI - lg.LO + 1) * lastNbits)
-    Value * pfxLgthMask = b->CreateAnd(curHash, lg.PREFIX_LENGTH_MASK);
-    Value * lgthBase = b->CreateAdd(b->CreateSub(keyLength, lg.LO), b->CreateMul(b->CreateAdd(b->CreateSub(lg.HI, lg.LO), sz_ONE), pfxLgthMask));
-    // different offset caclulation for length group 17-32
-    Value * pfxOffset = b->CreateSelect(b->CreateICmpEQ(lg.LO, b->getSize(17)), lgthBase, pfxLgthMask);
-    Value * ZTF_prefix = b->CreateAdd(lg.PREFIX_BASE, pfxOffset, "ZTF_prefix");
-    //b->CallPrintInt("ZTF_prefix", ZTF_prefix);
-    b->CreateStore(b->CreateTrunc(ZTF_prefix, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
+    /*
+            3    |  0xC0-0xC7
+            4    |  0xC8-0xCF
+            5    |  0xD0, 0xD4, 0xD8, 0xDC
+            6    |  0xD1, 0xD5, 0xD9, 0xDD
+            7    |  0xD2, 0xD6, 0xDA, 0xDE
+            8    |  0xD3, 0xD7, 0xDB, 0xDF
+            9-16 |  0xE0 - 0xEF (3-bytes)
+            17-32|  0xF0 - 0xFF (4-bytes)
+
+                (length - lo) = row of the prefix table
+            LG    RANGE         xHashBits      hashMask     numRows
+            0      0               3              111          8
+            1      0               3              111          8
+            2      0-3             2               11          4
+            3      0-7             1                1          8
+            4      0-15            0                0         16
+            (PFX_BASE + RANGE) + (numRows * (keyHash AND hashMask))
+    */
+    Value * pfxLgthMask = b->CreateTrunc(b->CreateAnd(keyHash, lg.PREFIX_LENGTH_MASK), b->getInt64Ty());
+    //b->CallPrintInt("keyLength", keyLength);
+    //b->CallPrintInt("lg.PREFIX_LENGTH_MASK", lg.PREFIX_LENGTH_MASK);
+    //b->CallPrintInt("keyHash", keyHash);
+    //b->CallPrintInt("pfxLgthMask", pfxLgthMask);
+
+    Value * lgthBase = b->CreateSub(keyLength, lg.LO);
+    //b->CallPrintInt("lgthBase", lgthBase);
+    Value * pfxOffset = b->CreateAdd(lg.PREFIX_BASE, lgthBase);
+    Value * multiplier = b->CreateMul(lg.RANGE, pfxLgthMask);
+
+    Value * ZTF_prefix = b->CreateAdd(pfxOffset, multiplier, "ZTF_prefix");
+    //b->CallPrintInt("prefix", b->CreateTrunc(pfxOffset, b->getInt8Ty()));
+    b->CreateStore(b->CreateTrunc(pfxOffset, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
 
     //b->CreateBr(nextKey);
     b->CreateBr(tryStore);
@@ -443,7 +466,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateCondBr(b->isFinal(), compressionMaskDone, updatePending);
     b->SetInsertPoint(updatePending);
     Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", produced), bitBlockPtrTy);
-    //b->CallPrintInt("pendingPtr", pendingPtr);
     Value * lastMask = b->CreateBlockAlignedLoad(pendingPtr);
     b->setScalarField("pendingMaskInverted", b->CreateNot(lastMask));
     b->CreateBr(compressionMaskDone);

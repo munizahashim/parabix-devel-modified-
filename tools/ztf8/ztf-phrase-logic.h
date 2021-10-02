@@ -98,28 +98,12 @@ protected:
     unsigned mUpdateCount;
 };
 
-class HashGroupSelector final: public pablo::PabloKernel {
-public:
-    HashGroupSelector(BuilderRef b,
-                 EncodingInfo & encodingScheme,
-                    unsigned groupNo,
-                 StreamSet * hashMarks,
-                 StreamSet * const lengthBixNum,
-                 StreamSet * overflow,
-                 StreamSet * selected);
-protected:
-    void generatePabloMethod() override;
-    EncodingInfo & mEncodingScheme;
-    unsigned mGroupNo;
-};
-
 class ZTF_PhraseExpansionDecoder final: public pablo::PabloKernel {
 public:
     ZTF_PhraseExpansionDecoder(BuilderRef b,
                          EncodingInfo & encodingScheme,
                          StreamSet * const basis,
-                         StreamSet * insertBixNum,
-                         StreamSet * countStream);
+                         StreamSet * insertBixNum);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;

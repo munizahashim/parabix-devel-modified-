@@ -106,12 +106,16 @@ mOverflow(accumOverflow != nullptr) {
 void AccumRunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * runMarks = getInputStreamSet("runMarks")[0];
-    PabloAST * symEndPos = pb.createNot(runMarks); // further validation needed?
+    PabloAST * symEndPos = pb.createNot(runMarks);
     std::vector<PabloAST *> runIndex = getInputStreamSet("runIndex");
     PabloAST * overflow = pb.createExtract(getInputStreamVar("overflow"), pb.getInteger(0));
+    // symbol is already marked for overflow or is following an overflow mark
+    PabloAST * curOverflow = pb.createOr(overflow, pb.createIndexedAdvance(overflow, symEndPos, 1));
+    overflow = pb.createNot(overflow);
     // output
     std::vector<PabloAST *> accumRunIndex(mIndexCount);
     Var * accumRunIndexVar = getOutputStreamVar("accumRunIndex");
+    Var * accumOverflowVar = getOutputStreamVar("accumOverflow");
     BixNumCompiler bnc(pb);
     BixNum curSymLen(mIndexCount);
     BixNum prevSymLen(mIndexCount);
@@ -120,17 +124,17 @@ void AccumRunIndex::generatePabloMethod() {
         // check ri[i] against symEndPos; set 0 if symEndPos is 0 => all the RI bixnum prior to sym end set to 0
         runIndex[i] = pb.createAnd(runIndex[i], symEndPos);
     }
-    //propagte last sym's length to next sym stopping right before next sym's start pos
-    for (unsigned int i = 0; i < 32; i++) { // max sym byte_length restricted to 32 (allow initializng at compile time)
+    //propagte last sym's length to cur sym stopping right before next sym's start pos
+    for (unsigned int i = 0; i < 32; i++) { // max symbol byte_length restricted to 32 (allow initializng at compile time)
         for (unsigned ii = 0; ii < mIndexCount; ii++) {
             PabloAST * priorBits = pb.createAdvance(runIndex[ii], 1);
-            priorBits = pb.createAnd(priorBits, runMarks);
+            priorBits = pb.createAnd3(priorBits, runMarks, overflow);
             runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
         }
     }
     // remove 1 byte symbols like LF
     PabloAST * byteLenSym = pb.createAnd(symEndPos, pb.createAdvance(symEndPos, 1));
-    // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
+    // IndexedAdvance by consecutive k-1 positions to mark invalid k-symbol phrase positions
     byteLenSym = pb.createIndexedAdvance(byteLenSym, symEndPos, 1);
     symEndPos = pb.createAnd(symEndPos, pb.createXor(symEndPos, pb.createAdvance(symEndPos, 1)));
     for (unsigned i = 0; i < mIndexCount; i++) {
@@ -141,12 +145,15 @@ void AccumRunIndex::generatePabloMethod() {
     // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
-    BixNum sum = bnc.AddFull(bnc.AddFull(prevSymLen, curSymLen), 2);
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 2);
+    curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
+    inRangeFinal = pb.createOr(inRangeFinal, pb.createNot(curOverflow));
 
     for (unsigned i = 0; i < mIndexCount; i++) {
         // if either of the operands is 0, ignore the sum in final run -> avoids 1-byte symbols like LF
         pb.createAssign(pb.createExtract(accumRunIndexVar, pb.getInteger(i)), pb.createAnd3(sum[i], symEndPos, inRangeFinal));
     }
+    pb.createAssign(pb.createExtract(accumOverflowVar, pb.getInteger(0)), curOverflow);
 
 }
 

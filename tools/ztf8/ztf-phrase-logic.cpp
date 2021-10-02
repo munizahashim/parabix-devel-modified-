@@ -98,7 +98,7 @@ LengthSelector::LengthSelector(BuilderRef b,
                            StreamSet * groupLenBixnum,
                            StreamSet * hashMarks,
                            StreamSet * selectedHashMarksPos)
-: PabloKernel(b, "LengthSelector",
+: PabloKernel(b, "LengthSelector" + encodingScheme.uniqueSuffix(),
               {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
                Binding{"groupLenBixnum", groupLenBixnum}},
               {Binding{"selectedHashMarksPos", selectedHashMarksPos}}), mEncodingScheme(encodingScheme) { }
@@ -111,18 +111,19 @@ void LengthSelector::generatePabloMethod() {
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
     std::vector<PabloAST *> selectedLengthMarks;
     unsigned offset = 2;
-    unsigned lo = mEncodingScheme.minSymbolLength()+1;
+    unsigned lo = mEncodingScheme.minSymbolLength();//+1;
     unsigned hi = mEncodingScheme.maxSymbolLength();
-    unsigned groupSize = hi - lo + 1;
-    std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
+    //unsigned groupSize = hi - lo + 1;
+    //std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
     for (unsigned i = lo; i <= hi; i++) {
         PabloAST * lenBixnum = bnc.EQ(groupLenBixnum, i - offset);
-        selectedLengthMarks.push_back(lenBixnum);
+        selectedLengthMarks.push_back(pb.createAnd(hashMarks, lenBixnum));
         //pb.createDebugPrint(pb.createCount(pb.createInFile(lenBixnum)), "count"+std::to_string(i));
     }
-    for (unsigned i = 0; i < groupSize; i++) {
-        pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i)), pb.createAnd(hashMarks, selectedLengthMarks[i]));
+    for (unsigned i = 0; i < groupLenBixnum.size(); i++) {
+        pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i)), selectedLengthMarks[i]);
     }
+    //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream2"), pb.getInteger(0)), selectedLengthMarks[mDebugIdx]);
 }
 
 OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
@@ -140,7 +141,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     Var * selectedStreamVar = getOutputStreamVar("selected");
     std::vector<PabloAST *> lengthwiseHashMarks = getInputStreamSet("lengthwiseHashMarks");
     PabloAST * prevSelected = getInputStreamSet("prevSelected")[0];
-    unsigned offset = 4;
+    unsigned offset = 3;
     unsigned curPhraseLen = mGroupNo+offset;
     /*
     Check for overlap with phrases of same length:
@@ -151,7 +152,6 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     */
     /// TODO: add an assertion to check mGroupNo is valid array index
     PabloAST * curLenPos = lengthwiseHashMarks[mGroupNo];
-    PabloAST * selected = pb.createZeroes();
     PabloAST * toAdvance = curLenPos;
     //for (unsigned loop = 0; loop < 2; loop++) { // loop depends on the max number of consecutive phrases of same length
         PabloAST * notSelected = pb.createZeroes();
@@ -159,8 +159,8 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
             toAdvance = pb.createAdvance(toAdvance, 1);
             notSelected = pb.createOr(notSelected, pb.createAnd(toAdvance, curLenPos));
         }
-        selected = pb.createOr(selected, pb.createXor(curLenPos, notSelected));
-        toAdvance = selected;
+        PabloAST * selected = pb.createXor(curLenPos, notSelected);
+        //toAdvance = selected;
     //}
 
     PabloAST * toEliminate = pb.createZeroes();
@@ -178,6 +178,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
         toEliminate = pb.createOr(toEliminate, preceededByLongerPhrase);
     }
     pb.createAssign(pb.createExtract(selectedStreamVar, pb.getInteger(0)), pb.createXor(selected, toEliminate));
+    //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream1"), pb.getInteger(0)), selected);
 }
 
 
@@ -200,10 +201,30 @@ void OverlappingLookaheadMarker::generatePabloMethod() {
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
     PabloAST * selectedPart1 = getInputStreamSet("selectedPart1")[0];
     PabloAST * selected = selectedPart1;
-    unsigned offset = 4;
-    if (mGroupNo < 28) {
+    /*
+    1. eliminate any phrases of curLen in the OR(preceeding region) of longer phrases.
+        * choose the hashMark phrasePos (selected for compression) stream of len (mGroupNo + 1) through 32:
+        toEliminate = zeroes()
+        toEliminate = OR(toEliminate, lookahead phrasePos stream 1 bit at a time (for phrasePosLen-1 times) AND selected(curLen))
+        selected(curLen) = XOR(toEliminate, selected(curLen))
+        selectedPart1 = OR(selectedPart1, selected(curLen))
+
+    selectedPart1 = selected(curLen) for phrasePosLen = 32
+    */
+    unsigned offset = 3;
+    if (mGroupNo < 29) {
         PabloAST * eliminateFinal = pb.createZeroes();
-        for (unsigned i = mGroupNo+1; i < 29; i++) {
+        for (unsigned i = mGroupNo+1; i < 30; i++) { // Use encoding scheme to determine the longest len
+            /*
+                mGroupNo = 5; max = 8
+                => selectedPart1 = phrases of len = 5 where any longer length phrase does not occur in the preceeding overlapping
+                region of len 5 phrases.
+                => for l in range 6-8:
+                    lookaheadStream = hashMarks of len l
+                    lookahead l-1 positions to check if any len 5 compressible phrase preceeds phrase of len l
+                    mark such len 5 phrases to not compress
+                => OR with already selected hashMarks
+            */
             //unsigned groupIdx = i - (mGroupNo + 1); ---> only when BixnumHashMarks kernel is used
             PabloAST * toEliminate = pb.createZeroes();
             PabloAST * lookaheadStream = groupLenBixnum[i];
@@ -216,8 +237,10 @@ void OverlappingLookaheadMarker::generatePabloMethod() {
         //pb.createDebugPrint(selectedPart1, "selectedPart1");
         //pb.createDebugPrint(eliminateFinal, "eliminateFinal");
         selected = pb.createOr(longerHashMarks, pb.createXor(selectedPart1, eliminateFinal));
+        //PabloAST * countStream = pb.createXor(selectedPart1, eliminateFinal);
     }
     pb.createAssign(pb.createExtract(selectedStreamVar, pb.getInteger(0)), selected);
+    //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), countStream);
 }
 
 BixnumHashMarks::BixnumHashMarks(BuilderRef kb,
@@ -249,52 +272,19 @@ void BixnumHashMarks::generatePabloMethod() {
     }
 }
 
-HashGroupSelector::HashGroupSelector(BuilderRef b,
-                           EncodingInfo & encodingScheme,
-                           unsigned groupNo,
-                           StreamSet * hashMarks,
-                           StreamSet * const lengthBixNum,
-                           StreamSet * overflow,
-                           StreamSet * selected)
-: PabloKernel(b, "HashGroupSelector" + groupNo,
-              {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
-                  Binding{"lengthBixNum", lengthBixNum},
-                  Binding{"overflow", overflow}},
-              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
-
-void HashGroupSelector::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    BixNumCompiler bnc(pb);
-    PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
-    std::vector<PabloAST *> lengthBixNum = getInputStreamSet("lengthBixNum");
-    PabloAST * overflow = getInputStreamSet("overflow")[0];
-    //PabloAST* hashMarksFinal = pb.createAnd(hashMarks, pb.createNot(overflow));
-    Var * groupStreamVar = getOutputStreamVar("selected");
-    LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
-    // hashMarks index codes count from 0 on the 2nd byte of a symbol.
-    // So the length is 2 more than the bixnum.
-    unsigned offset = 2;
-    unsigned lo = groupInfo.lo;
-    unsigned hi = groupInfo.hi;
-    std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
-    PabloAST * groupStream = pb.createAnd3(bnc.UGE(lengthBixNum, lo - offset), bnc.ULE(lengthBixNum, hi - offset), hashMarks, groupName);
-    pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
-}
-
 ZTF_PhraseExpansionDecoder::ZTF_PhraseExpansionDecoder(BuilderRef b,
                                            EncodingInfo & encodingScheme,
                                            StreamSet * const basis,
-                                           StreamSet * insertBixNum,
-                                           StreamSet * countStream)
+                                           StreamSet * insertBixNum)
 : pablo::PabloKernel(b, "ZTF_PhraseExpansionDecoder" + encodingScheme.uniqueSuffix(),
                      {Binding{"basis", basis, FixedRate(), LookAhead(encodingScheme.maxEncodingBytes() - 1)}},
-                     {Binding{"insertBixNum", insertBixNum}, Binding{"countStream", countStream}}),
+                     {Binding{"insertBixNum", insertBixNum}}),
     mEncodingScheme(encodingScheme)  {}
 
 void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
-    std::vector<PabloAST *> count;
+    //std::vector<PabloAST *> count;
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::vector<PabloAST *> ASCII_lookaheads;
     PabloAST * ASCII_lookahead = pb.createNot(pb.createLookahead(basis[7], 1)); // for lg 0,1,2
@@ -341,21 +331,10 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
             if (i < 2) {
                 next_base = base + 8;
                 inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[0], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
-                count.push_back(inGroup);
+                //count.push_back(inGroup);
             }
             else {
                 next_base = base + 16;
-                #if 0
-                for (unsigned c = base; c < base+4; c++) {
-                    PabloAST * countStream = pb.createZeroes();
-                    unsigned c1 = c;
-                    for (unsigned idx = 0; idx < 4; idx++) {
-                         countStream = pb.createOr(countStream, bnc.EQ(basis, c1));
-                         c1 += 4;
-                    }
-                    count.push_back(countStream);
-                }
-                #endif
                 inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[0], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
                 BixNum diff = bnc.SubModular(basis, base); // SubModular range (0-7)
                 for (unsigned extractIdx = 0; extractIdx < 2; extractIdx++) { // extract low 2 bits
@@ -370,30 +349,12 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
             inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[i-2], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
             //pb.createDebugPrint(inGroup, "inGroup["+std::to_string(i)+"]");
             if (i == 3) {
-                #if 0
-                for (unsigned c = base; c < base+8; c++) {
-                    PabloAST * countStream = pb.createZeroes();
-                    unsigned c1 = c;
-                    for (unsigned idx = 0; idx < 2; idx++) {
-                         countStream = pb.createOr(countStream, bnc.EQ(basis, c1));
-                         c1 += 8;
-                    }
-                    count.push_back(countStream);
-                }
-                #endif
-
                 BixNum diff = bnc.SubModular(basis, base); // 0,8; 1,9; 2,10; etc...
                 for (unsigned extractIdx = 0; extractIdx < 3; extractIdx++) {
                     relative[extractIdx] = pb.createOr(relative[extractIdx], diff[extractIdx]);
                 }
             }
             else {
-                #if 0
-                for (unsigned c = base; c < next_base; c++) {
-                    PabloAST * countStream = bnc.EQ(basis, c);
-                    count.push_back(countStream);
-                }
-                #endif
                 BixNum diff = bnc.SubModular(basis, base); // SubModular range (0-7)
                 for (unsigned extractIdx = 0; extractIdx < 4; extractIdx++) { // extract low 4 bits
                     relative[extractIdx] = pb.createOr(relative[extractIdx], diff[extractIdx]);
