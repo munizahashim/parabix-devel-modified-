@@ -371,5 +371,5 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
         //pb.createDebugPrint(insertLgth[i], "insertLgth["+std::to_string(i)+"]");
         pb.createAssign(pb.createExtract(lengthVar, pb.getInteger(i)), insertLgth[i]);
     }
-    pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), count[0]);
+    //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), count[0]);
 }
