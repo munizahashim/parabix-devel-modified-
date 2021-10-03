@@ -861,7 +861,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
-    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required);
+
+    Value * const syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
+
+    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mNumOfThreads);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
@@ -886,6 +889,20 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         getWritableOutputItems(b, port, false);
     }
 
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+
+        Value * const hasEnoughSpace = b->CreateICmpULE(required, afterExpansion[WITH_OVERFLOW]);
+
+        const Binding & output = getOutputBinding(outputPort);
+        Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
+        b->CreateAssert(sanityCheck,
+                        "%s.%s: required items (%" PRIu64 ") exceeds post-expansion writable items (%" PRIu64 ")",
+                        mCurrentKernelName,
+                        b->GetString(output.getName()),
+                        required, afterExpansion[WITH_OVERFLOW]);
+    }
+
+
     assert (beforeExpansion[WITH_OVERFLOW] == nullptr || (beforeExpansion[WITH_OVERFLOW] != afterExpansion[WITH_OVERFLOW]));
     assert ((beforeExpansion[WITH_OVERFLOW] != nullptr) && (afterExpansion[WITH_OVERFLOW] != nullptr));
     assert (beforeExpansion[WITHOUT_OVERFLOW] == nullptr || (beforeExpansion[WITHOUT_OVERFLOW] != afterExpansion[WITHOUT_OVERFLOW]));
@@ -899,6 +916,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion[WITH_OVERFLOW]);
+    debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
 
     BasicBlock * const expandBufferExit = b->GetInsertBlock();

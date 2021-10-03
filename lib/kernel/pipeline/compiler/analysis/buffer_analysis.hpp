@@ -802,13 +802,14 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto reqSize1 = round_up_to((bMax * 2) - bMin, blockWidth) / blockWidth;
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
-        auto requiredSize = std::max(reqSize1, reqSize2);
-
-        assert (requiredSize > 0);
+        auto reqSize3 = std::max(reqSize1, reqSize2);
+//        if (maxLookAhead || maxDelay) {
+//            reqSize3 *= 2;
+//        }
 
         bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
         bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
-        bn.RequiredCapacity = requiredSize;
+        bn.RequiredCapacity = reqSize3;
 
     }
 
@@ -849,13 +850,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
-                const auto bufferSize = bn.RequiredCapacity * mNumOfThreads;
+                auto bufferSize = bn.RequiredCapacity * (mNumOfThreads + 1);
                 assert (bufferSize > 0);
                 buffer = new DynamicBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal) {
-                    bufferSize *= mNumOfThreads;
+                    bufferSize *= (mNumOfThreads + 1);
                 }
                 buffer = new StaticBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
