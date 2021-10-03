@@ -186,7 +186,6 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
     if (RequiresSynchronization.test(kernelId)) {
-        assert (mNumOfThreads > 1);
         return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
     } else {
         return nullptr;

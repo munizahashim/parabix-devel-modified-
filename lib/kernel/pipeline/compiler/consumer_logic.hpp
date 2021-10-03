@@ -396,14 +396,13 @@ inline void PipelineCompiler::writeExternalConsumedItemCounts(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 unsigned PipelineCompiler::getLastConsumerOfStreamSet(const size_t streamSet) const {
     auto lastConsumer = PipelineInput;
-    assert (out_degree(streamSet, mConsumerGraph) > 0);
+   // assert (out_degree(streamSet, mConsumerGraph) > 0);
     for (const auto input : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
         const auto consumer = target(input, mConsumerGraph);
         if (LLVM_LIKELY(consumer < PipelineOutput)) {
             lastConsumer = std::max<unsigned>(lastConsumer, consumer);
         }
     }
-    assert (lastConsumer > mKernelId);
     return lastConsumer;
 }
 
