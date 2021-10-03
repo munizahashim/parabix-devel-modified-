@@ -829,18 +829,21 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     getWritableOutputItems(b, port, true);
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
-//    debugPrint(b, prefix + "_addr [%" PRIx64 ",%" PRIx64 ")",
-//               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
-    debugPrint(b, prefix + "_capacity = %" PRIu64, buffer->getCapacity(b));
-    #endif
+
 
     BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_expandBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b->CreateBasicBlock(prefix + "_expandedBuffer", mKernelLoopCall);
     const auto beforeExpansion = mWritableOutputItems[outputPort.Number];
 
     Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion[WITH_OVERFLOW]);
+
+#ifdef PRINT_DEBUG_MESSAGES
+debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
+//    debugPrint(b, prefix + "_addr [%" PRIx64 ",%" PRIx64 ")",
+//               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
+debugPrint(b, prefix + "_capacity = %" PRIu64, buffer->getCapacity(b));
+debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
+#endif
 
     BasicBlock * const noExpansionExit = b->GetInsertBlock();
     b->CreateLikelyCondBr(hasEnoughSpace, expanded, expandBuffer);
@@ -864,7 +867,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
 
-    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mNumOfThreads);
+    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
