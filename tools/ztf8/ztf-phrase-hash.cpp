@@ -99,7 +99,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const phraseRuns = P->CreateStreamSet(1);
     StreamSet * const cwRuns = P->CreateStreamSet(1);
     // Mark ZTF symbols among the Unicode words
-    P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns); /*, cwRuns);*/
+    P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns, cwRuns);
     //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
 
     std::vector<StreamSet *> phraseLenBixnum(SymCount);

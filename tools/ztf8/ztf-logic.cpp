@@ -237,11 +237,13 @@ void ZTF_Symbols::generatePabloMethod() {
 ZTF_Phrases::ZTF_Phrases(BuilderRef kb,
                 StreamSet * basisBits,
                 StreamSet * wordChar,
-                StreamSet * phraseRuns)
+                StreamSet * phraseRuns,
+                StreamSet * cwRuns)
 : PabloKernel(kb, "ZTF_Phrases",
             {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
-            {Binding{"phraseRuns", phraseRuns}}) { }
+            {Binding{"phraseRuns", phraseRuns},
+             Binding{"cwRuns", cwRuns}}) { }
 
 void ZTF_Phrases::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -261,14 +263,14 @@ void ZTF_Phrases::generatePabloMethod() {
     //
     // ZTF Code symbols
     PabloAST * anyPfx = ccc.compileCC(re::makeCC(0xC0, 0xFF));
-    PabloAST * anyPfx4 = ccc.compileCC(re::makeCC(0xF9, 0xFF));
-    PabloAST * anysfx = ccc.compileCC(re::makeCC(0x00, 0xFF));
+    PabloAST * anyPfx4 = ccc.compileCC(re::makeCC(0xF8, 0xFF));
+    PabloAST * anysfx = ccc.compileCC(re::makeCC(0x0, 0xFF));
     PabloAST * ZTF_sym = pb.createAnd(pb.createAdvance(anyPfx, 1), ASCII);
     ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx, 2), ASCII));
-    // ZTF Code symbols with prefix in range 0xF9-0xFF can have any suffix to be considered valid codeword
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 1), anysfx));
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 2), anysfx));
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 3), anysfx));
+    // ZTF Code symbols with prefix in range 0xF8-0xFF can have any number of suffix bytes to be considered valid codeword
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 1), ASCII)); // can't have any suffix because anysfx includes ZTF prefixes too
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 2), ASCII));
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 3), ASCII));
 
     PabloAST * ZTF_prefix = pb.createAnd(anyPfx, pb.createNot(pb.createLookahead(basis[7], 1)));
     // Consider prefix of 4-byte codewords as ZTF_prefix
@@ -289,6 +291,7 @@ void ZTF_Phrases::generatePabloMethod() {
     // runs are the bytes after a start symbol until the next symStart byte.
     pablo::PabloAST * runs = pb.createInFile(pb.createNot(symStart));
     pb.createAssign(pb.createExtract(getOutputStreamVar("phraseRuns"), pb.getInteger(0)), runs);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("cwRuns"), pb.getInteger(0)), wc1);
 }
 
 PhraseRunSeq::PhraseRunSeq(BuilderRef kb,
