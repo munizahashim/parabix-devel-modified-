@@ -482,6 +482,32 @@ Value * IDISA_Builder::simd_srlv(unsigned fw, Value * v, Value * shifts) {
     return w;
 }
 
+Value * IDISA_Builder::simd_rotl(unsigned fw, Value * v, Value * rotates) {
+    Type * fwTy = getIntNTy(fw);
+    unsigned numFields = getVectorBitWidth(v)/fw;
+    Constant * fw_mask =  ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, fw - 1));
+    Constant * fw_splat =  ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, fw));
+    Value * shft = simd_and(fw_mask, rotates);
+    Value * fwd = simd_sllv(fw, v, shft);
+    // Masking is necessary to avoid a srlv by fw (poison value) when the
+    // rotate amount is 0.
+    Value * back = simd_srlv(fw, v, simd_and(fw_mask, simd_sub(fw, fw_splat, shft)));
+    return simd_or(fwd, back);
+}
+
+Value * IDISA_Builder::simd_rotr(unsigned fw, Value * v, Value * rotates) {
+    Type * fwTy = getIntNTy(fw);
+    unsigned numFields = getVectorBitWidth(v)/fw;
+    Constant * fw_mask =  ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, fw - 1));
+    Constant * fw_splat =  ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, fw));
+    Value * shft = simd_and(fw_mask, rotates);
+    // Masking is necessary to avoid a sllv by fw (poison value) when the
+    // rotate amount is 0.
+    Value * fwd = simd_sllv(fw, v, simd_and(fw_mask, simd_sub(fw, fw_splat, shft)));
+    Value * back = simd_srlv(fw, v, shft);
+    return simd_or(fwd, back);
+}
+
 std::vector<Value *> IDISA_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
     Value * delcounts = CreateNot(extract_mask);  // initially deletion counts per 1-bit field
     std::vector<Value *> w(v.size());
