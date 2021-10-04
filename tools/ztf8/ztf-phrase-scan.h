@@ -17,6 +17,7 @@ public:
     MarkRepeatedHashvalue(BuilderRef b,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
+                           unsigned numSyms,
                            StreamSet * symbolMarks,
                            StreamSet * hashValues,
                            StreamSet * hashMarks,
@@ -33,6 +34,7 @@ public:
     SymbolGroupCompression(BuilderRef b,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
+                           unsigned numSyms,
                            StreamSet * symbolMarks,
                            StreamSet * hashValues,
                            StreamSet * const byteData,
@@ -44,6 +46,7 @@ private:
 
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
+    const unsigned mNumSym;
 };
 
 }

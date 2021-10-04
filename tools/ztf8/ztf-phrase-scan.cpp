@@ -28,6 +28,7 @@ using BuilderRef = Kernel::BuilderRef;
 
 MarkRepeatedHashvalue::MarkRepeatedHashvalue(BuilderRef b,
                                     EncodingInfo encodingScheme,
+                                    unsigned numSyms,
                                     unsigned groupNo,
                                     StreamSet * symbolMarks,
                                     StreamSet * hashValues,
@@ -37,7 +38,7 @@ MarkRepeatedHashvalue::MarkRepeatedHashvalue(BuilderRef b,
                    {Binding{"symbolMarks", symbolMarks},
                     Binding{"hashValues", hashValues}},
                    {}, {}, {}, {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
-                       InternalScalar{ArrayType::get(b->getInt8Ty(), /*hashTableSize(encodingScheme.byLength[groupNo])*/333334), "hashTable"}}),
+                       InternalScalar{ArrayType::get(b->getInt8Ty(), 33334), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("hashMarks", hashMarks, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -200,10 +201,9 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     b->SetInsertPoint(hashMarksDone);
 }
 
-// use a mask stream to indicate the k-symbol sequences already compressed
-// to eliminate compressing any overlapping l-symbol (l < k) sequences
 SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                EncodingInfo encodingScheme,
+                                               unsigned numSyms,
                                                unsigned groupNo,
                                                StreamSet * symbolMarks,
                                                StreamSet * hashValues,
@@ -213,11 +213,12 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                unsigned strideBlocks)
 : MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
-                       Binding{"hashValues", hashValues},
-                       Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
+                    Binding{"hashValues", hashValues},
+                    Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
                    {}, {}, {},
-                   {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"}}),
-mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
+                   {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"}/*,
+                    InternalScalar{ArrayType::get(b->getInt8Ty(), (333334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}*/}),
+mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -227,7 +228,7 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
         addInternalScalar(ArrayType::get(b->getInt8Ty(), 32), "pendingOutput");
     }
     Type * phraseType = ArrayType::get(b->getInt8Ty(), 32);
-    mInternalScalars.emplace_back(ArrayType::get(phraseType, 333334), "hashTable");
+    mInternalScalars.emplace_back(ArrayType::get(phraseType, (33334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
@@ -243,6 +244,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
     Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
+    Constant * sz_NUMSYM = b->getSize(mNumSym);
 
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
@@ -254,6 +256,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     BasicBlock * const tryStore = b->CreateBasicBlock("tryStore");
     BasicBlock * const storeKey = b->CreateBasicBlock("storeKey");
     BasicBlock * const markCompression = b->CreateBasicBlock("markCompression");
+    BasicBlock * const checkCompression = b->CreateBasicBlock("checkCompression");
     BasicBlock * const nextKey = b->CreateBasicBlock("nextKey");
     BasicBlock * const keysDone = b->CreateBasicBlock("keysDone");
     BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
@@ -320,7 +323,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
     Value * keyMarkPos = b->CreateAdd(keyWordPos, keyMarkPosInWord, "keyEndPos");
     /* Determine the key length. */
-    Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy);
+    Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy); // extract full hashcode based on lg
+
     Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_TWO, "keyLength");
     Value * keyStartPos = b->CreateSub(keyMarkPos, b->CreateSub(keyLength, sz_ONE), "keyStartPos");
     // keyOffset for accessing the final half of an entry.
@@ -328,9 +332,10 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     // Get the hash of this key.
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
 
-    Value * tableIdxHash = b->CreateAnd(hashValue, sz_TABLEMASK, "tableIdx");
-    Value * tblEntryPtr = b->CreateInBoundsGEP(hashTableBasePtr, tableIdxHash);
-    //Value * tblEntryPtr = b->CreateGEP(hashTablePtr, b->CreateMul(keyHash, lg.HI));
+    Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(33334)));
+    Value * tableIdxHash = b->CreateAnd(b->CreateMul(keyHash, lg.HI), /*sz_NUMSYM*/ sz_TABLEMASK, "tableIdx");
+    Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
+
     // Use two 8-byte loads to get hash and symbol values.
     //b->CallPrintInt("tblEntryPtr", tblEntryPtr);
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
@@ -342,9 +347,40 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * sym2 = b->CreateAlignedLoad(symPtr2, 1);
     Value * entry1 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr1);
     Value * entry2 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr2);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5ed663b8... WIP: Hashcode collision handling
+/*
+All the marked symMarks indicate hashMarks for only repeated phrases.
+Among those marks,
+1. If any symbol is being seen for the first time and has no hash table entry, store that hashcode in the hashtable
+and mark its compression mask.
+2. If the hashcode exists in the hashtable but the current phrase and hash table entry do not match, go to next symbol.
+*/
+    Value * isEmptyEntry = b->CreateICmpEQ(b->CreateOr(entry1, entry2), Constant::getNullValue(lg.halfLengthTy));
+    b->CreateCondBr(isEmptyEntry, storeKey, checkCompression);
+
+    b->SetInsertPoint(storeKey);
+#ifdef CHECK_COMPRESSION_DECOMPRESSION_STORE
+    b->CallPrintInt("hashCode", keyHash);
+    b->CallPrintInt("keyStartPos", keyStartPos);
+    b->CallPrintInt("keyLength", keyLength);
+#endif
+    // We have a new symbol that allows future occurrences of the symbol to
+    // be compressed using the hash code.
+    b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
+    b->CreateMonitoredScalarFieldStore("hashTable", sym2, tblPtr2);
+    b->CreateBr(markCompression);
+
+    b->SetInsertPoint(checkCompression);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5ed663b8... WIP: Hashcode collision handling
     Value * symIsEqEntry = b->CreateAnd(b->CreateICmpEQ(entry1, sym1), b->CreateICmpEQ(entry2, sym2));
 
-    //b->CreateCondBr(symIsEqEntry, markCompression, tryStore);
+    b->CreateCondBr(symIsEqEntry, markCompression, nextKey);
     b->CreateBr(markCompression);
 
     b->SetInsertPoint(markCompression);
@@ -375,10 +411,10 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, keyBasePtr, 1);
     Value * curPos = keyMarkPos;
-    Value * curHash = keyHash;  // Add hash extension bits later.
+    Value * curHash = keyHash;
     // Write the suffixes.
     for (unsigned i = 0; i < lg.groupInfo.encoding_bytes - 1; i++) {
-        Value * ZTF_suffix = b->CreateTrunc(/*b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix")*/b->getSize(49), b->getInt8Ty());
+        Value * ZTF_suffix = b->CreateTrunc(b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix"), b->getInt8Ty());
         b->CreateStore(ZTF_suffix, b->getRawOutputPointer("encodedBytes", curPos));
         curPos = b->CreateSub(curPos, sz_ONE);
         curHash = b->CreateLShr(curHash, lg.SUFFIX_BITS);
@@ -418,23 +454,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     //b->CallPrintInt("prefix", b->CreateTrunc(pfxOffset, b->getInt8Ty()));
     b->CreateStore(b->CreateTrunc(pfxOffset, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
 
-    //b->CreateBr(nextKey);
-    b->CreateBr(tryStore);
-
-    b->SetInsertPoint(tryStore);
-    Value * isEmptyEntry = b->CreateICmpEQ(b->CreateOr(entry1, entry2), Constant::getNullValue(lg.halfLengthTy));
-    b->CreateCondBr(isEmptyEntry, storeKey, nextKey);
-
-    b->SetInsertPoint(storeKey);
-#ifdef CHECK_COMPRESSION_DECOMPRESSION_STORE
-    b->CallPrintInt("hashCode", keyHash);
-    b->CallPrintInt("keyStartPos", keyStartPos);
-    b->CallPrintInt("keyLength", keyLength);
-#endif
-    // We have a new symbol that allows future occurrences of the symbol to
-    // be compressed using the hash code.
-    b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
-    b->CreateMonitoredScalarFieldStore("hashTable", sym2, tblPtr2);
     b->CreateBr(nextKey);
 
     b->SetInsertPoint(nextKey);

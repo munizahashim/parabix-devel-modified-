@@ -154,7 +154,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             // skip LG 0 for 2-sym phrases?
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], phraseLenOverflow[sym], groupMarks);
             StreamSet * const hashMarks = P->CreateStreamSet(1);
-            P->CreateKernelCall<MarkRepeatedHashvalue>(encodingScheme1, i, groupMarks, allHashValues[sym], hashMarks);
+            P->CreateKernelCall<MarkRepeatedHashvalue>(encodingScheme1, sym, i, groupMarks, allHashValues[sym], hashMarks);
             if (i > 0) {
                 StreamSet * lgHashMarks = P->CreateStreamSet(1);
                 P->CreateKernelCall<InverseStream>(hashMarks, hashMarksNonFinal, i, lgHashMarks);
@@ -209,7 +209,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
             StreamSet * const groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, allHashMarks[sym], phraseLenBixnum[sym], overflow, groupMarks);
-            P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes);
+            P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes);
             extractionMasks.push_back(extractionMask);
             u8bytes = output_bytes;
             //Update sym-1 hashMarks to avoid compressing sub-phrases of any of the already compressed phrases
