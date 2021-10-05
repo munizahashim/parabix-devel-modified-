@@ -55,9 +55,9 @@ llvm::StringRef copyText(const llvm::StringRef & text, Token::Allocator & alloc)
     return text.copy(A);
 }
 
-Token::Token(TokenType type, llvm::StringRef text, std::weak_ptr<SourceFile> source, size_t lineNum, size_t colNum, uint64_t value)
+Token::Token(TokenType type, std::string text, std::weak_ptr<SourceFile> source, size_t lineNum, size_t colNum, uint64_t value)
 : mType(type)
-, mText(copyText(text, mAllocator))
+, mText(std::move(text))
 , mSourceRef(std::move(source))
 , mLineNum(lineNum)
 , mColNum(colNum + 1) // convert from 0-indexed to 1-indexed

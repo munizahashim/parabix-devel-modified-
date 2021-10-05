@@ -13,6 +13,9 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/IR/IntrinsicsX86.h>
+#endif
 
 // #define COMPARISON_STUDY
 
@@ -310,11 +313,11 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     IntegerType * const sizeTy = b->getSizeTy();
     const unsigned numFields = b->getBitBlockWidth() / mCompressedFieldWidth;
     Constant * zeroSplat = Constant::getNullValue(b->fwVectorType(mCompressedFieldWidth));
-    Constant * oneSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, 1));
+    Constant * oneSplat = b->getSplat(numFields, ConstantInt::get(fwTy, 1));
     Constant * CFW = ConstantInt::get(fwTy, mCompressedFieldWidth);
-    Constant * fwSplat = ConstantVector::getSplat(numFields, CFW);
+    Constant * fwSplat = b->getSplat(numFields, CFW);
     Constant * numFieldConst = ConstantInt::get(fwTy, numFields);
-    Constant * fwMaskSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, mCompressedFieldWidth - 1));
+    Constant * fwMaskSplat = b->getSplat(numFields, ConstantInt::get(fwTy, mCompressedFieldWidth - 1));
     Constant * BLOCK_WIDTH = ConstantInt::get(fwTy, b->getBitBlockWidth());
     Constant * BLOCK_MASK = ConstantInt::get(fwTy, b->getBitBlockWidth() - 1);
 
@@ -509,11 +512,11 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     IntegerType * const sizeTy = b->getSizeTy();
     const unsigned numFields = b->getBitBlockWidth() / mCompressedFieldWidth;
     Constant * zeroSplat = Constant::getNullValue(b->fwVectorType(mCompressedFieldWidth));
-    Constant * oneSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, 1));
+    Constant * oneSplat = b->getSplat(numFields, ConstantInt::get(fwTy, 1));
     Constant * CFW = ConstantInt::get(fwTy, mCompressedFieldWidth);
-    Constant * fwSplat = ConstantVector::getSplat(numFields, CFW);
+    Constant * fwSplat = b->getSplat(numFields, CFW);
     Constant * numFieldConst = ConstantInt::get(fwTy, numFields);
-    Constant * fwMaskSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fwTy, mCompressedFieldWidth - 1));
+    Constant * fwMaskSplat = b->getSplat(numFields, ConstantInt::get(fwTy, mCompressedFieldWidth - 1));
     Constant * BLOCK_WIDTH = ConstantInt::get(fwTy, b->getBitBlockWidth());
     Constant * BLOCK_MASK = ConstantInt::get(fwTy, b->getBitBlockWidth() - 1);
 

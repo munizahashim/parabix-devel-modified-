@@ -15,7 +15,6 @@
 #include <toolchain/toolchain.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/ADT/STLExtras.h> // for make_unique
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Casting.h>
 #include <grep/regex_passes.h>
@@ -497,7 +496,7 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
 }
 
 void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    std::unique_ptr<GrepKernelOptions> options = make_unique<GrepKernelOptions>(&cc::Unicode);
+    auto options = std::make_unique<GrepKernelOptions>(&cc::Unicode);
     auto lengths = getLengthRange(re, &cc::Unicode);
     const auto UnicodeSets = re::collectCCs(re, cc::Unicode);
     if (UnicodeSets.empty()) {
@@ -533,7 +532,7 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
 }
 
 void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    std::unique_ptr<GrepKernelOptions> options = make_unique<GrepKernelOptions>(&cc::UTF8);
+    auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
     auto lengths = getLengthRange(re, &cc::UTF8);
     options->setSource(Source);
     StreamSet * MatchResults = nullptr;
@@ -1273,7 +1272,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     E->CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
     StreamSet * MatchResults = E->CreateStreamSet();
-    std::unique_ptr<GrepKernelOptions> options = make_unique<GrepKernelOptions>(&cc::UTF8);
+    auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
     options->setRE(matchingRE);
     options->setSource(BasisBits);
     options->setResults(MatchResults);
@@ -1355,7 +1354,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     for (unsigned i = 0; i < n; i++) {
         StreamSet * const MatchResults = E->CreateStreamSet();
 
-        auto options = make_unique<GrepKernelOptions>();
+        auto options = std::make_unique<GrepKernelOptions>();
 
         auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
         r = re::exclude_CC(r, breakCC);

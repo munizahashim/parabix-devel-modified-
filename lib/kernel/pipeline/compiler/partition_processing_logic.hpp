@@ -21,12 +21,12 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
     IntegerType * const boolTy = b->getInt1Ty();
     IntegerType * const sizeTy = b->getInt64Ty();
     const auto m = ActivePartitions.size();
+    assert (m > 1);
     assert (ActivePartitions[m - 1] == PartitionCount - 1);
 
     for (unsigned k = 1; k < m; ++k) {
         const auto partId = ActivePartitions[k];
         b->SetInsertPoint(mPartitionEntryPoint[partId]);
-        assert (mPartitionEntryPoint[k]->getFirstNonPHI() == nullptr);
         const auto prefix = std::to_string(partId);
         mPartitionPipelineProgressPhi[partId] = b->CreatePHI(boolTy, PartitionCount, prefix + ".pipelineProgress");
         mExhaustedPipelineInputAtPartitionEntry[partId] = b->CreatePHI(boolTy, PartitionCount, prefix + ".exhaustedInput");
@@ -107,7 +107,10 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     BitVector toCheck(PartitionCount, 0);
 
-    for (unsigned partId = 0; partId < PartitionCount; ++partId) {
+    assert (KernelPartitionId[PipelineInput] == 0);
+    assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
+
+    for (unsigned partId = 1; partId < (PartitionCount - 1); ++partId) {
         if (mTerminationCheck[partId] != 0 && PartitionOnHybridThread.test(partId) == mCompilingHybridThread) {
             toCheck.set(partId);
         }
@@ -124,9 +127,13 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
             }
             assert (kernel >= FirstKernel);
         }
+        assert (partitionId >= 0);
 
         if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
-            for (auto k = kernel + 1; k <= lastKernel; ++k) {
+            const auto firstKernel = kernel + 1;
+            assert (KernelPartitionId[firstKernel] == partitionId);
+            assert (KernelPartitionId[lastKernel] == partitionId);
+            for (auto k = firstKernel; k <= lastKernel; ++k) {
                 for (const auto input : make_iterator_range(in_edges(k, mBufferGraph))) {
                     const auto streamSet = source(input, mBufferGraph);
                     const auto producer = parent(streamSet, mBufferGraph);

@@ -1176,7 +1176,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
         const StreamSetVector Streams;
         const ScalarVector Scalars;
 
-        KernelId(const std::string && id, const StreamSetVector & streams, const ScalarVector & scalars)
+        KernelId(const std::string & id, const StreamSetVector & streams, const ScalarVector & scalars)
         : Id(id), Streams(streams), Scalars(scalars) {
 
         }

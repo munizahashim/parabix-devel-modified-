@@ -15,6 +15,9 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <kernel/core/kernel_builder.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/Support/Host.h>
+#endif
 
 using namespace kernel;
 using namespace llvm;

@@ -25,6 +25,10 @@ using namespace llvm;
 
 using BuilderRef = pablo::CarryManager::BuilderRef;
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = llvm::VectorType;
+#endif
+
 namespace pablo {
 
 inline static unsigned ceil_log2(const unsigned v) {
@@ -794,8 +798,8 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
             Value * carry = b->CreateZExt(b->bitblock_any(value), streamTy);
             const auto summaryBlocks = ceil_udiv(shiftAmount, blockWidth);
             const auto summarySize = ceil_udiv(summaryBlocks, blockWidth);
-            VectorType * const bitBlockTy = b->getBitBlockType();
-            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getVectorElementType());
+            FixedVectorType * const bitBlockTy = b->getBitBlockType();
+            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getElementType());
             const auto laneWidth = laneTy->getIntegerBitWidth();
 
             assert (summarySize > 0);
@@ -821,7 +825,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                 }
                 Value * stream = b->CreateBitCast(advanced, bitBlockTy);
                 if (LLVM_LIKELY(i == summarySize)) {
-                    const auto n = bitBlockTy->getVectorNumElements();
+                    const auto n = bitBlockTy->getNumElements();
                     SmallVector<Constant *, 16> mask(n);
                     const auto m = udiv(summaryBlocks, laneWidth);
                     if (m) {

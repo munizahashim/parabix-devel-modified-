@@ -207,14 +207,14 @@ public:
     uint64_t getValue() const { return mValue; }
 private:
 
-    Token(TokenType type, llvm::StringRef text, std::weak_ptr<SourceFile> source, size_t lineNum, size_t colNum, uint64_t value);
+    Token(TokenType type, std::string text, std::weak_ptr<SourceFile> source, size_t lineNum, size_t colNum, uint64_t value);
 
     void * operator new (size_t size) {
         return mAllocator.allocate<uint8_t>(size);
     }
 
     const TokenType             mType;
-    llvm::StringRef             mText;
+    const std::string           mText;
     std::weak_ptr<SourceFile>   mSourceRef;
     size_t                      mLineNum;
     size_t                      mColNum;

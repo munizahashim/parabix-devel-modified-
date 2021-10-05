@@ -21,12 +21,12 @@ void HexToBinary::generateDoBlockMethod(BuilderRef b) {
     Type * i8Ty = b->getInt8Ty();
     Constant * const ZERO = b->getSize(0);
     const unsigned bytesPerBlock = b->getBitBlockWidth()/8;
-    Constant * splat_0 = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '0'));
-    Constant * splat_9 = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '9'));
-    Constant * case_shift = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a' - 'A'));
-    Constant * splat_a = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a'));
-    Constant * splat_f = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'f'));
-    Constant * af_cvt = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a' - 10));
+    Constant * splat_0 = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '0'));
+    Constant * splat_9 = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '9'));
+    Constant * case_shift = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a' - 'A'));
+    Constant * splat_a = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a'));
+    Constant * splat_f = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'f'));
+    Constant * af_cvt = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a' - 10));
 
     for (unsigned i = 0; i < 4; i++) {
         Value * hexPack[2];
@@ -57,9 +57,9 @@ void BinaryToHex::generateDoBlockMethod(BuilderRef b) {
     Type * i8Ty = b->getInt8Ty();
     Constant * const ZERO = b->getSize(0);
     const unsigned bytesPerBlock = b->getBitBlockWidth()/8;
-    Constant * splatCh_0 = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '0'));
-    Constant * splat_9 = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 9));
-    Constant * splatCh_a = ConstantVector::getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a'-10));
+    Constant * splatCh_0 = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, '0'));
+    Constant * splat_9 = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 9));
+    Constant * splatCh_a = b->getSplat(bytesPerBlock, ConstantInt::get(i8Ty, 'a'-10));
     for (unsigned i = 0; i < 4; i++) {
         Value * bit_data = b->loadInputStreamBlock("binary_data", ZERO, b->getInt32(i));
         Value * nybble_0 = b->fwCast(8, b->esimd_mergel(4, bit_data, b->allZeroes()));

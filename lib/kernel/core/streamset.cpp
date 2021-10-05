@@ -24,6 +24,9 @@ using IDISA::IDISA_Builder;
 
 using boost::intrusive::detail::is_pow2;
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
 
 namespace kernel {
 
@@ -55,7 +58,8 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
     }
-    return cast<IntegerType>(ty->getVectorElementType())->getBitWidth();
+    ty = cast<FixedVectorType>(ty)->getElementType();
+    return cast<IntegerType>(ty)->getBitWidth();
 }
 
 LLVM_READNONE inline size_t getArraySize(const Type * ty) {
@@ -140,11 +144,12 @@ unsigned StreamSetBuffer::getFieldWidth() const {
  * The type of the pointer is i8* for fields of 8 bits or less, otherwise iN* for N-bit fields.
  */
 Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Value * absolutePosition) const {
-    Type * const itemTy = mBaseType->getArrayElementType()->getVectorElementType();
-    #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(13, 0, 0)
-    const auto itemWidth = itemTy->getPrimitiveSizeInBits();
+    Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
+    Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+    #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
+    const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
     #else
-    const auto itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
+    const unsigned itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
     #endif
     IntegerType * const sizeTy = b->getSizeTy();
     streamIndex = b->CreateZExt(streamIndex, sizeTy);
@@ -204,8 +209,8 @@ Type * StreamSetBuffer::resolveType(BuilderPtr b, Type * const streamSetType) {
         numElements = type->getArrayNumElements();
         type = type->getArrayElementType();
     }
-    if (LLVM_LIKELY(type->isVectorTy() && type->getVectorNumElements() == 0)) {
-        type = type->getVectorElementType();
+    if (LLVM_LIKELY(type->isVectorTy() && cast<FixedVectorType>(type)->getNumElements() == 0)) {
+        type = cast<FixedVectorType>(type)->getElementType();
         if (LLVM_LIKELY(type->isIntegerTy())) {
             const auto fieldWidth = cast<IntegerType>(type)->getBitWidth();
             type = b->getBitBlockType();
@@ -600,7 +605,7 @@ Value * StaticBuffer::reserveCapacity(BuilderPtr b, Value * produced, Value * co
         const auto streamCount = ty->getArrayNumElements();
         name << streamCount << 'x';
         ty = ty->getArrayElementType();
-        ty = ty->getVectorElementType();
+        ty = cast<FixedVectorType>(ty)->getElementType();;
         const auto itemWidth = ty->getIntegerBitWidth();
         name << itemWidth << '_' << mAddressSpace;
 
@@ -1179,7 +1184,7 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
     const auto streamCount = ty->getArrayNumElements();
     name << streamCount << 'x';
     ty = ty->getArrayElementType();
-    ty = ty->getVectorElementType();
+    ty = cast<FixedVectorType>(ty)->getElementType();
     const auto itemWidth = ty->getIntegerBitWidth();
     name << itemWidth << '@' << mAddressSpace;
 

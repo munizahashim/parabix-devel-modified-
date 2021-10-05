@@ -43,6 +43,9 @@
 #else
 #include <llvm/IR/PassTimingInfo.h>
 #endif
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/Support/Host.h>
+#endif
 #ifndef NDEBUG
 #define IN_DEBUG_MODE true
 #else
@@ -193,11 +196,14 @@ inline void CPUDriver::preparePassManager() {
         } else {
             mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
         }
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-        if (LLVM_UNLIKELY(mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile))) {
-#else
-        if (LLVM_UNLIKELY(mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile))) {
-#endif
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
+        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
+        #else
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
+        #endif
+        if (r) {
             report_fatal_error("LLVM error: could not add emit assembly pass");
         }
     }
@@ -312,14 +318,22 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
     mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
     mEngine->addModule(std::move(mainModule));
     mEngine->finalizeObject();
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    auto mainFnPtr = mEngine->getFunctionAddress(main->getName().str());
+    #else
     auto mainFnPtr = mEngine->getFunctionAddress(main->getName());
+    #endif
     removeModules(Normal);
     removeModules(Infrequent);
     return reinterpret_cast<void *>(mainFnPtr);
 }
 
 bool CPUDriver::hasExternalFunction(llvm::StringRef functionName) const {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    return RTDyldMemoryManager::getSymbolAddressInProcess(functionName.str());
+    #else
     return RTDyldMemoryManager::getSymbolAddressInProcess(functionName);
+    #endif
 }
 
 CPUDriver::~CPUDriver() {

@@ -18,6 +18,10 @@
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/IR/IntrinsicsX86.h>
+#endif
+
 using namespace llvm;
 
 namespace kernel {
@@ -68,8 +72,8 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     Constant * const ZERO = b->getSize(0);
     Constant * BLOCK_WIDTH = ConstantInt::get(sizeTy, b->getBitBlockWidth());
     Constant * FIELD_WIDTH = ConstantInt::get(sizeTy, mFieldWidth);
-    Constant * fwSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth));
-    Constant * fw_sub1Splat = ConstantVector::getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth - 1));
+    Constant * fwSplat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth));
+    Constant * fw_sub1Splat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth - 1));
 
     BasicBlock * entry = b->GetInsertBlock();
     BasicBlock * expandLoop = b->CreateBasicBlock("expandLoop");

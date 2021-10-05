@@ -271,7 +271,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << ':'
                 << ty->getArrayNumElements() << 'x';
             ty = ty->getArrayElementType();
-            ty = ty->getVectorElementType();
+            ty = cast<VectorType>(ty)->getElementType();
             out << ty->getIntegerBitWidth();
         }
 
@@ -385,7 +385,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         }
     };
 
-    out << "digraph \"" << mPipelineKernel->getName() << "\" {\n"
+    out << "digraph \"" << StringRef(mPipelineKernel->getName()) << "\" {\n"
            "rankdir=tb;"
            "nodesep=0.5;"
            "ranksep=0.5;"
@@ -397,7 +397,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
     firstKernelOfPartition[0] = PipelineInput;
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i); assert (kernel);
-        auto name = kernel->getName().str();
+        auto name = kernel->getName();
         boost::replace_all(name, "\"", "\\\"");
         printKernel(i, name, false);
     }

@@ -9,6 +9,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/IR/IntrinsicsX86.h>
+#endif
 
 using namespace llvm;
 

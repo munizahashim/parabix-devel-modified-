@@ -2,13 +2,18 @@
 
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <toolchain/toolchain.h>
 
 using namespace llvm;
+
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
 
 namespace kernel {
 
 inline VectorType * LLVM_READNONE getStreamTy(LLVMContext & C, const unsigned FieldWidth) {
-    return VectorType::get(IntegerType::getIntNTy(C, FieldWidth), 0);
+    return FixedVectorType::get(IntegerType::getIntNTy(C, FieldWidth), static_cast<unsigned>(0));
 }
 
 inline ArrayType * LLVM_READNONE getStreamSetTy(LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth) {
@@ -20,7 +25,7 @@ unsigned StreamSet::getNumElements() const {
 }
 
 unsigned StreamSet::getFieldWidth() const {
-    return mType->getArrayElementType()->getVectorElementType()->getIntegerBitWidth();
+    return cast<VectorType>(mType->getArrayElementType())->getElementType()->getIntegerBitWidth();
 }
 
 std::string StreamSet::shapeString() {

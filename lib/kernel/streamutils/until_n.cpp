@@ -14,6 +14,10 @@ namespace llvm { class Type; }
 
 using namespace llvm;
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
+
 namespace kernel {
 
 void UntilNkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
@@ -46,7 +50,7 @@ void UntilNkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const num
     Constant * const BLOCKS_PER_STRIDE = b->getSize(blocksPerStride);
     const auto maximumBlocksPerIteration = packSize / packsPerBlock;
     Constant * const MAXIMUM_BLOCKS_PER_ITERATION = b->getSize(maximumBlocksPerIteration);
-    VectorType * const packVectorTy = VectorType::get(sizeTy, packsPerBlock);
+    VectorType * const packVectorTy = FixedVectorType::get(sizeTy, packsPerBlock);
 
     BasicBlock * const entry = b->GetInsertBlock();
     Value * const numOfBlocks = b->CreateMul(numOfStrides, BLOCKS_PER_STRIDE);

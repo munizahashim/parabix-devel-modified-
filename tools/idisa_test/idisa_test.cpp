@@ -64,7 +64,7 @@ void ShiftLimitKernel::generateDoBlockMethod(BuilderRef kb) {
     Constant * const ZeroConst = kb->getSize(0);
     Value * shiftOperand = kb->loadInputStreamBlock("shiftOperand", ZeroConst);
     unsigned fieldCount = kb->getBitBlockWidth()/mTestFw;
-    Value * limited = kb->simd_umin(mTestFw, shiftOperand, ConstantVector::getSplat(fieldCount, ConstantInt::get(fwTy, mShiftLimit)));
+    Value * limited = kb->simd_umin(mTestFw, shiftOperand, kb->getSplat(fieldCount, ConstantInt::get(fwTy, mShiftLimit)));
     kb->storeOutputStreamBlock("limitedShift", ZeroConst, limited);
 }
 

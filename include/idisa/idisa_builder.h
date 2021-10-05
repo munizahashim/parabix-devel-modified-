@@ -17,31 +17,36 @@ namespace llvm { class StringRef; }
 namespace IDISA {
 
 
-inline bool isStreamTy(llvm::Type * t) {
-    return t->isVectorTy() && (t->getVectorNumElements() == 0);
+inline bool isStreamTy(const llvm::Type * const t) {
+    return t->isVectorTy() && (llvm::cast<llvm::VectorType>(t)->getNumElements() == 0);
 }
 
-inline bool isStreamSetTy(llvm::Type * t) {
+inline bool isStreamSetTy(const llvm::Type * const t) {
     return t->isArrayTy() && (isStreamTy(t->getArrayElementType()));
 }
 
-inline unsigned getNumOfStreams (llvm::Type * t) {
+inline unsigned getNumOfStreams (const llvm::Type * const t) {
     if (isStreamTy(t)) return 1;
     assert(isStreamSetTy(t));
-    return t->getArrayNumElements();
+    return llvm::cast<llvm::ArrayType>(t)->getNumElements();
 }
 
-inline unsigned getStreamFieldWidth (llvm::Type * t) {
+inline unsigned getStreamFieldWidth (const llvm::Type * const t) {
     if (isStreamTy(t)) return t->getScalarSizeInBits();
     assert(isStreamSetTy(t));
-    return t->getArrayElementType()->getScalarSizeInBits();
+    return llvm::cast<llvm::ArrayType>(t)->getElementType()->getScalarSizeInBits();
 }
 
 unsigned getVectorBitWidth(llvm::Value * vec);
 
 class IDISA_Builder : public CBuilder {
-
 public:
+
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+    using FixedVectorType = llvm::VectorType;
+#else
+    using FixedVectorType = llvm::FixedVectorType;
+#endif
 
     IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
 
@@ -73,6 +78,8 @@ public:
 
     llvm::Value * CreateDoubleVector(llvm::Value * lo, llvm::Value * hi);
 
+    llvm::Constant * getSplat(const unsigned fieldCount, llvm::Constant * Elt);
+
     llvm::LoadInst * CreateBlockAlignedLoad(llvm::Value * const ptr) {
         return CreateAlignedLoad(ptr, mBitBlockWidth / 8);
     }
@@ -101,7 +108,7 @@ public:
         return CreateAlignedMalloc(size, mBitBlockWidth / 8);
     }
 
-    llvm::VectorType * fwVectorType(const unsigned fw);
+    FixedVectorType * fwVectorType(const unsigned fw);
 
     llvm::Constant * simd_himask(unsigned fw);
     llvm::Constant * simd_lomask(unsigned fw);
@@ -225,19 +232,19 @@ public:
     llvm::Value * simd_not(llvm::Value * a, llvm::StringRef s = llvm::StringRef());
     llvm::Value * fwCast(unsigned fw, llvm::Value * a);
 
-    inline llvm::VectorType * getBitBlockType() const {
+    inline FixedVectorType * getBitBlockType() const {
         return mBitBlockType;
     }
 
-    static llvm::VectorType * LLVM_READNONE getStreamTy(llvm::LLVMContext & C, const unsigned FieldWidth = 1) {
-        return llvm::VectorType::get(llvm::IntegerType::getIntNTy(C, FieldWidth), 0);
+    static FixedVectorType * LLVM_READNONE getStreamTy(llvm::LLVMContext & C, const unsigned FieldWidth = 1) {
+        return FixedVectorType::get(llvm::IntegerType::getIntNTy(C, FieldWidth), static_cast<unsigned>(0));
     }
 
     static llvm::ArrayType * LLVM_READNONE getStreamSetTy(llvm::LLVMContext & C, const unsigned NumElements = 1, const unsigned FieldWidth = 1) {
         return llvm::ArrayType::get(getStreamTy(C, FieldWidth), NumElements);
     }
 
-    llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) {
+    FixedVectorType * getStreamTy(const unsigned FieldWidth = 1) {
         return getStreamTy(getContext(), FieldWidth);
     }
 
@@ -257,7 +264,7 @@ protected:
     const unsigned              mLaneWidth;
     const unsigned              MAX_NATIVE_SIMD_SHIFT;
     const unsigned              MIN_NATIVE_SIMD_SHIFT;
-    llvm::VectorType * const    mBitBlockType;
+    FixedVectorType * const    mBitBlockType;
     llvm::Constant * const      mZeroInitializer;
     llvm::Constant * const      mOneInitializer;
     llvm::Constant *            mPrintRegisterFunction;

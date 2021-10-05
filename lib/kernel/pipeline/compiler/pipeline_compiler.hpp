@@ -54,6 +54,10 @@ enum PAPIKernelCounter {
 };
 #endif
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
+
 const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY = "BLSM";
 
 const static std::string EXPECTED_NUM_OF_STRIDES_MULTIPLIER = "EnSM";
@@ -950,7 +954,7 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
     }
-    return cast<IntegerType>(ty->getVectorElementType())->getBitWidth();
+    return cast<IntegerType>(cast<VectorType>(ty)->getElementType())->getBitWidth();
 }
 
 } // end of namespace

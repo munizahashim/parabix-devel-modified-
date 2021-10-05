@@ -29,6 +29,9 @@
 #include <boost/intrusive/detail/math.hpp>
 #include <cxxabi.h>
 using boost::intrusive::detail::floor_log2;
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+#include <llvm/Support/Alignment.h>
+#endif
 
 static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 
@@ -57,6 +60,13 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(5, 0, 0)
 #define setReturnDoesNotAlias() setDoesNotAlias(0)
 #endif
+
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(10, 0, 0)
+    typedef unsigned            AlignType;
+#else
+    typedef llvm::Align         AlignType;
+#endif
+
 
 using namespace llvm;
 
@@ -408,12 +418,12 @@ Value * CBuilder::CreateMalloc(Value * size) {
 }
 
 Value * CBuilder::CreatePageAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace) {
-    return CreateAlignedMalloc(type, ArraySize, addressSpace, NON_HUGE_PAGE_SIZE);
+    return CreateAlignedMalloc(type, ArraySize, addressSpace, unsigned{NON_HUGE_PAGE_SIZE});
 }
 
-llvm::Value * CBuilder::CreatePageAlignedMalloc(llvm::Value * const size) {
-    const auto alignment = NON_HUGE_PAGE_SIZE;
-    Constant * align = ConstantInt::get(size->getType(), alignment);
+Value * CBuilder::CreatePageAlignedMalloc(Value * const size) {
+    const auto alignment = unsigned{NON_HUGE_PAGE_SIZE};
+    Constant * align = ConstantInt::get(size->getType(), NON_HUGE_PAGE_SIZE);
     Value * const alignedSize = CreateRoundUp(size, align);
     return CreateAlignedMalloc(alignedSize, alignment);
 }
@@ -422,7 +432,7 @@ Value * CBuilder::CreateCacheAlignedMalloc(Type * const type, Value * const Arra
     return CreateAlignedMalloc(type, ArraySize, addressSpace, getCacheAlignment());
 }
 
-llvm::Value * CBuilder::CreateCacheAlignedMalloc(llvm::Value * const size) {
+Value * CBuilder::CreateCacheAlignedMalloc(Value * const size) {
     const auto alignment = getCacheAlignment();
     Constant * align = ConstantInt::get(size->getType(), alignment);
     Value * const alignedSize = CreateRoundUp(size, align);
@@ -1374,7 +1384,7 @@ inline bool CBuilder::hasAddressSanitizer() const {
     return mDriver && mDriver->hasExternalFunction("__asan_region_is_poisoned");
 }
 
-LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, const char * Name) {
+LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const char * Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1383,11 +1393,11 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, const char *
         CreateAssertZero(alignmentOffset, "CreateAlignedLoad: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
     LoadInst * LI = CreateLoad(Ptr, Name);
-    LI->setAlignment(Align);
+    LI->setAlignment(AlignType{Align});
     return LI;
 }
 
-LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, const Twine Name) {
+LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const Twine Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1396,11 +1406,11 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, const Twine 
         CreateAssertZero(alignmentOffset, "CreateAlignedLoad: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
     LoadInst * LI = CreateLoad(Ptr, Name);
-    LI->setAlignment(Align);
+    LI->setAlignment(AlignType{Align});
     return LI;
 }
 
-LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, bool isVolatile, const Twine Name) {
+LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, bool isVolatile, const Twine Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1409,11 +1419,11 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, unsigned Align, bool isVolat
         CreateAssertZero(alignmentOffset, "CreateAlignedLoad: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
     LoadInst * LI = CreateLoad(Ptr, isVolatile, Name);
-    LI->setAlignment(Align);
+    LI->setAlignment(AlignType{Align});
     return LI;
 }
 
-StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, unsigned Align, bool isVolatile) {
+StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigned Align, bool isVolatile) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1422,7 +1432,7 @@ StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, unsigned Alig
         CreateAssertZero(alignmentOffset, "CreateAlignedStore: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
     StoreInst *SI = CreateStore(Val, Ptr, isVolatile);
-    SI->setAlignment(Align);
+    SI->setAlignment(AlignType{Align});
     return SI;
 }
 
@@ -1442,7 +1452,7 @@ Value * CBuilder::CreateMemChr(Value * ptr, Value * byteVal, Value * num) {
     return CreateCall(memchrFn->getFunctionType(), memchrFn, {ptr, byteVal, num});
 }
 
-CallInst * CBuilder::CreateMemMove(Value * Dst, Value * Src, Value *Size, unsigned Align, bool isVolatile,
+CallInst * CBuilder::CreateMemMove(Value * Dst, Value * Src, Value *Size, const unsigned Align, bool isVolatile,
                                    MDNode *TBAATag, MDNode *ScopeTag, MDNode *NoAliasTag) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Src, Size, "CreateMemMove: Src");
@@ -1461,13 +1471,13 @@ CallInst * CBuilder::CreateMemMove(Value * Dst, Value * Src, Value *Size, unsign
         }
     }
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-    return IRBuilder<>::CreateMemMove(Dst, Align, Src, Align, Size, isVolatile, TBAATag, ScopeTag, NoAliasTag);
+    return IRBuilder<>::CreateMemMove(Dst, AlignType{Align}, Src, AlignType{Align}, Size, isVolatile, TBAATag, ScopeTag, NoAliasTag);
 #else
-    return IRBuilder<>::CreateMemMove(Dst, Src, Size, Align, isVolatile, TBAATag, ScopeTag, NoAliasTag);
+    return IRBuilder<>::CreateMemMove(Dst, Src, Size, AlignType{Align}, isVolatile, TBAATag, ScopeTag, NoAliasTag);
 #endif
 }
 
-CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, unsigned Align, bool isVolatile,
+CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, const unsigned Align, bool isVolatile,
                                   MDNode *TBAATag, MDNode *TBAAStructTag, MDNode *ScopeTag, MDNode *NoAliasTag) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Src, Size, "CreateMemCpy: Src");
@@ -1490,13 +1500,13 @@ CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, unsigned 
         CreateAssert(nonOverlapping, "CreateMemCpy: overlapping ranges is undefined");
     }
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-    return IRBuilder<>::CreateMemCpy(Dst, Align, Src, Align, Size, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
+    return IRBuilder<>::CreateMemCpy(Dst, AlignType{Align}, Src, AlignType{Align}, Size, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
 #else
-    return IRBuilder<>::CreateMemCpy(Dst, Src, Size, Align, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
+    return IRBuilder<>::CreateMemCpy(Dst, Src, Size, AlignType{Align}, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
 #endif
 }
 
-CallInst * CBuilder::CreateMemSet(Value * Ptr, Value * Val, Value * Size, unsigned Align,
+CallInst * CBuilder::CreateMemSet(Value * Ptr, Value * Val, Value * Size, const unsigned Align,
                        bool isVolatile, MDNode * TBAATag, MDNode * ScopeTag, MDNode * NoAliasTag) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, Size, "CreateMemSet");
@@ -1508,7 +1518,7 @@ CallInst * CBuilder::CreateMemSet(Value * Ptr, Value * Val, Value * Size, unsign
             CreateAssertZero(CreateURem(intPtr, align), "CreateMemSet: Ptr is misaligned");
         }
     }
-    return IRBuilder<>::CreateMemSet(Ptr, Val, Size, Align, isVolatile, TBAATag, ScopeTag, NoAliasTag);
+    return IRBuilder<>::CreateMemSet(Ptr, Val, Size, AlignType{Align}, isVolatile, TBAATag, ScopeTag, NoAliasTag);
 }
 
 CallInst * CBuilder::CreateMemCmp(Value * Ptr1, Value * Ptr2, Value * Num) {
@@ -1535,12 +1545,19 @@ CallInst * CBuilder::CreateMemCmp(Value * Ptr1, Value * Ptr2, Value * Num) {
     return CreateCall(f->getFunctionType(), f, {Ptr1, Ptr2, Num});
 }
 
+AllocaInst * CBuilder::CreateAlignedAlloca(Type * const Ty, const unsigned Align, Value * const ArraySize) {
+    AllocaInst * const alloc = CreateAlloca(Ty, ArraySize);
+    alloc->setAlignment(AlignType{Align});
+    return alloc;
+}
+
 Value * CBuilder::CreateExtractElement(Value * Vec, Value *Idx, const Twine Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         if (LLVM_UNLIKELY(!Vec->getType()->isVectorTy())) {
             report_fatal_error("CreateExtractElement: Vec argument is not a vector type");
         }
-        Constant * const Size = ConstantInt::get(Idx->getType(), Vec->getType()->getVectorNumElements());
+        const auto n = cast<VectorType>(Vec->getType())->getNumElements();
+        Constant * const Size = ConstantInt::get(Idx->getType(), n);
         // exctracting an element from a position that exceeds the length of the vector is undefined
         __CreateAssert(CreateICmpULT(Idx, Size), "CreateExtractElement: Idx (%" PRIdsz ") is greater than Vec size (%" PRIdsz ")", { Idx, Size });
     }
@@ -1552,7 +1569,8 @@ Value * CBuilder::CreateInsertElement(Value * Vec, Value * NewElt, Value * Idx, 
         if (LLVM_UNLIKELY(!Vec->getType()->isVectorTy())) {
             report_fatal_error("CreateExtractElement: Vec argument is not a vector type");
         }
-        Constant * const Size = ConstantInt::get(Idx->getType(), Vec->getType()->getVectorNumElements());
+        const auto n = cast<VectorType>(Vec->getType())->getNumElements();
+        Constant * const Size = ConstantInt::get(Idx->getType(), n);
         // inserting an element into a position that exceeds the length of the vector is undefined
         __CreateAssert(CreateICmpULT(Idx, Size), "CreateInsertElement: Idx (%" PRIdsz ") is greater than Vec size (%" PRIdsz ")", { Idx, Size });
     }

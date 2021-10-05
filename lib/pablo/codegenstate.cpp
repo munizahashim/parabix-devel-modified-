@@ -34,6 +34,10 @@
 
 using namespace llvm;
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
+
 namespace pablo {
 
 #ifndef NDEBUG
@@ -137,7 +141,7 @@ LessThan * PabloBlock::createLessThan(PabloAST * expr1, PabloAST * expr2) {
     CHECK_SAME_TYPE(t1, t2);
     Type * ty = getParent()->getInt1Ty();
     if (t1->isVectorTy() || t2->isVectorTy()) {
-        ty = VectorType::get(ty, 0);
+        ty = FixedVectorType::get(ty,  static_cast<unsigned>(0));
     }
     return new (mAllocator) LessThan(ty, expr1, expr2, mAllocator);
 }
@@ -148,7 +152,7 @@ Equals * PabloBlock::createEquals(PabloAST * expr1, PabloAST * expr2) {
     CHECK_SAME_TYPE(t1, t2);
     Type * ty = getParent()->getInt1Ty();
     if (t1->isVectorTy() || t2->isVectorTy()) {
-        ty = VectorType::get(ty, 0);
+        ty = FixedVectorType::get(ty,  static_cast<unsigned>(0));
     }
     return new (mAllocator) Equals(ty, expr1, expr2, mAllocator);
 }
@@ -210,19 +214,19 @@ While * PabloBlock::createWhile(PabloAST * condition, PabloBlock * body) {
 
 Repeat * PabloBlock::createRepeat(Integer * fieldWidth, PabloAST * value, const String * const name) {
     assert (fieldWidth && value);
-    Type * const type = VectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()), 0);
+    Type * const type = FixedVectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()),  static_cast<unsigned>(0));
     return insertAtInsertionPoint(new (mAllocator) Repeat(fieldWidth, value, type, name, mAllocator));
 }
 
 PackH * PabloBlock::createPackH(Integer * fieldWidth, PabloAST * value, const String * const name) {
     assert (fieldWidth && value);
-    Type * const type = VectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()/2), 0);
+    Type * const type = FixedVectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()/2),  static_cast<unsigned>(0));
     return insertAtInsertionPoint(new (mAllocator) PackH(fieldWidth, value, name, type, mAllocator));
 }
 
 PackL * PabloBlock::createPackL(Integer * fieldWidth, PabloAST * value, const String * const name) {
     assert (fieldWidth && value);
-    Type * const type = VectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()/2), 0);
+    Type * const type = FixedVectorType::get(IntegerType::get(value->getType()->getContext(), fieldWidth->value()/2),  static_cast<unsigned>(0));
     return insertAtInsertionPoint(new (mAllocator) PackL(fieldWidth, value, name, type, mAllocator));
 }
 

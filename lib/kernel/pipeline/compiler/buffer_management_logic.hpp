@@ -825,7 +825,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
  * @brief prefetchThreeCacheLinesFrom
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * const addr, const bool write) const {
-
+#if 0
     Module * const m = b->getModule();
     Function * const prefetchFunc = Intrinsic::getDeclaration(m, Intrinsic::prefetch);
 
@@ -851,6 +851,7 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
         args[0] = b->CreateGEP(baseAddr, b->getSize(i));
         b->CreateCall(prefetchFunc->getFunctionType(), prefetchFunc, args);
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

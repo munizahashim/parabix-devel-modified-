@@ -6,6 +6,10 @@
 
 using namespace llvm;
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
+
 namespace kernel {
 
 inline bool notProperFactorOf(const unsigned n, const unsigned m) {
@@ -59,10 +63,10 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
 
     Value * const ZERO = b->getSize(0);
 
-    VectorType * const inputTy = VectorType::get(b->getIntNTy(inputFieldWidth), inputVectorSize);
+    VectorType * const inputTy = FixedVectorType::get(b->getIntNTy(inputFieldWidth), inputVectorSize);
     PointerType * const inputPtrTy = inputTy->getPointerTo();
 
-    VectorType * const outputTy = VectorType::get(b->getIntNTy(outputFieldWidth), outputVectorSize);
+    VectorType * const outputTy = FixedVectorType::get(b->getIntNTy(outputFieldWidth), outputVectorSize);
     PointerType * const outputPtrTy = outputTy->getPointerTo();
 
     Value * const processed = b->getProcessedItemCount(input.getName());
@@ -100,7 +104,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
 
         VectorType * const inputTy = cast<VectorType>(inputBuffer[0]->getType());
 
-        const auto n = inputTy->getVectorElementType()->getIntegerBitWidth();
+        const auto n = inputTy->getElementType()->getIntegerBitWidth();
         const auto count = blockWidth / n;
 
         const auto halfCount = (count / 2);
@@ -117,7 +121,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         }
         Constant * const UPPER_MASK = ConstantVector::get(upperHalf);
 
-        VectorType * const outputTy = VectorType::get(b->getIntNTy(n * 2), halfCount);
+        VectorType * const outputTy = FixedVectorType::get(b->getIntNTy(n * 2), halfCount);
 
         Constant * const ZEROES = ConstantVector::getNullValue(inputTy);
         for (unsigned i = 0; i < inputBuffer.size(); ++i) {

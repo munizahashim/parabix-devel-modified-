@@ -9,8 +9,16 @@
 #include <toolchain/toolchain.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/IR/Intrinsics.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#include <llvm/IR/IntrinsicsX86.h>
+#include <llvm/Support/Host.h>
+#endif
 
 using namespace llvm;
+
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
+using FixedVectorType = VectorType;
+#endif
 
 namespace IDISA {
 
@@ -23,25 +31,25 @@ Value * IDISA_AVX_Builder::hsimd_signmask(unsigned fw, Value * a) {
     if (mBitBlockWidth == 256) {
         if (fw == 64) {
             Function * signmask_f64func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx_movmsk_pd_256);
-            Type * bitBlock_f64type = VectorType::get(getDoubleTy(), mBitBlockWidth/64);
+            Type * bitBlock_f64type = FixedVectorType::get(getDoubleTy(), mBitBlockWidth/64);
             Value * a_as_pd = CreateBitCast(a, bitBlock_f64type);
             return CreateCall(signmask_f64func->getFunctionType(), signmask_f64func, a_as_pd);
         } else if (fw == 32) {
             Function * signmask_f32func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx_movmsk_ps_256);
-            Type * bitBlock_f32type = VectorType::get(getFloatTy(), mBitBlockWidth/32);
+            Type * bitBlock_f32type = FixedVectorType::get(getFloatTy(), mBitBlockWidth/32);
             Value * a_as_ps = CreateBitCast(a, bitBlock_f32type);
             return CreateCall(signmask_f32func->getFunctionType(), signmask_f32func, a_as_ps);
         }
     } else if (mBitBlockWidth == 512) {
         if (fw == 64) {
-            Type * bitBlock_f32type = VectorType::get(getFloatTy(), mBitBlockWidth / 32);
+            Type * bitBlock_f32type = FixedVectorType::get(getFloatTy(), mBitBlockWidth / 32);
             Value * a_as_ps = CreateBitCast(a, bitBlock_f32type);
             Constant * indicies[8];
             for (unsigned i = 0; i < 8; i++) {
                 indicies[i] = getInt32(2 * i + 1);
             }
             Value * packh = CreateShuffleVector(a_as_ps, UndefValue::get(bitBlock_f32type), ConstantVector::get({indicies, 8}));
-            Type * halfBlock_f32type = VectorType::get(getFloatTy(), mBitBlockWidth/64);
+            Type * halfBlock_f32type = FixedVectorType::get(getFloatTy(), mBitBlockWidth/64);
             Value * pack_as_ps = CreateBitCast(packh, halfBlock_f32type);
             Function * signmask_f32func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx_movmsk_ps_256);
             return CreateCall(signmask_f32func->getFunctionType(), signmask_f32func, pack_as_ps);
@@ -263,8 +271,8 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_add_with_carry(Value * 
 std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
     if (shiftin->getType() == getInt8Ty() && shift == 1) {
         const uint32_t fw = mBitBlockWidth / 8;
-        Type * const v32xi8Ty = VectorType::get(getInt8Ty(), 32);
-        Type * const v32xi32Ty = VectorType::get(getInt32Ty(), 32);
+        Type * const v32xi8Ty = FixedVectorType::get(getInt8Ty(), 32);
+        Type * const v32xi32Ty = FixedVectorType::get(getInt32Ty(), 32);
         Value * shiftin_block = CreateInsertElement(Constant::getNullValue(v32xi8Ty), shiftin, (uint64_t) 0);
         shiftin_block = CreateShuffleVector(shiftin_block, UndefValue::get(v32xi8Ty), Constant::getNullValue(v32xi32Ty));
         shiftin_block = bitCast(shiftin_block);
@@ -331,7 +339,7 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_indexed_advance(Value *
         Type * iBitBlock = getIntNTy(getBitBlockWidth());
         Value * shiftVal = getSize(shiftAmount);
         const auto n = getBitBlockWidth() / bitWidth;
-        VectorType * const vecTy = VectorType::get(getSizeTy(), n);
+        FixedVectorType * const vecTy = FixedVectorType::get(getSizeTy(), n);
         if (LLVM_LIKELY(shiftAmount < bitWidth)) {
             Value * carry = mvmd_extract(bitWidth, shiftIn, 0);
             Value * result = UndefValue::get(vecTy);
@@ -398,7 +406,7 @@ Value * IDISA_AVX2_Builder::hsimd_signmask(unsigned fw, Value * a) {
     if (mBitBlockWidth == 256) {
         if (fw == 8) {
             Function * signmask_f8func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_pmovmskb);
-            Type * bitBlock_i8type = VectorType::get(getInt8Ty(), mBitBlockWidth/8);
+            Type * bitBlock_i8type = FixedVectorType::get(getInt8Ty(), mBitBlockWidth/8);
             Value * a_as_ps = CreateBitCast(a, bitBlock_i8type);
             return CreateCall(signmask_f8func->getFunctionType(), signmask_f8func, a_as_ps);
         }
@@ -422,7 +430,7 @@ llvm::Value * IDISA_AVX2_Builder::mvmd_srl(unsigned fw, llvm::Value * a, llvm::V
             indexes[i] = ConstantInt::get(fieldTy, i);
         }
         Constant * indexVec = ConstantVector::get(indexes);
-        Constant * fieldCountSplat = ConstantVector::getSplat(fieldCount, ConstantInt::get(fieldTy, fieldCount));
+        Constant * fieldCountSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, fieldCount));
         Value * shiftSplat = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
         Value * permuteVec = CreateAdd(indexVec, shiftSplat);
         // Zero out fields that are above the max.
@@ -468,7 +476,7 @@ llvm::Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, llvm::Value * a, llv
     if (mBitBlockWidth == 256 && fw > 32) {
         const unsigned fieldCount = mBitBlockWidth/fw;
         // Create a table for shuffling with smaller field widths.
-        Constant * idxMask = ConstantVector::getSplat(fieldCount, ConstantInt::get(getIntNTy(fw), fieldCount-1));
+        Constant * idxMask = getSplat(fieldCount, ConstantInt::get(getIntNTy(fw), fieldCount-1));
         Value * idx = simd_and(index_vector, idxMask);
         unsigned half_fw = fw/2;
         unsigned field_count = mBitBlockWidth/half_fw;
@@ -499,10 +507,10 @@ llvm::Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, llvm::Value * a, ll
         return result;
     }
     if (hasBMI2 && (mBitBlockWidth == 256) && (fw == 32)) {
-        Type * v1xi32Ty = VectorType::get(getInt32Ty(), 1);
-        Type * v8xi32Ty = VectorType::get(getInt32Ty(), 8);
-        Type * v8xi1Ty = VectorType::get(getInt1Ty(), 8);
-        Constant * mask0000000Fsplaat = ConstantVector::getSplat(8, ConstantInt::get(getInt32Ty(), 0xF));
+        Type * v1xi32Ty = FixedVectorType::get(getInt32Ty(), 1);
+        Type * v8xi32Ty = FixedVectorType::get(getInt32Ty(), 8);
+        Type * v8xi1Ty = FixedVectorType::get(getInt1Ty(), 8);
+        Constant * mask0000000Fsplaat = getSplat(8, ConstantInt::get(getInt32Ty(), 0xF));
         Function * PEXT_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
         Function * PDEP_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
         Function * const popcount_func = Intrinsic::getDeclaration(getModule(), Intrinsic::ctpop, getInt32Ty());
@@ -556,8 +564,8 @@ llvm::Value * IDISA_AVX512F_Builder::hsimd_packl(unsigned fw, llvm::Value * a, l
             Idxs[i] = getInt32(i);
         }
         llvm::Constant * shuffleMask = ConstantVector::get({Idxs, 64});
-        Value * a1 = CreateTrunc(fwCast(fw, a), VectorType::get(getInt8Ty(), 32));
-        Value * b1 = CreateTrunc(fwCast(fw, b), VectorType::get(getInt8Ty(), 32));
+        Value * a1 = CreateTrunc(fwCast(fw, a), FixedVectorType::get(getInt8Ty(), 32));
+        Value * b1 = CreateTrunc(fwCast(fw, b), FixedVectorType::get(getInt8Ty(), 32));
         llvm::Value * c = CreateShuffleVector(a1, b1, shuffleMask);
         c = bitCast(c);
         return c;
@@ -615,7 +623,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
 llvm::Value * IDISA_AVX512F_Builder::esimd_bitspread(unsigned fw, llvm::Value * bitmask) {
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
     const auto field_count = mBitBlockWidth / fw;
-    Type * maskTy = VectorType::get(getInt1Ty(), field_count);
+    Type * maskTy = FixedVectorType::get(getInt1Ty(), field_count);
     Type * resultTy = fwVectorType(fw);
     return CreateZExt(CreateBitCast(CreateZExtOrTrunc(bitmask, getIntNTy(field_count)), maskTy), resultTy);
 #else
@@ -732,7 +740,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_d_512);
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(32, a), fwCast(32, allZeroes()), mask});
 #else
-        Type * maskTy = VectorType::get(getInt1Ty(), fieldCount);
+        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(32, a), fwCast(32, allZeroes()), CreateBitCast(mask, maskTy)});
 #endif
@@ -742,7 +750,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_q_512);
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(64, a), fwCast(64, allZeroes()), mask});
 #else
-        Type * maskTy = VectorType::get(getInt1Ty(), fieldCount);
+        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(64, a), fwCast(64, allZeroes()), CreateBitCast(mask, maskTy)});
 #endif
@@ -793,7 +801,7 @@ Value * IDISA_AVX512F_Builder:: mvmd_dslli(unsigned fw, llvm::Value * a, llvm::V
 
 llvm::Value * IDISA_AVX512F_Builder::simd_popcount(unsigned fw, llvm::Value * a) {
      if (fw == 512) {
-         Constant * zero16xi8 = Constant::getNullValue(VectorType::get(getInt8Ty(), 16));
+         Constant * zero16xi8 = Constant::getNullValue(FixedVectorType::get(getInt8Ty(), 16));
          Constant * zeroInt32 = Constant::getNullValue(getInt32Ty());
          Value * c = simd_popcount(64, a);
          //  Should probably use _mm512_reduce_add_epi64, but not found in LLVM 3.8
@@ -991,9 +999,9 @@ Value * IDISA_AVX512F_Builder::simd_ternary(unsigned char mask, Value * a, Value
 std::pair<Value *, Value *> IDISA_AVX512F_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
     if (shift == 1 && shiftin->getType() == getInt8Ty()) {
         const uint32_t fw = 64;
-        Value * const ci_mask = CreateBitCast(shiftin, VectorType::get(getInt1Ty(), 8));
+        Value * const ci_mask = CreateBitCast(shiftin, FixedVectorType::get(getInt1Ty(), 8));
         Value * const v8xi64_1 = simd_fill(fw, ConstantInt::get(getInt64Ty(), 0x8000000000000000));
-        Value * const ecarry_in = CreateSelect(ci_mask, v8xi64_1, Constant::getNullValue(VectorType::get(getInt64Ty(), 8)));
+        Value * const ecarry_in = CreateSelect(ci_mask, v8xi64_1, Constant::getNullValue(FixedVectorType::get(getInt64Ty(), 8)));
         Value * const a1 = mvmd_dslli(fw, a, ecarry_in, shift);
         Value * const result = simd_or(CreateLShr(a1, fw - shift), CreateShl(fwCast(fw, a), shift));
 
@@ -1007,6 +1015,28 @@ std::pair<Value *, Value *> IDISA_AVX512F_Builder::bitblock_advance(Value * a, V
         return IDISA_AVX2_Builder::bitblock_advance(a, shiftin, shift);
     }
 }
+
+IDISA_AVX_Builder::IDISA_AVX_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
+, IDISA_SSE2_Builder(C, vectorWidth, laneWidth)
+{
+    llvm::StringMap<bool> features;
+    hasBMI1 = llvm::sys::getHostCPUFeatures(features) && features.lookup("bmi");
+    hasBMI2 = llvm::sys::getHostCPUFeatures(features) && features.lookup("bmi2");
+}
+
+IDISA_AVX2_Builder::IDISA_AVX2_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
+, IDISA_AVX_Builder(C, vectorWidth, laneWidth) {
+}
+
+IDISA_AVX512F_Builder::IDISA_AVX512F_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, AVX512_width, vectorWidth, laneWidth)
+, IDISA_AVX2_Builder(C, vectorWidth, laneWidth) {
+    getAVX512Features();
+}
+
+
 
 void IDISA_AVX512F_Builder::getAVX512Features() {
     llvm::StringMap<bool> features;
