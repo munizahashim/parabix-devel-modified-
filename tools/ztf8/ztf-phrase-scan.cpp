@@ -134,7 +134,7 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
 
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
     //b->CallPrintInt("keyHash", keyHash);
-    Value * tableIdxHash = b->CreateAnd(hashValue, sz_TABLEMASK, "tableIdx");
+    Value * tableIdxHash = b->CreateAnd(keyHash, sz_TABLEMASK, "tableIdx");
     //b->CallPrintInt("hashValue", hashValue);
     //b->CallPrintInt("tableIdxHash", tableIdxHash);
 
@@ -245,6 +245,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
     Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
     Constant * sz_NUMSYM = b->getSize(mNumSym);
+    Constant * sz_FF = b->getSize(0xFF);
 
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
@@ -323,7 +324,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
     Value * keyMarkPos = b->CreateAdd(keyWordPos, keyMarkPosInWord, "keyEndPos");
     /* Determine the key length. */
-    Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy); // extract full hashcode based on lg
+    Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy);
 
     Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_TWO, "keyLength");
     Value * keyStartPos = b->CreateSub(keyMarkPos, b->CreateSub(keyLength, sz_ONE), "keyStartPos");
@@ -332,8 +333,16 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     // Get the hash of this key.
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
 
+    // Build up a single encoded value for table lookup from the hashcode sequence.
+    Value * encodedVal = b->CreateAnd(hashValue, sz_FF);
+    for (unsigned j = 1; j < lg.groupInfo.encoding_bytes; j++) {
+        Value * hashcodePos = b->CreateSub(keyMarkPos, sz_ONE);
+        Value * suffixByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
+        encodedVal = b->CreateOr(b->CreateShl(encodedVal, lg.MAX_HASH_BITS), b->CreateAnd(suffixByte, sz_FF));
+    }
+    //b->CallPrintInt("encodedVal", encodedVal);
     Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(33334)));
-    Value * tableIdxHash = b->CreateAnd(b->CreateMul(keyHash, lg.HI), /*sz_NUMSYM*/ sz_TABLEMASK, "tableIdx");
+    Value * tableIdxHash = b->CreateAnd(encodedVal, sz_TABLEMASK, "tableIdx");
     Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
 
     // Use two 8-byte loads to get hash and symbol values.
@@ -347,10 +356,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * sym2 = b->CreateAlignedLoad(symPtr2, 1);
     Value * entry1 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr1);
     Value * entry2 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr2);
-<<<<<<< HEAD
-=======
-
->>>>>>> 5ed663b8... WIP: Hashcode collision handling
 /*
 All the marked symMarks indicate hashMarks for only repeated phrases.
 Among those marks,
@@ -374,10 +379,6 @@ and mark its compression mask.
     b->CreateBr(markCompression);
 
     b->SetInsertPoint(checkCompression);
-<<<<<<< HEAD
-=======
-
->>>>>>> 5ed663b8... WIP: Hashcode collision handling
     Value * symIsEqEntry = b->CreateAnd(b->CreateICmpEQ(entry1, sym1), b->CreateICmpEQ(entry2, sym2));
 
     b->CreateCondBr(symIsEqEntry, markCompression, nextKey);
