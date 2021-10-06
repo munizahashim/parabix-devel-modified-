@@ -40,7 +40,6 @@ void HexToBinary::generateDoBlockMethod(BuilderRef b) {
             base_val[j] = b->simd_or(b->simd_and(range_09, b->simd_sub(8, hexPack[j], splat_0)),
                                     b->simd_and(range_af, b->simd_sub(8, lc_hex, af_cvt)));
         }
-        //b->CallPrintInt("binary_pack ptr", b->CreateGEP(outputStreamBasePtr, b->CreateUDiv(packNumPhi, TWO)));
         Value * binary_pack = b->bitCast(b->hsimd_packl(8, base_val[0], base_val[1]));
         b->storeOutputStreamBlock("binary_data", ZERO, b->getSize(i), binary_pack);
     }

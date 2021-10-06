@@ -37,6 +37,9 @@
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
 #include <llvm/ExecutionEngine/MCJIT.h>
 #endif
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_None F_None
+#endif
 #include <llvm/ADT/Statistic.h>
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(8, 0, 0)
 #include <llvm/IR/LegacyPassManager.h>
@@ -151,7 +154,7 @@ inline void CPUDriver::preparePassManager() {
         if (LLVM_LIKELY(mIROutputStream == nullptr)) {
             if (!codegen::ShowUnoptimizedIROption.empty()) {
                 std::error_code error;
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::F_None);
+                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::OF_None);
             } else {
                 mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
             }
@@ -168,7 +171,7 @@ inline void CPUDriver::preparePassManager() {
         if (LLVM_LIKELY(mIROutputStream == nullptr)) {
             if (!codegen::ShowIROption.empty()) {
                 std::error_code error;
-                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::F_None);
+                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::OF_None);
             } else {
                 mIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
             }
@@ -192,7 +195,7 @@ inline void CPUDriver::preparePassManager() {
     if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
         if (!codegen::ShowASMOption.empty()) {
             std::error_code error;
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::F_None);
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
         } else {
             mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
         }

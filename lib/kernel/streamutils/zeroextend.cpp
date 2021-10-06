@@ -86,7 +86,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const baseInputOffset = b->CreateMul(index, b->getSize(inputFieldWidth));
     for (unsigned i = 0; i < inputFieldWidth; ++i) {
         Value * const offset = b->CreateAdd(baseInputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(baseInputPtr, offset);
+        Value * const ptr = b->CreateGEP(inputTy, baseInputPtr, offset);
         inputBuffer[i] = b->CreateAlignedLoad(ptr, (inputFieldWidth / CHAR_BIT));
     }
 
@@ -141,7 +141,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const baseOutputOffset = b->CreateMul(index, b->getSize(outputFieldWidth));
     for (unsigned i = 0; i < outputFieldWidth; ++i) {
         Value * const offset = b->CreateAdd(baseOutputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(baseOutputPtr, offset);
+        Value * const ptr = b->CreateGEP(outputTy, baseOutputPtr, offset);
         b->CreateAlignedStore(outputBuffer[i], ptr, (outputFieldWidth / CHAR_BIT));
     }
 

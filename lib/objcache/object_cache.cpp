@@ -194,6 +194,9 @@ invalid:
  *
  * A new module has been compiled. If it is cacheable and no conflicting module exists, write it out.
  ** ------------------------------------------------------------------------------------------------------------- */
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_None F_None
+#endif
 void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef Obj) {
 
     if (LLVM_LIKELY(M->getNamedMetadata(CACHEABLE) != nullptr)) {
@@ -207,7 +210,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
 
         // Write the object code
         std::error_code EC;
-        raw_fd_ostream objFile(objectName, EC, sys::fs::F_None);
+        raw_fd_ostream objFile(objectName, EC, sys::fs::OF_None);
         if (LLVM_UNLIKELY(EC)) {
             SmallVector<char, 512> tmp;
             llvm::raw_svector_ostream msg(tmp);
@@ -222,7 +225,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
         objFile.close();
 
         sys::path::replace_extension(objectName, KERNEL_FILE_EXTENSION);
-        raw_fd_ostream kernelFile(objectName.str(), EC, sys::fs::F_None);
+        raw_fd_ostream kernelFile(objectName.str(), EC, sys::fs::OF_None);
 
         if (LLVM_UNLIKELY(EC)) {
             SmallVector<char, 512> tmp;

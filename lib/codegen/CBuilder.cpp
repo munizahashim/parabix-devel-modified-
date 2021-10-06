@@ -773,7 +773,11 @@ Value * CBuilder::CreateAtomicFetchAndAdd(Value * const val, Value * const ptr) 
         Constant * const Size = ConstantExpr::getSizeOf(val->getType());
         CheckAddress(ptr, Size, "CreateAtomicFetchAndAdd: ptr");
     }
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(13, 0, 0)
     return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, AtomicOrdering::AcquireRelease);
+#else
+    return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, None, AtomicOrdering::AcquireRelease);
+#endif
 }
 
 Value * CBuilder::CreateAtomicFetchAndSub(Value * const val, Value * const ptr) {
@@ -781,7 +785,11 @@ Value * CBuilder::CreateAtomicFetchAndSub(Value * const val, Value * const ptr) 
         Constant * const Size = ConstantExpr::getSizeOf(val->getType());
         CheckAddress(ptr, Size, "CreateAtomicFetchAndSub: ptr");
     }
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(13, 0, 0)
     return CreateAtomicRMW(AtomicRMWInst::Sub, ptr, val, AtomicOrdering::AcquireRelease);
+#else
+    return CreateAtomicRMW(AtomicRMWInst::Sub, ptr, val, None, AtomicOrdering::AcquireRelease);
+#endif
 }
 
 LoadInst * CBuilder::CreateAtomicLoadAcquire(Value * ptr) {
@@ -1571,10 +1579,10 @@ Value * CBuilder::CreateExtractElement(Value * Vec, Value *Idx, const Twine Name
 
 Value * CBuilder::CreateInsertElement(Value * Vec, Value * NewElt, Value * Idx, const Twine Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        if (LLVM_UNLIKELY(!Vec->getType()->isVectorTy())) {
-            report_fatal_error("CreateExtractElement: Vec argument is not a vector type");
+        if (LLVM_UNLIKELY(!isa<FixedVectorType>(Vec->getType()))) {
+            report_fatal_error("CreateInsertElement: Vec argument is not a vector type");
         }
-        const auto n = cast<VectorType>(Vec->getType())->getNumElements();
+        const auto n = cast<FixedVectorType>(Vec->getType())->getNumElements();
         Constant * const Size = ConstantInt::get(Idx->getType(), n);
         // inserting an element into a position that exceeds the length of the vector is undefined
         __CreateAssert(CreateICmpULT(Idx, Size), "CreateInsertElement: Idx (%" PRIdsz ") is greater than Vec size (%" PRIdsz ")", { Idx, Size });

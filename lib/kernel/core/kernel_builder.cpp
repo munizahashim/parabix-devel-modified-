@@ -54,9 +54,11 @@ void KernelBuilder::setScalarField(const StringRef fieldName, Value * const valu
  * @brief CreateMonitoredScalarFieldLoad
  ** ------------------------------------------------------------------------------------------------------------- */
 LoadInst * KernelBuilder::CreateMonitoredScalarFieldLoad(const StringRef fieldName, Value * internalPtr) {
+    Type * internalTy = internalPtr->getType()->getScalarType()->getPointerElementType();
     Value * scalarPtr = getScalarFieldPtr(fieldName);
-    Value * scalarEndPtr = CreateGEP(scalarPtr, getInt32(1));
-    Value * internalEndPtr = CreateGEP(internalPtr, getInt32(1));
+    Type * scalarTy = scalarPtr->getType()->getScalarType()->getPointerElementType();
+    Value * scalarEndPtr = CreateGEP(scalarTy, scalarPtr, getInt32(1));
+    Value * internalEndPtr = CreateGEP(internalTy, internalPtr, getInt32(1));
     Value * scalarAddr = CreatePtrToInt(scalarPtr, getSizeTy());
     Value * scalarEndAddr = CreatePtrToInt(scalarEndPtr, getSizeTy());
     Value * internalAddr = CreatePtrToInt(internalPtr, getSizeTy());
@@ -73,7 +75,8 @@ LoadInst * KernelBuilder::CreateMonitoredScalarFieldLoad(const StringRef fieldNa
 StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef fieldName, Value * toStore, Value * internalPtr) {
     DataLayout DL(getModule());
     Value * scalarPtr = getScalarFieldPtr(fieldName);
-    Value * scalarEndPtr = CreateGEP(scalarPtr, getInt32(1));
+    Type * scalarTy = scalarPtr->getType()->getScalarType()->getPointerElementType();
+    Value * scalarEndPtr = CreateGEP(scalarTy, scalarPtr, getInt32(1));
     Value * scalarAddr = CreatePtrToInt(scalarPtr, getSizeTy());
     Value * scalarEndAddr = CreatePtrToInt(scalarEndPtr, getSizeTy());
     Value * internalAddr = CreatePtrToInt(internalPtr, getSizeTy());

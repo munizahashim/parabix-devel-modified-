@@ -192,7 +192,7 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
                 Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
-                kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
+                kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
             }
         }
     } else {
@@ -260,7 +260,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     Value * extractionMaskPtr = kb->getInputStreamBlockPtr("extractionMask", ZERO, blockOffsetPhi);
     extractionMaskPtr = kb->CreatePointerCast(extractionMaskPtr, fieldPtrTy);
     for (unsigned i = 0; i < fieldsPerBlock; i++) {
-        mask[i] = kb->CreateLoad(kb->CreateGEP(extractionMaskPtr, kb->getInt32(i)));
+        mask[i] = kb->CreateLoad(kb->CreateGEP(fieldTy, extractionMaskPtr, kb->getInt32(i)));
     }
     for (unsigned j = 0; j < mStreamCount; ++j) {
         Value * inputPtr = kb->getInputStreamBlockPtr("inputStreamSet", kb->getInt32(j), blockOffsetPhi);
@@ -268,9 +268,9 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
         Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), blockOffsetPhi);
         outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
-            Value * field = kb->CreateLoad(kb->CreateGEP(inputPtr, kb->getInt32(i)));
+            Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
             Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
-            kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
+            kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }
     }
     Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
@@ -1162,8 +1162,10 @@ SwizzledBitstreamCompressByCount::SwizzledBitstreamCompressByCount(BuilderRef b,
 
 void SwizzledBitstreamCompressByCount::generateDoBlockMethod(BuilderRef kb) {
 
+    Type * fieldTy = kb->getIntNTy(mFieldWidth);
+    Type * blockTy = kb->getBitBlockType();
     Value * countsPerStridePtr = kb->getInputStreamBlockPtr("countsPerStride", kb->getInt32(0));
-    Value * countStreamPtr = kb->CreatePointerCast(countsPerStridePtr, kb->getIntNTy(mFieldWidth)->getPointerTo());
+    Value * countStreamPtr = kb->CreatePointerCast(countsPerStridePtr, fieldTy->getPointerTo());
 
     // Output is written and committed to the output buffer one swizzle at a time.
     //
@@ -1187,7 +1189,7 @@ void SwizzledBitstreamCompressByCount::generateDoBlockMethod(BuilderRef kb) {
     // Generate code for each of the mSwizzleFactor fields making up a block.
     // We load the count for the field and process all swizzle groups accordingly.
     for (unsigned i = 0; i < mSwizzleFactor; i++) {
-        Value * newItemCount = kb->CreateLoad(kb->CreateGEP(countStreamPtr, kb->getInt32(i)));
+        Value * newItemCount = kb->CreateLoad(kb->CreateGEP(fieldTy, countStreamPtr, kb->getInt32(i)));
         Value * pendingSpace = kb->CreateSub(kb->getSize(mFieldWidth), pendingOffset);
         Value * pendingSpaceFilled = kb->CreateICmpUGE(newItemCount, pendingSpace);
 
@@ -1200,7 +1202,7 @@ void SwizzledBitstreamCompressByCount::generateDoBlockMethod(BuilderRef kb) {
             // Combine as many of the new items as possible into the pending group.
             Value * combinedGroup = kb->CreateOr(pendingData[j], kb->CreateShl(newItems, fieldWidths));
             // To avoid an unpredictable branch, always store the combined group, whether full or not.
-            kb->CreateBlockAlignedStore(combinedGroup, kb->CreateGEP(outputStreamPtr[j], outputIndex));
+            kb->CreateBlockAlignedStore(combinedGroup, kb->CreateGEP(blockTy, outputStreamPtr[j], outputIndex));
             // Any items in excess of the space available in the current pending group overflow for the next group.
             Value * overFlowGroup = kb->CreateLShr(newItems, kb->simd_fill(mFieldWidth, pendingSpace));
             // If we filled the space, then the overflow group becomes the new pending group and the index is updated.
@@ -1222,6 +1224,7 @@ void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(BuilderRef kb, V
     RepeatDoBlockLogic(kb);
     Constant * blockOffsetMask = kb->getSize(kb->getBitBlockWidth() - 1);
     Constant * outputIndexShift = kb->getSize(std::log2(mFieldWidth));
+    Type * blockTy = kb->getBitBlockType();
 
     Value * outputProduced = kb->getProducedItemCount("outputSwizzle0"); // All output groups have the same count.
     Value * producedOffset = kb->CreateAnd(outputProduced, blockOffsetMask);
@@ -1232,7 +1235,7 @@ void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(BuilderRef kb, V
     for (unsigned i = 0; i < mSwizzleSetCount; i++) {
         Value * pendingData = kb->getScalarField("pendingSwizzleData" + std::to_string(i));
         Value * outputStreamPtr = kb->getOutputStreamBlockPtr("outputSwizzle" + std::to_string(i), kb->getInt32(0));
-        kb->CreateBlockAlignedStore(pendingData, kb->CreateGEP(outputStreamPtr, outputIndex));
+        kb->CreateBlockAlignedStore(pendingData, kb->CreateGEP(blockTy, outputStreamPtr, outputIndex));
     }
 //    kb->setProducedItemCount("outputSwizzle0", kb->CreateAdd(pendingOffset, outputProduced));
 }
@@ -1285,6 +1288,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     Type * const sizeTy = kb->getSizeTy();
     Type * const fieldTy = kb->getIntNTy(mFW);
     Type * const FieldPtrTy = fieldTy->getPointerTo();
+    Type * blockTy = kb->getBitBlockType();
 
     Function * PEXT_func = nullptr;
     FunctionType * PEXT_ty = nullptr;
@@ -1388,7 +1392,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 Value * const combined = kb->CreateOr(pendingData[j], shiftedItems);
                 Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), outputBlock);
                 outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
-                outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
+                outputPtr = kb->CreateGEP(fieldTy, outputPtr, fieldIndex);
                 kb->CreateStore(combined, outputPtr);
                 Value * overFlow = kb->CreateLShr(compressed, kb->CreateZExtOrTrunc(maskedSpace, fieldTy));
                 overFlow = kb->CreateSelect(kb->CreateIsNull(maskedSpace), ConstantInt::getNullValue(overFlow->getType()), overFlow);
@@ -1397,7 +1401,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 kb->CreateStore(newPending, pendingDataPtr[j]);
             }
         } else {
-            std::vector<Value *> swizzles(mPendingSetCount, ConstantInt::getNullValue(kb->getBitBlockType()));
+            std::vector<Value *> swizzles(mPendingSetCount, ConstantInt::getNullValue(blockTy));
             for (unsigned j = 0; j < input.size(); ++j) {
                 unsigned swizzleNo = j/mFieldsPerBlock;
                 Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
@@ -1427,7 +1431,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                     unsigned strmIdx = j * mFieldsPerBlock + k;
                     Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), outputBlock);
                     outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
-                    outputPtr = kb->CreateGEP(outputPtr, fieldIndex);
+                    outputPtr = kb->CreateGEP(fieldTy, outputPtr, fieldIndex);
                     kb->CreateStore(kb->CreateExtractElement(combinedGroup, kb->getInt32(k)), outputPtr);
                 }
                 // Any items in excess of the space available in the current pending group overflow for the next group.
@@ -1470,7 +1474,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
         for (unsigned j = 0; j < mStreamCount; j++) {
             Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), finalBlock);
             outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
-            outputPtr = kb->CreateGEP(outputPtr, finalField);
+            outputPtr = kb->CreateGEP(fieldTy, outputPtr, finalField);
             kb->CreateStore(kb->CreateLoad(pendingDataPtr[j]), outputPtr);
         }
     } else {
@@ -1479,7 +1483,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 unsigned strmIdx = j * mFieldsPerBlock + k;
                 Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), finalBlock);
                 outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
-                outputPtr = kb->CreateGEP(outputPtr, finalField);
+                outputPtr = kb->CreateGEP(fieldTy, outputPtr, finalField);
                 kb->CreateStore(kb->CreateExtractElement(kb->CreateLoad(pendingDataPtr[j]), kb->getInt32(k)), outputPtr);
             }
         }

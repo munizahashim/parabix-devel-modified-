@@ -457,6 +457,7 @@ void AbortOnNull::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numO
     DataLayout DL(m);
     IntegerType * const intPtrTy = DL.getIntPtrType(m->getContext());
     Type * voidPtrTy = b->getVoidPtrTy();
+    Type * blockTy = b->getBitBlockType();
     const auto blocksPerStride = getStride() / b->getBitBlockWidth();
     Constant * const BLOCKS_PER_STRIDE = b->getSize(blocksPerStride);
     BasicBlock * const entry = b->GetInsertBlock();
@@ -494,8 +495,8 @@ void AbortOnNull::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numO
     PHINode * const blocksRemaining = b->CreatePHI(b->getSizeTy(), 2);
     blocksRemaining->addIncoming(numOfBlocks, entry);
     for (unsigned i = 0; i < 8; i++) {
-        Value * next = b->CreateBlockAlignedLoad(b->CreateGEP(byteStreamBasePtr, {baseBlockIndex, b->getSize(i)}));
-        b->CreateBlockAlignedStore(next, b->CreateGEP(outputStreamBasePtr, {baseBlockIndex, b->getSize(i)}));
+        Value * next = b->CreateBlockAlignedLoad(b->CreateGEP(blockTy, byteStreamBasePtr, {baseBlockIndex, b->getSize(i)}));
+        b->CreateBlockAlignedStore(next, b->CreateGEP(blockTy, outputStreamBasePtr, {baseBlockIndex, b->getSize(i)}));
         next = b->fwCast(8, next);
         blockMin[i] = b->CreateSelect(b->CreateICmpULT(next, blockMin[i]), next, blockMin[i]);
     }

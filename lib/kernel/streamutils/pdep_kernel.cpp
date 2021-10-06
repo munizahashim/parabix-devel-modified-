@@ -282,7 +282,7 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
     Value * depositMaskPtr = kb->getInputStreamBlockPtr("depositMask", ZERO, blockOffsetPhi);
     depositMaskPtr = kb->CreatePointerCast(depositMaskPtr, fieldPtrTy);
     for (unsigned i = 0; i < fieldsPerBlock; i++) {
-        mask[i] = kb->CreateLoad(kb->CreateGEP(depositMaskPtr, kb->getInt32(i)));
+        mask[i] = kb->CreateLoad(kb->CreateGEP(fieldTy, depositMaskPtr, kb->getInt32(i)));
     }
 #else
 
@@ -308,13 +308,13 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
 #endif
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
-            Value * field = kb->CreateLoad(kb->CreateGEP(inputPtr, kb->getInt32(i)));
+            Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
 #else
             Value * field = kb->CreateExtractElement(inputStrm, kb->getInt32(i));
 #endif
             Value * compressed = kb->CreateCall(fTy, PDEP_func, {field, mask[i]});
 #ifdef PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
-            kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
+            kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }
 #else
         outputStrm = kb->CreateInsertElement(outputStrm, compressed, kb->getInt32(i));

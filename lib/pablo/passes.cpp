@@ -18,6 +18,11 @@
 #include <toolchain/toolchain.h>
 #include <toolchain/pablo_toolchain.h>
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_Append F_Append
+#endif
+
+
 using namespace llvm;
 
 namespace pablo {
@@ -33,7 +38,7 @@ void pablo_function_passes(PabloKernel * kernel) {
             std::error_code error;
             llvm::raw_fd_ostream out(ShowPabloOption, error, PabloOutputFileFlag);
             PabloPrinter::print(kernel, out);
-            PabloOutputFileFlag = sys::fs::OpenFlags::F_Append;   // append subsequent Pablo kernels
+            PabloOutputFileFlag = sys::fs::OpenFlags::OF_Append;   // append subsequent Pablo kernels
         }
     }
 
@@ -70,7 +75,7 @@ void pablo_function_passes(PabloKernel * kernel) {
             std::error_code error;
             llvm::raw_fd_ostream out(ShowOptimizedPabloOption, error, PabloOptimizedOutputFileFlag);
             PabloPrinter::print(kernel, out);
-            PabloOptimizedOutputFileFlag = sys::fs::OpenFlags::F_Append;  // append subsequent Pablo kernels
+            PabloOptimizedOutputFileFlag = sys::fs::OpenFlags::OF_Append;  // append subsequent Pablo kernels
         }
     }
 }

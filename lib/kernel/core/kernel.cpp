@@ -731,7 +731,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
             fields.push_back(voidPtrTy);
         }
 
-        #warning if an I/O rate is deferred and this is internally synchronized, we need both item counts
+        //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
         // produced output items
         if (internallySynchronized || hasTerminationSignal || isAddressable(output)) {
@@ -1070,7 +1070,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
-        #warning fix this so BufferSegments is an argument to main
+        //TODO: fix this so BufferSegments is an argument to main
         allocArgs.push_back(b->getSize(codegen::BufferSegments));
         b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (hasThreadLocal()) {

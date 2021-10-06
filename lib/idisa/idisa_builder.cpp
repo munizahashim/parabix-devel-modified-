@@ -21,7 +21,7 @@ using namespace llvm;
 namespace IDISA {
 
 bool isStreamTy(const llvm::Type * const t) {
-    return t->isVectorTy() && (llvm::cast<llvm::VectorType>(t)->getNumElements() == 0);
+    return isa<FixedVectorType>(t) && (cast<FixedVectorType>(t)->getNumElements() == 0);
 }
 
 bool isStreamSetTy(const llvm::Type * const t) {
