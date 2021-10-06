@@ -46,12 +46,12 @@ public:
     }
 
     template <typename ExternalFunctionType>
-    void CreateCall(llvm::StringRef name, ExternalFunctionType & functionPtr, std::initializer_list<Scalar *> args) {
+    void CreateCall(std::string name, ExternalFunctionType & functionPtr, std::initializer_list<Scalar *> args) {
         llvm::FunctionType * const type = FunctionTypeBuilder<ExternalFunctionType>::get(mDriver.getContext());
         assert ("FunctionTypeBuilder did not resolve a function type." && type);
         assert ("Function was not provided the correct number of args" && type->getNumParams() == args.size());
         // Since the pipeline kernel module has not been made yet, just record the function info and its arguments.
-        mCallBindings.emplace_back(name, type, reinterpret_cast<void *>(&functionPtr), std::move(args));
+        mCallBindings.emplace_back(std::move(name), type, reinterpret_cast<void *>(&functionPtr), std::move(args));
     }
 
     Scalar * getInputScalar(const unsigned i) {

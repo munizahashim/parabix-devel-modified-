@@ -193,6 +193,14 @@ inline StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) 
     return StringRef(tmp.data(), tmp.size());
 }
 
+inline StructType * getTypeByName(Module * const m, StringRef name) {
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    return StructType::getTypeByName(m->getContext(), name);
+#else
+    return m->getTypeByName(name);
+#endif
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ensureLoaded
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -201,8 +209,8 @@ void Kernel::ensureLoaded() {
         return;
     }
     SmallVector<char, 256> tmp;
-    mSharedStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), SHARED_SUFFIX, tmp)));
-    mThreadLocalStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
+    mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
+    mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -212,8 +220,8 @@ void Kernel::loadCachedKernel(BuilderRef b) {
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b->getModule(); assert (mModule);
     SmallVector<char, 256> tmp;
-    mSharedStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), SHARED_SUFFIX, tmp)));
-    mThreadLocalStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
+    mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
+    mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
     linkExternalMethods(b);
     mGenerated = true;
 }
@@ -236,10 +244,10 @@ void Kernel::constructStateTypes(BuilderRef b) {
     Module * const m = getModule(); assert (b->getModule() == m);
     SmallVector<char, 256> tmpShared;
     auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
-    mSharedStateType = m->getTypeByName(strShared);
+    mSharedStateType = getTypeByName(m, strShared);
     SmallVector<char, 256> tmpThreadLocal;
     auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
-    mThreadLocalStateType = m->getTypeByName(strThreadLocal);
+    mThreadLocalStateType = getTypeByName(m, strThreadLocal);
     if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
 
         flat_set<unsigned> sharedGroups;

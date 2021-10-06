@@ -22,6 +22,7 @@
 #include <array>
 
 using namespace llvm;
+using namespace IDISA;
 
 using BuilderRef = pablo::CarryManager::BuilderRef;
 
@@ -794,8 +795,8 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
             Value * carry = b->CreateZExt(b->bitblock_any(value), streamTy);
             const auto summaryBlocks = ceil_udiv(shiftAmount, blockWidth);
             const auto summarySize = ceil_udiv(summaryBlocks, blockWidth);
-            VectorType * const bitBlockTy = b->getBitBlockType();
-            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getVectorElementType());
+            FixedVectorType * const bitBlockTy = b->getBitBlockType();
+            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getElementType());
             const auto laneWidth = laneTy->getIntegerBitWidth();
 
             assert (summarySize > 0);
@@ -821,7 +822,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                 }
                 Value * stream = b->CreateBitCast(advanced, bitBlockTy);
                 if (LLVM_LIKELY(i == summarySize)) {
-                    const auto n = bitBlockTy->getVectorNumElements();
+                    const auto n = bitBlockTy->getNumElements();
                     SmallVector<Constant *, 16> mask(n);
                     const auto m = udiv(summaryBlocks, laneWidth);
                     if (m) {

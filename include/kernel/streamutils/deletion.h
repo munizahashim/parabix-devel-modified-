@@ -65,7 +65,7 @@ public:
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
 private:
-    const unsigned mCompressFieldWidth;
+    const unsigned mFW;
     SelectedInput mMaskOp;
     SelectedInputList mInputOps;
 
@@ -94,7 +94,7 @@ public:
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
 private:
-    const unsigned mCompressedFieldWidth;
+    const unsigned mFW;
     const unsigned mStreamCount;
 };
 
@@ -156,7 +156,7 @@ public:
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
 private:
-    const unsigned mCompressFieldWidth;
+    const unsigned mFW;
     SelectedInput mMaskOp;
     SelectedInputList mInputOps;
     unsigned mFieldsPerBlock;

@@ -298,7 +298,22 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
     }
 
+//    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
+//        const RelationshipNode & node = mStreamGraph[kernel];
+//        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
+//        if (isa<PopCountKernel>(kernelObj)) {
+//            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//                const auto streamSet = target(output, mBufferGraph);
+//                BufferNode & bn = mBufferGraph[streamSet];
+//                if (bn.Locality == BufferLocality::ThreadLocal) {
+//                    bn.Locality = BufferLocality::GloballyShared;
+//                }
+//            }
+//        }
+
+
+//    }
 
 }
 
@@ -678,6 +693,27 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto producer = source(producerOutput, mBufferGraph);
 
+//        const RelationshipNode & node = mStreamGraph[producer];
+//        const Kernel * const kernelObj = node.Kernel;
+//        const auto isPopCountStreamSet = isa<PopCountKernel>(kernelObj);
+
+        //    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
+
+        //        const RelationshipNode & node = mStreamGraph[kernel];
+        //        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
+        //        if (isa<PopCountKernel>(kernelObj)) {
+        //            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+        //                const auto streamSet = target(output, mBufferGraph);
+        //                BufferNode & bn = mBufferGraph[streamSet];
+        //                if (bn.Locality == BufferLocality::ThreadLocal) {
+        //                    bn.Locality = BufferLocality::GloballyShared;
+        //                }
+        //            }
+        //        }
+
+
+        //    }
+
         #ifndef NDEBUG
         const auto & processingRate = producerRate.Binding.get().getRate();
         assert (!processingRate.isGreedy() || producerRate.Minimum <= producerRate.Maximum);
@@ -685,7 +721,9 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         #endif
 
         auto bMin = floor(producerRate.Minimum * MinimumNumOfStrides[producer]);
-        auto bMax = ceiling(producerRate.Maximum * MaximumNumOfStrides[producer]);
+        // const auto & maxStrides = bn.isNonThreadLocal() ? ExpectedNumOfStrides : MaximumNumOfStrides;
+        const auto & maxStrides = MaximumNumOfStrides;
+        auto bMax = ceiling(producerRate.Maximum * maxStrides[producer]);
 
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
 
@@ -700,7 +738,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
             #endif
 
             const auto cMin = floor(consumerRate.Minimum * MinimumNumOfStrides[consumer]);
-            const auto cMax = ceiling(consumerRate.Maximum * MaximumNumOfStrides[consumer]);
+            const auto cMax = ceiling(consumerRate.Maximum * maxStrides[consumer]);
 
             assert (cMax >= cMin);
 
@@ -764,13 +802,14 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto reqSize1 = round_up_to((bMax * 2) - bMin, blockWidth) / blockWidth;
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
-        auto requiredSize = std::max(reqSize1, reqSize2);
-
-        assert (requiredSize > 0);
+        auto reqSize3 = std::max(reqSize1, reqSize2);
+//        if (maxLookAhead || maxDelay) {
+//            reqSize3 *= 2;
+//        }
 
         bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
         bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
-        bn.RequiredCapacity = requiredSize;
+        bn.RequiredCapacity = reqSize3;
 
     }
 
@@ -811,13 +850,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
-                const auto bufferSize = bn.RequiredCapacity * mNumOfThreads;
+                auto bufferSize = bn.RequiredCapacity * (mNumOfThreads + 1);
                 assert (bufferSize > 0);
                 buffer = new DynamicBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal) {
-                    bufferSize *= mNumOfThreads;
+                    bufferSize *= (mNumOfThreads + 1);
                 }
                 buffer = new StaticBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }

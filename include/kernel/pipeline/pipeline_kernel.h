@@ -46,8 +46,8 @@ public:
 
         mutable llvm::Constant * Callee;
 
-        CallBinding(const std::string Name, llvm::FunctionType * Type, void * FunctionPointer, std::initializer_list<Scalar *> && Args)
-        : Name(Name), Type(Type), FunctionPointer(FunctionPointer), Args(Args), Callee(nullptr) { }
+        CallBinding(std::string Name, llvm::FunctionType * Type, void * FunctionPointer, std::initializer_list<Scalar *> && Args)
+        : Name(std::move(Name)), Type(Type), FunctionPointer(FunctionPointer), Args(Args.begin(), Args.end()), Callee(nullptr) { }
     };
 
     using CallBindings = std::vector<CallBinding>;

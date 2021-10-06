@@ -219,11 +219,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                     assert (typeSize > 0);
                     const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
 
-                    if (c == 0) {
-                        errs() << "streamSet " << streamSet << " c is 0?\n\n";
-                        printBufferGraph(errs());
-                    }
-
                     assert (c > 0);
                     const auto w = c * typeSize;
                     assert (w > 0);
@@ -232,7 +227,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                     const auto j = count++;
                     assert (mapping[i] == -1U);
                     mapping[i] = j;
-                    weight[j] = w;
+                    weight[j] = w * THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
                 }
             }
         }
@@ -362,10 +357,13 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                 const auto streamSet = target(output, mBufferGraph);
                 const auto i = streamSet - FirstStreamSet;
                 const auto j = mapping[i];
-                if (j != -1U) {
+                if (j == -1U) {
+                    assert (mBufferGraph[streamSet].Locality != BufferLocality::ThreadLocal);
+                } else {
                     BufferNode & bn = mBufferGraph[streamSet];
                     const auto & interval = intervals[j];
                     bn.BufferStart = interval.lower();
+                    bn.BufferEnd = interval.upper();
                 }
             }
         }

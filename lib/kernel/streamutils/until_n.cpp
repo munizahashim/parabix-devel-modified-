@@ -46,7 +46,7 @@ void UntilNkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const num
     Constant * const BLOCKS_PER_STRIDE = b->getSize(blocksPerStride);
     const auto maximumBlocksPerIteration = packSize / packsPerBlock;
     Constant * const MAXIMUM_BLOCKS_PER_ITERATION = b->getSize(maximumBlocksPerIteration);
-    VectorType * const packVectorTy = VectorType::get(sizeTy, packsPerBlock);
+    VectorType * const packVectorTy = b->fwVectorType(packSize);
 
     BasicBlock * const entry = b->GetInsertBlock();
     Value * const numOfBlocks = b->CreateMul(numOfStrides, BLOCKS_PER_STRIDE);

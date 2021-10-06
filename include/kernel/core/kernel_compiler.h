@@ -82,7 +82,7 @@ public:
 
 public:
 
-    LLVM_READNONE std::string getName() const {
+    LLVM_READNONE const std::string & getName() const {
         return mTarget->getName();
     }
 

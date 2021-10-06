@@ -30,7 +30,7 @@
 #include <pablo/pe_ones.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <toolchain/toolchain.h>
-
+#include <llvm/Support/CommandLine.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sstream>

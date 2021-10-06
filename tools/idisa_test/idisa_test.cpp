@@ -64,7 +64,7 @@ void ShiftMaskKernel::generateDoBlockMethod(BuilderRef kb) {
     Constant * const ZeroConst = kb->getSize(0);
     Value * shiftOperand = kb->loadInputStreamBlock("shiftOperand", ZeroConst);
     unsigned fieldCount = kb->getBitBlockWidth()/mTestFw;
-    Value * masked = kb->simd_and(shiftOperand, ConstantVector::getSplat(fieldCount, ConstantInt::get(fwTy, mShiftMask)));
+    Value * masked = kb->simd_and(shiftOperand, kb->getSplat(fieldCount, ConstantInt::get(fwTy, mShiftMask)));
     kb->storeOutputStreamBlock("limitedShift", ZeroConst, masked);
 }
 

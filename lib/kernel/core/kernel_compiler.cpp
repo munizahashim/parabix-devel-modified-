@@ -998,79 +998,6 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
     return outputs;
 }
 
-template <typename IndexTy>
-static bool checkIndexedTypeInternal(StructType *ST, ArrayRef<IndexTy> IdxList) {
-  // Handle the special case of the empty set index set, which is always valid.
-  if (IdxList.empty())
-    return true;
-
-  const auto n = ST->getStructNumElements();
-
-  for (unsigned i = 0; i < n; ++i) {
-      Type * ty = ST->getStructElementType(i);
-        if (!ty->isSized())   {
-            errs() << i << " is unsized: ";
-            ty->print(errs(), false);
-            errs() << "\n";
-            return false;
-        }
-  }
-
-  // If there is at least one index, the top level type must be sized, otherwise
-  // it cannot be 'stepped over'.
-  if (!cast<StructType>(ST)->isSized()) {
-     errs() << "unsized?";
-     return false;
-  }
-
-  Type * Agg = ST;
-  unsigned CurIdx = 1;
-  for (; CurIdx != IdxList.size(); ++CurIdx) {
-    CompositeType *CT = dyn_cast<CompositeType>(Agg);
-    if (!CT || CT->isPointerTy()) {
-        errs() << CurIdx << " is not composite?";
-        return false;
-    }
-    IndexTy Index = IdxList[CurIdx];
-    if (!CT->indexValid(Index)) {
-        errs() << CurIdx << " is not valid index?";
-        return false;
-    }
-    Agg = CT->getTypeAtIndex(Index);
-  }
-  if (CurIdx != IdxList.size()) {
-    errs() << CurIdx << " has incorrect elements " << IdxList.size();
-  }
-
-
-  return CurIdx == IdxList.size();
-}
-
-bool checkIndexedType(Type *Ty, ArrayRef<Value *> IdxList) {
-    return checkIndexedTypeInternal(cast<StructType>(Ty), IdxList);
-}
-
-//bool isSized(StructType * type, SmallPtrSetImpl<Type*> *Visited) {
-
-//    if (type->isOpaque())
-//      return false;
-
-
-//    // Okay, our struct is sized if all of the elements are, but if one of the
-//    // elements is opaque, the struct isn't sized *yet*, but may become sized in
-//    // the future, so just bail out without caching.
-//    for (auto I = type->element_begin(), E = type->element_end(); I != E; ++I)
-//      if (!(*I)->isSized(Visited))
-//        return false;
-
-//    // Here we cheat a bit and cast away const-ness. The goal is to memoize when
-//    // we find a sized type, as types can only move from opaque to sized, not the
-//    // other way.
-//    const_cast<StructType*>(type)->setSubclassData(
-//      type->getSubclassData() | StructType::SCDB_IsSized);
-//    return true;
-// }
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1160,7 +1087,6 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
             assert (k < sharedTy->getStructElementType(groupId * 2)->getStructNumElements());
             assert (sharedTy->getStructElementType(groupId * 2)->getStructElementType(k) == binding.getType());
             indices[2] = b->getInt32(k++);
-            assert (checkIndexedType(sharedTy, indices));
             Value * const scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType());
         }
@@ -1203,7 +1129,6 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 assert (k < threadLocalTy->getStructElementType(j * 2)->getStructNumElements());
                 assert (threadLocalTy->getStructElementType(j * 2)->getStructElementType(k) == binding.getValueType());
                 indices[2] = b->getInt32(k++);
-                assert (checkIndexedType(threadLocalTy, indices));
                 scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
                 END_SCOPED_REGION
                 break;

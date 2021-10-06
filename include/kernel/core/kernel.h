@@ -100,8 +100,8 @@ public:
             return mValueType;
         }
 
-        const llvm::StringRef getName() const {
-            return llvm::StringRef(mName);
+        const std::string & getName() const {
+            return mName;
         }
 
         unsigned getGroup() const {
@@ -178,7 +178,7 @@ public:
     // guaranteeing uniqueness.  In this case, hasSignature() should return false.
     //
 
-    LLVM_READNONE const llvm::StringRef getName() const {
+    LLVM_READNONE const std::string & getName() const {
         return mKernelName;
     }
 
@@ -194,7 +194,7 @@ public:
         if (hasFamilyName()) {
             return getDefaultFamilyName();
         } else {
-            return getName().str();
+            return getName();
         }
     }
 
@@ -358,7 +358,7 @@ public:
     void loadCachedKernel(BuilderRef b);
 
     template <typename ExternalFunctionType>
-    void link(llvm::StringRef name, ExternalFunctionType & functionPtr);
+    void link(std::string name, ExternalFunctionType & functionPtr);
 
     static bool isLocalBuffer(const Binding & output, const bool includeShared = true);
 
@@ -490,12 +490,12 @@ protected:
 };
 
 template <typename ExternalFunctionType>
-inline void Kernel::link(llvm::StringRef name, ExternalFunctionType & functionPtr) {
+inline void Kernel::link(std::string name, ExternalFunctionType & functionPtr) {
     assert ("Kernel does not have a module?" && mModule);
     auto & C = mModule->getContext();
     auto * const type = FunctionTypeBuilder<ExternalFunctionType>::get(C);
     assert ("FunctionTypeBuilder did not resolve a function type." && type);
-    mLinkedFunctions.emplace_back(name, type, reinterpret_cast<void *>(functionPtr));
+    mLinkedFunctions.emplace_back(std::move(name), type, reinterpret_cast<void *>(functionPtr));
 }
 
 class SegmentOrientedKernel : public Kernel {
