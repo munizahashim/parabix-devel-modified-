@@ -190,7 +190,7 @@ inline void PipelineCompiler::initializeConsumedItemCount(BuilderRef b, const un
 
 
     #ifdef PRINT_DEBUG_MESSAGES
-    const auto prefix = makeBufferName(mKernelId, outputPort);
+    const auto prefix = makeBufferName(kernelId, outputPort);
     debugPrint(b, prefix + " -> " + prefix + "_initiallyConsumed = %" PRIu64, initiallyConsumed);
     #endif
 

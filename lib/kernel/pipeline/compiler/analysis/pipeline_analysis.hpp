@@ -59,15 +59,7 @@ public:
 
         P.identifyOutputNodeIds();
 
-//        errs() << "-- max t\n";
-
-//        P.computeMaximumDataflow(true);
-
-//        errs() << "-- max f\n";
-
         P.computeMaximumDataflow(false);
-
-//        errs() << "-- xx\n";
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 

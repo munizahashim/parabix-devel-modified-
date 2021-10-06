@@ -87,7 +87,6 @@ void PipelineAnalysis::identifyTerminationChecks() {
         }
     }
 
-
     mTerminationCheck.resize(PartitionCount, 0U);
 
     // we are only interested in the incoming edges of the pipeline output
@@ -97,11 +96,12 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     // hard terminations
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        const Kernel * const kernelObj = getKernel(i);
-        if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::MayFatallyTerminate))) {
+        if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::MayFatallyTerminate))) {
             mTerminationCheck[KernelPartitionId[i]] |= TerminationCheckFlag::Hard;
         }
     }
+
+    mTerminationCheck[terminal] = 0;
 
 }
 

@@ -75,8 +75,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mPipelineProgress = i1_FALSE;
     mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
-   // readAllConsumerItemCounts(b);
-    branchToInitialPartition(b);
 }
 
 
@@ -891,7 +889,7 @@ void PipelineCompiler::end(BuilderRef b) {
 
         Value * const done = b->CreateIsNotNull(terminated);
 
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions && PartitionOnHybridThread.none())) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
             Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");

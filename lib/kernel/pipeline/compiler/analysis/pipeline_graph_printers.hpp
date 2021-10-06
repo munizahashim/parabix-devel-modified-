@@ -324,17 +324,24 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         }
     };
 
+    bool firstKernelInPartition = true;
+
     auto checkOpenPartitionLabel = [&](const unsigned kernel, const bool ignorePartition) {
         const auto partitionId = KernelPartitionId[kernel];
         if (partitionId != currentPartition || ignorePartition) {
             checkClosePartitionLabel();
+            firstKernelInPartition = true;
             if (LLVM_LIKELY(!ignorePartition)) {
                 out << "subgraph cluster" << partitionId << " {\n"
                        "label=\"Partition #" << partitionId  << "\";"
                        "fontcolor=\"red\";"
-                       "style=\"rounded,dashed,bold\";"
-                       "color=\"red\";"
-                       "\n";
+                       "style=\"rounded,dashed,bold\";";
+                if (PartitionOnHybridThread.test(partitionId)) {
+                    out << "color=\"blue\";";
+                } else {
+                    out << "color=\"red\";";
+                }
+                out <<  "\n";
                 closePartition = true;
                 currentPartition = partitionId;
                 firstKernelOfPartition[partitionId] = kernel;
@@ -372,6 +379,17 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         if (kernelObj->canSetTerminateSignal()) {
             out << "<CanTerminateEarly>\\n";
         }
+        if (firstKernelInPartition) {
+            if (mTerminationCheck[currentPartition]) {
+                out << " T:";
+                if (mTerminationCheck[currentPartition] & TerminationCheckFlag::Soft) {
+                    out << 'S';
+                }
+                if (mTerminationCheck[currentPartition] & TerminationCheckFlag::Hard) {
+                    out << 'H';
+                }
+            }
+        }
 
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
                 if (explicitFinalPartialStride) {
@@ -383,6 +401,8 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             const auto streamSet = target(e, mBufferGraph);
             printStreamSet(streamSet);
         }
+
+        firstKernelInPartition = false;
     };
 
     out << "digraph \"" << StringRef(mPipelineKernel->getName()) << "\" {\n"

@@ -99,7 +99,17 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
         return;
     }
     assert (mNumOfThreads > 0);
-    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(mNumOfThreads));
+    unsigned step = 0;
+    if (mCompilingHybridThread) {
+        step = 1;
+    } else {
+        step = mNumOfThreads;
+        if (PartitionOnHybridThread.any()) {
+            step -= 1;
+        }
+    }
+    assert (step > 0);
+    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(step));
     cast<PHINode>(mSegNo)->addIncoming(nextSegNo, exitBlock);
     #else
     if (LLVM_LIKELY(ExternallySynchronized || mNumOfThreads > 1)) {

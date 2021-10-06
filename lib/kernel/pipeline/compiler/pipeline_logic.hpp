@@ -433,6 +433,9 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     initializeForAllKernels();
     start(b);
     for (ActiveKernelIndex = 0; ActiveKernelIndex < ActiveKernels.size() - 1; ++ActiveKernelIndex) {
+        if (ActiveKernelIndex == 0) {
+            branchToInitialPartition(b);
+        }
         setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
         executeKernel(b);
     }
@@ -671,6 +674,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     const auto resumePoint = b->saveIP();
     const auto storedState = storeDoSegmentState();
 
+    BitVector isInputFromAlternateThread(LastStreamSet + 1U);
+    BitVector requiresTerminationSignalFromAlternateThread(PartitionCount);
+
     // -------------------------------------------------------------------------------------------------------------------------
     // MAKE PIPELINE THREAD
     // -------------------------------------------------------------------------------------------------------------------------
@@ -722,34 +728,103 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             PartitionOnHybridThread.reset(0);
             PartitionOnHybridThread.reset(PartitionCount - 1);
         }
+
+        isInputFromAlternateThread.reset();
+        requiresTerminationSignalFromAlternateThread.reset();
+
+        if (KernelOnHybridThread.any()) {
+            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+                if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
+                    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                        const auto streamSet = source(input, mBufferGraph);
+                        const auto output = in_edge(streamSet, mBufferGraph);
+                        const auto producer = source(output, mBufferGraph);
+                        assert (producer < kernel);
+                        if (KernelOnHybridThread.test(producer) != mCompilingHybridThread) {
+                            isInputFromAlternateThread.set(streamSet);
+                            requiresTerminationSignalFromAlternateThread.set(KernelPartitionId[producer]);
+                        }
+                    }
+                }
+            }
+            assert (KernelPartitionId[PipelineInput] == 0);
+            assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
+
+            for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+                if (mTerminationCheck[partitionId] && PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread) {
+                    requiresTerminationSignalFromAlternateThread.set(partitionId);
+                }
+            }
+        }
+
+        auto loadCrossThreadIOState = [&](const unsigned firstKernel, const unsigned lastKernel, const unsigned nextPartitionId) {
+            auto lastPartitionId = 0U;
+            for (auto kernel = firstKernel; kernel < lastKernel; ++kernel) {
+                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                    const auto streamSet = target(output, mBufferGraph);
+                    if (isInputFromAlternateThread.test(streamSet)) {
+                        const BufferPort & outputPort = mBufferGraph[output];
+                         Value * produced = nullptr;
+                         const auto prefix = makeBufferName(kernel, outputPort.Port);
+                         if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                             produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                         } else {
+                             produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                         }
+                         mLocallyAvailableItems[streamSet] = produced;
+                         initializeConsumedItemCount(b, kernel, outputPort.Port, produced);
+                    }
+                }
+                const auto partId = KernelPartitionId[kernel];
+                assert (partId != nextPartitionId);
+                if (lastPartitionId != partId) {
+                    if (requiresTerminationSignalFromAlternateThread.test(partId)) {
+                        mPartitionTerminationSignal[partId] = readTerminationSignal(b, partId);
+                    }
+                    lastPartitionId = partId;
+                }
+            }
+        };
+
+
         start(b);
         const auto m = ActiveKernels.size() - 1;
         auto kernel = FirstKernel;
+        mCurrentPartitionId = 0;
         for (ActiveKernelIndex = 0; ActiveKernelIndex < m; ++ActiveKernelIndex) {
             const auto nextKernel = ActiveKernels[ActiveKernelIndex];
             assert (kernel <= nextKernel);
-            loadTerminationSignalsBetweenKernels(b, kernel, nextKernel);
-            loadCrossHybridThreadProducedItemCounts(b, kernel, nextKernel);
+            const auto nextPartitionId = KernelPartitionId[nextKernel];
+            loadCrossThreadIOState(kernel, nextKernel, nextPartitionId);
+            if (ActiveKernelIndex == 0) {
+                branchToInitialPartition(b);
+            }
             setActiveKernel(b, nextKernel, true);
             executeKernel(b);
             kernel = nextKernel + 1;
         }
         assert (kernel <= PipelineOutput);
+        loadCrossThreadIOState(kernel, PipelineOutput, PartitionCount - 1);
         mKernel = nullptr;
         mKernelId = 0;
         end(b);
         ActiveKernels.clear();
         ActivePartitions.clear();
+
+        BasicBlock * exitThread  = nullptr;
+        BasicBlock * exitFunction  = nullptr;
         if (!isHybridThread) {
             // only call pthread_exit() within spawned threads; otherwise it'll be equivalent to calling exit() within the process
-            BasicBlock * const exitThread = b->CreateBasicBlock("ExitThread");
-            BasicBlock * const exitFunction = b->CreateBasicBlock("ExitProcessFunction");
+            exitThread = b->CreateBasicBlock("ExitThread");
+            exitFunction = b->CreateBasicBlock("ExitProcessFunction");
             b->CreateCondBr(isProcessThread(b, threadStruct), exitFunction, exitThread);
             b->SetInsertPoint(exitThread);
-            #ifdef ENABLE_PAPI
-            unregisterPAPIThread(b);
-            #endif
-            b->CreateCall(pthreadExitFn->getFunctionType(), pthreadExitFn, nullVoidPtrVal);
+        }
+        #ifdef ENABLE_PAPI
+        unregisterPAPIThread(b);
+        #endif
+        b->CreateCall(pthreadExitFn->getFunctionType(), pthreadExitFn, nullVoidPtrVal);
+       if (!isHybridThread) {
             b->CreateBr(exitFunction);
             b->SetInsertPoint(exitFunction);
         }

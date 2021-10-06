@@ -201,8 +201,8 @@ public:
 
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(BuilderRef b) const;
 
-    void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint, const unsigned debugNum);
-    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock, BasicBlock * const entryPoint, const unsigned debugNum);
+    void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
+    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
 
     Value * acquireAndReleaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned partitionId);
 
@@ -311,8 +311,6 @@ public:
 
     void addTerminationProperties(BuilderRef b, const size_t kernel);
     void initializePipelineInputTerminationSignal(BuilderRef b);
-    void readPartitionTerminationSignalFromState(BuilderRef b, const size_t partitionId);
-    void loadTerminationSignalsBetweenKernels(BuilderRef b, unsigned firstKernel, unsigned lastKernel);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort) const;
@@ -355,8 +353,6 @@ public:
     void releaseOwnedBuffers(BuilderRef b, const bool nonLocal);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
-
-    void loadCrossHybridThreadProducedItemCounts(BuilderRef b, unsigned firstKernel, unsigned lastKernel);
 
     void prepareLinearThreadLocalOutputBuffers(BuilderRef b);
 

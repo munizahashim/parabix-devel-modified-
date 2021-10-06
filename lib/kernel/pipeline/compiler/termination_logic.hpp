@@ -32,14 +32,6 @@ void PipelineCompiler::initializePipelineInputTerminationSignal(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief readPartitionTerminationSignalFromState
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readPartitionTerminationSignalFromState(BuilderRef b, const size_t partitionId) {
-    assert (mPartitionTerminationSignal[partitionId] == nullptr);
-    mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief setCurrentTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
@@ -74,14 +66,15 @@ inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) const {
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
     Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
 
-    assert (ActivePartitions.size()  > 1);
-    const auto m = ActivePartitions.size() - 1;
+    assert (KernelPartitionId[PipelineInput] == 0);
+    assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
 
-    for (unsigned i = 0; i < m; ++i) {
-        const auto partitionId = ActivePartitions[i];
-        Value * const signal = mPartitionTerminationSignal[partitionId]; assert (signal);
+    for (const auto partitionId : ActivePartitions) {
+        Value * const signal = mPartitionTerminationSignal[partitionId];
         const auto type = mTerminationCheck[partitionId];
         if (type & TerminationCheckFlag::Hard) {
+            assert (signal);
+            assert (!isa<Constant>(signal));
             Value * const final = b->CreateICmpEQ(signal, fatal);
             if (hard) {
                 hard = b->CreateOr(hard, final);
@@ -90,6 +83,7 @@ inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) const {
             }
         }
         if (type & TerminationCheckFlag::Soft) {
+            assert (signal);
             Value * const final = b->CreateICmpNE(signal, unterminated);
             if (soft) {
                 soft = b->CreateAnd(soft, final);
@@ -167,7 +161,7 @@ bool PipelineCompiler::kernelCanTerminateAbnormally(const unsigned kernel) const
  * @brief checkIfKernelIsAlreadyTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    if (mIsPartitionRoot) { // || mKernelCanTerminateEarly) {
         const auto id = KernelPartitionId[mKernelId];
         Value * const signal = readTerminationSignal(b, id);
         mInitialTerminationSignal = signal; assert (signal);
@@ -182,18 +176,6 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
             terminated = b->CreateOr(terminated, allConsumersFinished);
         }
         mInitiallyTerminated = terminated;
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadTerminationSignalsBetweenKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadTerminationSignalsBetweenKernels(BuilderRef b, unsigned firstKernel, unsigned lastKernel) {
-    const auto startPartId = KernelPartitionId[firstKernel];
-    const auto endPartId = KernelPartitionId[lastKernel];
-    assert (startPartId <= endPartId);
-    for (auto partId = startPartId; partId < endPartId; ++partId) {
-        mPartitionTerminationSignal[partId] = readTerminationSignal(b, partId);
     }
 }
 
