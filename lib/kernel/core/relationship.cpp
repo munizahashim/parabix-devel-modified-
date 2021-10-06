@@ -1,14 +1,12 @@
 #include <kernel/core/relationship.h>
 
 #include <llvm/IR/Constant.h>
-#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Constant.h>
+#include <idisa/idisa_builder.h>
 #include <toolchain/toolchain.h>
 
 using namespace llvm;
-
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-using FixedVectorType = VectorType;
-#endif
+using namespace IDISA;
 
 namespace kernel {
 

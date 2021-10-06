@@ -10,10 +10,6 @@
 
 using namespace llvm;
 
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-using FixedVectorType = VectorType;
-#endif
-
 namespace kernel {
 
 void editdScanKernel::generateDoBlockMethod(BuilderRef b) {
@@ -23,7 +19,7 @@ void editdScanKernel::generateDoBlockMethod(BuilderRef b) {
 
     const unsigned fieldCount = b->getBitBlockWidth() / mScanwordBitWidth;
     Type * T = b->getIntNTy(mScanwordBitWidth);
-    VectorType * scanwordVectorType =  FixedVectorType::get(T, fieldCount);
+    VectorType * scanwordVectorType = b->fwVectorType(mScanwordBitWidth);
     Value * blockNo = b->getScalarField("BlockNo");
     Value * scanwordPos = b->CreateMul(blockNo, ConstantInt::get(blockNo->getType(), b->getBitBlockWidth()));
 

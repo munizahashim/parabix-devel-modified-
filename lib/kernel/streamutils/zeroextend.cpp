@@ -5,10 +5,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
-
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-using FixedVectorType = VectorType;
-#endif
+using namespace IDISA;
 
 namespace kernel {
 
