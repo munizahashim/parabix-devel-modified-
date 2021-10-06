@@ -73,18 +73,19 @@ void UpdateNextHashMarks::generatePabloMethod() {
 InverseStream::InverseStream(BuilderRef kb,
                 StreamSet * hashMarks,
                 StreamSet * prevMarks,
+                unsigned startLgIdx,
                 unsigned groupNum,
                 StreamSet * selected)
-: PabloKernel(kb, "InverseStream" + std::to_string(groupNum),
+: PabloKernel(kb, "InverseStream_" + std::to_string(startLgIdx) + std::to_string(groupNum),
             {Binding{"hashMarks", hashMarks},
              Binding{"prevMarks", prevMarks}},
-            {Binding{"selected", selected}}), mGroupNum(groupNum) { }
+            {Binding{"selected", selected}}), mGroupNum(groupNum), mStartIdx(startLgIdx) { }
 
 void InverseStream::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     PabloAST * prevMarks = getInputStreamSet("prevMarks")[0];
-    if (mGroupNum == 1) {
+    if (mGroupNum == mStartIdx+1) {
         prevMarks = pb.createNot(prevMarks);
     }
     PabloAST * result = pb.createNot(hashMarks);
@@ -111,21 +112,23 @@ void LengthSelector::generatePabloMethod() {
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
     std::vector<PabloAST *> selectedLengthMarks;
     unsigned offset = 2;
-    unsigned lo = mEncodingScheme.minSymbolLength();//+1;
+    unsigned lo = mEncodingScheme.minSymbolLength()+2; // min k-sym phrase length = 5 bytes
     unsigned hi = mEncodingScheme.maxSymbolLength();
-    //unsigned groupSize = hi - lo + 1;
+    unsigned groupSize = hi - lo + 1;
     //std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
     for (unsigned i = lo; i <= hi; i++) {
         PabloAST * lenBixnum = bnc.EQ(groupLenBixnum, i - offset);
         selectedLengthMarks.push_back(pb.createAnd(hashMarks, lenBixnum));
         //pb.createDebugPrint(pb.createCount(pb.createInFile(lenBixnum)), "count"+std::to_string(i));
     }
-    for (unsigned i = 0; i < groupLenBixnum.size(); i++) {
+    for (unsigned i = 0; i < selectedLengthMarks.size(); i++) {
         pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i)), selectedLengthMarks[i]);
     }
     //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream2"), pb.getInteger(0)), selectedLengthMarks[mDebugIdx]);
 }
 
+
+///TODO: Complexity of OverlappingLengthGroupMarker:
 OverlappingLengthGroupMarker::OverlappingLengthGroupMarker(BuilderRef b,
                            unsigned groupNo,
                            StreamSet * lengthwiseHashMarks,
@@ -141,8 +144,9 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     Var * selectedStreamVar = getOutputStreamVar("selected");
     std::vector<PabloAST *> lengthwiseHashMarks = getInputStreamSet("lengthwiseHashMarks");
     PabloAST * prevSelected = getInputStreamSet("prevSelected")[0];
-    unsigned offset = 3;
-    unsigned curPhraseLen = mGroupNo+offset;
+    unsigned offset = 5;
+    unsigned curPhraseLen = mGroupNo;
+    unsigned idx = mGroupNo-offset;
     /*
     Check for overlap with phrases of same length:
         Adv every lengthwiseHashMarks pos by curLen-1 positions (one bit at a time).
@@ -151,7 +155,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
         select the max number of non-overlapping phrases.
     */
     /// TODO: add an assertion to check mGroupNo is valid array index
-    PabloAST * curLenPos = lengthwiseHashMarks[mGroupNo];
+    PabloAST * curLenPos = lengthwiseHashMarks[idx];
     PabloAST * toAdvance = curLenPos;
     //for (unsigned loop = 0; loop < 2; loop++) { // loop depends on the max number of consecutive phrases of same length
         PabloAST * notSelected = pb.createZeroes();
@@ -164,7 +168,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     //}
 
     PabloAST * toEliminate = pb.createZeroes();
-    for (unsigned i = mGroupNo+1; i < lengthwiseHashMarks.size(); i++) {
+    for (unsigned i = idx+1; i < lengthwiseHashMarks.size(); i++) {
         PabloAST * phrasePos = lengthwiseHashMarks[i];
         // get all the phrases marked for compression of length i+3 Eg: 29+3 -> mGroupNo+3 = 32
         phrasePos = pb.createAnd(phrasePos, prevSelected); // update prevSelected correctly
@@ -202,19 +206,22 @@ void OverlappingLookaheadMarker::generatePabloMethod() {
     PabloAST * selectedPart1 = getInputStreamSet("selectedPart1")[0];
     PabloAST * selected = selectedPart1;
     /*
-    1. eliminate any phrases of curLen in the OR(preceeding region) of longer phrases.
-        * choose the hashMark phrasePos (selected for compression) stream of len (mGroupNo + 1) through 32:
-        toEliminate = zeroes()
-        toEliminate = OR(toEliminate, lookahead phrasePos stream 1 bit at a time (for phrasePosLen-1 times) AND selected(curLen))
-        selected(curLen) = XOR(toEliminate, selected(curLen))
-        selectedPart1 = OR(selectedPart1, selected(curLen))
-
-    selectedPart1 = selected(curLen) for phrasePosLen = 32
+    1. eliminate any phrases of curLen in the OR(preceding region) of longer phrases.
+        eliminateFinal = zeroes()
+        for len in ((mGroupNo + 1), 32)
+            lookaheadStream = hashMarks[len]
+            toEliminate = zeroes()
+            for lookaheadPos in (1, len)
+                toEliminate = OR(toEliminate, AND( selected(curLen), lookahead(lookaheadStream, lookaheadPos)))
+            eliminateFinal = OR(eliminateFinal, toEliminate)
+        selected(curLen) = XOR(eliminateFinal, selected(curLen))
+        selected(curLen) = OR(selected(curLen), selectedLongerPhrases)
     */
-    unsigned offset = 3;
-    if (mGroupNo < 29) {
+    unsigned offset = 5;
+    unsigned phraseLenIdx = mGroupNo - offset;
+    if (phraseLenIdx+1 < groupLenBixnum.size()) {
         PabloAST * eliminateFinal = pb.createZeroes();
-        for (unsigned i = mGroupNo+1; i < 30; i++) { // Use encoding scheme to determine the longest len
+        for (unsigned i = phraseLenIdx+1; i < groupLenBixnum.size(); i++) { // Use encoding scheme to determine the longest len
             /*
                 mGroupNo = 5; max = 8
                 => selectedPart1 = phrases of len = 5 where any longer length phrase does not occur in the preceeding overlapping

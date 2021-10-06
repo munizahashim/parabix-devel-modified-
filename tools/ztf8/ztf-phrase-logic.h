@@ -30,11 +30,13 @@ public:
     InverseStream(BuilderRef kb,
                 StreamSet * hashMarks,
                 StreamSet * prevMarks,
+                unsigned startLgIdx,
                 unsigned groupNum,
                 StreamSet * selected);
 protected:
     void generatePabloMethod() override;
     unsigned mGroupNum;
+    unsigned mStartIdx;
 };
 
 /*

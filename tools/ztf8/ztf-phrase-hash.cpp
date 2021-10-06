@@ -148,16 +148,19 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     // Mark all the repeated hashCodes 
     std::vector<StreamSet *> allHashMarks;
     for (unsigned sym = 0; sym < SymCount; sym++) {
+        unsigned startLgIdx = 0;
+        if (sym > 0) {
+            startLgIdx = 2;
+        }
         StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
-        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+        for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) { // k-sym phrases length range 5-32
             StreamSet * const groupMarks = P->CreateStreamSet(1);
-            // skip LG 0 for 2-sym phrases?
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], phraseLenOverflow[sym], groupMarks);
             StreamSet * const hashMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<MarkRepeatedHashvalue>(encodingScheme1, sym, i, groupMarks, allHashValues[sym], hashMarks);
-            if (i > 0) {
+            if (i > startLgIdx) {
                 StreamSet * lgHashMarks = P->CreateStreamSet(1);
-                P->CreateKernelCall<InverseStream>(hashMarks, hashMarksNonFinal, i, lgHashMarks);
+                P->CreateKernelCall<InverseStream>(hashMarks, hashMarksNonFinal, startLgIdx, i, lgHashMarks);
                 hashMarksNonFinal = lgHashMarks;
             }
             else {
@@ -168,12 +171,12 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         allHashMarks.push_back(hashMarksNonFinal);
     }
     for (unsigned sym = 1; sym < SymCount; sym++) {
-            StreamSet * const selectedHashMarks = P->CreateStreamSet(30);
+            StreamSet * const selectedHashMarks = P->CreateStreamSet(28);
             //StreamSet * const countStream2 = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthSelector>(encodingScheme1, phraseLenBixnum[sym], allHashMarks[sym], selectedHashMarks);
             //P->CreateKernelCall<PopcountKernel>(countStream2, P->getOutputScalar("count1"));
             StreamSet * hmSelectedSoFar = P->CreateStreamSet(1);
-            for(unsigned i = encodingScheme1.maxSymbolLength(); i >= encodingScheme1.minSymbolLength(); i--) {
+            for(unsigned i = encodingScheme1.maxSymbolLength(); i >= 5 /*encodingScheme1.minSymbolLength()*/; i--) {
                 if (i == encodingScheme1.maxSymbolLength()) {
                     hmSelectedSoFar = allHashMarks[sym];
                 }
@@ -182,7 +185,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
                 // 2. eliminate all the currLen phrases preceeded by longer length phrases
 
                 //StreamSet * const countStream1 = P->CreateStreamSet(1);
-                P->CreateKernelCall<OverlappingLengthGroupMarker>(i-3, selectedHashMarks, hmSelectedSoFar, selectedStep1);
+                P->CreateKernelCall<OverlappingLengthGroupMarker>(i, selectedHashMarks, hmSelectedSoFar, selectedStep1);
                 //P->CreateKernelCall<DebugDisplayKernel>("selectedStep1", selectedStep1);
                 // 3. eliminate all the curLen phrases preceeding longer length phrases
                 /*if (i == 32) {
@@ -194,7 +197,8 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
                 P->CreateKernelCall<DebugDisplayKernel>("accumHashMarks", accumHashMarks);*/
                 // without accumHashMarks, more than expected hashMarks from selectedStep1 may be eliminated
                 StreamSet * const selectedStep2 = P->CreateStreamSet(1);
-                P->CreateKernelCall<OverlappingLookaheadMarker>(i-3, selectedHashMarks, hmSelectedSoFar, selectedStep1, selectedStep2);
+                // no need to invoke OverlappingLookaheadMarker for maxSymbolLength
+                P->CreateKernelCall<OverlappingLookaheadMarker>(i, selectedHashMarks, hmSelectedSoFar, selectedStep1, selectedStep2);
                 hmSelectedSoFar = selectedStep2;
             }
             allHashMarks[sym] = hmSelectedSoFar;
@@ -203,7 +207,11 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * u8bytes = codeUnitStream;
     std::vector<StreamSet *> extractionMasks;
     for (int sym = SymCount-1; sym >= 0; sym--) {
-        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+        unsigned startLgIdx = 0;
+        if (sym > 0) {
+            startLgIdx = 2;
+        }
+        for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) {
             StreamSet * const extractionMask = P->CreateStreamSet(1);
             StreamSet * const input_bytes = u8bytes;
             StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
