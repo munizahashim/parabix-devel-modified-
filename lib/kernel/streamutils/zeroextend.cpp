@@ -54,16 +54,15 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     }
 
     const auto inputVectorSize = (blockWidth / inputFieldWidth); assert (is_power_2(inputVectorSize));
-    const auto outputVectorSize = (blockWidth / outputFieldWidth); assert (is_power_2(outputVectorSize));
 
     IntegerType * const sizeTy = b->getSizeTy();
 
     Value * const ZERO = b->getSize(0);
 
-    VectorType * const inputTy = FixedVectorType::get(b->getIntNTy(inputFieldWidth), inputVectorSize);
+    VectorType * const inputTy = b->fwVectorType(inputFieldWidth);
     PointerType * const inputPtrTy = inputTy->getPointerTo();
 
-    VectorType * const outputTy = FixedVectorType::get(b->getIntNTy(outputFieldWidth), outputVectorSize);
+    VectorType * const outputTy = b->fwVectorType(outputFieldWidth);
     PointerType * const outputPtrTy = outputTy->getPointerTo();
 
     Value * const processed = b->getProcessedItemCount(input.getName());
@@ -99,7 +98,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     // expand by doubling repeatidly until we've reached the desired output size
     for (;;) {
 
-        VectorType * const inputTy = cast<VectorType>(inputBuffer[0]->getType());
+        FixedVectorType * const inputTy = cast<FixedVectorType>(inputBuffer[0]->getType());
 
         const auto n = inputTy->getElementType()->getIntegerBitWidth();
         const auto count = blockWidth / n;
@@ -118,7 +117,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         }
         Constant * const UPPER_MASK = ConstantVector::get(upperHalf);
 
-        VectorType * const outputTy = FixedVectorType::get(b->getIntNTy(n * 2), halfCount);
+        FixedVectorType * const outputTy = b->fwVectorType(n * 2);
 
         Constant * const ZEROES = ConstantVector::getNullValue(inputTy);
         for (unsigned i = 0; i < inputBuffer.size(); ++i) {
