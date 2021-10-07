@@ -18,11 +18,27 @@
 
 using namespace llvm;
 
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-using FixedVectorType = VectorType;
-#endif
-
 namespace IDISA {
+
+bool isStreamTy(const llvm::Type * const t) {
+    return t->isVectorTy() && (llvm::cast<llvm::VectorType>(t)->getNumElements() == 0);
+}
+
+bool isStreamSetTy(const llvm::Type * const t) {
+    return t->isArrayTy() && (isStreamTy(t->getArrayElementType()));
+}
+
+unsigned getNumOfStreams (const llvm::Type * const t) {
+    if (isStreamTy(t)) return 1;
+    assert(isStreamSetTy(t));
+    return llvm::cast<llvm::ArrayType>(t)->getNumElements();
+}
+
+unsigned getStreamFieldWidth (const llvm::Type * const t) {
+    if (isStreamTy(t)) return t->getScalarSizeInBits();
+    assert(isStreamSetTy(t));
+    return llvm::cast<llvm::ArrayType>(t)->getElementType()->getScalarSizeInBits();
+}
 
 unsigned getVectorBitWidth(Value * a) {
     Type * aTy = a->getType();
@@ -85,7 +101,7 @@ CallInst * IDISA_Builder::CallPrintRegister(StringRef name, Value * const value,
 Constant *IDISA_Builder::getSplat(const unsigned fieldCount, Constant *Elt) {
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
     return ConstantVector::getSplat(ElementCount::get(fieldCount, false), Elt);
-#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
     return ConstantVector::getSplat({fieldCount, false}, Elt);
 #else
     return ConstantVector::getSplat(fieldCount, Elt);

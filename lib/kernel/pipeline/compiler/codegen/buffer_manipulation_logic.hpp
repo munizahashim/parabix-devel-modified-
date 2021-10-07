@@ -3,6 +3,7 @@
 
 #include "../pipeline_compiler.hpp"
 
+using namespace IDISA;
 namespace kernel {
 
 

@@ -43,7 +43,7 @@
 #else
 #include <llvm/IR/PassTimingInfo.h>
 #endif
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
 #include <llvm/Support/Host.h>
 #endif
 #ifndef NDEBUG
@@ -196,7 +196,7 @@ inline void CPUDriver::preparePassManager() {
         } else {
             mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
         }
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
         const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
         #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
         const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
@@ -318,7 +318,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
     mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
     mEngine->addModule(std::move(mainModule));
     mEngine->finalizeObject();
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
     auto mainFnPtr = mEngine->getFunctionAddress(main->getName().str());
     #else
     auto mainFnPtr = mEngine->getFunctionAddress(main->getName());
@@ -329,7 +329,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
 }
 
 bool CPUDriver::hasExternalFunction(llvm::StringRef functionName) const {
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
     return RTDyldMemoryManager::getSymbolAddressInProcess(functionName.str());
     #else
     return RTDyldMemoryManager::getSymbolAddressInProcess(functionName);

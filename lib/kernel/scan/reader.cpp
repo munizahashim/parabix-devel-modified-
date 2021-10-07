@@ -20,9 +20,10 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const readItem = b->CreateBasicBlock("readItem");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exitBlock");
+    BasicBlock * const doneBlock = mDoneCallbackName.empty() ? exitBlock :  b->CreateBasicBlock("doneBlock");
     Value * const initialStride = b->getProcessedItemCount("scan");
     Value * const isInvalidFinalItem = b->CreateAnd(b->isFinal(), b->CreateICmpEQ(b->getSize(0), b->getAccessibleItemCount("scan")));
-    b->CreateCondBr(isInvalidFinalItem, exitBlock, readItem);
+    b->CreateCondBr(isInvalidFinalItem, doneBlock, readItem);
 
     b->SetInsertPoint(readItem);
     PHINode * const strideNo = b->CreatePHI(sizeTy, 2);
@@ -59,6 +60,17 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     b->CreateCall(fTy, callback, ArrayRef<Value *>(callbackParams));
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, exitBlock);
 
+    if (doneBlock != exitBlock) {
+        b->SetInsertPoint(doneBlock);
+        Function * const callback = module->getFunction(mDoneCallbackName);
+        FunctionType * fTy = callback->getFunctionType();
+        if (callback == nullptr) {
+            llvm::report_fatal_error(mKernelName + ": failed to get function: " + mDoneCallbackName);
+        }
+        b->CreateCall(fTy, callback, ArrayRef<Value *>({}));
+        b->CreateBr(exitBlock);
+    }
+
     b->SetInsertPoint(exitBlock);
 }
 
@@ -89,6 +101,12 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
     setStride(1);
 }
 
+ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName)
+: ScanReader(b, source, scanIndices, callbackName)
+{
+    mDoneCallbackName = doneCallbackName;
+}
+
 ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::initializer_list<StreamSet *> additionalStreams)
 : MultiBlockKernel(b, ScanReader_GenerateName(scanIndices, callbackName, additionalStreams), {
     {"scan", scanIndices, BoundedRate(0, 1), Principal()},
@@ -108,6 +126,12 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
         mInputStreamSets.push_back({name, stream, BoundedRate(0, 1)});
         mAdditionalStreamNames.push_back(name);
     }
+}
+
+ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName, std::initializer_list<StreamSet *> additionalStreams)
+: ScanReader(b, source, scanIndices, callbackName, additionalStreams)
+{
+    mDoneCallbackName = doneCallbackName;
 }
 
 }

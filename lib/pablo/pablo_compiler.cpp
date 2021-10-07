@@ -860,7 +860,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                 const unsigned intWidth = std::min(getIntegerBitWidth(lh->getType()), getIntegerBitWidth(rh->getType()));
                 const unsigned maskWidth = b->getBitBlockWidth() / intWidth;
                 IntegerType * const maskTy = b->getIntNTy(maskWidth);
-                FixedVectorType * const vTy = FixedVectorType::get(b->getIntNTy(intWidth), maskWidth);
+                FixedVectorType * const vTy = b->fwVectorType(intWidth);
 
                 Value * baseLhv = nullptr;
                 Value * lhvStreamIndex = nullptr;
@@ -922,7 +922,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
 
                 } else {
 
-                    value = UndefValue::get(FixedVectorType::get(maskTy, intWidth));
+                    value = UndefValue::get(b->fwVectorType(maskWidth));
 
                     for (unsigned i = 0; i < intWidth; ++i) {
                         llvm::Constant * const index = b->getInt32(i);

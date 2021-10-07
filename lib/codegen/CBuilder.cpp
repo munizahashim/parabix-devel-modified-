@@ -67,6 +67,11 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
     typedef llvm::Align         AlignType;
 #endif
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+    using FixedVectorType = llvm::VectorType;
+#else
+    using FixedVectorType = llvm::FixedVectorType;
+#endif
 
 using namespace llvm;
 
@@ -1553,10 +1558,10 @@ AllocaInst * CBuilder::CreateAlignedAlloca(Type * const Ty, const unsigned Align
 
 Value * CBuilder::CreateExtractElement(Value * Vec, Value *Idx, const Twine Name) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        if (LLVM_UNLIKELY(!Vec->getType()->isVectorTy())) {
+        if (LLVM_UNLIKELY(!isa<FixedVectorType>(Vec->getType()))) {
             report_fatal_error("CreateExtractElement: Vec argument is not a vector type");
         }
-        const auto n = cast<VectorType>(Vec->getType())->getNumElements();
+        const auto n = cast<FixedVectorType>(Vec->getType())->getNumElements();
         Constant * const Size = ConstantInt::get(Idx->getType(), n);
         // exctracting an element from a position that exceeds the length of the vector is undefined
         __CreateAssert(CreateICmpULT(Idx, Size), "CreateExtractElement: Idx (%" PRIdsz ") is greater than Vec size (%" PRIdsz ")", { Idx, Size });

@@ -15,38 +15,24 @@ namespace llvm { class Value; }
 namespace llvm { class StringRef; }
 
 namespace IDISA {
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+    using FixedVectorType = llvm::VectorType;
+#else
+    using FixedVectorType = llvm::FixedVectorType;
+#endif
 
+bool isStreamTy(const llvm::Type * const t);
 
-inline bool isStreamTy(const llvm::Type * const t) {
-    return t->isVectorTy() && (llvm::cast<llvm::VectorType>(t)->getNumElements() == 0);
-}
+bool isStreamSetTy(const llvm::Type * const t);
 
-inline bool isStreamSetTy(const llvm::Type * const t) {
-    return t->isArrayTy() && (isStreamTy(t->getArrayElementType()));
-}
+unsigned getNumOfStreams (const llvm::Type * const t);
 
-inline unsigned getNumOfStreams (const llvm::Type * const t) {
-    if (isStreamTy(t)) return 1;
-    assert(isStreamSetTy(t));
-    return llvm::cast<llvm::ArrayType>(t)->getNumElements();
-}
-
-inline unsigned getStreamFieldWidth (const llvm::Type * const t) {
-    if (isStreamTy(t)) return t->getScalarSizeInBits();
-    assert(isStreamSetTy(t));
-    return llvm::cast<llvm::ArrayType>(t)->getElementType()->getScalarSizeInBits();
-}
+unsigned getStreamFieldWidth (const llvm::Type * const t);
 
 unsigned getVectorBitWidth(llvm::Value * vec);
 
 class IDISA_Builder : public CBuilder {
 public:
-
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-    using FixedVectorType = llvm::VectorType;
-#else
-    using FixedVectorType = llvm::FixedVectorType;
-#endif
 
     IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
 

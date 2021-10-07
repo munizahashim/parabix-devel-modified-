@@ -22,12 +22,9 @@
 #include <array>
 
 using namespace llvm;
+using namespace IDISA;
 
 using BuilderRef = pablo::CarryManager::BuilderRef;
-
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
-using FixedVectorType = llvm::VectorType;
-#endif
 
 namespace pablo {
 

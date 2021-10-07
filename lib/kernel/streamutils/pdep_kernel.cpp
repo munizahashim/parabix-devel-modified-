@@ -18,7 +18,7 @@
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
 #include <llvm/IR/IntrinsicsX86.h>
 #endif
 
