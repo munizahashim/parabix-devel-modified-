@@ -41,7 +41,7 @@ void PipelineCompiler::convertPAPIEventNamesToCodes() {
         tokenizer<escaped_list_separator<char>> events(codegen::PapiCounterOptions);
         for (const auto & event : events) {
             int EventCode = PAPI_NULL;
-            const int rvalEventNameToCode = PAPI_event_name_to_code(event.c_str(), &EventCode);
+            const int rvalEventNameToCode = PAPI_event_name_to_code(const_cast<char*>(event.c_str()), &EventCode);
             if (LLVM_LIKELY(rvalEventNameToCode == PAPI_OK)) {
                 PAPIEventList.push_back(EventCode);
             } else {
@@ -677,7 +677,7 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
         auto toGlobal = [&](ArrayRef<Constant *> array, Type * const type, size_t size) {
             ArrayType * const arTy = ArrayType::get(type, size);
             Constant * const ar = ConstantArray::get(arTy, array);
-            Module & mod = *b->getModule();            
+            Module & mod = *b->getModule();
             GlobalVariable * const gv = new GlobalVariable(mod, arTy, true, GlobalValue::PrivateLinkage, ar);
             FixedArray<Value *, 2> tmp;
             tmp[0] = ZERO;
