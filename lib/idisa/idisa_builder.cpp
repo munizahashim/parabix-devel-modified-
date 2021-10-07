@@ -20,24 +20,24 @@ using namespace llvm;
 
 namespace IDISA {
 
-bool isStreamTy(const llvm::Type * const t) {
-    return t->isVectorTy() && (llvm::cast<llvm::VectorType>(t)->getNumElements() == 0);
+bool isStreamTy(const Type * const t) {
+    return t->isVectorTy() && (cast<FixedVectorType>(t)->getNumElements() == 0);
 }
 
-bool isStreamSetTy(const llvm::Type * const t) {
+bool isStreamSetTy(const Type * const t) {
     return t->isArrayTy() && (isStreamTy(t->getArrayElementType()));
 }
 
-unsigned getNumOfStreams (const llvm::Type * const t) {
+unsigned getNumOfStreams (const Type * const t) {
     if (isStreamTy(t)) return 1;
     assert(isStreamSetTy(t));
-    return llvm::cast<llvm::ArrayType>(t)->getNumElements();
+    return cast<ArrayType>(t)->getNumElements();
 }
 
-unsigned getStreamFieldWidth (const llvm::Type * const t) {
+unsigned getStreamFieldWidth (const Type * const t) {
     if (isStreamTy(t)) return t->getScalarSizeInBits();
     assert(isStreamSetTy(t));
-    return llvm::cast<llvm::ArrayType>(t)->getElementType()->getScalarSizeInBits();
+    return cast<ArrayType>(t)->getElementType()->getScalarSizeInBits();
 }
 
 unsigned getVectorBitWidth(Value * a) {
@@ -1015,7 +1015,7 @@ std::pair<Value *, Value *> IDISA_Builder::bitblock_add_with_carry(Value * a, Va
 }
 
 // full subtract producing {borrowOut, difference}
-std::pair<llvm::Value *, llvm::Value *> IDISA_Builder::bitblock_subtract_with_borrow(llvm::Value * a, llvm::Value * b, llvm::Value * borrowIn) {
+std::pair<Value *, Value *> IDISA_Builder::bitblock_subtract_with_borrow(Value * a, Value * b, Value * borrowIn) {
     Value * gen = simd_and(a, b);
     Value * prop = simd_or(a, b);
     Value * partial = simd_sub(mBitBlockWidth, simd_sub(mBitBlockWidth, a, b), borrowIn);
