@@ -183,31 +183,30 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const Codes = su::Multiplex(P, Errs);
 
     // 9.3 Prepare StreamSets in case we want to show lines on error
-    auto indices = { Indices };
-    auto lineNums = { Indices };
-    auto errIndices = { ErrIndices };
-    auto errLineNums = { Codes };
+    //    If flag -c is provided, parse for CSV
+    auto validateFn = SCAN_CALLBACK(ToCSVFlag ? json2csv_validateObjectsAndArrays : postproc_validateObjectsAndArrays);
+    auto doneFn = SCAN_CALLBACK(ToCSVFlag ? json2csv_doneCallback : postproc_doneCallback);
+    auto errFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
+
     if (ShowLinesFlag) {
         auto const LineBreaks = P->CreateStreamSet(1);
         P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
         StreamSet * const LineNumbers = scan::LineNumbers(P, collapsedLex, LineBreaks);
         StreamSet * const LineSpans = scan::LineSpans(P, LineBreaks);
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
-        indices = { Indices, Spans };
-        lineNums = { LineNumbers, Indices };
-        errIndices = { ErrIndices, Spans };
-        errLineNums = { LineNumbers, Codes };
+
+        // 9.4 Validate objects and arrays
+        scan::Reader(P, driver, validateFn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
+
+        // 10. Output whether or not it is valid
+        scan::Reader(P, driver, errFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
+    } else {
+        // 9.4 Validate objects and arrays
+        scan::Reader(P, driver, validateFn, doneFn, codeUnitStream, { Indices }, { Indices });
+
+        // 10. Output whether or not it is valid
+        scan::Reader(P, driver, errFn, codeUnitStream, { ErrIndices }, { Codes });
     }
-
-    // 9.4 Validate objects and arrays
-    //    If flag -c is provided, parse for CSV
-    auto validateFn = SCAN_CALLBACK(ToCSVFlag ? json2csv_validateObjectsAndArrays : postproc_validateObjectsAndArrays);
-    auto doneFn = SCAN_CALLBACK(ToCSVFlag ? json2csv_doneCallback : postproc_doneCallback);
-    scan::Reader(P, driver, validateFn, doneFn, codeUnitStream, indices, lineNums);
-
-    // 10. Output whether or not it is valid
-    auto errFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
-    scan::Reader(P, driver, errFn, codeUnitStream, errIndices, errLineNums);
     
 // uncomment lines below for debugging
 /*
