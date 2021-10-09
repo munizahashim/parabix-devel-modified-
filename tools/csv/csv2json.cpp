@@ -37,7 +37,9 @@
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include "csv_util.hpp"
-
+#ifdef ENABLE_PAPI
+#include <util/papi_helper.hpp>
+#endif
 
 using namespace kernel;
 using namespace llvm;
@@ -232,12 +234,21 @@ int main(int argc, char *argv[]) {
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
+        #ifdef REPORT_PAPI_TESTS
+        papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
+        // papi::PapiCounter<3> jitExecution{{PAPI_FUL_ICY, PAPI_STL_CCY, PAPI_RES_STL}};
+        jitExecution.start();
+        #endif
         //  Run the pipeline.
         printf("%s", templatePrologue.c_str());
         fflush(stdout);
         fn(fd);
         close(fd);
         printf("%s", templateEpilogue.c_str());
+        #ifdef REPORT_PAPI_TESTS
+        jitExecution.stop();
+        jitExecution.write(std::cerr);
+        #endif
     }
     return 0;
 }
