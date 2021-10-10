@@ -90,6 +90,20 @@ unsigned EncodingInfo::prefixLengthMaskBits(unsigned lgth) const {
     }
 }
 
+unsigned EncodingInfo::lastSuffixBase(unsigned groupNo) const {
+    if(groupNo > 2) {
+        return 128;
+    }
+    return 0;
+}
+
+unsigned EncodingInfo::lastSuffixHashBits(unsigned numSym, unsigned groupNo) const {
+    if (numSym > 0 && groupNo > 2) {
+        return 6;
+    }
+    return 7;
+}
+
 WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
 : PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 

@@ -31,6 +31,8 @@ struct LengthGroupParameters {
     Constant * MAX_HASH_BITS;
     Constant * SUFFIX_BITS;
     Constant * SUFFIX_MASK;
+    Constant * LAST_SUFFIX_BASE;
+    Constant * LAST_SUFFIX_MASK;
     unsigned const groupHalfLength;
     Type * halfLengthTy;
     Type * halfSymPtrTy;
@@ -51,7 +53,7 @@ struct LengthGroupParameters {
     Constant * LENGTH_MASK;
     Constant * EXTENSION_MASK;
 
-    LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo);
+    LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo, unsigned numSym = 0);
 };
 
 unsigned hashTableSize(LengthGroupInfo g);

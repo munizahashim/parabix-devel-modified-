@@ -35,6 +35,8 @@ public:
     unsigned maxEncodingBytes() const;
     unsigned prefixLengthOffset(unsigned lgth) const;
     unsigned prefixLengthMaskBits(unsigned lgth) const;
+    unsigned lastSuffixBase(unsigned groupNo) const;
+    unsigned lastSuffixHashBits(unsigned numSym, unsigned groupNo) const;
     std::string uniqueSuffix() const;
 };
 

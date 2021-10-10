@@ -209,7 +209,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     for (int sym = SymCount-1; sym >= 0; sym--) {
         unsigned startLgIdx = 0;
         if (sym > 0) {
-            startLgIdx = 2;
+            startLgIdx = 3; //2; k-symbol compressible phrase min length = 9 bytes
         }
         for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) {
             StreamSet * const extractionMask = P->CreateStreamSet(1);

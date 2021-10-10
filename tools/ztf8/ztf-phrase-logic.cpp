@@ -294,14 +294,20 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
     //std::vector<PabloAST *> count;
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::vector<PabloAST *> ASCII_lookaheads;
+    std::vector<PabloAST *> sfx_80_BF_lookaheads;
     PabloAST * ASCII_lookahead = pb.createNot(pb.createLookahead(basis[7], 1)); // for lg 0,1,2
     ASCII_lookaheads.push_back(ASCII_lookahead);
     //pb.createDebugPrint(ASCII_lookahead, "ASCII_lookahead");
     // for lg 3,4
     for (unsigned i = 2; i < mEncodingScheme.maxEncodingBytes(); i++) {
-        PabloAST * ASCII_lookahead_multibyte = pb.createNot(pb.createLookahead(basis[7], pb.getInteger(i)));
+        PabloAST * ASCII_lookahead_multibyte = pb.createAnd(ASCII_lookahead, pb.createNot(pb.createLookahead(basis[7], pb.getInteger(i))));
         ASCII_lookaheads.push_back(ASCII_lookahead_multibyte);
         //pb.createDebugPrint(pb.createLookahead(basis[7], pb.getInteger(i)), "ASCII_lookahead_multibyte");
+    }
+    for(unsigned i = 2; i < mEncodingScheme.maxEncodingBytes(); i++) {
+        PabloAST * suffix_lookahead = pb.createAnd(pb.createLookahead(basis[7], pb.getInteger(i)), pb.createNot(pb.createLookahead(basis[6], pb.getInteger(i)))); // 80-BF
+        suffix_lookahead = pb.createAnd(suffix_lookahead, ASCII_lookahead); // E0-EF 00-7F 80-BF; F0-FF 00-7F 00-7F 80-BF
+        sfx_80_BF_lookaheads.push_back(suffix_lookahead);
     }
     /*
         CODEWORDS                                                    | VALID UTF-8
@@ -353,7 +359,8 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
         }
         else {
             next_base = base + 16;
-            inGroup = pb.createOr(inGroup, pb.createAnd3(ASCII_lookaheads[i-2], bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
+            PabloAST * lookahead_accum = pb.createOr(ASCII_lookaheads[i-2], sfx_80_BF_lookaheads[i-3]);
+            inGroup = pb.createOr(inGroup, pb.createAnd3(lookahead_accum, bnc.UGE(basis, base), bnc.ULT(basis, next_base)));
             //pb.createDebugPrint(inGroup, "inGroup["+std::to_string(i)+"]");
             if (i == 3) {
                 BixNum diff = bnc.SubModular(basis, base); // 0,8; 1,9; 2,10; etc...

@@ -211,7 +211,7 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
+: MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(numSyms) + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
                     Binding{"hashValues", hashValues},
                     Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
@@ -234,7 +234,7 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
 
 void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     ScanWordParameters sw(b, mStride);
-    LengthGroupParameters lg(b, mEncodingScheme, mGroupNo);
+    LengthGroupParameters lg(b, mEncodingScheme, mGroupNo, mNumSym);
     Constant * sz_DELAYED = b->getSize(mEncodingScheme.maxSymbolLength());
     Constant * sz_STRIDE = b->getSize(mStride);
     Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
@@ -335,7 +335,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
 
     // Build up a single encoded value for table lookup from the hashcode sequence.
     Value * encodedVal = b->CreateAnd(hashValue, sz_FF);
-    for (unsigned j = 1; j < lg.groupInfo.encoding_bytes; j++) {
+    for (unsigned j = 1; j < lg.groupInfo.encoding_bytes/* + mNumSym*/; j++) { // same # encoding_bytes for k-sym phrases
         Value * hashcodePos = b->CreateSub(keyMarkPos, sz_ONE);
         Value * suffixByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
         encodedVal = b->CreateOr(b->CreateShl(encodedVal, lg.MAX_HASH_BITS), b->CreateAnd(suffixByte, sz_FF));
@@ -414,7 +414,17 @@ and mark its compression mask.
     Value * curPos = keyMarkPos;
     Value * curHash = keyHash;
     // Write the suffixes.
-    for (unsigned i = 0; i < lg.groupInfo.encoding_bytes - 1; i++) {
+
+    //for (unsigned i = 0; i < mNumSym; i++) { // write 1 extra suffix byte
+        //Value * last_suffix = b->CreateTrunc(b->CreateAdd(b->getSize(128), b->CreateAnd(curHash, lg.LAST_SUFFIX_MASK, "ZTF_suffix_last
+        Value * last_suffix = b->CreateTrunc(b->CreateAdd(lg.LAST_SUFFIX_BASE, b->CreateAnd(curHash, lg.LAST_SUFFIX_MASK, "ZTF_suffix_last")), b->getInt8Ty());
+        //b->CallPrintInt("SUFFIX_MASK", lg.SUFFIX_MASK);
+        //b->CallPrintInt("last_suffix", last_suffix);
+        b->CreateStore(last_suffix, b->getRawOutputPointer("encodedBytes", curPos));
+        curPos = b->CreateSub(curPos, sz_ONE);
+        curHash = b->CreateLShr(curHash, lg.SUFFIX_BITS);
+    //}
+    for (unsigned i = 0; i < lg.groupInfo.encoding_bytes - 2; i++) {
         Value * ZTF_suffix = b->CreateTrunc(b->CreateAnd(curHash, lg.SUFFIX_MASK, "ZTF_suffix"), b->getInt8Ty());
         b->CreateStore(ZTF_suffix, b->getRawOutputPointer("encodedBytes", curPos));
         curPos = b->CreateSub(curPos, sz_ONE);

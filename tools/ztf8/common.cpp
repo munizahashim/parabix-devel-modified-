@@ -40,11 +40,13 @@ ScanWordParameters::ScanWordParameters(BuilderRef b, unsigned stride) :
         assert((((stride & (stride - 1)) == 0) && (stride >= b->getBitBlockWidth()) && (stride <= SIZE_T_BITS * SIZE_T_BITS)));
     }
 
-LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo) :
+LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo, unsigned numSym) :
     groupInfo(encodingScheme.byLength[groupNo]),
     MAX_HASH_BITS(b->getSize(encodingScheme.MAX_HASH_BITS)),
     SUFFIX_BITS(b->getSize(7)),
     SUFFIX_MASK(b->getSize(0x7F)),
+    LAST_SUFFIX_BASE(b->getSize(encodingScheme.lastSuffixBase(groupNo) * std::min(1U, unsigned(numSym)))),
+    LAST_SUFFIX_MASK(b->getSize((1UL << encodingScheme.lastSuffixHashBits(numSym, groupNo)) - 1)),
     groupHalfLength(1UL << boost::intrusive::detail::floor_log2(groupInfo.lo)),
     halfLengthTy(b->getIntNTy(8U * groupHalfLength)),
     halfSymPtrTy(halfLengthTy->getPointerTo()),
