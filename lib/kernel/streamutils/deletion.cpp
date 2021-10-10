@@ -316,7 +316,6 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     Constant * zeroSplat = Constant::getNullValue(b->fwVectorType(mFW));
     Constant * oneSplat = b->getSplat(numFields, ConstantInt::get(fwTy, 1));
     Constant * CFW = ConstantInt::get(fwTy, mFW);
-    Constant * fwSplat = b->getSplat(numFields, CFW);
     Constant * numFieldConst = ConstantInt::get(fwTy, numFields);
     Constant * fwMaskSplat = b->getSplat(numFields, ConstantInt::get(fwTy, mFW - 1));
 
@@ -387,6 +386,12 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     // field numbers for all subsequent fields, (the fields that receive overflow bits).
     Value * pendingSum = b->simd_add(mFW, partialSum, splatPending);
     Value * initialFieldNo = b->simd_srli(mFW, pendingSum, std::log2(mFW));
+    //
+    // Each input field contains bits from at most two output fields.  After
+    // rotatioh, overflow bits are at the beginning of the rotated field, while
+    // bits for the current output field will be shifted by the offset.
+    // Create a mask for selecting current field bits.
+    Value * currentFieldMask = b->simd_sllv(mFW, b->allOnes(), offsets);
     // Now process the input data block of each stream in the input stream set.
     //
     // First load all the stream set blocks and the pending data.
@@ -399,10 +404,10 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     // and then shift and combine subsequent fields.
     SmallVector<Value *, 16> pendingOutput(mStreamCount);
     SmallVector<Value *, 16> outputFields(mStreamCount);
-    Value * backShift = b->simd_sub(mFW, fwSplat, offsets);
     for (unsigned i = 0; i < mStreamCount; i++) {
-        Value * currentFieldBits = b->simd_sllv(mFW, sourceBlock[i], offsets);
-        Value * nextFieldBits = b->simd_srlv(mFW, sourceBlock[i], backShift);
+        Value * alignedBits = b->simd_rotl(mFW, sourceBlock[i], offsets);
+        Value * currentFieldBits = b->simd_and(alignedBits, currentFieldMask);
+        Value * nextFieldBits = b->simd_xor(currentFieldBits, alignedBits);
         Value * firstField = b->mvmd_extract(mFW, currentFieldBits, 0);
         Value * vec1 = b->CreateInsertElement(zeroSplat, firstField, pendingFieldIdx);
         pendingOutput[i] = b->simd_or(pendingDataPhi[i], vec1);
