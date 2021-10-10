@@ -245,9 +245,16 @@ void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     }
 }
 
+//#define PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
+
 void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsigned fieldWidth, unsigned streamCount, unsigned stride) {
+#ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
     Type * fieldTy = kb->getIntNTy(fieldWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
+#elif PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
+    Type * fieldTy = kb->getIntNTy(fieldWidth);
+    Type * fieldPtrTy = PointerType::get(fieldTy, 0);
+#endif
     Function * PDEP_func = nullptr;
     if (fieldWidth == 64) {
         PDEP_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pdep_64);
@@ -277,7 +284,6 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
     //  while field store is better.   Vector insert then store creates long dependence
     //  chains.
     //
-//#define PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
     Value * depositMaskPtr = kb->getInputStreamBlockPtr("depositMask", ZERO, blockOffsetPhi);
     depositMaskPtr = kb->CreatePointerCast(depositMaskPtr, fieldPtrTy);
@@ -525,13 +531,20 @@ void UnitInsertionExtractionMasks::generateFinalBlockMethod(BuilderRef b, Value 
     b->setScalarField("EOFmask", b->bitblock_mask_from(remainingBytes));
     RepeatDoBlockLogic(b);
 }
-
+#define USE_FILTER_BY_MASK_KERNEL
 StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P, StreamSet * insertion_mask, InsertPosition p) {
     auto stream01 = P->CreateStreamSet(1);
     auto valid01 = P->CreateStreamSet(1);
     P->CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
     auto spread_mask = P->CreateStreamSet(1);
+#ifndef USE_FILTER_BY_MASK_KERNEL
     FilterByMask(P, valid01, stream01, spread_mask);
+#else
+    P->CreateKernelCall<FilterByMaskKernel>
+        (Select(valid01, {0}),
+         SelectOperationList{Select(stream01, {0})},
+         spread_mask);
+#endif
     return spread_mask;
 }
 
