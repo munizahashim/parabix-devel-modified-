@@ -68,6 +68,50 @@ Value * IDISA_AVX_Builder::CreateZeroHiBitsFrom(Value * bits, Value * pos, const
     return CBuilder::CreateZeroHiBitsFrom(bits, pos, Name);
 }
 
+Value * IDISA_AVX_Builder::CreatePextract(Value * bits, Value * mask, const Twine Name) {
+    if (hasBMI2) {
+        Type * Ty = bits->getType();
+        unsigned width = Ty->getPrimitiveSizeInBits();
+        if (width == 64) {
+            Function * pext64 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_64);
+            return CreateCall(pext64->getFunctionType(), pext64, {bits, mask}, Name);
+        }
+        if (width <= 32) {
+            Function * pext32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
+            if (width < 32) {
+                bits = CreateZExt(bits, getInt32Ty());
+                mask = CreateZExt(mask, getInt32Ty());
+            }
+            Value * r = CreateCall(pext32->getFunctionType(), pext32, {bits, mask}, Name);
+            if (width == 32) return r;
+            return CreateTrunc(r, bits->getType());
+        }
+    }
+    return IDISA_Builder::CreatePextract(mask, bits, Name);
+}
+
+Value * IDISA_AVX_Builder::CreatePdeposit(Value * bits, Value * mask, const Twine Name) {
+    if (hasBMI2) {
+        Type * Ty = bits->getType();
+        unsigned width = Ty->getPrimitiveSizeInBits();
+        if (width == 64) {
+            Function * pdep64 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_64);
+            return CreateCall(pdep64->getFunctionType(), pdep64, {bits, mask}, Name);
+        }
+        if (width <= 32) {
+            Function * pdep32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
+            if (width < 32) {
+                bits = CreateZExt(bits, getInt32Ty());
+                mask = CreateZExt(mask, getInt32Ty());
+            }
+            Value * r = CreateCall(pdep32->getFunctionType(), pdep32, {bits, mask}, Name);
+            if (width == 32) return r;
+            return CreateTrunc(r, bits->getType());
+        }
+    }
+    return IDISA_Builder::CreatePdeposit(mask, bits, Name);
+}
+
 std::string IDISA_AVX2_Builder::getBuilderUniqueName() {
     return mBitBlockWidth != 256 ? "AVX2_" + std::to_string(mBitBlockWidth) : "AVX2";
 }
@@ -284,23 +328,21 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_advance(Value * a, Valu
 }
 
 std::vector<Value *> IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
-    if (hasBMI2 && ((fieldwidth == 64) || (fieldwidth == 32))) {
-        Function * PEXT_f = (fieldwidth == 64) ? Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_64)
-                                            : Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
-        const auto n = getBitBlockWidth() / fieldwidth;
+    if (hasBMI2) {
+        const auto n = getVectorBitWidth(v[0]) / fieldwidth;
         std::vector<Value *> mask(n);
         for (unsigned i = 0; i < n; i++) {
             mask[i] = mvmd_extract(fieldwidth, extract_mask, i);
         }
         std::vector<Value *> w(v.size());
         for (unsigned j = 0; j < v.size(); j++) {
-            Value * result = UndefValue::get(fwVectorType(fieldwidth));
+            Value * result = UndefValue::get(v[j]->getType());
             for (unsigned i = 0; i < n; i++) {
                 Value * v_i = mvmd_extract(fieldwidth, v[j], i);
-                Value * bits = CreateCall(PEXT_f->getFunctionType(), PEXT_f, {v_i, mask[i]});
+                Value * bits = CreatePextract(v_i, mask[i]);
                 result = mvmd_insert(fieldwidth, result, bits, i);
             }
-            w[j] = bitCast(result);
+            w[j] = fwCast(fieldwidth, result);
         }
         return w;
     }
@@ -308,18 +350,16 @@ std::vector<Value *> IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, std::vec
 }
 
 Value * IDISA_AVX2_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
-    if (hasBMI2 && ((fieldwidth == 64) || (fieldwidth == 32))) {
-        Function * PDEP_f = (fieldwidth == 64) ? Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_64)
-                                            : Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
-        const auto n = getBitBlockWidth() / fieldwidth;
-        Value * result = UndefValue::get(fwVectorType(fieldwidth));
+    if (hasBMI2) {
+        const auto n = getVectorBitWidth(v) / fieldwidth;
+        Value * result = UndefValue::get(v->getType());
         for (unsigned i = 0; i < n; i++) {
             Value * v_i = mvmd_extract(fieldwidth, v, i);
             Value * mask_i = mvmd_extract(fieldwidth, deposit_mask, i);
-            Value * bits = CreateCall(PDEP_f->getFunctionType(), PDEP_f, {v_i, mask_i});
+            Value * bits = CreatePdeposit(v_i, mask_i);
             result = mvmd_insert(fieldwidth, result, bits, i);
         }
-        return bitCast(result);
+        return fwCast(fieldwidth, result);
     }
     return IDISA_Builder::simd_pdep(fieldwidth, v, deposit_mask);
 }

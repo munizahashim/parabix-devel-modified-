@@ -13,10 +13,6 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
-#include <llvm/IR/IntrinsicsX86.h>
-#endif
-
 // #define COMPARISON_STUDY
 
 using namespace llvm;
@@ -169,16 +165,9 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
     blockOffsetPhi->addIncoming(ZERO, entry);
     std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, blockOffsetPhi);
     std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, blockOffsetPhi);
-    if (BMI2_available() && ((mFW == 32) || (mFW == 64))) {
+    if (BMI2_available()) {
         Type * fieldTy = kb->getIntNTy(mFW);
         Type * fieldPtrTy = PointerType::get(fieldTy, 0);
-        Function * PEXT_func = nullptr;
-        if (mFW == 64) {
-            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
-        } else if (mFW == 32) {
-            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
-        }
-        FunctionType * fTy = PEXT_func->getFunctionType();
         const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mFW;
         Value * extractionMask = kb->fwCast(mFW, maskVec[0]);
         std::vector<Value *> mask(fieldsPerBlock);
@@ -191,7 +180,7 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
             outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
-                Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
+                Value * compressed = kb->CreatePextract(field, mask[i]);
                 kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
             }
         }
@@ -236,13 +225,6 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
 void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
     Type * fieldTy = kb->getIntNTy(mPEXTWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
-    Function * PEXT_func = nullptr;
-    if (mPEXTWidth == 64) {
-        PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
-    } else if (mPEXTWidth == 32) {
-        PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
-    }
-    FunctionType * fTy = PEXT_func->getFunctionType();
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
@@ -269,7 +251,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
         outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
             Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
-            Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, mask[i]});
+            Value * compressed = kb->CreatePextract(field, mask[i]);
             kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }
     }
@@ -1011,14 +993,6 @@ Returns:
 
 SwizzledDeleteByPEXTkernel::SwizzleSets SwizzledDeleteByPEXTkernel::makeSwizzleSets(BuilderRef b, llvm::Value * const selectors, Value * const strideIndex) {
 
-    Function * pext = nullptr;
-    if (mPEXTWidth == 64) {
-        pext = Intrinsic::getDeclaration(b->getModule(), Intrinsic::x86_bmi_pext_64);
-    } else if (mPEXTWidth == 32) {
-        pext = Intrinsic::getDeclaration(b->getModule(), Intrinsic::x86_bmi_pext_32);
-    }
-    FunctionType * fTy = pext->getFunctionType();
-
     Value * const m = b->fwCast(mPEXTWidth, selectors);
 
     std::vector<Value *> masks(mSwizzleFactor);
@@ -1057,7 +1031,8 @@ SwizzledDeleteByPEXTkernel::SwizzleSets SwizzledDeleteByPEXTkernel::makeSwizzleS
                 // Load block j,k
                 Value * const field = b->CreateExtractElement(input[j], k);
                 // Apply PEXT deletion
-                Value * const selected = b->CreateCall(fTy, pext, {field, masks[k]});
+                Value * const selected = b->CreatePextract(field, masks[k]);
+
                 // Then store it as our k,j-th output
                 output[k] = b->CreateInsertElement(output[k], selected, j);
             }
@@ -1087,13 +1062,6 @@ void DeleteByPEXTkernel::generateFinalBlockMethod(BuilderRef kb, Value * remaini
 }
 
 void DeleteByPEXTkernel::generateProcessingLoop(BuilderRef kb, Value * delMask) {
-    Function * PEXT_func = nullptr;
-    if (mPEXTWidth == 64) {
-        PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
-    } else if (mPEXTWidth == 32) {
-        PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
-    }
-    FunctionType * fTy = PEXT_func->getFunctionType();
     std::vector<Value *> masks(mSwizzleFactor);
     Value * const m = kb->fwCast(mPEXTWidth, kb->simd_not(delMask));
     for (unsigned i = 0; i < mSwizzleFactor; i++) {
@@ -1106,7 +1074,7 @@ void DeleteByPEXTkernel::generateProcessingLoop(BuilderRef kb, Value * delMask) 
         Value * output = UndefValue::get(value->getType());
         for (unsigned j = 0; j < mSwizzleFactor; j++) {
             Value * field = kb->CreateExtractElement(value, j);
-            Value * compressed = kb->CreateCall(fTy, PEXT_func, {field, masks[j]});
+            Value * const compressed = kb->CreatePextract(field, masks[j]);
             output = kb->CreateInsertElement(output, compressed, j);
         }
         kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(i), output);
@@ -1295,16 +1263,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     Type * const FieldPtrTy = fieldTy->getPointerTo();
     Type * blockTy = kb->getBitBlockType();
 
-    Function * PEXT_func = nullptr;
-    FunctionType * PEXT_ty = nullptr;
-    if (Use_BMI_PEXT) {
-        if (mFW == 64) {
-            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_64);
-        } else if (mFW == 32) {
-            PEXT_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pext_32);
-        }
-        PEXT_ty = PEXT_func->getFunctionType();
-    }
     ConstantInt * const LOG_2_BLOCK_WIDTH = kb->getSize(std::log2(kb->getBitBlockWidth()));
     ConstantInt * const BLOCK_WIDTH_MASK = kb->getSize(kb->getBitBlockWidth() - 1);
     ConstantInt * const FIELD_WIDTH = kb->getSize(mFW);
@@ -1392,7 +1350,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
             for (unsigned j = 0; j < input.size(); ++j) {
                 Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
                 Value * compressed =
-                    Use_BMI_PEXT ? kb->CreateCall(PEXT_ty, PEXT_func, {field, mask[i]}) : field;
+                    Use_BMI_PEXT ? kb->CreatePextract(field, mask[i]) : field;
                 Value * const shiftedItems = kb->CreateShl(compressed, kb->CreateZExtOrTrunc(pendingOffset, fieldTy));
                 Value * const combined = kb->CreateOr(pendingData[j], shiftedItems);
                 Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), outputBlock);
@@ -1410,8 +1368,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
             for (unsigned j = 0; j < input.size(); ++j) {
                 unsigned swizzleNo = j/mFieldsPerBlock;
                 Value * field = kb->CreateExtractElement(input[j], kb->getInt32(i));
-                Value * compressed =
-                    Use_BMI_PEXT ? kb->CreateCall(PEXT_ty, PEXT_func, {field, mask[i]}) : field;
+                Value * compressed = Use_BMI_PEXT ? kb->CreatePextract(field, mask[i]) : field;
                 swizzles[swizzleNo] = kb->CreateInsertElement(swizzles[swizzleNo], compressed, j%mFieldsPerBlock);
                 //kb->CallPrintRegister("swizzles" + std::to_string(swizzleNo), swizzles[swizzleNo]);
             }

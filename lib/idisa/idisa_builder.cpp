@@ -258,9 +258,6 @@ Value * IDISA_Builder::simd_le(unsigned fw, Value * a, Value * b) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "le");
     Value * a1 = fwCast(fw, a);
     Value * b1 = fwCast(fw, b);
-    CallPrintRegister("a1", a1);
-    CallPrintRegister("b1", b1);
-    CallPrintRegister("sle", CreateSExt(CreateICmpSLE(a1, b1), a1->getType()));
     return CreateSExt(CreateICmpSLE(a1, b1), a1->getType());
 }
 
@@ -565,6 +562,13 @@ Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract
     return simd_pext(fieldwidth, std::vector<Value *>{v}, extract_mask)[0];
 }
 
+Value * IDISA_Builder::CreatePextract(Value * v, Value * mask, const Twine Name) {
+    Type * Ty = v->getType();
+    unsigned width = Ty->getPrimitiveSizeInBits();
+    UnsupportedFieldWidthError(width, "Pextract");
+    //return CreateBitCast(IDISA_Builder::simd_pext(width, fwCast(width, v), fwCast(width, mask)), Ty);
+}
+
 Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
     // simd_pdep is implemented by reversing the process of simd_pext.
     // First determine the deletion counts necessary for each stage of the process.
@@ -587,6 +591,13 @@ Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit
                     simd_sllv(fw, simd_select_hi(fw * 2, w), pext_shift_back_amts));
     }
     return simd_and(w, deposit_mask);
+}
+
+Value * IDISA_Builder::CreatePdeposit(Value * v, Value * mask, const Twine Name) {
+    Type * Ty = v->getType();
+    unsigned width = Ty->getPrimitiveSizeInBits();
+    UnsupportedFieldWidthError(width, "Pdeposit");
+    //return CreateBitCast(simd_pdep(width, fwCast(width, v), fwCast(width, mask)), Ty);
 }
 
 Value * IDISA_Builder::simd_popcount(unsigned fw, Value * a) {

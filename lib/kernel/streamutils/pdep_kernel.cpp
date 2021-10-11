@@ -18,10 +18,6 @@
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
-#include <llvm/IR/IntrinsicsX86.h>
-#endif
-
 using namespace llvm;
 
 namespace kernel {
@@ -255,13 +251,6 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
     Type * fieldTy = kb->getIntNTy(fieldWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
 #endif
-    Function * PDEP_func = nullptr;
-    if (fieldWidth == 64) {
-        PDEP_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pdep_64);
-    } else if (fieldWidth == 32) {
-        PDEP_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pdep_32);
-    }
-    FunctionType * fTy = PDEP_func->getFunctionType();
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
@@ -318,7 +307,7 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
 #else
             Value * field = kb->CreateExtractElement(inputStrm, kb->getInt32(i));
 #endif
-            Value * compressed = kb->CreateCall(fTy, PDEP_func, {field, mask[i]});
+            Value * compressed = kb->CreatePdeposit(field, mask[i]);
 #ifdef PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
             kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }

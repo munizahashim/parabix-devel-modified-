@@ -23,6 +23,8 @@ public:
 
     llvm::Value * hsimd_signmask(unsigned fw, llvm::Value * a) override;
     llvm::Value * CreateZeroHiBitsFrom(llvm::Value * bits, llvm::Value * pos, const llvm::Twine Name = "") override;
+    llvm::Value * CreatePextract(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
+    llvm::Value * CreatePdeposit(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
 
     ~IDISA_AVX_Builder() {}
 protected:
