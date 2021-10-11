@@ -944,7 +944,7 @@ Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
 
 Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned shift) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_dslli");
-    if (shift == 0) return b;
+    if (shift == 0) return a;
     const auto field_count = getVectorBitWidth(a) / fw;
     SmallVector<Constant *, 16> Idxs(field_count);
     for (unsigned i = 0; i < field_count; i++) {
