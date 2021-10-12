@@ -35,7 +35,6 @@
 #include <util/aligned_allocator.h>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-// #define REPORT_PAPI_TESTS
 #endif
 
 // #define USE_MULTI_EDITD_MERGE_GROUPS

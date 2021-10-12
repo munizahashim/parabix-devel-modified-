@@ -35,6 +35,9 @@
 #include <fcntl.h>
 #include <sstream>
 #include <llvm/Support/raw_ostream.h>
+#ifdef ENABLE_PAPI
+#include <util/papi_helper.hpp>
+#endif
 
 using namespace pablo;
 using namespace kernel;
@@ -417,7 +420,7 @@ GB_18030_FourByteLogic::GB_18030_FourByteLogic
 void GB_18030_FourByteLogic::generatePabloMethod() {
     std::string UTF_prefix = (mIndexingKind == GB_18030_IndexingKind::UTF16) ? "UTF16_" : "UTF32_";
     PabloBuilder pb(getEntryScope());
-    
+
     PabloAST * GB_4byte = pb.createExtract(getInputStreamVar("GB_4byte"), pb.getInteger(0));
     BixNum byte1 = getInputStreamSet("byte1");
     BixNum nybble1 = getInputStreamSet("nybble1");
@@ -444,12 +447,12 @@ void GB_18030_FourByteLogic::generatePabloMethod() {
 
     PabloBuilder nb = pb.createScope();
     BixNumCompiler bnc(nb);
-    
+
     BixNum GB4_basis21_15(7);
     BixNum GB4_basis14_11(4);
     BixNum GB4_basis10_4(7);
     BixNum GB4_basis3_0(4);
-    
+
     for (unsigned i = 0; i < 7; i++) {
         GB4_basis21_15[i] = nb.createAnd(GB_4byte, byte1[i], "gb_byte1");
     }
@@ -512,7 +515,7 @@ void GB_18030_FourByteLogic::generatePabloMethod() {
         nb.createAssign(u16[12], nb.createOr(u16[12], surrogate));
         nb.createAssign(u16[11], nb.createOr(u16[11], surrogate));
         nb.createAssign(u16[10], nb.createOr(u16[10], surrogate2));
-        
+
         for (unsigned i = 0; i < 10; i++) {
             PabloAST * surrogate_bit = nb.createSel(surrogate1, SMP_offset[i+10], SMP_offset[i]);
             nb.createAssign(u16[i], nb.createSel(surrogate, surrogate_bit, u16[i]));
@@ -602,7 +605,7 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
         GB_mask4 = GB_mask4Out;
         GB_prefix4 = GB_prefix4Out;
     }
-    
+
     StreamSet * GB_4byte = P->CreateStreamSet(1); // markers for 4-byte sequences
     StreamSet * const byte1 = P->CreateStreamSet(8);
     StreamSet * const nybble1 = P->CreateStreamSet(4);
@@ -731,7 +734,15 @@ int main(int argc, char *argv[]) {
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
+        #ifdef REPORT_PAPI_TESTS
+        papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
+        jitExecution.start();
+        #endif
         gb18030Function(fd, inputFile.c_str());
+        #ifdef REPORT_PAPI_TESTS
+        jitExecution.stop();
+        jitExecution.write(std::cerr);
+        #endif
         close(fd);
     }
     return 0;

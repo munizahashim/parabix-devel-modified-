@@ -33,7 +33,6 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-#define REPORT_PAPI_TESTS
 #endif
 
 using namespace llvm;

@@ -33,6 +33,9 @@
 #include <string>
 #include <sys/stat.h>
 #include <vector>
+#ifdef ENABLE_PAPI
+#include <util/papi_helper.hpp>
+#endif
 
 namespace fs = boost::filesystem;
 
@@ -55,7 +58,7 @@ static cl::list<CountOptions> wcOptions(
              clEnumValN(CharOption, "m", "Report the number of characters in each input file (override -c)."),
              clEnumValN(ByteOption, "c", "Report the number of bytes in each input file (override -m).")
              CL_ENUM_VAL_SENTINEL), cl::cat(wcFlags));
-                                                 
+
 static std::string wc_modes = "";
 
 static int defaultDisplayColumnWidth = 7;  // default field width
@@ -121,7 +124,7 @@ void WordCountKernel::generatePabloMethod() {
     } else {
         ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
     }
-    
+
     PabloAST * u8final = nullptr;
     if (CountWords || CountChars) {
         Zeroes * const ZEROES = pb.createZeroes();
@@ -331,16 +334,21 @@ int main(int argc, char *argv[]) {
     charCount.resize(fileCount);
     byteCount.resize(fileCount);
 
+    #ifdef REPORT_PAPI_TESTS
+    papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
+    jitExecution.start();
+    #endif
+
     for (unsigned i = 0; i < fileCount; ++i) {
         wc(wordCountFunctionPtr, i);
     }
-    
+
     size_t maxCount = 0;
     if (CountLines) maxCount = TotalLines;
     if (CountWords) maxCount = TotalWords;
     if (CountChars) maxCount = TotalChars;
     if (CountBytes) maxCount = TotalBytes;
-    
+
     int displayColumnWidth = std::to_string(maxCount).size() + 1;
     if (displayColumnWidth < defaultDisplayColumnWidth) displayColumnWidth = defaultDisplayColumnWidth;
 
@@ -376,6 +384,11 @@ int main(int argc, char *argv[]) {
         }
         std::cout << " total" << std::endl;
     }
+
+    #ifdef REPORT_PAPI_TESTS
+    jitExecution.stop();
+    jitExecution.write(std::cerr);
+    #endif
 
     return 0;
 }

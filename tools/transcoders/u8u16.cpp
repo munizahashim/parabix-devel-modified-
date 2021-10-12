@@ -35,10 +35,6 @@
 #include <iostream>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-// #define REPORT_PAPI_TESTS
-#endif
-#ifdef REPORT_PAPI_TESTS
-#define COMPARISION_STUDY
 #endif
 
 using namespace pablo;
@@ -73,19 +69,6 @@ protected:
     void generatePabloMethod() override;
 };
 
-#ifdef COMPARISION_STUDY
-U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *delMask, StreamSet *errMask)
-: PabloKernel(b, "u8u16",
-// input
-{Binding{"u8bit", BasisBits}},
-// outputs
-{Binding{"u16bit", u8bits}
-,Binding{"delMask", delMask}
-,Binding{"errMask", errMask}}) {
-
-}
-
-#else
 U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
 : PabloKernel(b, "u8u16",
 // input
@@ -95,10 +78,6 @@ U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, 
 ,Binding{"selectors", selectors}}) {
 
 }
-
-#endif
-
-
 
 // {Binding{b->getStreamSetTy(16, 1), "u16bit"}, Binding{b->getStreamSetTy(1, 1), "delMask"}, Binding{b->getStreamSetTy(1, 1), "errMask"}}) {
 
@@ -290,15 +269,8 @@ void U8U16Kernel::generatePabloMethod() {
     for (unsigned i = 0; i < 8; i++) {
         main.createAssign(main.createExtract(output, i), u16_lo[i]);
     }
-    #ifdef COMPARISION_STUDY
-    Var * delmask_out = getOutputStreamVar("delMask");
-    Var * error_mask_out = getOutputStreamVar("errMask");
-    main.createAssign(main.createExtract(delmask_out, main.getInteger(0)), delmask);
-    main.createAssign(main.createExtract(error_mask_out,  main.getInteger(0)), error_mask);
-    #else
     PabloAST * selectors = main.createInFile(main.createNot(delmask));
     main.createAssign(main.createExtract(getOutputStreamVar("selectors"), main.getInteger(0)), selectors);
-    #endif
 }
 
 typedef void (*u8u16FunctionType)(uint32_t fd, const char *);
@@ -325,20 +297,11 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
     StreamSet * u8bits = P->CreateStreamSet(16);
 
-    #ifdef COMPARISION_STUDY
-    StreamSet * DelMask = P->CreateStreamSet();
-    StreamSet * ErrorMask = P->CreateStreamSet();
-    P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, DelMask, ErrorMask);
-    #else
     StreamSet * u16bits = P->CreateStreamSet(16);
     StreamSet * selectors = P->CreateStreamSet();
     P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
-    #endif
     StreamSet * u16bytes = P->CreateStreamSet(1, 16);
     if (useAVX2()) {
-        #ifdef COMPARISION_STUDY
-        report_fatal_error("Not supported in comparison study");
-        #else
         // Allocate space for fully compressed swizzled UTF-16 bit streams
         std::vector<StreamSet *> u16Swizzles(4);
         u16Swizzles[0] = P->CreateStreamSet(4);
@@ -351,26 +314,13 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
         // Produce unswizzled UTF-16 bit streams
         P->CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
         P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
-        #endif
     } else {
-
-        #ifdef COMPARISION_STUDY
-
-        StreamSet * U16Bits = P->CreateStreamSet(16);
-        StreamSet * DeletionCounts = P->CreateStreamSet();
-
-        P->CreateKernelCall<DeletionKernel>(u8bits, DelMask, U16Bits, DeletionCounts);
-
-        P->CreateKernelCall<P2S16KernelWithCompressedOutputOld>(U16Bits, DeletionCounts, u16bytes);
-        #else
-
         const auto fieldWidth = b->getBitBlockWidth() / 16;
         P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
                                                  fieldWidth);
         P->CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
-        #endif
     }
 
     Scalar * outputFileName = P->getInputScalar("outputFileName");
