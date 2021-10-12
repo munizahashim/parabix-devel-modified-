@@ -215,7 +215,7 @@ public:
                             assert (count == 0);
 
                             repairCandidate(C);
-                            insertCandidate(std::move(C), population);
+                            insertCandidate(std::move(C), population, true);
                         };
 
                         crossover(A, B, true);
@@ -241,7 +241,7 @@ public:
                     std::shuffle(C.begin() + a, C.begin() + b, rng);
 
                     repairCandidate(C);
-                    insertCandidate(std::move(C), population);
+                    insertCandidate(std::move(C), population, true);
                 }
             }
 
@@ -429,7 +429,7 @@ protected:
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief insertCandidate
      ** ------------------------------------------------------------------------------------------------------------- */
-    bool insertCandidate(Candidate && candidate, Population & population) {
+    bool insertCandidate(Candidate && candidate, Population & population, const bool alwaysAddToPopulation) {
         assert (candidate.size() == candidateLength);
         #ifndef NDEBUG
         BitVector check(candidateLength);
@@ -448,7 +448,9 @@ protected:
             f.first->second = value;
         }
         assert (f.first != candidates.end());
-        population.emplace_back(f.first);
+        if (alwaysAddToPopulation || f.second) {
+            population.emplace_back(f.first);
+        }
         return f.second;
     }
 

@@ -22,11 +22,14 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/dominator_tree.hpp>
 
+
+
 namespace kernel {
 
 struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
 public:
+
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
