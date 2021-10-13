@@ -303,6 +303,7 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     Constant * CFW = ConstantInt::get(fwTy, mFW);
     Constant * numFieldConst = ConstantInt::get(fwTy, numFields);
     Constant * fwMaskSplat = b->getSplat(numFields, ConstantInt::get(fwTy, mFW - 1));
+    Constant * intSequence = b->getConstantVectorSequence(mFW, 0, numFields - 1, 1);
 
     Constant * BLOCK_WIDTH = ConstantInt::get(fwTy, b->getBitBlockWidth());
     Constant * BLOCK_MASK = ConstantInt::get(fwTy, b->getBitBlockWidth() - 1);
@@ -359,11 +360,12 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     }
     SmallVector<Value *, 8> offsets(strideBlocks);
     SmallVector<Value *, 8> currentFieldMask(strideBlocks);
+    SmallVector<Value *, 8> pendingFieldIdx(strideBlocks);
     const unsigned fieldMovementSteps = std::log2(numFields);
     SmallVector<SmallVector<Value *, 8>, 8> fieldsToMove(strideBlocks, SmallVector<Value *, 4>(fieldMovementSteps));
     SmallVector<SmallVector<Value *, 8>, 8> combine(strideBlocks, SmallVector<Value *, 4>(fieldMovementSteps));
     SmallVector<Value *, 8> doesFit(strideBlocks);
-    SmallVector<Value *, 8> pendingFieldIdx(strideBlocks);
+    SmallVector<Value *, 8> updatedFieldIdx(strideBlocks);
     SmallVector<Value *, 8> pendingSpaceFilled(strideBlocks);
     SmallVector<Value *, 8> shftBack(strideBlocks);
     for (unsigned blk = 0; blk < strideBlocks; blk++) {
@@ -395,6 +397,51 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
         // bits for the current output field will be shifted by the offset.
         // Create a mask for selecting current field bits.
         currentFieldMask[blk] = b->simd_sllv(mFW, b->allOnes(), offsets[blk]);
+        
+        // Now compress the data fields, eliminating duplicate field numbers.
+        // However, field number operations will sometimes produce a zero, for
+        // fields that are not selected.  So we add 1 to field numbers first.
+        Value * fieldNo = b->simd_add(mFW, initialFieldNo, oneSplat);
+        // Now move bits back and combine to produce consecutive field numbers.
+        Value * firstFieldNoSplat = b->simd_fill(mFW, b->mvmd_extract(mFW, fieldNo, 0));
+        Value * finalFieldNo = b->CreateAdd(firstFieldNoSplat, intSequence);
+        for (unsigned step = 0; step < fieldMovementSteps; step++) {
+            unsigned mov = 1 << step;
+            Value * fieldMovement = b->CreateSub(finalFieldNo, fieldNo);
+            Value * movSplat = b->simd_fill(mFW, b->getIntN(mFW, mov));
+            fieldsToMove[blk][step] = b->simd_eq(mFW, movSplat, b->simd_and(movSplat, fieldMovement));
+            Value * receivingFields = b->mvmd_srli(mFW, fieldsToMove[blk][step], mov);
+            Value * newFieldNos = b->simd_if(1, receivingFields, b->mvmd_srli(mFW, fieldNo, mov), fieldNo);
+            combine[blk][step] = b->simd_and(b->simd_eq(mFW, fieldNo, newFieldNos), receivingFields);
+            fieldNo = newFieldNos;
+        }
+        //
+        // Finally combine the pendingOutput and outputField data.
+        // (a) shift forward outputField data to fill the pendingOutput values.
+        // (b) shift back outputField data to clear data added to pendingOutput.
+        //
+        // However, we may need to increment pendingFieldIndex if we previously
+        // filled the field with the extracted firstField value.  The first
+        // value of the fieldNo vector will be 0 or 1.
+        // It is possible that pendingFieldIndex will reach the total number
+        // of fields held in register.  mvmd_sll may not handle this if it
+        // translates to an LLVM shl.
+        Value * increment = b->CreateZExtOrTrunc(b->mvmd_extract(mFW, initialFieldNo, 0), fwTy);
+        updatedFieldIdx[blk] = b->CreateAdd(pendingFieldIdx[blk], increment);
+        pendingSpaceFilled[blk] = b->CreateICmpEQ(updatedFieldIdx[blk], numFieldConst);
+        shftBack[blk] = b->CreateSub(numFieldConst, updatedFieldIdx[blk]);
+        //
+        // Now determine the total amount of pending items and whether
+        // the pending data all fits within the pendingOutput.
+        Value * nextPendingItems = b->CreateAdd(pendingItems[blk], newPendingItems);
+        doesFit[blk] = b->CreateICmpULT(nextPendingItems, BLOCK_WIDTH);
+        pendingItems[blk+1] = b->CreateSelect(doesFit[blk], nextPendingItems, b->CreateSub(nextPendingItems, BLOCK_WIDTH));
+        inputOffset[blk+1] = b->CreateAdd(inputOffset[blk], ONE);
+        Value * nextOutputOffset = b->CreateAdd(outputOffset[blk], ONE);
+        outputOffset[blk+1] = b->CreateSelect(doesFit[blk], outputOffset[blk], nextOutputOffset);
+        // Update pending data, based on whether all data fits within the current block.
+    }
+    for (unsigned blk = 0; blk < strideBlocks; blk++) {
         // Now process the input data block of each stream in the input stream set.
         //
         // First load all the stream set blocks and the pending data.
@@ -418,21 +465,8 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
             outputFields[i] = b->simd_or(b->mvmd_srli(mFW, currentFieldBits, 1), nextFieldBits);
         }
         // Now compress the data fields, eliminating duplicate field numbers.
-        // However, field number operations will sometimes produce a zero, for
-        // fields that are not selected.  So we add 1 to field numbers first.
-        Value * fieldNo = b->simd_add(mFW, initialFieldNo, oneSplat);
-        // Now move bits back and combine to produce consecutive field numbers.
-        Constant * intSequence = b->getConstantVectorSequence(mFW, 0, numFields - 1, 1);
-        Value * firstFieldNoSplat = b->simd_fill(mFW, b->mvmd_extract(mFW, fieldNo, 0));
-        Value * finalFieldNo = b->CreateAdd(firstFieldNoSplat, intSequence);
         for (unsigned step = 0; step < fieldMovementSteps; step++) {
             unsigned mov = 1 << step;
-            Value * fieldMovement = b->CreateSub(finalFieldNo, fieldNo);
-            Value * movSplat = b->simd_fill(mFW, b->getIntN(mFW, mov));
-            fieldsToMove[blk][step] = b->simd_eq(mFW, movSplat, b->simd_and(movSplat, fieldMovement));
-            Value * receivingFields = b->mvmd_srli(mFW, fieldsToMove[blk][step], mov);
-            Value * newFieldNos = b->simd_if(1, receivingFields, b->mvmd_srli(mFW, fieldNo, mov), fieldNo);
-            combine[blk][step] = b->simd_and(b->simd_eq(mFW, fieldNo, newFieldNos), receivingFields);
             for (unsigned i = 0; i < mStreamCount; i++) {
                 Value * unmoved = b->simd_and(outputFields[i], combine[blk][step]);
                 Value * data_to_move = b->simd_and(outputFields[i], fieldsToMove[blk][step]);
@@ -440,25 +474,14 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
                 Value * cleared = b->simd_xor(outputFields[i], data_to_move);
                 outputFields[i] = b->simd_or(fields_back, b->simd_or(unmoved, cleared));
             }
-            fieldNo = newFieldNos;
         }
         //
         // Finally combine the pendingOutput and outputField data.
         // (a) shift forward outputField data to fill the pendingOutput values.
         // (b) shift back outputField data to clear data added to pendingOutput.
         //
-        // However, we may need to increment pendingFieldIndex if we previously
-        // filled the field with the extracted firstField value.  The first
-        // value of the fieldNo vector will be 0 or 1.
-        // It is possible that pendingFieldIndex will reach the total number
-        // of fields held in register.  mvmd_sll may not handle this if it
-        // translates to an LLVM shl.
-        Value * increment = b->CreateZExtOrTrunc(b->mvmd_extract(mFW, initialFieldNo, 0), fwTy);
-        pendingFieldIdx[blk] = b->CreateAdd(pendingFieldIdx[blk], increment);
-        pendingSpaceFilled[blk] = b->CreateICmpEQ(pendingFieldIdx[blk], numFieldConst);
-        shftBack[blk] = b->CreateSub(numFieldConst, pendingFieldIdx[blk]);
         for (unsigned i = 0; i < mStreamCount; i++) {
-            Value * shiftedField = b->mvmd_sll(mFW, outputFields[i], pendingFieldIdx[blk]);
+            Value * shiftedField = b->mvmd_sll(mFW, outputFields[i], updatedFieldIdx[blk]);
             Value * outputFwd = b->fwCast(mFW, shiftedField);
             shiftedField = b->CreateSelect(pendingSpaceFilled[blk], zeroSplat, outputFwd);
             pendingOutput[i] = b->simd_or(pendingOutput[i], shiftedField);
@@ -470,16 +493,6 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
         for (unsigned i = 0; i < mStreamCount; i++) {
             b->storeOutputStreamBlock("compressedOutput", b->getInt32(i), outputOffset[blk], pendingOutput[i]);
         }
-        //
-        // Now determine the total amount of pending items and whether
-        // the pending data all fits within the pendingOutput.
-        Value * nextPendingItems = b->CreateAdd(pendingItems[blk], newPendingItems);
-        doesFit[blk] = b->CreateICmpULT(nextPendingItems, BLOCK_WIDTH);
-        pendingItems[blk+1] = b->CreateSelect(doesFit[blk], nextPendingItems, b->CreateSub(nextPendingItems, BLOCK_WIDTH));
-        inputOffset[blk+1] = b->CreateAdd(inputOffset[blk], ONE);
-        Value * nextOutputOffset = b->CreateAdd(outputOffset[blk], ONE);
-        outputOffset[blk+1] = b->CreateSelect(doesFit[blk], outputOffset[blk], nextOutputOffset);
-        // Update pending data, based on whether all data fits within the current block.
         for (unsigned i = 0; i < mStreamCount; i++) {
             pendingData[i] = b->bitCast(b->CreateSelect(doesFit[blk], pendingOutput[i], outputFields[i]));
         }
