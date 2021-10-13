@@ -264,13 +264,77 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     //P->CreateKernelCall<codeword_index>(ztfHashBasis, countStream);
     //P->CreateKernelCall<PopcountKernel>(countStream, P->getOutputScalar("count2"));
     StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
-    StreamSet * const ztfHash_u8_Basis = P->CreateStreamSet(8);
+    StreamSet * ztfHash_u8_Basis = P->CreateStreamSet(8);
     //P->CreateKernelCall<DebugDisplayKernel>("ztfRunSpreadMask", ztfRunSpreadMask);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
 
+    unsigned decodedNumStreams = 3 + (2 * SymCount); // LG 0, 1, 2 are valid for 1-sym only
+    StreamSet * decodedMarks = P->CreateStreamSet(decodedNumStreams);
+    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, decodedNumStreams, SymCount, ztfHash_u8_Basis, decodedMarks);
+
+    StreamSet * WordChars = P->CreateStreamSet(1);
+    P->CreateKernelCall<WordMarkKernel>(ztfHash_u8_Basis, WordChars);
+    P->CreateKernelCall<DebugDisplayKernel>("WordChars", WordChars);
+
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
-    P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
+    //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
+    StreamSet * u8bytes = P->CreateStreamSet(1, 8);
+    for (unsigned sym = 0; sym < 1; sym++) {
+        StreamSet * const phraseRuns = P->CreateStreamSet(1);
+        StreamSet * const cwRuns = P->CreateStreamSet(1);
+        P->CreateKernelCall<ZTF_Phrases>(ztfHash_u8_Basis, WordChars, phraseRuns, cwRuns);
+        P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
+
+        StreamSet * const runIndex = P->CreateStreamSet(4);
+        StreamSet * const overflow = P->CreateStreamSet(1);
+        P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow);
+
+        StreamSet * const bixHashes = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
+        P->CreateKernelCall<BixHash>(ztfHash_u8_Basis, phraseRuns, bixHashes, 0);
+
+        StreamSet * const hashValues = P->CreateStreamSet(1, 16);
+        std::vector<StreamSet *> combinedHashData = {bixHashes, runIndex};
+        P->CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
+
+        u8bytes = ztfHash_u8bytes;
+        unsigned startLgIdx = 0;
+        if (sym > 0) {
+            startLgIdx = 3; //2; k-symbol compressible phrase min length = 9 bytes
+        }
+        for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) {
+            StreamSet * groupMarks = P->CreateStreamSet(1);
+            P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, runIndex, overflow, groupMarks);
+            P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
+
+            unsigned streamSelIdx = i;
+            if (i > 2) { // 3, 5, 7 | 4, 6, 8
+            /*
+            sym    idx     actual
+            0       3         3
+                    4         5
+                    5         7
+            1       3         4
+                    4         6
+                    5         8
+            */
+                unsigned offset =  (i-3) + sym; // 0, 1, 2 | 1, 2, 3
+                streamSelIdx += offset;
+            }
+            StreamSet * groupDecoded = P->CreateStreamSet(1); // 0, 1, 2, {3, 3..}, {4, 4..}
+            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {streamSelIdx}));
+            P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
+
+            StreamSet * input_bytes = u8bytes;
+            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+            P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, sym, i, groupMarks, hashValues, groupDecoded, input_bytes, output_bytes);
+            u8bytes = output_bytes;
+        }
+        StreamSet * u8_Basis = P->CreateStreamSet(8);
+        P->CreateKernelCall<S2PKernel>(u8bytes, u8_Basis);
+        ztfHash_u8_Basis = u8_Basis;
+    }
+    P->CreateKernelCall<StdOutKernel>(u8bytes);
     return reinterpret_cast<ztfHashDecmpFunctionType>(P->compile());
 }
 

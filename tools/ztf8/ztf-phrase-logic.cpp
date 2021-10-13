@@ -279,6 +279,59 @@ void BixnumHashMarks::generatePabloMethod() {
     }
 }
 
+ZTF_PhraseDecodeLengths::ZTF_PhraseDecodeLengths(BuilderRef b,
+                                                EncodingInfo & encodingScheme,
+                                                unsigned decodeStreamCount,
+                                                unsigned numSym,
+                                                StreamSet * basisBits,
+                                                StreamSet * groupStreams)
+: PabloKernel(b, "ZTF_PhraseDecodeLengths" + encodingScheme.uniqueSuffix(),
+              {Binding{"basisBits", basisBits}}, {Binding{"groupStreams", groupStreams}}),
+    mEncodingScheme(encodingScheme), mDecodeStreamCount(decodeStreamCount), mNumSym(numSym) { }
+
+void ZTF_PhraseDecodeLengths::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
+    std::vector<PabloAST *> groupStreams(mDecodeStreamCount);
+    PabloAST * ASCII = bnc.ULT(basis, 0x80);
+    PabloAST * suffix_80_BF = pb.createAnd(bnc.UGE(basis, 0x80), bnc.ULE(basis, 0xBF));
+    Var * groupStreamVar = getOutputStreamVar("groupStreams");
+    unsigned offsetIdx = 0;
+    for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
+        LengthGroupInfo groupInfo = mEncodingScheme.byLength[i];
+        unsigned lo = groupInfo.lo;
+        unsigned hi = groupInfo.hi;
+        unsigned base = groupInfo.prefix_base;
+        unsigned next_base = 0;
+        if (i < 2) {
+            next_base = base + 8;
+        }
+        else {
+            next_base = base + 16;
+        }
+        PabloAST * inGroup = pb.createAnd(bnc.UGE(basis, base), bnc.ULT(basis, next_base));
+        PabloAST * curGroupStream = pb.createAnd(pb.createAdvance(inGroup, 1), ASCII); // PFX 00-7F
+        groupStreams[i] = curGroupStream;
+        for (unsigned j = 2; j < groupInfo.encoding_bytes; j++) {
+           // llvm::errs() << "i+offsetIdx " << i+offsetIdx << "\n";
+            groupStreams[i+offsetIdx] = pb.createAnd(pb.createAdvance(groupStreams[i], 1), ASCII);
+            if (j+1 == groupInfo.encoding_bytes) {
+                for (unsigned k = 1; k < mNumSym; k++) {
+                    //llvm::errs() << "i+offsetIdx+k " << i+offsetIdx+k<< "\n";
+                    // PFX 00-7F{1,2} 80-BF
+                    groupStreams[i+offsetIdx+k] = pb.createAnd(pb.createAdvance(curGroupStream, groupInfo.encoding_bytes-2), suffix_80_BF);
+                }
+                offsetIdx += mNumSym-1;
+            }
+        }
+    }
+    for (unsigned i = 0; i < mDecodeStreamCount; i++) {
+        pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), groupStreams[i]);
+    }
+}
+
+
 ZTF_PhraseExpansionDecoder::ZTF_PhraseExpansionDecoder(BuilderRef b,
                                            EncodingInfo & encodingScheme,
                                            StreamSet * const basis,

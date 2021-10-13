@@ -100,6 +100,21 @@ protected:
     unsigned mUpdateCount;
 };
 
+class ZTF_PhraseDecodeLengths : public pablo::PabloKernel {
+public:
+    ZTF_PhraseDecodeLengths(BuilderRef b,
+                      EncodingInfo & encodingScheme,
+                      unsigned decodeStreamCount,
+                      unsigned numSym,
+                      StreamSet * basisBits,
+                      StreamSet * groupStreams);
+protected:
+    void generatePabloMethod() override;
+    EncodingInfo & mEncodingScheme;
+    unsigned mDecodeStreamCount;
+    unsigned mNumSym;
+};
+
 class ZTF_PhraseExpansionDecoder final: public pablo::PabloKernel {
 public:
     ZTF_PhraseExpansionDecoder(BuilderRef b,

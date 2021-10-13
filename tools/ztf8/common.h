@@ -44,6 +44,7 @@ struct LengthGroupParameters {
     Constant * SUBTABLE_SIZE;
     Constant * HASH_BITS;
     Constant * EXTENDED_BITS;
+    Constant * PHRASE_EXTENSION_MASK;
     Constant * HASH_MASK;
     Constant * ENC_BYTES;
     Constant * MAX_INDEX;
@@ -67,7 +68,14 @@ std::vector<llvm::Value *> initializeCompressionMasks(Kernel::BuilderRef b,
                                                     llvm::Value * strideBlockOffset,
                                                     llvm::Value * compressMaskPtr,
                                                     llvm::BasicBlock * strideMasksReady);
-
+void initializeDecompressionMasks(Kernel::BuilderRef b,
+                                                    struct ScanWordParameters & sw,
+                                                    llvm::Constant * sz_BLOCKS_PER_STRIDE,
+                                                    unsigned maskCount,
+                                                    llvm::Value * strideBlockOffset,
+                                                    std::vector<Value *> & keyMasks,
+                                                    std::vector<Value *> & hashMasks,
+                                                    llvm::BasicBlock * strideMasksReady);
 bool LLVM_READONLY DeferredAttributeIsSet();
 bool LLVM_READONLY DelayedAttributeIsSet();
 bool LLVM_READONLY PrefixCheckIsSet();

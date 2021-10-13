@@ -306,51 +306,6 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->SetInsertPoint(compressionMaskDone);
 }
 
-void initializeDecompressionMasks(BuilderRef b,
-                                  ScanWordParameters & sw,
-                                  Constant * sz_BLOCKS_PER_STRIDE,
-                                  unsigned maskCount,
-                                  Value * strideBlockOffset,
-                                  std::vector<Value *> & keyMasks,
-                                  std::vector<Value *> & hashMasks,
-                                  BasicBlock * strideMasksReady) {
-    Constant * sz_ZERO = b->getSize(0);
-    Constant * sz_ONE = b->getSize(1);
-    Type * sizeTy = b->getSizeTy();
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    BasicBlock * const maskInitialization = b->CreateBasicBlock("maskInitialization");
-    b->CreateBr(maskInitialization);
-    b->SetInsertPoint(maskInitialization);
-    std::vector<PHINode *> keyMaskAccum(maskCount);
-    std::vector<PHINode *> hashMaskAccum(maskCount);
-    for (unsigned i = 0; i < maskCount; i++) {
-        keyMaskAccum[i] = b->CreatePHI(sizeTy, 2);
-        hashMaskAccum[i] = b->CreatePHI(sizeTy, 2);
-        keyMaskAccum[i]->addIncoming(sz_ZERO, entryBlock);
-        hashMaskAccum[i]->addIncoming(sz_ZERO, entryBlock);
-    }
-    PHINode * const blockNo = b->CreatePHI(sizeTy, 2);
-    blockNo->addIncoming(sz_ZERO, entryBlock);
-    Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
-    for (unsigned i = 0; i < maskCount; i++) {
-        Value * keyBitBlock = b->loadInputStreamBlock("keyMarks" + std::to_string(i), sz_ZERO, strideBlockIndex);
-        Value * hashBitBlock = b->loadInputStreamBlock("hashMarks" + std::to_string(i), sz_ZERO, strideBlockIndex);
-        Value * const anyKey = b->simd_any(sw.width, keyBitBlock);
-        Value * const anyHash = b->simd_any(sw.width, hashBitBlock);
-        Value * keyWordMask = b->CreateZExtOrTrunc(b->hsimd_signmask(sw.width, anyKey), sizeTy);
-        Value * hashWordMask = b->CreateZExtOrTrunc(b->hsimd_signmask(sw.width, anyHash), sizeTy);
-        keyMasks[i] = b->CreateOr(keyMaskAccum[i], b->CreateShl(keyWordMask, b->CreateMul(blockNo, sw.WORDS_PER_BLOCK)));
-        hashMasks[i] = b->CreateOr(hashMaskAccum[i], b->CreateShl(hashWordMask, b->CreateMul(blockNo, sw.WORDS_PER_BLOCK)));
-        keyMaskAccum[i]->addIncoming(keyMasks[i], maskInitialization);
-        hashMaskAccum[i]->addIncoming(hashMasks[i], maskInitialization);
-    }
-    Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
-    blockNo->addIncoming(nextBlockNo, maskInitialization);
-    // Default initial compression mask is all ones (no zeroes => no compression).
-    b->CreateCondBr(b->CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), maskInitialization, strideMasksReady);
-}
-
-
 LengthGroupDecompression::LengthGroupDecompression(BuilderRef b,
                                                    EncodingInfo encodingScheme,
                                                    unsigned groupNo,

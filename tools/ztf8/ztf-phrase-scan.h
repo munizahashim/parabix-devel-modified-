@@ -49,5 +49,26 @@ private:
     const unsigned mNumSym;
 };
 
+
+class SymbolGroupDecompression final : public MultiBlockKernel {
+public:
+    SymbolGroupDecompression(BuilderRef b,
+                             EncodingInfo encodingScheme,
+                             unsigned numSym,
+                             unsigned groupNo,
+                             StreamSet * keyMarks,
+                             StreamSet * hashValues,
+                             StreamSet * const hashMarks,
+                             StreamSet * const byteData,
+                             StreamSet * const result,
+                             unsigned strideBlocks = 8);
+private:
+    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+
+    const EncodingInfo mEncodingScheme;
+    const unsigned mGroupNo;
+    const unsigned mNumSym;
+};
+
 }
 #endif
