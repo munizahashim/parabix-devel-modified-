@@ -52,6 +52,7 @@ FixedVectorType * IDISA_Builder::fwVectorType(const unsigned fw) {
 
 Value * IDISA_Builder::fwCast(const unsigned fw, Value * const a) {
     unsigned vecWidth = getVectorBitWidth(a);
+    if (a->getType()->getScalarSizeInBits() == fw) return a;
     return CreateBitCast(a, FixedVectorType::get(getIntNTy(fw), vecWidth / fw));
 }
 
@@ -258,9 +259,6 @@ Value * IDISA_Builder::simd_le(unsigned fw, Value * a, Value * b) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "le");
     Value * a1 = fwCast(fw, a);
     Value * b1 = fwCast(fw, b);
-    CallPrintRegister("a1", a1);
-    CallPrintRegister("b1", b1);
-    CallPrintRegister("sle", CreateSExt(CreateICmpSLE(a1, b1), a1->getType()));
     return CreateSExt(CreateICmpSLE(a1, b1), a1->getType());
 }
 
@@ -402,6 +400,7 @@ Value * IDISA_Builder::mvmd_srl(unsigned fw, Value * value, Value * shift, const
 }
 
 Value * IDISA_Builder::simd_slli(unsigned fw, Value * a, unsigned shift) {
+    if (shift == 0) return a;
     const unsigned vectorWidth = getVectorBitWidth(a);
     if (fw > MAX_NATIVE_SIMD_SHIFT) {
         unsigned fullFieldShift = shift / MAX_NATIVE_SIMD_SHIFT;
@@ -434,6 +433,7 @@ Value * IDISA_Builder::simd_slli(unsigned fw, Value * a, unsigned shift) {
 }
 
 Value * IDISA_Builder::simd_srli(unsigned fw, Value * a, unsigned shift) {
+    if (shift == 0) return a;
     const unsigned vectorWidth = getVectorBitWidth(a);
     if (fw > MAX_NATIVE_SIMD_SHIFT) {
         unsigned fullFieldShift = shift / MAX_NATIVE_SIMD_SHIFT;
@@ -466,8 +466,8 @@ Value * IDISA_Builder::simd_srli(unsigned fw, Value * a, unsigned shift) {
 }
 
 Value * IDISA_Builder::simd_srai(unsigned fw, Value * a, unsigned shift) {
-    const unsigned vectorWidth = getVectorBitWidth(a);
     if (shift == 0) return a;
+    const unsigned vectorWidth = getVectorBitWidth(a);
     if (fw < MIN_NATIVE_SIMD_SHIFT) {
         Constant * sign_mask = Constant::getIntegerValue(getIntNTy(vectorWidth),
                                                        APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, 1)));
@@ -565,6 +565,13 @@ Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract
     return simd_pext(fieldwidth, std::vector<Value *>{v}, extract_mask)[0];
 }
 
+Value * IDISA_Builder::CreatePextract(Value * v, Value * mask, const Twine Name) {
+    Type * Ty = v->getType();
+    unsigned width = Ty->getPrimitiveSizeInBits();
+    UnsupportedFieldWidthError(width, "Pextract");
+    //return CreateBitCast(IDISA_Builder::simd_pext(width, fwCast(width, v), fwCast(width, mask)), Ty);
+}
+
 Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
     // simd_pdep is implemented by reversing the process of simd_pext.
     // First determine the deletion counts necessary for each stage of the process.
@@ -587,6 +594,13 @@ Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit
                     simd_sllv(fw, simd_select_hi(fw * 2, w), pext_shift_back_amts));
     }
     return simd_and(w, deposit_mask);
+}
+
+Value * IDISA_Builder::CreatePdeposit(Value * v, Value * mask, const Twine Name) {
+    Type * Ty = v->getType();
+    unsigned width = Ty->getPrimitiveSizeInBits();
+    UnsupportedFieldWidthError(width, "Pdeposit");
+    //return CreateBitCast(simd_pdep(width, fwCast(width, v), fwCast(width, mask)), Ty);
 }
 
 Value * IDISA_Builder::simd_popcount(unsigned fw, Value * a) {
@@ -914,6 +928,7 @@ Value * IDISA_Builder::mvmd_insert(unsigned fw, Value * a, Value * elt, unsigned
 
 Value * IDISA_Builder::mvmd_slli(unsigned fw, Value * a, unsigned shift) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_slli");
+    if (shift == 0) return a;
     Value * a1 = fwCast(fw, a);
     Value * shifted = mvmd_dslli(fw, a1, Constant::getNullValue(a1->getType()), shift);
     return shifted;
@@ -921,6 +936,7 @@ Value * IDISA_Builder::mvmd_slli(unsigned fw, Value * a, unsigned shift) {
 
 Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_srli");
+    if (shift == 0) return a;
     const auto field_count = getVectorBitWidth(a) / fw;
     Value * a1 = fwCast(fw, a);
     return mvmd_dslli(fw, Constant::getNullValue(a1->getType()), a1, field_count - shift);
@@ -928,6 +944,7 @@ Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
 
 Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned shift) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_dslli");
+    if (shift == 0) return a;
     const auto field_count = getVectorBitWidth(a) / fw;
     SmallVector<Constant *, 16> Idxs(field_count);
     for (unsigned i = 0; i < field_count; i++) {

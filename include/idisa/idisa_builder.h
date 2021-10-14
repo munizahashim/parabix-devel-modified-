@@ -160,7 +160,9 @@ public:
 
     virtual std::vector<llvm::Value *> simd_pext(unsigned fw, std::vector<llvm::Value *>, llvm::Value * extract_mask);
     llvm::Value * simd_pext(unsigned fw, llvm::Value * v, llvm::Value * extract_mask);
+    virtual llvm::Value * CreatePextract(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "");
     virtual llvm::Value * simd_pdep(unsigned fw, llvm::Value * v, llvm::Value * deposit_mask);
+    virtual llvm::Value * CreatePdeposit(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "");
     virtual llvm::Value * simd_any(unsigned fw, llvm::Value * a);
     virtual llvm::Value * simd_popcount(unsigned fw, llvm::Value * a);
     virtual llvm::Value * hsimd_partial_sum(unsigned fw, llvm::Value * a);
