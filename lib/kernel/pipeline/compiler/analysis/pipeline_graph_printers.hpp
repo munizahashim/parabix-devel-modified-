@@ -271,7 +271,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << ':'
                 << ty->getArrayNumElements() << 'x';
             ty = ty->getArrayElementType();
-            ty = cast<VectorType>(ty)->getElementType();
+            ty = cast<FixedVectorType>(ty)->getElementType();
             out << ty->getIntegerBitWidth();
         }
 

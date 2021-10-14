@@ -946,7 +946,7 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
     }
-    return cast<IntegerType>(cast<VectorType>(ty)->getElementType())->getBitWidth();
+    return cast<IntegerType>(cast<FixedVectorType>(ty)->getElementType())->getBitWidth();
 }
 
 } // end of namespace

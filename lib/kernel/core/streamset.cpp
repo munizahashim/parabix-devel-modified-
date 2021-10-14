@@ -743,7 +743,6 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         b->CreateAssert(capacity, "Dynamic buffer capacity cannot be 0.");
     }
 
-
     indices[1] = b->getInt32(BaseAddress);
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
