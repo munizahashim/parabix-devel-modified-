@@ -6,7 +6,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include "../common/common.hpp"
 
-#warning cleanup this code if the approach works
+//TODO: cleanup this code if the approach works
 
 namespace  {
 

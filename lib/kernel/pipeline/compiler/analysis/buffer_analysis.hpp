@@ -136,7 +136,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         };
 
 
-        #warning TODO: replace this with abstracted function
+        // TODO: replace this with abstracted function
 
         // Evaluate the input/output ordering here and ensure that any reference port is stored first.
         const auto numOfInputs = in_degree(kernel, mStreamGraph);

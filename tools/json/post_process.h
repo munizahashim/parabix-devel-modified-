@@ -11,8 +11,10 @@
 extern "C" {
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position);
+void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr);
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code);
+void postproc_simpleError(const uint8_t * /*ptr*/);
 
 void postproc_doneCallback();
 

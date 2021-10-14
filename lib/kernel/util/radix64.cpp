@@ -262,12 +262,12 @@ void base64Kernel::generateFinalBlockMethod(BuilderRef b, Value * remainingBytes
     b->SetInsertPoint(doPadding);
     Value * i8output_ptr = b->getOutputStreamBlockPtr("base64stream", ZERO);
     i8output_ptr = b->CreatePointerCast(i8output_ptr, b->getInt8PtrTy());
-    b->CreateStore(PADDING, b->CreateGEP(i8output_ptr, remainingBytes));
+    b->CreateStore(PADDING, b->CreateGEP(b->getInt8Ty(), i8output_ptr, remainingBytes));
     b->CreateCondBr(b->CreateICmpEQ(remainMod4, THREE), fbExit, doPadding2);
 
     b->SetInsertPoint(doPadding2);
     Value * finalPadPos = b->CreateAdd(remainingBytes, ONE);
-    b->CreateStore(PADDING, b->CreateGEP(i8output_ptr, finalPadPos));
+    b->CreateStore(PADDING, b->CreateGEP(b->getInt8Ty(), i8output_ptr, finalPadPos));
     b->CreateBr(fbExit);
     b->SetInsertPoint(fbExit);
 }

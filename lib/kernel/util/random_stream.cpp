@@ -19,6 +19,7 @@ void RandomStreamKernel::generateInitializeMethod(BuilderRef b) {
    the output buffer has a full segment of space available. */
 void RandomStreamKernel::generateDoSegmentMethod(BuilderRef b) {
     const size_t randIntSize = 32;  // from standard C rand function
+    Type * randIntTy = b->getIntNTy(randIntSize);
     const size_t segmentItems = codegen::SegmentSize * codegen::BlockSize;
     //
     // The item width (mValueWidth) for the desired random value stream may
@@ -49,7 +50,7 @@ void RandomStreamKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * rvNo = rvNumPHI;
     for (unsigned i = 0; i < b->getBitBlockWidth()/randIntSize; i++) {
         Value * randVal = b->CreateRandCall();
-        b->CreateStore(randVal, b->CreateGEP(rvBuffer, rvNo));
+        b->CreateStore(randVal, b->CreateGEP(randIntTy, rvBuffer, rvNo));
         rvNo = b->CreateAdd(rvNo, b->getSize(1));
     }
     rvNumPHI->addIncoming(rvNo, genNextRVsegment);
@@ -66,7 +67,7 @@ void RandomStreamKernel::generateDoSegmentMethod(BuilderRef b) {
         rvNumPHI->addIncoming(b->getSize(0), entry);
         rvNo = rvNumPHI;
         Value * randVal = b->CreateRandCall();
-        b->CreateStore(randVal, b->CreateGEP(rvBuffer, rvNo));
+        b->CreateStore(randVal, b->CreateGEP(randIntTy, rvBuffer, rvNo));
         rvNo = b->CreateAdd(rvNo, b->getSize(1));
         rvNumPHI->addIncoming(rvNo, b->GetInsertBlock());
         Value * moreToDo = b->CreateICmpULT(rvNo, ConstantInt::get(b->getSizeTy(), remainingFullRandInts));
@@ -77,11 +78,11 @@ void RandomStreamKernel::generateDoSegmentMethod(BuilderRef b) {
     if (partialRandInt > 0) {
         Constant * mask = ConstantInt::get(b->getInt32Ty(), APInt::getLowBitsSet(randIntSize, partialRandInt));
         Value * partialRV = b->CreateAnd(mask, b->CreateRandCall());
-        b->CreateStore(partialRV, b->CreateGEP(rvBuffer, rvNo));
+        b->CreateStore(partialRV, b->CreateGEP(randIntTy, rvBuffer, rvNo));
     }
     if (zeroFill > 0) {
         if (partialRandInt > 0) rvNo = b->CreateAdd(rvNo, b->getSize(1));
-        b->CreateMemZero(b->CreateGEP(rvBuffer, rvNo), b->getSize(zeroFill/8));
+        b->CreateMemZero(b->CreateGEP(randIntTy, rvBuffer, rvNo), b->getSize(zeroFill/8));
     }
     b->setTerminationSignal();
     BasicBlock * finalBB = b->GetInsertBlock();

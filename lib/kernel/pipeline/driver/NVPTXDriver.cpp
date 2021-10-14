@@ -24,6 +24,9 @@
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 9, 0)
 #include <llvm/Transforms/Scalar/GVN.h>
 #endif
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_None F_None
+#endif
 
 using namespace llvm;
 
@@ -87,7 +90,7 @@ static int llvm2ptx(Module * M, std::string PTXFilename) {
 
     // Figure out where we are going to send the output.
     std::error_code EC;
-    sys::fs::OpenFlags OpenFlags = sys::fs::F_None | sys::fs::F_Text;
+    sys::fs::OpenFlags OpenFlags = sys::fs::OF_None | sys::fs::F_Text;
     std::unique_ptr<tool_output_file> Out = std::make_unique<tool_output_file>(PTXFilename, EC, OpenFlags);
     if (EC) {
         errs() << EC.message() << '\n';

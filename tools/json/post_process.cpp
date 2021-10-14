@@ -52,7 +52,15 @@ enum JSONState {
 static llvm::SmallVector<const u_int8_t *, 32> stack{};
 static JSONState currentState = JInit;
 
+static void postproc_reportError(const std::string str) {
+    fprintf(stderr, "%s\n", str.c_str());
+    exit(-1);
+}
+
 static ptrdiff_t postproc_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
+    if (lineBegin == nullptr) {
+        return 0;
+    }
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
     return column;
@@ -84,7 +92,7 @@ static void postproc_popAndFindNewState() {
     if (last == '{' || last == '[') {
         currentState = JNextComma;
     } else {
-        llvm_unreachable("The stack has an unknown char");
+        postproc_reportError("The stack has an unknown char");
     }
 }
 
@@ -94,7 +102,7 @@ static void postproc_parseArrOrObj(const uint8_t * ptr, const uint8_t * lineBegi
     } else if (*ptr == '[') {
         currentState = JArrInit;
     } else {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing object or array", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing object or array", ptr, lineBegin, lineNum));
     }
     stack.push_back(ptr);
 }
@@ -105,7 +113,7 @@ static void postproc_parseStrOrPop(bool popAllowed, const uint8_t * ptr, const u
     } else if (*ptr == '}' && popAllowed) {
         postproc_popAndFindNewState();
     } else {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
@@ -120,7 +128,7 @@ static bool postproc_parseValue(bool strict, const uint8_t * ptr, const uint8_t 
         currentState = JValue;
         return true;
     } else if (strict) {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing value", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing value", ptr, lineBegin, lineNum));
     }
     return false;
 }
@@ -130,7 +138,7 @@ static void postproc_parseValueOrPop(bool popAllowed, const uint8_t * ptr, const
         if (*ptr == ']' && popAllowed) {
             postproc_popAndFindNewState();
         } else {
-            llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
+            postproc_reportError(postproc_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
         }
     }
 }
@@ -141,7 +149,7 @@ static void postproc_parseStr(const uint8_t * ptr, const uint8_t * lineBegin, ui
     } else if (*ptr == '"' && currentState == JVStrBegin) {
         currentState = JVStrEnd;
     } else {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
     }
 }
 
@@ -149,13 +157,13 @@ static void postproc_parseColon(const uint8_t * ptr, const uint8_t * lineBegin, 
     if (*ptr == ':') {
         currentState = JObjColon;
     } else {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
 static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
     if (stack.empty()) {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Stack is empty", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Stack is empty", ptr, lineBegin, lineNum));
         return;
     }
     const uint8_t last = *stack.back();
@@ -165,14 +173,14 @@ static void postproc_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
         } else if (last == '[') {
             currentState = JArrInit;
         } else {
-            llvm::report_fatal_error(postproc_getLineAndColumnInfo("Wrong char in stack", ptr, lineBegin, lineNum));
+            postproc_reportError(postproc_getLineAndColumnInfo("Wrong char in stack", ptr, lineBegin, lineNum));
         }
     } else if (*ptr == '}' && last == '{') {
         postproc_popAndFindNewState();
     } else if (*ptr == ']' && last == '[') {
         postproc_popAndFindNewState();
     } else {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
@@ -181,7 +189,7 @@ void postproc_doneCallback() {
         currentState = JDone;
         return;
     }
-    llvm::report_fatal_error("Found EOF but the JSON is missing elements");
+    postproc_reportError("Found EOF but the JSON is missing elements");
 }
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
@@ -200,8 +208,12 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
     } else if (currentState == JVStrEnd || currentState == JValue || currentState == JNextComma) {
         postproc_parseCommaOrPop(ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone) {
-        llvm::report_fatal_error(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
+        postproc_reportError(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
+}
+
+void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
+    postproc_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
 }
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {
@@ -211,15 +223,19 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
     const uint8_t EXTRA_CODE = 0x8;
 
     if (code == KEYWORD_CODE) {
-        fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal keyword", ptr, lineBegin, lineNum).c_str());
+        postproc_reportError(postproc_getLineAndColumnInfo("illegal keyword", ptr, lineBegin, lineNum));
     } else if (code == UTF8_CODE) {
-        fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal utf8 char", ptr, lineBegin, lineNum).c_str());
+        postproc_reportError(postproc_getLineAndColumnInfo("illegal utf8 char", ptr, lineBegin, lineNum));
     } else if (code == NUMBER_CODE) {
-        fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal number", ptr, lineBegin, lineNum).c_str());
+        postproc_reportError(postproc_getLineAndColumnInfo("illegal number", ptr, lineBegin, lineNum));
     } else if (code == EXTRA_CODE) {
-        fprintf(stderr, "%s", postproc_getLineAndColumnInfo("illegal char in json", ptr, lineBegin, lineNum).c_str());
+        postproc_reportError(postproc_getLineAndColumnInfo("illegal char in json", ptr, lineBegin, lineNum));
     } else {
-        llvm::report_fatal_error("Unprocessed error stream");
+        postproc_reportError("Unprocessed error stream");
     }
     fprintf(stderr, "\n");
+}
+
+void postproc_simpleError(const uint8_t * /*ptr*/) {
+    postproc_reportError("The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.");
 }

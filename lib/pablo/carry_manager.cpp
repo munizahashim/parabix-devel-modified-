@@ -274,6 +274,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
 
         assert (mCarryInfo->hasSummary());
 
+        Type * const int8Ty = b->getInt8Ty();
         Type * const int8PtrTy = b->getInt8PtrTy();
         Type * const carryTy = b->getBitBlockType();
         PointerType * const carryPtrTy = carryTy->getPointerTo();
@@ -311,7 +312,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->CreateMemCpy(newArray, array, capacitySize, b->getCacheAlignment());
         b->CreateFree(array);
         b->CreateStore(newArray, arrayPtr);
-        Value * const startNewArrayPtr = b->CreateGEP(b->CreatePointerCast(newArray, int8PtrTy), capacitySize);
+        Value * const startNewArrayPtr = b->CreateGEP(int8Ty, b->CreatePointerCast(newArray, int8PtrTy), capacitySize);
         b->CreateMemZero(startNewArrayPtr, capacitySize, BlockWidth);
         Value * const newCapacity = b->CreateShl(capacity, 1);
         b->CreateStore(newCapacity, capacityPtr);
@@ -323,7 +324,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->CreateMemCpy(newSummary, summary, summarySize, BlockWidth);
         b->CreateFree(summary);
         b->CreateStore(b->CreatePointerCast(newSummary, carryPtrTy), summaryPtr);
-        Value * const startNewSummaryPtr = b->CreateGEP(b->CreatePointerCast(newSummary, int8PtrTy), summarySize);
+        Value * const startNewSummaryPtr = b->CreateGEP(int8Ty, b->CreatePointerCast(newSummary, int8PtrTy), summarySize);
         b->CreateMemZero(startNewSummaryPtr, additionalSpace, BlockWidth);
         b->CreateBr(resumeKernel);
 

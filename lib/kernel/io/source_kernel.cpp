@@ -83,6 +83,8 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const setTermination = b->CreateBasicBlock("setTermination");
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
+    Type * i8Ty = b->getInt8Ty();
+
     Value * const numOfStrides = b->getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         b->CreateAssert(b->CreateIsNotNull(numOfStrides),
@@ -135,12 +137,12 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, PADDING_SIZE), STRIDE_BYTES);
     Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
     b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-    b->CreateMemZero(b->CreateGEP(buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
+    b->CreateMemZero(b->CreateGEP(i8Ty, buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
     // get the difference between our base and from position then compute an offsetted temporary buffer address
     Value * const base = b->getBaseAddress("sourceBuffer");
     Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
     Value * const diff = b->CreateSub(baseInt, readStartInt);
-    Value * const offsettedBuffer = b->CreateGEP(buffer, diff);
+    Value * const offsettedBuffer = b->CreateGEP(i8Ty, buffer, diff);
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
     b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
     b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
@@ -187,6 +189,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
 
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(stride));
     ConstantInt * const codeUnitBytes = b->getSize(codeUnitWidth / 8);
+    Type * codeUnitTy = b->getIntNTy(codeUnitWidth);
     Value * const segmentBytes = b->CreateMul(segmentItems, codeUnitBytes);
 
     BasicBlock * const entryBB = b->GetInsertBlock();
@@ -230,7 +233,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     Value * const unreadData = b->getRawOutputPointer("sourceBuffer", consumed);
     Value * const potentialItems = b->CreateAdd(unreadItems, segmentItems);
 
-    Value * const toWrite = b->CreateGEP(baseBuffer, potentialItems);
+    Value * const toWrite = b->CreateGEP(codeUnitTy, baseBuffer, potentialItems);
     Value * const canCopy = b->CreateICmpULT(toWrite, unreadData);
 
     Value * const remainingBytes = b->CreateMul(unreadItems, codeUnitBytes);
@@ -281,7 +284,7 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     PHINode * const newBaseBuffer = b->CreatePHI(baseBuffer->getType(), 2);
     newBaseBuffer->addIncoming(baseBuffer, copyBackExit);
     newBaseBuffer->addIncoming(expandedBuffer, expandAndCopyBackExit);
-    Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumed));
+    Value * const newBaseAddress = b->CreateGEP(codeUnitTy, newBaseBuffer, b->CreateNeg(consumed));
     b->setBaseAddress("sourceBuffer", newBaseAddress);
     b->CreateBr(readData);
 
@@ -425,6 +428,7 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     }
 
     const auto codeUnitWidth = source->getFieldWidth();
+    Type * codeUnitTy = b->getIntNTy(codeUnitWidth);
 
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(getStride()));
     Value * const segmentSize = b->CreateMul(numOfStrides, b->getSize(getStride() * codeUnitWidth));
@@ -478,13 +482,13 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
     b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
     b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-    b->CreateMemZero(b->CreateGEP(buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
+    b->CreateMemZero(b->CreateGEP(b->getInt8Ty(), buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
 
     // get the difference between our base and from position then compute an offsetted temporary buffer address
     Value * const base = b->getBaseAddress("sourceBuffer");
     Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
     Value * const diff = b->CreateSub(baseInt, readStartInt);
-    Value * const offsettedBuffer = b->CreateGEP(buffer, diff);
+    Value * const offsettedBuffer = b->CreateGEP(codeUnitTy, buffer, diff);
     // set the temporary buffer as the new source buffer
     b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
     b->setTerminationSignal();

@@ -66,7 +66,7 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
         }
     }
 
-    #warning Verify min dataflow considers multiple inputs of differing rates
+    //TODO: Verify min dataflow considers multiple inputs of differing rates
 
     for (unsigned producerPartitionId = 1; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];
@@ -148,7 +148,7 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
         }
     }
 
-    #warning ADD LENGTH EQUALITY ASSERTIONS HERE
+    // TODO: ADD LENGTH EQUALITY ASSERTIONS HERE
 
     if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
         assert (false);
