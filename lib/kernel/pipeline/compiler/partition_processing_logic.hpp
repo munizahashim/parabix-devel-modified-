@@ -349,26 +349,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
 
         if (consPhi) {
 
-            Value * consumed = nullptr;
-            if (kernel > mKernelId) {
-                consumed = ConstantInt::getAllOnesValue(b->getSizeTy());
-            } else {
-                consumed = mInitialConsumedItemCount[streamSet];
-            }
-
-            assert(consumed);
-
-//            if (consumed == nullptr) {
-//                assert (mInitialConsumedItemCount[streamSet] == nullptr);
-//                assert (out_degree(streamSet, mConsumerGraph) > 0);
-//                for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-//                    const auto consumer = target(e, mConsumerGraph);
-//                    assert (consumer > mKernelId);
-
-//                }
-//                consumed = readConsumedItemCount(b, streamSet);
-
-//            }
+            Value * const consumed = readConsumedItemCount(b, streamSet);
             assert (isFromCurrentFunction(b, consumed, false));
 
             #ifdef PRINT_DEBUG_MESSAGES
@@ -434,25 +415,22 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
     assert (std::find(ActivePartitions.begin(), ActivePartitions.end(), partitionId) != ActivePartitions.end());
 
+    const auto n = LastStreamSet - FirstStreamSet;
+
+
+
+
+    // mPartitionConsumedItemCountPhi[partitionId][k]
+
     auto firstKernelInTargetPartition = mKernelId;
     assert (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread);
-    auto lastConsumer = mKernelId;
+
+
+
     const auto m = ActiveKernels.size();
     auto k = ActiveKernelIndex;
     for (; k < m; ++k) {
         const auto kernel = ActiveKernels[k];
-        #ifdef WAIT_FOR_LAST_CONSUMER_PRIOR_TO_PARTITION_JUMP
-        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(e, mBufferGraph);
-                if (RequiresSynchronization.test(consumer)) {
-                    assert (KernelOnHybridThread.test(consumer) == mCompilingHybridThread);
-                    lastConsumer = std::max<unsigned>(lastConsumer, consumer);
-                }
-            }
-        }
-        #endif
         if (KernelPartitionId[kernel] == partitionId) {
             firstKernelInTargetPartition = kernel;
             assert (KernelOnHybridThread.test(kernel) == mCompilingHybridThread);
@@ -461,9 +439,24 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
         assert (KernelPartitionId[kernel] < partitionId);
     }
 
+    auto lastConsumer = firstKernelInTargetPartition;
+
+    for (unsigned i = 0; i <= n; ++i) {
+        if (mPartitionConsumedItemCountPhi[partitionId][i]) {
+            for (const auto e : make_iterator_range(out_edges(FirstStreamSet + i, mConsumerGraph))) {
+                const auto consumer = target(e, mConsumerGraph);
+                if (RequiresSynchronization.test(consumer)) {
+                    assert (KernelOnHybridThread.test(consumer) == mCompilingHybridThread);
+                    lastConsumer = std::max<unsigned>(lastConsumer, consumer);
+                }
+            }
+        }
+    }
+
     assert (k > ActiveKernelIndex && k < m);
     assert (firstKernelInTargetPartition > mKernelId);
-    const auto toAcquire = std::min(std::max(lastConsumer, firstKernelInTargetPartition), LastKernel);
+
+    const auto toAcquire = std::min(lastConsumer, LastKernel);
 
     // TODO: experiment with a mutex lock here.
     #ifdef ENABLE_PAPI

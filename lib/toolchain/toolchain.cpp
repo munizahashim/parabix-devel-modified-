@@ -117,6 +117,21 @@ static cl::opt<unsigned, true> SegmentSizeOption("segment-size", cl::location(Se
 static cl::opt<unsigned, true> BufferSegmentsOption("buffer-segments", cl::location(BufferSegments), cl::init(1),
                                                cl::desc("Buffer Segments"), cl::value_desc("positive integer"));
 
+
+unsigned NumOfKernels = 0;
+unsigned NumOfStreamSets = 0;
+unsigned NumOfPartitions = 0;
+
+static cl::opt<unsigned, true> NumOfKernelsOption("num-kernels", cl::location(NumOfKernels), cl::init(1),
+                                               cl::desc("NumOfKernels"), cl::value_desc("positive integer"));
+
+static cl::opt<unsigned, true> NumOfStreamSetsOption("num-streamsets", cl::location(NumOfStreamSets), cl::init(1),
+                                               cl::desc("NumOfStreamSets"), cl::value_desc("positive integer"));
+
+static cl::opt<unsigned, true> NumOfPartitionsOption("num-partitions", cl::location(NumOfPartitions), cl::init(1),
+                                               cl::desc("NumOfPartitions"), cl::value_desc("positive integer"));
+
+
 static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)

@@ -34,7 +34,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     std::vector<unsigned> ordering;
     ordering.reserve(n);
     if (LLVM_UNLIKELY(!lexical_ordering(Relationships, ordering))) {
-        report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
+        throw new std::exception();
+        // report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
     }
 
     // Convert the relationship graph into a simpler graph G that we can annotate.
@@ -498,7 +499,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     renumberingSeq.reserve(partitionCount);
 
     if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
-        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        //report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        throw new std::exception();
     }
 
     assert (renumberingSeq[0] == 0);
