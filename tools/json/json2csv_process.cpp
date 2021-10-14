@@ -258,3 +258,7 @@ void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         llvm::report_fatal_error(json2csv_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
 }
+
+void json2csv_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
+    json2csv_validateObjectsAndArrays(ptr, 0, 0, 0, 0);
+}

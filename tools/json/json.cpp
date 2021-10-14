@@ -184,7 +184,16 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     // 9.3 Prepare StreamSets in case we want to show lines on error
     //    If flag -c is provided, parse for CSV
-    auto errFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
+    auto normalJsonFn = SCAN_CALLBACK(postproc_validateObjectsAndArrays);
+    auto simpleJsonFn = SCAN_CALLBACK(postproc_simpleValidateObjectsAndArrays);
+    auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
+
+    auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);
+    auto simpleCsv2JsonFn = SCAN_CALLBACK(json2csv_simpleValidateObjectsAndArrays);
+    auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
+
+    auto normalErrFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
+    auto simpleErrFn = SCAN_CALLBACK(postproc_simpleError);
 
     if (ShowLinesFlag) {
         auto const LineBreaks = P->CreateStreamSet(1);
@@ -194,55 +203,20 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
 
         // 9.4 Validate objects and arrays
-        if (ToCSVFlag) {
-            scan::Reader(
-                P,
-                driver,
-                SCAN_CALLBACK(json2csv_validateObjectsAndArrays),
-                SCAN_CALLBACK(json2csv_doneCallback),
-                codeUnitStream,
-                { Indices, Spans },
-                { LineNumbers, Indices }
-            );
-        } else {
-            scan::Reader(
-                P,
-                driver,
-                SCAN_CALLBACK(postproc_validateObjectsAndArrays),
-                SCAN_CALLBACK(postproc_doneCallback),
-                codeUnitStream,
-                { Indices, Spans },
-                { LineNumbers, Indices }
-            );
-        }
+        auto fn = ToCSVFlag ? normalCsv2JsonFn : normalJsonFn;
+        auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
+        scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
         
         // 10. Output whether or not it is valid
-        scan::Reader(P, driver, errFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
+        scan::Reader(P, driver, normalErrFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
     } else {
         // 9.4 Validate objects and arrays
-        if (ToCSVFlag) {
-            scan::Reader(
-                P,
-                driver,
-                SCAN_CALLBACK(json2csv_validateObjectsAndArrays),
-                SCAN_CALLBACK(json2csv_doneCallback),
-                codeUnitStream,
-                { Indices },
-                { Indices, Codes }
-            );
-        } else {
-            scan::Reader(
-                P,
-                driver,
-                SCAN_CALLBACK(postproc_validateObjectsAndArrays),
-                SCAN_CALLBACK(postproc_doneCallback),
-                codeUnitStream,
-                { Indices },
-                { Indices, Codes }
-            );
-        }
+        auto fn = ToCSVFlag ? simpleCsv2JsonFn : simpleJsonFn;
+        auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
+        scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices });
+
         // 10. Output whether or not it is valid
-        scan::Reader(P, driver, errFn, codeUnitStream, { ErrIndices }, { Codes });
+        scan::Reader(P, driver, simpleErrFn, codeUnitStream, { ErrIndices });
     }
     
 // uncomment lines below for debugging
