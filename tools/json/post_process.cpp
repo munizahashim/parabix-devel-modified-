@@ -53,6 +53,9 @@ static llvm::SmallVector<const u_int8_t *, 32> stack{};
 static JSONState currentState = JInit;
 
 static ptrdiff_t postproc_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
+    if (lineBegin == nullptr) {
+        return 0;
+    }
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
     return column;
@@ -205,7 +208,7 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
 }
 
 void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
-    postproc_validateObjectsAndArrays(ptr, 0, 0, 0, 0);
+    postproc_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
 }
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {

@@ -103,6 +103,9 @@ static void json2csv_saveKeyValuePair() {
 }
 
 static ptrdiff_t json2csv_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
+    if (lineBegin == nullptr) {
+        return 0;
+    }
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
     return column;
@@ -260,5 +263,5 @@ void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
 }
 
 void json2csv_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
-    json2csv_validateObjectsAndArrays(ptr, 0, 0, 0, 0);
+    json2csv_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
 }
