@@ -193,10 +193,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     incrementNumberOfSegmentsCounter(b);
     recordUnconsumedItemCounts(b);
 
-    mFinalPartialStrideFixedRateRemainderPhi = nullptr;
-
     detemineMaximumNumberOfStrides(b);
 
+    mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {

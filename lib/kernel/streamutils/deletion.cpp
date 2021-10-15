@@ -181,6 +181,8 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
                 Value * compressed = kb->CreatePextract(field, mask[i]);
+                // Pextract is returning 32-bit integers but fieldTy is 16 bit?
+                compressed = kb->CreateZExtOrTrunc(compressed, fieldTy);
                 kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
             }
         }

@@ -1876,7 +1876,7 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
                targets.clear();
            }
 
-           assert (P.size() == (numOfKernels + 1));
+           assert (path.size() == (numOfKernels + 1));
 
            // extract the sequence of kernel ids from the path
            toEval.clear();
