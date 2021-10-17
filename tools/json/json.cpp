@@ -186,7 +186,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 9.3 Prepare StreamSets in case we want to show lines on error
     //    If flag -c is provided, parse for CSV
     auto normalJsonFn = SCAN_CALLBACK(postproc_validateObjectsAndArrays);
-    auto simpleJsonFn = SCAN_CALLBACK(postproc_simpleValidateObjectsAndArrays);
+    auto simpleJsonFn = SCAN_CALLBACK(postproc_simpleValidateJSON);
     auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
 
     auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);

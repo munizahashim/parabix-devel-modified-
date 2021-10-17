@@ -10,7 +10,7 @@
 
 extern "C" {
 
-void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr);
+void postproc_simpleValidateJSON(const uint8_t * ptr);
 void postproc_simpleError(const uint8_t * /*ptr*/);
 
 }
