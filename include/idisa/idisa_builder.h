@@ -58,6 +58,8 @@ public:
 
     llvm::Constant * getConstantVectorSequence(unsigned fw, unsigned first, unsigned last, unsigned by = 1);
 
+    llvm::Constant * getRepeatingConstantVectorSequence(unsigned fw, unsigned repeat, unsigned first, unsigned last, unsigned by = 1);
+
     llvm::Value * CreateHalfVectorHigh(llvm::Value *);
 
     llvm::Value * CreateHalfVectorLow(llvm::Value *);
