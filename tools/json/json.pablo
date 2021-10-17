@@ -248,8 +248,7 @@ kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
     mStream = marker[0]
     every2 = EveryNth(mStream, 2)
     endStream = every2 ^ mStream
-    beginStream = endStream ^ mStream
-    inSpan = InclusiveSpan(beginStream, endStream)
+    inSpan = InclusiveSpan(every2, endStream)
     span[0] = inSpan
 }
 
