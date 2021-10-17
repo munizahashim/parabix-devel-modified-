@@ -37,8 +37,9 @@
 #include <iomanip>
 #include <kernel/pipeline/pipeline_builder.h>
 #include "json-kernel.h"
-#include "post_process.h"
-#include "json2csv_process.h"
+#include "postprocess/json-simple.h"
+#include "postprocess/json-detail.h"
+#include "postprocess/json2csv.h"
 
 namespace su = kernel::streamutils;
 

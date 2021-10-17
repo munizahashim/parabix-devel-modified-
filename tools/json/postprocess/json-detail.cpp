@@ -1,4 +1,4 @@
-#include "post_process.h"
+#include "json-detail.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -212,10 +212,6 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
     }
 }
 
-void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
-    postproc_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
-}
-
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {
     const uint8_t KEYWORD_CODE = 0x1;
     const uint8_t UTF8_CODE = 0x2;
@@ -234,8 +230,4 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
         postproc_reportError("Unprocessed error stream");
     }
     fprintf(stderr, "\n");
-}
-
-void postproc_simpleError(const uint8_t * /*ptr*/) {
-    postproc_reportError("The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.");
 }
