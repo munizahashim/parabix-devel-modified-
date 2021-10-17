@@ -46,17 +46,21 @@ enum KwLex {
     Given the JSON lex for characters backslash and double quotes,
     this kernel returns the marker of a JSON string, based on paper
     Parsing Gigabytes of JSON per Second (Daniel Lemire and Geoff Langdale)
-    E.g.: "a string \\\", oops"
-    In:   1............1......1
-    Out:  1...................1
+
+             json: { "key1\"": value1, "key2"  : null }
+    input example: ..1.....11..........1....1..........
+    output marker: ..1......1..........1....1..........
+      output span: ...111111............1111...........
 */
 class JSONStringMarker : public pablo::PabloKernel {
 public:
-    JSONStringMarker(const std::unique_ptr<KernelBuilder> & b, StreamSet * const lex, StreamSet * strMarker)
+    JSONStringMarker(const std::unique_ptr<KernelBuilder> & b,
+                     StreamSet * const backslash, StreamSet * const dQuotes,
+                     StreamSet * strMarker, StreamSet * strSpan)
     : pablo::PabloKernel(b,
                          "jsonStrMarker",
-                         {Binding{"lex", lex}},
-                         {Binding{"marker", strMarker}}) {}
+                         {Binding{"backslash", backslash}, Binding{"dQuotes", dQuotes}},
+                         {Binding{"marker", strMarker}, Binding{"span", strSpan}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:

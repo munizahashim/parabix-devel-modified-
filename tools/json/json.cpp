@@ -90,21 +90,14 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     );
 
     // 2. Find string marker (without backslashes)
+    // 3. and make string span
     StreamSet * const stringMarker = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONStringMarker>(lexStream, stringMarker);
-
-    // 3. Make string span
     StreamSet * const stringSpan = P->CreateStreamSet(1);
-    P->CreateKernelCall<PabloSourceKernel>(
-        parser,
-        jsonPabloSrc,
-        "JSONStringSpan",
-        Bindings { // Input Stream Bindings
-            Binding {"marker", stringMarker},
-        },
-        Bindings { // Output Stream Bindings
-            Binding {"span", stringSpan}
-        }
+    P->CreateKernelCall<JSONStringMarker>(
+        su::Select(P, lexStream, Lex::backslash),
+        su::Select(P, lexStream, Lex::dQuote),
+        stringMarker,
+        stringSpan
     );
 
     // 4. Mark keywords (true, false, null)

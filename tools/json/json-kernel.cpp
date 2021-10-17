@@ -26,11 +26,13 @@ static PabloAST * sanitizeLexInput(PabloBuilder & pb, PabloAST * strSpan, PabloA
 
 void JSONStringMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> lex = getInputStreamSet("lex");
+    PabloAST * dQuotes = getInputStreamSet("dQuotes")[0];
+    PabloAST * backslash = getInputStreamSet("backslash")[0];
     Var * const strMarker = getOutputStreamVar("marker");
+    Var * const strSpan = getOutputStreamVar("span");
 
     // keeping the names as the ones in paper PGJS (Lemire)
-    PabloAST * B = lex[Lex::backslash];
+    PabloAST * B = backslash;
     PabloAST * E = pb.createRepeat(1, pb.getInteger(0xAAAAAAAAAAAAAAAA, 64)); // constant
     PabloAST * O = pb.createRepeat(1, pb.getInteger(0x5555555555555555, 64)); // constant
 
@@ -58,10 +60,16 @@ void JSONStringMarker::generatePabloMethod() {
     PabloAST * OD = pb.createOr(OD1, OD2);
 
     // There is a bug on the quotes
-    PabloAST * Q = lex[Lex::dQuote];
+    PabloAST * Q = dQuotes;
     PabloAST * QEq = pb.createAnd(Q, pb.createNot(OD));
 
+    // Find strspan
+    PabloAST * beginDQuotes = pb.createEveryNth(QEq, pb.getInteger(2));
+    PabloAST * endDQuotes = pb.createXor(QEq, beginDQuotes);
+    PabloAST * inSpan = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {beginDQuotes, endDQuotes});
+
     pb.createAssign(pb.createExtract(strMarker, pb.getInteger(0)), QEq);
+    pb.createAssign(pb.createExtract(strSpan, pb.getInteger(0)), inSpan);
 }
 
 void JSONKeywordMarker::generatePabloMethod() {

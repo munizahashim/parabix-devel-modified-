@@ -236,21 +236,7 @@ kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
     }
 }
 
-type StringMarker = <i1>[1]
 type StringSpan = <i1>[1]
-
-# Get the string span not sequentially (EveryNth)
-#          json: { "key1": value1, "key2"  : null }
-# input example: ..1....1..........1....1..........
-#        output: ...1111............1111...........
-#
-kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
-    mStream = marker[0]
-    every2 = EveryNth(mStream, 2)
-    endStream = every2 ^ mStream
-    inSpan = InclusiveSpan(every2, endStream)
-    span[0] = inSpan
-}
 
 kernel LexLocations :: [Lex lex] -> [BasisBits output] {
     rOrLCurly = lex.lCurly | lex.rCurly
