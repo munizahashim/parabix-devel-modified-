@@ -92,8 +92,10 @@ static void parseValue(const uint8_t *ptr) {
     if (*ptr == '"') {
         currentState = JVStrBegin;
     } else if (*ptr == '{') {
+        stack.push_back(ptr);
         currentState = JObjInit;
     } else if (*ptr == '[') {
+        stack.push_back(ptr);
         currentState = JArrInit;
     } else if (*ptr >= '0' && *ptr <= '9') {
         currentState = JFindNewState;
@@ -160,6 +162,7 @@ static void parseObjColon(const uint8_t *ptr) {
 
 static void parseObjAfterComma(const uint8_t *ptr) {
     if (*ptr == '{') {
+        stack.push_back(ptr);
         currentState = JObjInit;
     } else {
         postproc_simpleError(nullptr);
@@ -168,22 +171,24 @@ static void parseObjAfterComma(const uint8_t *ptr) {
 
 static void parseArrAfterComma(const uint8_t *ptr) {
     if (*ptr == '[') {
+        stack.push_back(ptr);
         currentState = JArrInit;
     } else {
         postproc_simpleError(nullptr);
     }
 }
 
-static void popAndFindNewState(const uint8_t *last) {
+static void popAndFindNewState() {
     stack.pop_back();
     if (stack.empty()) {
         currentState = JDone;
         return;
     }
 
-    if (*last == '{') {
+    const uint8_t last = *stack.back();
+    if (last == '{') {
         currentState = JObjInit;
-    } else if (*last == '[') {
+    } else if (last == '[') {
         currentState = JArrInit;
     } else {
         postproc_simpleError(nullptr);
@@ -191,18 +196,18 @@ static void popAndFindNewState(const uint8_t *last) {
 }
 
 static void parseNewState(const uint8_t *ptr) {
-    assert(!stack.empty());
-    const uint8_t last = *stack.back();
     if (*ptr == ',') {
+        assert(!stack.empty());
+        const uint8_t last = *stack.back();
         if (last == '{') {
-            currentState = JObjComma;
+            currentState = JObjInit;
         } else if (last == '[') {
-            currentState = JArrComma;
+            currentState = JArrInit;
         } else {
             postproc_simpleError(nullptr);
         }
     } else {
-        popAndFindNewState(&last);
+        popAndFindNewState();
     }
 }
 
