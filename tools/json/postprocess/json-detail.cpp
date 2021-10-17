@@ -9,8 +9,7 @@
 #include <llvm/ADT/SmallVector.h>
 
 /*
- * <Json> ::= <Object>
- *          | <Array>
+ * <Json> ::= <Value>
  * 
  * <Object> ::= '{' '}'
  *            | '{' <Members> '}'
@@ -194,7 +193,7 @@ void postproc_doneCallback() {
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
     if (currentState == JInit) {
-        postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
+        postproc_parseValue(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
         postproc_parseStrOrPop(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JArrInit) {
