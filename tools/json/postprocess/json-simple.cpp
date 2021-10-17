@@ -72,6 +72,8 @@ static void parseArrAfterComma(const uint8_t *ptr);
 static void parseNewState(const uint8_t *ptr);
 static void parseDone(const uint8_t *ptr);
 
+static void popAndFindNewState();
+
 typedef void (*HandlerFnTy)(const uint8_t *);
 static HandlerFnTy jsonJumpTable[JDone + 1] = {
     parseValue,
@@ -88,6 +90,14 @@ static HandlerFnTy jsonJumpTable[JDone + 1] = {
     parseDone
 };
 
+static bool isControl(const uint8_t * ptr) {
+    if (*ptr == '}' || *ptr == ']' || *ptr == ',' || *ptr == ':') {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 static void parseValue(const uint8_t *ptr) {
     if (*ptr == '"') {
         currentState = JVStrBegin;
@@ -97,13 +107,7 @@ static void parseValue(const uint8_t *ptr) {
     } else if (*ptr == '[') {
         stack.push_back(ptr);
         currentState = JArrInit;
-    } else if (*ptr >= '0' && *ptr <= '9') {
-        currentState = JFindNewState;
-    } else if (*ptr == 'n') {
-        currentState = JFindNewState;
-    } else if (*ptr == 't') {
-        currentState = JFindNewState;
-    } else if (*ptr == 'f') {
+    } else if (!isControl(ptr)) {
         currentState = JFindNewState;
     } else {
         postproc_simpleError(nullptr);
@@ -114,7 +118,7 @@ static void parseObj(const uint8_t *ptr) {
     if (*ptr == '"') {
         currentState = JKStrBegin;
     } else if (*ptr == '}') {
-        currentState = JFindNewState;
+        popAndFindNewState();
     } else {
         postproc_simpleError(nullptr);
     }
@@ -122,7 +126,7 @@ static void parseObj(const uint8_t *ptr) {
 
 static void parseArr(const uint8_t *ptr) {
     if (*ptr == ']') {
-        currentState = JFindNewState;
+        popAndFindNewState();
     } else {
         parseValue(ptr);
     }
@@ -187,17 +191,17 @@ static void popAndFindNewState() {
 
     const uint8_t last = *stack.back();
     if (last == '{') {
-        currentState = JObjInit;
+        currentState = JFindNewState;
     } else if (last == '[') {
-        currentState = JArrInit;
+        currentState = JFindNewState;
     } else {
         postproc_simpleError(nullptr);
     }
 }
 
 static void parseNewState(const uint8_t *ptr) {
+    assert(!stack.empty());
     if (*ptr == ',') {
-        assert(!stack.empty());
         const uint8_t last = *stack.back();
         if (last == '{') {
             currentState = JObjInit;
@@ -206,8 +210,12 @@ static void parseNewState(const uint8_t *ptr) {
         } else {
             postproc_simpleError(nullptr);
         }
-    } else {
+    } else if (*ptr == ']') {
         popAndFindNewState();
+    } else if (*ptr == '}') {
+        popAndFindNewState();
+    } else {
+        postproc_simpleError(nullptr);
     }
 }
 
