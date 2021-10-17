@@ -24,7 +24,7 @@ using boost::intrusive::detail::ceil_log2;
 using boost::intrusive::detail::ceil_pow2;
 using boost::intrusive::detail::is_pow2;
 using namespace llvm;
-
+using IDISA::FixedVectorType;
 
 // TODO: merge Cycle counter and PAPI?
 

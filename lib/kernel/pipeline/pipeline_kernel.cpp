@@ -14,6 +14,8 @@
 // a "family", the pipeline kernel will be compiled once for the lifetime of a program. Thus we can avoid even
 // constructing any data structures for the pipeline in normal usage.
 
+using IDISA::FixedVectorType;
+
 namespace kernel {
 
 #define COMPILER (static_cast<PipelineCompiler *>(b->getCompiler()))

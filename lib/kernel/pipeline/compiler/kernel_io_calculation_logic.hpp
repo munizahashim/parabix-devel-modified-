@@ -892,9 +892,6 @@ debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
-
-        Value * const hasEnoughSpace = b->CreateICmpULE(required, afterExpansion[WITH_OVERFLOW]);
-
         const Binding & output = getOutputBinding(outputPort);
         Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
         b->CreateAssert(sanityCheck,
@@ -1467,8 +1464,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     assert (ref.Type == PortType::Input);
     const auto prefix = makeBufferName(mKernelId, ref) + "_readPartialSum";
 
-    const auto refInput = getInput(mKernelId, ref);
-    const BufferPort & refInputRate = mBufferGraph[refInput];
+//    const auto refInput = getInput(mKernelId, ref);
+//    const BufferPort & refInputRate = mBufferGraph[refInput];
     const auto refBufferVertex = getInputBufferVertex(ref);
     const StreamSetBuffer * const popCountBuffer = mBufferGraph[refBufferVertex].Buffer;
 

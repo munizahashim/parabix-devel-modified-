@@ -73,7 +73,6 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
-            const auto consPartId = KernelPartitionId[consumer];
 
             const auto onHybrid = KernelOnHybridThread.test(consumer);
             const auto type = onHybrid ? 1 : 0;

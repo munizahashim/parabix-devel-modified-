@@ -583,7 +583,6 @@ inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef
     Type * const boolTy = b->getInt1Ty();
     mExhaustedInputAtJumpPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInputAtJumpPhi");
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
         const auto port = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b->CreatePHI(b->getSizeTy(), 2, prefix + "_producedAtJumpPhi");
@@ -700,7 +699,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
             mExhaustedInputAtJumpPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
         }
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
             const auto & br = mBufferGraph[e];
             const auto port = br.Port;
             Value * produced = nullptr;

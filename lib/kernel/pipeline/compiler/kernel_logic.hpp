@@ -44,7 +44,6 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         mFullyProcessedItemCount[port] = fullyProcessed;
         if (CheckAssertions) {
             const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
             const auto producer = parent(streamSet, mBufferGraph);
             if (mCurrentPartitionId == KernelPartitionId[producer]) {
             // if (bn.Locality == BufferLocality::ThreadLocal) {

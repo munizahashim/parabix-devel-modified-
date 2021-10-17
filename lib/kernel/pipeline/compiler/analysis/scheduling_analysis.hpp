@@ -2526,7 +2526,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
             const auto sum = rate.getLowerBound() + rate.getUpperBound();
 
             const auto expectedItemsPerStride = sum * strideSize * Rational{1, 2};
-            const PartitionData & Pi = P[producerPartitionId];
+
             const auto expectedItemsPerSegment = N.Repetitions[index] * expectedItemsPerStride;
             const Rational bytesPerItem{outputBinding.getFieldWidth() * outputBinding.getNumElements(), 8};
             node.Size = expectedItemsPerSegment * bytesPerItem; // bytes per segment

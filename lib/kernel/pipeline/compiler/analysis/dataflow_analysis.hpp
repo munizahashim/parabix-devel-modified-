@@ -241,10 +241,6 @@ void PipelineAnalysis::computeMaximumDataflow(const bool expected) {
         return constant_real(rate.Minimum);
     };
 
-    auto minimum_non_zero = [&](const BufferPort & rate) {
-        return constant_real(std::max(rate.Minimum, Rational{1}));
-    };
-
     auto multiply =[&](Z3_ast X, Z3_ast Y) {
         Z3_ast args[2] = { X, Y };
         return Z3_mk_mul(ctx, 2, args);

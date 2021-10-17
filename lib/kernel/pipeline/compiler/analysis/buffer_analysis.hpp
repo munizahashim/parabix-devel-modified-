@@ -534,19 +534,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
         }
     }
 
-    auto mustBeLinear = [](const Binding & binding) {
-        for (const Attribute & attr : binding.getAttributes()) {
-            switch(attr.getKind()) {
-                case AttrId::Linear:
-                case AttrId::Deferred:
-                    return true;
-                default: break;
-            }
-        }
-        const ProcessingRate & rate = binding.getRate();
-        return !rate.isFixed();
-    };
-
     // If the binding attributes of the producer/consumer(s) of a streamSet indicate
     // that the kernel requires linear input, mark it accordingly.
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {

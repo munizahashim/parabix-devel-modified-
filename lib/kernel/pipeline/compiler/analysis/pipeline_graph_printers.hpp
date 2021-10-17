@@ -271,7 +271,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << ':'
                 << ty->getArrayNumElements() << 'x';
             ty = ty->getArrayElementType();
-            ty = cast<FixedVectorType>(ty)->getElementType();
+            ty = cast<IDISA::FixedVectorType>(ty)->getElementType();
             out << ty->getIntegerBitWidth();
         }
 
@@ -379,6 +379,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         if (kernelObj->canSetTerminateSignal()) {
             out << "<CanTerminateEarly>\\n";
         }
+#if 0
         if (firstKernelInPartition) {
             if (mTerminationCheck[currentPartition]) {
                 out << " T:";
@@ -390,7 +391,7 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
                 }
             }
         }
-
+#endif
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
                 if (explicitFinalPartialStride) {
                     out << ",color=\"blue\"";
