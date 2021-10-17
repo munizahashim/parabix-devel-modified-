@@ -49,9 +49,7 @@ enum JSONState {
     JVStrEnd,
     JObjInit,
     JObjColon,
-    JObjComma,
     JArrInit,
-    JArrComma,
     JFindNewState,
     JDone
 };
@@ -66,9 +64,7 @@ static void parseVStrBegin(const uint8_t *ptr);
 static void parseVStrEnd(const uint8_t *ptr);
 static void parseObj(const uint8_t *ptr);
 static void parseObjColon(const uint8_t *ptr);
-static void parseObjAfterComma(const uint8_t *ptr);
 static void parseArr(const uint8_t *ptr);
-static void parseArrAfterComma(const uint8_t *ptr);
 static void parseNewState(const uint8_t *ptr);
 static void parseDone(const uint8_t *ptr);
 
@@ -83,9 +79,7 @@ static HandlerFnTy jsonJumpTable[JDone + 1] = {
     parseVStrEnd,
     parseObj,
     parseObjColon,
-    parseObjAfterComma,
     parseArr,
-    parseArrAfterComma,
     parseNewState,
     parseDone
 };
@@ -162,24 +156,6 @@ static void parseVStrEnd(const uint8_t *ptr) {
 
 static void parseObjColon(const uint8_t *ptr) {
     parseValue(ptr);
-}
-
-static void parseObjAfterComma(const uint8_t *ptr) {
-    if (*ptr == '{') {
-        stack.push_back(ptr);
-        currentState = JObjInit;
-    } else {
-        postproc_simpleError(nullptr);
-    }
-}
-
-static void parseArrAfterComma(const uint8_t *ptr) {
-    if (*ptr == '[') {
-        stack.push_back(ptr);
-        currentState = JArrInit;
-    } else {
-        postproc_simpleError(nullptr);
-    }
 }
 
 static void popAndFindNewState() {
