@@ -10,7 +10,12 @@
 #include <util/extended_boost_graph_containers.h>
 #include <toolchain/toolchain.h>
 #include <boost/range/adaptor/reversed.hpp>
+#if (BOOST_VERSION < 106500)
 #include <boost/math/common_factor_rt.hpp>
+using namespace boost::math;
+#else
+#include <boost/integer/common_factor_rt.hpp>
+#endif
 #include <boost/dynamic_bitset.hpp>
 #include <llvm/IR/ValueMap.h>
 #include <llvm/ADT/BitVector.h>

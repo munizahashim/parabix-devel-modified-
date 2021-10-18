@@ -15,7 +15,6 @@
 #include "config.h"
 
 using namespace boost;
-using namespace boost::math;
 using namespace boost::adaptors;
 using boost::container::flat_set;
 using boost::container::flat_map;
