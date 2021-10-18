@@ -150,6 +150,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     P->CreateKernelCall<JSONLexSanitizer>(stringSpan, stringMarker, lexStream, finalLexStream);
 
     // 8. Validate rest of the output (check for extraneous chars)
+    // We also take the opportunity to create the keyword marker
     const size_t COMBINED_STREAM_COUNT = 14;
     StreamSet * const allSpans = P->CreateStreamSet(COMBINED_STREAM_COUNT, 1);
     P->CreateKernelCall<StreamsMerge>(
