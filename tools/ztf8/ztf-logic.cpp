@@ -271,27 +271,36 @@ void ZTF_Phrases::generatePabloMethod() {
     PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
     PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4));
     PabloAST * wc1 = pb.createAnd(ASCII, wordChar);
+    // valid UTF-8 codepoints
     wc1 = pb.createOr(wc1, pb.createAnd(prefix2, pb.createLookahead(wordChar, 1)));
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix3, pb.createLookahead(wordChar, 2)));
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix4, pb.createLookahead(wordChar, 3)));
+    wc1 = pb.createOr(wc1, pb.createAnd3(prefix3, pb.createLookahead(wordChar, 1), pb.createLookahead(wordChar, 2)));
+    wc1 = pb.createOr(wc1, pb.createAnd3(prefix4, pb.createLookahead(wordChar, 2), pb.createLookahead(wordChar, 3)));
     //
     // ZTF Code symbols
+    PabloAST * multiSymSfx = ccc.compileCC(re::makeCC(0x80, 0xBF));
+    PabloAST * multiSymPfx = ccc.compileCC(re::makeCC(0xE0, 0xFF));
     PabloAST * anyPfx = ccc.compileCC(re::makeCC(0xC0, 0xFF));
-    PabloAST * anyPfx4 = ccc.compileCC(re::makeCC(0xF8, 0xFF));
-    PabloAST * anysfx = ccc.compileCC(re::makeCC(0x0, 0xFF));
-    PabloAST * ZTF_sym = pb.createAnd(pb.createAdvance(anyPfx, 1), ASCII);
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx, 2), ASCII));
-    // ZTF Code symbols with prefix in range 0xF8-0xFF can have any number of suffix bytes to be considered valid codeword
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 1), ASCII)); // can't have any suffix because anysfx includes ZTF prefixes too
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 2), ASCII));
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(anyPfx4, 3), ASCII));
+    PabloAST * pfx1 = ccc.compileCC(re::makeCC(0xC0, 0xDF));
+    PabloAST * pfx2 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
+    PabloAST * pfx3 = ccc.compileCC(re::makeCC(0xF0, 0xFF));
+
+    /// TODO: F8-FF can have any suffix except multi-byte pfx byte
+    PabloAST * ZTF_sym = pb.createAnd(pb.createAdvance(anyPfx, 1), ASCII); // // PFX 00-7F
+
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(ZTF_sym, 1), multiSymSfx)); // PFX 00-7F 80-BF
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(pfx2, 2), ASCII)); // PFX 00-7F 00-7F
+
+    PabloAST * multiSymPfx3 = pb.createAnd(pb.createAdvance(pfx3, 2), ASCII);
+    ZTF_sym = pb.createOr(ZTF_sym, multiSymPfx3); // PFX 00-7F 00-7F
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(multiSymPfx3, 1), multiSymSfx)); // PFX 00-7F 00-7F 80-BF
+    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(multiSymPfx3, 1), ASCII));
 
     PabloAST * ZTF_prefix = pb.createAnd(anyPfx, pb.createNot(pb.createLookahead(basis[7], 1)));
-    // Consider prefix of 4-byte codewords as ZTF_prefix
     ZTF_prefix = pb.createOr(ZTF_prefix, anyPfx4);
+
     // Filter out ZTF code symbols from word characters.
     wc1 = pb.createAnd(wc1, pb.createNot(ZTF_sym));
-    //
+
     PabloAST * wordStart = pb.createAnd(pb.createNot(pb.createAdvance(wordChar, 1)), wc1, "wordStart");
     // Nulls, Linefeeds and ZTF_symbols are also treated as symbol starts.
     PabloAST * LF = ccc.compileCC(re::makeByte(0x0A));
@@ -299,13 +308,12 @@ void ZTF_Phrases::generatePabloMethod() {
     PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * symStart = pb.createOr3(wordStart, ZTF_prefix, pb.createOr3(LF, Null, fileStart));
 
-    // The next character after a ZTF symbol or a line feed also starts a new symbol.
-    symStart = pb.createOr(symStart, pb.createAdvance(pb.createOr(ZTF_sym, LF), 1), "symStart");
-    //
+   // The next character after a ZTF symbol or a line feed also starts a new symbol.
+    symStart = pb.createOr3(symStart, pb.createAdvance(ZTF_prefix, 1), pb.createAdvance(pb.createOr(ZTF_sym, LF), 1), "symStart");
+
     // runs are the bytes after a start symbol until the next symStart byte.
     pablo::PabloAST * runs = pb.createInFile(pb.createNot(symStart));
     pb.createAssign(pb.createExtract(getOutputStreamVar("phraseRuns"), pb.getInteger(0)), runs);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("cwRuns"), pb.getInteger(0)), wc1);
 }
 
 PhraseRunSeq::PhraseRunSeq(BuilderRef kb,

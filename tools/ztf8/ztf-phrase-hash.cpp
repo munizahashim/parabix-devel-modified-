@@ -97,9 +97,8 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
 
     StreamSet * const phraseRuns = P->CreateStreamSet(1);
-    StreamSet * const cwRuns = P->CreateStreamSet(1);
     // Mark ZTF symbols among the Unicode words
-    P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns, cwRuns);
+    P->CreateKernelCall<ZTF_Phrases>(u8basis, WordChars, phraseRuns);
     //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
 
     std::vector<StreamSet *> phraseLenBixnum(SymCount);
@@ -274,19 +273,18 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
 
     StreamSet * WordChars = P->CreateStreamSet(1);
     P->CreateKernelCall<WordMarkKernel>(ztfHash_u8_Basis, WordChars);
-    P->CreateKernelCall<DebugDisplayKernel>("WordChars", WordChars);
+    //P->CreateKernelCall<DebugDisplayKernel>("WordChars", WordChars);
 
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
     //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
     StreamSet * u8bytes = P->CreateStreamSet(1, 8);
-    for (unsigned sym = 0; sym < 1; sym++) {
+    for (unsigned sym = 0; sym < SymCount; sym++) {
         StreamSet * const phraseRuns = P->CreateStreamSet(1);
-        StreamSet * const cwRuns = P->CreateStreamSet(1);
-        P->CreateKernelCall<ZTF_Phrases>(ztfHash_u8_Basis, WordChars, phraseRuns, cwRuns);
-        P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
+        P->CreateKernelCall<ZTF_Phrases>(ztfHash_u8_Basis, WordChars, phraseRuns);
+        //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
 
-        StreamSet * const runIndex = P->CreateStreamSet(4);
+        StreamSet * const runIndex = P->CreateStreamSet(5);
         StreamSet * const overflow = P->CreateStreamSet(1);
         P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow);
 
@@ -300,30 +298,20 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
         u8bytes = ztfHash_u8bytes;
         unsigned startLgIdx = 0;
         if (sym > 0) {
-            startLgIdx = 3; //2; k-symbol compressible phrase min length = 9 bytes
+            startLgIdx = 3; // k-symbol compressible phrase min length = 9 bytes
         }
         for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) {
             StreamSet * groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, runIndex, overflow, groupMarks);
-            P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
-
+            //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
             unsigned streamSelIdx = i;
-            if (i > 2) { // 3, 5, 7 | 4, 6, 8
-            /*
-            sym    idx     actual
-            0       3         3
-                    4         5
-                    5         7
-            1       3         4
-                    4         6
-                    5         8
-            */
-                unsigned offset =  (i-3) + sym; // 0, 1, 2 | 1, 2, 3
-                streamSelIdx += offset;
+            if (i > 2) {
+                unsigned relativeIdx =  sym + ((SymCount-1) * (i-3));
+                streamSelIdx += relativeIdx;
             }
             StreamSet * groupDecoded = P->CreateStreamSet(1); // 0, 1, 2, {3, 3..}, {4, 4..}
             P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {streamSelIdx}));
-            P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
+            //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
             StreamSet * input_bytes = u8bytes;
             StreamSet * output_bytes = P->CreateStreamSet(1, 8);

@@ -59,14 +59,16 @@ LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encoding
     HASH_BITS(b->getSize(groupInfo.hash_bits)),
     EXTENDED_BITS(b->getSize(std::max((groupInfo.hash_bits + groupInfo.length_extension_bits), ((groupInfo.encoding_bytes - 1U) * 7U)))),
     PHRASE_EXTENSION_MASK(b->getSize(( 1UL << std::min(groupInfo.hi - groupInfo.lo, groupNo)) - 1UL)),
-    HASH_MASK(b->getSize((1UL << ((groupInfo.hash_bits >> 1UL) * groupInfo.encoding_bytes)) - 1UL)), // extend the # bits in mask? FF, FFF, FFFF
+    HASH_MASK(b->getSize((1UL << ((groupInfo.hash_bits >> 1UL) * groupInfo.encoding_bytes)) - 1UL)),
+    HASH_MASK_NEW(b->getSize((1UL << ((groupInfo.hash_bits) * groupInfo.encoding_bytes)) - 1UL)),
     ENC_BYTES(b->getSize(groupInfo.encoding_bytes)),
     MAX_INDEX(b->getSize(groupInfo.encoding_bytes - 1UL)),
     PREFIX_BASE(b->getSize(groupInfo.prefix_base)),
     PREFIX_LENGTH_OFFSET(b->getSize(encodingScheme.prefixLengthOffset(groupInfo.lo))),
     LENGTH_MASK(b->getSize(2UL * groupHalfLength - 1UL)),
     PREFIX_LENGTH_MASK(b->getSize((1UL << encodingScheme.prefixLengthMaskBits(groupInfo.lo)) - 1UL)),
-    EXTENSION_MASK(b->getSize((1UL << groupInfo.length_extension_bits) - 1UL)) {
+    EXTENSION_MASK(b->getSize((1UL << groupInfo.length_extension_bits) - 1UL)),
+    TABLE_IDX_MASK(b->getSize((1U << (8*groupInfo.encoding_bytes)) -1)) {
         assert(groupInfo.hi <= (1UL << (boost::intrusive::detail::floor_log2(groupInfo.lo) + 1UL)));
     }
 

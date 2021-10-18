@@ -46,6 +46,7 @@ struct LengthGroupParameters {
     Constant * EXTENDED_BITS;
     Constant * PHRASE_EXTENSION_MASK;
     Constant * HASH_MASK;
+    Constant * HASH_MASK_NEW;
     Constant * ENC_BYTES;
     Constant * MAX_INDEX;
     Constant * PREFIX_BASE;
@@ -53,6 +54,7 @@ struct LengthGroupParameters {
     Constant * PREFIX_LENGTH_MASK;
     Constant * LENGTH_MASK;
     Constant * EXTENSION_MASK;
+    Constant * TABLE_IDX_MASK;
 
     LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo, unsigned numSym = 0);
 };

@@ -106,8 +106,7 @@ public:
     ZTF_Phrases(BuilderRef kb,
                 StreamSet * basisBits,
                 StreamSet * wordChar,
-                StreamSet * phraseRuns,
-                StreamSet * cwRuns);
+                StreamSet * phraseRuns);
 protected:
     void generatePabloMethod() override;
 };
