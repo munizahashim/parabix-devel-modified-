@@ -89,24 +89,40 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         }
     );
 
+    StreamSet * backslashStream = su::Select(P, lexStream, Lex::backslash);
+    StreamSet * dQuotesStream = su::Select(P, lexStream, Lex::dQuote);
+    StreamSet * wsStream = su::Select(P, lexStream, Lex::ws);
+    StreamSet * nStream = su::Select(P, lexStream, Lex::n);
+    StreamSet * tStream = su::Select(P, lexStream, Lex::t);
+    StreamSet * fStream = su::Select(P, lexStream, Lex::f);
+    StreamSet * rCurlyStream = su::Select(P, lexStream, Lex::rCurly);
+    StreamSet * rBracketStream = su::Select(P, lexStream, Lex::rBracket);
+    StreamSet * commaStream = su::Select(P, lexStream, Lex::comma);
+
+    std::vector<StreamSet *> literalStreams = { nStream, tStream, fStream };
+    std::vector<StreamSet *> validAfterValueStreams = { wsStream, rCurlyStream, rBracketStream, commaStream };
+
     // 2. Find string marker (without backslashes)
     // 3. and make string span
     StreamSet * const stringMarker = P->CreateStreamSet(1);
     StreamSet * const stringSpan = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONStringMarker>(
-        su::Select(P, lexStream, Lex::backslash),
-        su::Select(P, lexStream, Lex::dQuote),
+        backslashStream,
+        dQuotesStream,
         stringMarker,
         stringSpan
     );
 
-    // 4. Mark keywords (true, false, null)
-    StreamSet * const keywordMarker = P->CreateStreamSet(3);
-    StreamSet * const keywordLex = P->CreateStreamSet(4);
-    P->CreateKernelCall<JSONKeywordMarker>(u8basis, lexStream, stringSpan, keywordMarker, keywordLex);
-    StreamSet * const keywordSpan = P->CreateStreamSet(3);
-    StreamSet * const keywordErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONKeywordSpan>(keywordMarker, keywordLex, keywordSpan, keywordErr);
+    // 4. Mark end of keywords (true, false, null)
+    // Note: We mark the words later when we sanitize the input because
+    // lookahead only works on input streams
+    StreamSet * const keywordEndMarkers = P->CreateStreamSet(3);
+    P->CreateKernelCall<JSONKeywordEndMarker>(
+        u8basis,
+        literalStreams,
+        stringSpan,
+        keywordEndMarkers
+    );
 
     // 5. Validate numbers
     StreamSet * const numberLex = P->CreateStreamSet(1);
@@ -137,27 +153,32 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     const size_t COMBINED_STREAM_COUNT = 14;
     StreamSet * const allSpans = P->CreateStreamSet(COMBINED_STREAM_COUNT, 1);
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{finalLexStream, stringSpan, keywordSpan, numberSpan},
+        std::vector<StreamSet *>{finalLexStream, stringSpan, numberSpan},
         allSpans
     );
     StreamSet * const combinedSpans = su::Collapse(P, allSpans);
     StreamSet * const extraErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONExtraneousChars>(combinedSpans, extraErr);
+    StreamSet * const keywordMarker = P->CreateStreamSet(1);
+    P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
+        combinedSpans,
+        keywordEndMarkers,
+        keywordMarker,
+        extraErr
+    );
 
     // 9.1 Prepare StreamSets for validation
-    StreamSet * const kwLexCollapsed = su::Collapse(P, su::Select(P, keywordLex, su::Range(0, 3)));
     StreamSet * const firstLexers = su::Select(P, finalLexStream, su::Range(0, 7));
     StreamSet * allLex;
     if (ToCSVFlag) {
         allLex = P->CreateStreamSet(11, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex, stringSpan},
+            std::vector<StreamSet *>{firstLexers, keywordMarker, numberLex, stringSpan},
             allLex
         );
     } else {
         allLex = P->CreateStreamSet(10, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, kwLexCollapsed, numberLex},
+            std::vector<StreamSet *>{firstLexers, keywordMarker, numberLex},
             allLex
         );
     }
@@ -165,14 +186,14 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
 
     // 9.2 Prepare error StreamSets
-    StreamSet * const Errors = P->CreateStreamSet(4, 1);
+    StreamSet * const Errors = P->CreateStreamSet(3, 1);
     P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{keywordErr, utf8Err, numberErr, extraErr},
+        std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
         Errors
     );
     StreamSet * const ErrsIn = su::Collapse(P, Errors);
     StreamSet * const Errs = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONErrsSanitizer>(su::Select(P, lexStream, Lex::ws), ErrsIn, Errs);
+    P->CreateKernelCall<JSONErrsSanitizer>(wsStream, ErrsIn, Errs);
     StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
     StreamSet * const Codes = su::Multiplex(P, Errs);
 
@@ -221,7 +242,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", collapsedLex}
+            Binding {"span", keywordMarker}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}

@@ -30,16 +30,9 @@ enum Lex {
 };
 
 enum KwMarker {
-    kwNull = 0,
-    kwTrue,
-    kwFalse,
-};
-
-enum KwLex {
-    nMarker = 0,
-    tMarker,
-    fMarker,
-    nextLexMarker
+    kwNullEnd = 0,
+    kwTrueEnd,
+    kwFalseEnd,
 };
 
 /*
@@ -70,31 +63,32 @@ protected:
 /*
    Marks keywords letters such as l', 'a', 's', 'r', 'u', 'e',
    joining it at the end with 'n', 't' and 'f'
+
+            json: { "keynull": false, "keyt": true }
+   input example: ......1......1..........1...1.....
+          output:..................1.............1..
+
+    Note: we do not return the beginning of the marker here because lookahead
+    only works on input streams, so this will be done in a further step.
 */
-class JSONKeywordMarker : public pablo::PabloKernel {
+class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
-    JSONKeywordMarker(const std::unique_ptr<KernelBuilder> & b,
-                      StreamSet * const basis, StreamSet * const lex, StreamSet * const strSpan,
-                      StreamSet * kwMarker, StreamSet * kwLex)
+    JSONKeywordEndMarker(const std::unique_ptr<KernelBuilder> & b,
+                      StreamSet * const basis,
+                      std::vector<StreamSet *> literals, StreamSet * const strSpan,
+                      StreamSet * kwMarker)
     : pablo::PabloKernel(b,
                          "jsonKeywordMarker",
-                         {Binding{"basis", basis}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
-                         {Binding{"kwMarker", kwMarker}, Binding{"kwLex", kwLex}}) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
-class JSONKeywordSpan : public pablo::PabloKernel {
-public:
-    JSONKeywordSpan(const std::unique_ptr<KernelBuilder> & b,
-                    StreamSet * const kwMarker, StreamSet * const kwLex,
-                    StreamSet * kwSpan, StreamSet * kwErr)
-    : pablo::PabloKernel(b,
-                         "jsonKeywordSpan",
-                         {Binding{"kwLex", kwLex}, Binding{"kwMarker", kwMarker, FixedRate(1), LookAhead(4)}},
-                         {Binding{"kwSpan", kwSpan}, Binding{"kwErr", kwErr}}) {}
+                         {
+                            Binding{"basis", basis},
+                            Binding{"n", literals[0]},
+                            Binding{"t", literals[1]},
+                            Binding{"f", literals[2]},
+                            Binding{"strSpan", strSpan}
+                         },
+                         {
+                            Binding{"kwEndMarker", kwMarker},
+                         }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -121,15 +115,15 @@ protected:
     void generatePabloMethod() override;
 };
 
-class JSONExtraneousChars : public pablo::PabloKernel {
+class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
-    JSONExtraneousChars(const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const combinedSpans,
-                        StreamSet * extraErr)
+    JSONFindKwAndExtraneousChars(const std::unique_ptr<KernelBuilder> & b,
+                        StreamSet * const combinedSpans, StreamSet * const kwEndMarkers,
+                        StreamSet * const kwMarker, StreamSet * extraErr)
     : pablo::PabloKernel(b,
-                         "jsonExtraneousChars",
-                         {Binding{"combinedSpans", combinedSpans}},
-                         {Binding{"extraErr", extraErr}}) {}
+                         "jsonFindKwAndExtraneousChars",
+                         {Binding{"combinedSpans", combinedSpans}, Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)}},
+                         {Binding{"kwMarker", kwMarker}, Binding{"extraErr", extraErr}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
