@@ -251,13 +251,11 @@ void ZTF_Symbols::generatePabloMethod() {
 ZTF_Phrases::ZTF_Phrases(BuilderRef kb,
                 StreamSet * basisBits,
                 StreamSet * wordChar,
-                StreamSet * phraseRuns,
-                StreamSet * cwRuns)
+                StreamSet * phraseRuns)
 : PabloKernel(kb, "ZTF_Phrases",
             {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
-            {Binding{"phraseRuns", phraseRuns},
-             Binding{"cwRuns", cwRuns}}) { }
+            {Binding{"phraseRuns", phraseRuns}}) { }
 
 void ZTF_Phrases::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -296,7 +294,6 @@ void ZTF_Phrases::generatePabloMethod() {
     ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(multiSymPfx3, 1), ASCII));
 
     PabloAST * ZTF_prefix = pb.createAnd(anyPfx, pb.createNot(pb.createLookahead(basis[7], 1)));
-    ZTF_prefix = pb.createOr(ZTF_prefix, anyPfx4);
 
     // Filter out ZTF code symbols from word characters.
     wc1 = pb.createAnd(wc1, pb.createNot(ZTF_sym));
