@@ -134,7 +134,12 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
-    std::vector<PabloAST *> lex = getInputStreamSet("lex");
+    PabloAST * hyphenIn = getInputStreamSet("hyphen")[0];
+    PabloAST * digitIn = getInputStreamSet("digit")[0];
+    PabloAST * rCurlyIn = getInputStreamSet("rCurly")[0];
+    PabloAST * rBracketIn = getInputStreamSet("rBracket")[0];
+    PabloAST * commaIn = getInputStreamSet("comma")[0];
+
     PabloAST * strSpan = getInputStreamSet("strSpan")[0];
     Var * const nbrLex = getOutputStreamVar("nbrLex");
     Var * const nbrSpan = getOutputStreamVar("nbrSpan");
@@ -142,11 +147,11 @@ void JSONNumberSpan::generatePabloMethod() {
 
     PabloAST * alleE = pb.createOr(ccc.compileCC(re::makeByte(0x45)), ccc.compileCC(re::makeByte(0x65)));
     PabloAST * allDot = ccc.compileCC(re::makeByte(0x2E));
-    PabloAST * allPlusMinus = pb.createOr(lex[Lex::hyphen], ccc.compileCC(re::makeByte(0x2B)));
+    PabloAST * allPlusMinus = pb.createOr(hyphenIn, ccc.compileCC(re::makeByte(0x2B)));
 
     PabloAST * notStrSpan = pb.createNot(strSpan);
-    PabloAST * hyphen = pb.createAnd(notStrSpan, lex[Lex::hyphen]);
-    PabloAST * digit = pb.createAnd(notStrSpan, lex[Lex::digit]);
+    PabloAST * hyphen = pb.createAnd(notStrSpan, hyphenIn);
+    PabloAST * digit = pb.createAnd(notStrSpan, digitIn);
     PabloAST * eE = pb.createAnd(notStrSpan, alleE);
     PabloAST * dot = pb.createAnd(notStrSpan, allDot);
     PabloAST * plusMinus = pb.createAnd(notStrSpan, allPlusMinus);
@@ -167,8 +172,7 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * erreENotPlusMinus = pb.createAnd(eENotPlusMinus, nondigit);
     PabloAST * potentialErr = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
 
-    PabloAST * initValidToken = pb.createOr(lex[Lex::rCurly], lex[Lex::rBracket]);
-    PabloAST * nextValidToken = pb.createOr(initValidToken, lex[Lex::comma]);
+    PabloAST * nextValidToken = pb.createOr3(rCurlyIn, rBracketIn, commaIn);
     PabloAST * err = sanitizeLexInput(pb, nextValidToken, potentialErr);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 

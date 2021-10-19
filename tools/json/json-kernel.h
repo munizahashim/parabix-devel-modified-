@@ -103,11 +103,22 @@ protected:
 class JSONNumberSpan : public pablo::PabloKernel {
 public:
     JSONNumberSpan(const std::unique_ptr<KernelBuilder> & b,
-                   StreamSet * const basis, StreamSet * const lex, StreamSet * const strSpan,
+                   StreamSet * const basis,
+                   std::vector<StreamSet *> numberStreams,
+                   std::vector<StreamSet *> validAfterValueStreams,
+                   StreamSet * const strSpan,
                    StreamSet * nbrLex, StreamSet * nbrSpan, StreamSet * nbrErr)
     : pablo::PabloKernel(b,
                          "jsonNumberMarker",
-                         {Binding{"basis", basis, FixedRate(1), LookAhead(1)}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
+                         {
+                            Binding{"basis", basis, FixedRate(1), LookAhead(1)},
+                            Binding{"hyphen", numberStreams[0]},
+                            Binding{"digit", numberStreams[1]},
+                            Binding{"rCurly", validAfterValueStreams[0]},
+                            Binding{"rBracket", validAfterValueStreams[1]},
+                            Binding{"comma", validAfterValueStreams[2]},
+                            Binding{"strSpan", strSpan}
+                         },
                          {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
@@ -115,6 +126,16 @@ protected:
     void generatePabloMethod() override;
 };
 
+/*
+   Marks keywords and find if there are other extra chars
+   where they should not be
+
+            json: { "keynull": false, "keyt": truenull }
+   combinedSpans: 1.1111111111......1.1111111..........1
+    kwEndMarkers: .................1.............1...1..
+ output kwMarker: .............1..............1.........
+ output extraErr: ................................1.....
+*/
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
     JSONFindKwAndExtraneousChars(const std::unique_ptr<KernelBuilder> & b,

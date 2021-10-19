@@ -98,9 +98,13 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * rCurlyStream = su::Select(P, lexStream, Lex::rCurly);
     StreamSet * rBracketStream = su::Select(P, lexStream, Lex::rBracket);
     StreamSet * commaStream = su::Select(P, lexStream, Lex::comma);
+    StreamSet * hyphenStream = su::Select(P, lexStream, Lex::hyphen);
+    StreamSet * digitStream = su::Select(P, lexStream, Lex::digit);
+
 
     std::vector<StreamSet *> literalStreams = { nStream, tStream, fStream };
-    std::vector<StreamSet *> validAfterValueStreams = { wsStream, rCurlyStream, rBracketStream, commaStream };
+    std::vector<StreamSet *> validAfterValueStreams = { rCurlyStream, rBracketStream, commaStream };
+    std::vector<StreamSet *> numberStreams = { hyphenStream, digitStream };
 
     // 2. Find string marker (without backslashes)
     // 3. and make string span
@@ -128,7 +132,15 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const numberLex = P->CreateStreamSet(1);
     StreamSet * const numberSpan = P->CreateStreamSet(1);
     StreamSet * const numberErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONNumberSpan>(u8basis, lexStream, stringSpan, numberLex, numberSpan, numberErr);
+    P->CreateKernelCall<JSONNumberSpan>(
+        u8basis,
+        numberStreams,
+        validAfterValueStreams,
+        stringSpan,
+        numberLex,
+        numberSpan,
+        numberErr
+    );
 
     // 6. Validate strings
     StreamSet * const utf8Err = P->CreateStreamSet(1);
