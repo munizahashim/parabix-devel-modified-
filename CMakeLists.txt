@@ -25,6 +25,7 @@ option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if 
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
+option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
 option(LLVM_PATH "LLVM root directory")
 option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
 
@@ -195,6 +196,10 @@ endif()
 
 if (USE_2020_PIPELINE_COMPILER)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2020_PIPELINE_COMPILER")
+endif()
+
+if (USE_2017_U8U16_ALGORITHM)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2017_U8U16_ALGORITHM")
 endif()
 
 ###   Functions   ###

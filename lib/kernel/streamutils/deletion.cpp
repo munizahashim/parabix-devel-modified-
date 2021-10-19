@@ -13,8 +13,6 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
-// #define COMPARISON_STUDY
-
 using namespace llvm;
 
 inline size_t ceil_udiv(const size_t n, const size_t m) {
@@ -67,8 +65,7 @@ inline Value * apply_parallel_prefix_deletion(BuilderRef kb, const unsigned fw, 
 // Outputs: the deleted streams, plus a partial sum popcount
 
 
-#ifdef COMPARISON_STUDY
-
+#ifdef USE_2017_U8U16_ALGORITHM
 
 inline Value * partial_sum_popcount(const std::unique_ptr<KernelBuilder> & iBuilder, const unsigned fw, Value * mask) {
     Value * field = iBuilder->simd_popcount(fw, mask);
@@ -105,6 +102,7 @@ void DeletionKernel::generateFinalBlockMethod(const std::unique_ptr<KernelBuilde
     Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
     iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
 }
+
 #else
 
 void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
