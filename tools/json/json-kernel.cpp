@@ -139,6 +139,7 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * rCurlyIn = getInputStreamSet("rCurly")[0];
     PabloAST * rBracketIn = getInputStreamSet("rBracket")[0];
     PabloAST * commaIn = getInputStreamSet("comma")[0];
+    PabloAST * ws = getInputStreamSet("ws")[0];
 
     PabloAST * strSpan = getInputStreamSet("strSpan")[0];
     Var * const nbrLex = getOutputStreamVar("nbrLex");
@@ -172,7 +173,8 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * erreENotPlusMinus = pb.createAnd(eENotPlusMinus, nondigit);
     PabloAST * potentialErr = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
 
-    PabloAST * nextValidToken = pb.createOr3(rCurlyIn, rBracketIn, commaIn);
+    PabloAST * validToken = pb.createOr3(rCurlyIn, rBracketIn, commaIn);
+    PabloAST * nextValidToken = pb.createOr(ws, validToken);
     PabloAST * err = sanitizeLexInput(pb, nextValidToken, potentialErr);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 
@@ -187,6 +189,7 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * combinedSpans = getInputStreamSet("combinedSpans")[0];
     std::vector<PabloAST *> kwEndMarkers = getInputStreamSet("kwEndMarkers");
+    PabloAST * ws = getInputStreamSet("ws")[0];
 
     Var * const nbrErr = getOutputStreamVar("extraErr");
     Var * const keywordMarker = getOutputStreamVar("kwMarker");
@@ -214,9 +217,10 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * keywordSpans = pb.createOr3(nSpan, tSpan, fSpan);
 
     PabloAST * extraneousChars = pb.createNot(pb.createOr(keywordSpans, combinedSpans));
+    PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, extraneousChars);
 
     pb.createAssign(pb.createExtract(keywordMarker, pb.getInteger(0)), finalKeywordMarker);
-    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), extraneousChars);
+    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
 }
 
 void JSONLexSanitizer::generatePabloMethod() {
@@ -253,15 +257,4 @@ void JSONLexSanitizer::generatePabloMethod() {
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::t)), lexIn[Lex::t]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::f)), lexIn[Lex::f]);
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::ws)), lexIn[Lex::ws]);
-}
-
-void JSONErrsSanitizer::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    PabloAST * ws = getInputStreamSet("ws")[0];
-    PabloAST * errsIn = getInputStreamSet("errsIn")[0];
-    Var * const errsOut = getOutputStreamVar("errsOut");
-
-    PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, errsIn);
-
-    pb.createAssign(pb.createExtract(errsOut, pb.getInteger(0)), sanitizedErr);
 }

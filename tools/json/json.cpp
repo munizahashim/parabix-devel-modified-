@@ -136,6 +136,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         u8basis,
         numberStreams,
         validAfterValueStreams,
+        wsStream,
         stringSpan,
         numberLex,
         numberSpan,
@@ -149,7 +150,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "ValidateUTF8",
         Bindings { // Input Stream Bindings
-            Binding {"basis", u8basis}
+            Binding {"basis", u8basis},
+            Binding {"ws", wsStream}
         },
         Bindings { // Output Stream Bindings
             Binding {"utf8Err", utf8Err}
@@ -175,6 +177,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
         combinedSpans,
         keywordEndMarkers,
+        wsStream,
         keywordMarker,
         extraErr
     );
@@ -204,9 +207,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
         Errors
     );
-    StreamSet * const ErrsIn = su::Collapse(P, Errors);
-    StreamSet * const Errs = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONErrsSanitizer>(wsStream, ErrsIn, Errs);
+    StreamSet * const Errs = su::Collapse(P, Errors);
     StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
     StreamSet * const Codes = su::Multiplex(P, Errs);
 

@@ -106,6 +106,7 @@ public:
                    StreamSet * const basis,
                    std::vector<StreamSet *> numberStreams,
                    std::vector<StreamSet *> validAfterValueStreams,
+                   StreamSet * const ws,
                    StreamSet * const strSpan,
                    StreamSet * nbrLex, StreamSet * nbrSpan, StreamSet * nbrErr)
     : pablo::PabloKernel(b,
@@ -117,6 +118,7 @@ public:
                             Binding{"rCurly", validAfterValueStreams[0]},
                             Binding{"rBracket", validAfterValueStreams[1]},
                             Binding{"comma", validAfterValueStreams[2]},
+                            Binding{"ws", ws},
                             Binding{"strSpan", strSpan}
                          },
                          {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
@@ -139,11 +141,15 @@ protected:
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
     JSONFindKwAndExtraneousChars(const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const combinedSpans, StreamSet * const kwEndMarkers,
+                        StreamSet * const combinedSpans, StreamSet * const kwEndMarkers, StreamSet * const ws,
                         StreamSet * const kwMarker, StreamSet * extraErr)
     : pablo::PabloKernel(b,
                          "jsonFindKwAndExtraneousChars",
-                         {Binding{"combinedSpans", combinedSpans}, Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)}},
+                         {
+                            Binding{"combinedSpans", combinedSpans},
+                            Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
+                            Binding{"ws", ws},
+                         },
                          {Binding{"kwMarker", kwMarker}, Binding{"extraErr", extraErr}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
@@ -169,19 +175,6 @@ public:
                          "jsonLexSanitizer",
                          {Binding{"strSpan", stringSpan}, Binding{"validDQuotes", validDQuotes}, Binding{"lexIn", lexIn}},
                          {Binding{"lexOut", lexOut}}) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
-class JSONErrsSanitizer : public pablo::PabloKernel {
-public:
-    JSONErrsSanitizer(const std::unique_ptr<KernelBuilder> & b, StreamSet * const ws, StreamSet * const errsIn, StreamSet * errsOut)
-    : pablo::PabloKernel(b,
-                         "jsonErrsSanitizer",
-                         {Binding{"ws", ws}, Binding{"errsIn", errsIn}},
-                         {Binding{"errsOut", errsOut}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
