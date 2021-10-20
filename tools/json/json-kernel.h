@@ -140,17 +140,33 @@ protected:
 */
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
-    JSONFindKwAndExtraneousChars(const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const combinedSpans, StreamSet * const kwEndMarkers, StreamSet * const ws,
-                        StreamSet * const kwMarker, StreamSet * extraErr)
+    JSONFindKwAndExtraneousChars(
+                        const std::unique_ptr<KernelBuilder> & b,
+                        StreamSet * const firstLexsForCleaning,
+                        StreamSet * const stringSpan,
+                        StreamSet * const numberSpan,
+                        StreamSet * const kwEndMarkers,
+                        StreamSet * const ws,
+                        StreamSet * const hyphen,
+                        StreamSet * const kwMarker,
+                        StreamSet * const firstLexs,
+                        StreamSet * const extraErr
+    )
     : pablo::PabloKernel(b,
                          "jsonFindKwAndExtraneousChars",
                          {
-                            Binding{"combinedSpans", combinedSpans},
+                            Binding{"firstLexsForCleaning", firstLexsForCleaning},
+                            Binding{"strSpan", stringSpan},
+                            Binding{"numSpan", numberSpan},
                             Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
                             Binding{"ws", ws},
+                            Binding{"hyphen", hyphen},
                          },
-                         {Binding{"kwMarker", kwMarker}, Binding{"extraErr", extraErr}}) {}
+                         {
+                            Binding{"kwMarker", kwMarker},
+                            Binding{"firstLexs", firstLexs},
+                            Binding{"extraErr", extraErr}
+                         }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
