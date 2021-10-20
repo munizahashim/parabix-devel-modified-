@@ -132,11 +132,15 @@ protected:
    Marks keywords and find if there are other extra chars
    where they should not be
 
-            json: { "keynull": false, "keyt": truenull }
-   combinedSpans: 1.1111111111......1.1111111..........1
-    kwEndMarkers: .................1.............1...1..
- output kwMarker: .............1..............1.........
- output extraErr: ................................1.....
+            json: { "keynull": false, "key{": truenull2 }
+ firstLexsClning: 1..........1......1.....1.1...........1
+      stringSpan: ..111111111.........111111.............
+      numberSpan: ....................................1..
+    kwEndMarkers: .................1.............1...1...
+ output kwMarker: .............1..............1..........
+ output firstLex: 1..........1......1.......1...........1
+ output extraErr: ................................1......
+
 */
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
@@ -167,30 +171,6 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                             Binding{"firstLexs", firstLexs},
                             Binding{"extraErr", extraErr}
                          }) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
-/*
- * Clean lexer in case there are still 'dirty' chars in the string span
- *        json: { "ke{1": value1, "ke}2"  : null }
- *         span: ...1111............1111...........
- *  lexIn.lCurly 1....1............................
- *  lexIn.rCurly .....................1...........1
- *  lexIn.lCurly 1.................................
- *  lexIn.rCurly .................................1
-*/
-class JSONLexSanitizer : public pablo::PabloKernel {
-public:
-    JSONLexSanitizer(const std::unique_ptr<KernelBuilder> & b,
-                     StreamSet * const stringSpan, StreamSet * const validDQuotes, StreamSet * const lexIn,
-                     StreamSet * lexOut)
-    : pablo::PabloKernel(b,
-                         "jsonLexSanitizer",
-                         {Binding{"strSpan", stringSpan}, Binding{"validDQuotes", validDQuotes}, Binding{"lexIn", lexIn}},
-                         {Binding{"lexOut", lexOut}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
