@@ -78,7 +78,6 @@ EncodingInfo encodingScheme1(8,
                              });
 
 ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
-
     auto & b = driver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
@@ -149,7 +148,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     for (unsigned sym = 0; sym < SymCount; sym++) {
         unsigned startLgIdx = 0;
         if (sym > 0) {
-            startLgIdx = 2;
+            startLgIdx = 3;
         }
         StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
         for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) { // k-sym phrases length range 5-32
@@ -175,7 +174,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             P->CreateKernelCall<LengthSelector>(encodingScheme1, phraseLenBixnum[sym], allHashMarks[sym], selectedHashMarks);
             //P->CreateKernelCall<PopcountKernel>(countStream2, P->getOutputScalar("count1"));
             StreamSet * hmSelectedSoFar = P->CreateStreamSet(1);
-            for(unsigned i = encodingScheme1.maxSymbolLength(); i >= 5 /*encodingScheme1.minSymbolLength()*/; i--) {
+            for(unsigned i = encodingScheme1.maxSymbolLength(); i >= 9 /*encodingScheme1.minSymbolLength()*/; i--) {
                 if (i == encodingScheme1.maxSymbolLength()) {
                     hmSelectedSoFar = allHashMarks[sym];
                 }
@@ -257,8 +256,9 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<S2PKernel>(source, ztfHashBasis);
     //P->CreateKernelCall<DebugDisplayKernel>("ztfHashBasis", ztfHashBasis);
     StreamSet * const ztfInsertionLengths = P->CreateStreamSet(5);
-    //StreamSet * countStream = P->CreateStreamSet(1);
-    P->CreateKernelCall<ZTF_PhraseExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths);
+    StreamSet * countStream = P->CreateStreamSet(1);
+    StreamSet * const hashtableSpan = P->CreateStreamSet(1);
+    P->CreateKernelCall<ZTF_PhraseExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths, hashtableSpan, countStream);
     //P->CreateKernelCall<DebugDisplayKernel>("ztfInsertionLengths", ztfInsertionLengths);
     //P->CreateKernelCall<codeword_index>(ztfHashBasis, countStream);
     //P->CreateKernelCall<PopcountKernel>(countStream, P->getOutputScalar("count2"));
@@ -267,61 +267,33 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     //P->CreateKernelCall<DebugDisplayKernel>("ztfRunSpreadMask", ztfRunSpreadMask);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
 
-    unsigned decodedNumStreams = 3 + (2 * SymCount); // LG 0, 1, 2 are valid for 1-sym only
-    StreamSet * decodedMarks = P->CreateStreamSet(decodedNumStreams);
-    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, decodedNumStreams, SymCount, ztfHash_u8_Basis, decodedMarks);
-
-    StreamSet * WordChars = P->CreateStreamSet(1);
-    P->CreateKernelCall<WordMarkKernel>(ztfHash_u8_Basis, WordChars);
-    //P->CreateKernelCall<DebugDisplayKernel>("WordChars", WordChars);
+    StreamSet * decodedMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
+    StreamSet * hashtableMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
+    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, ztfHash_u8_Basis, hashtableSpan, decodedMarks, hashtableMarks);
 
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
     //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
-    StreamSet * u8bytes = P->CreateStreamSet(1, 8);
-    for (unsigned sym = 0; sym < SymCount; sym++) {
-        StreamSet * const phraseRuns = P->CreateStreamSet(1);
-        P->CreateKernelCall<ZTF_Phrases>(ztfHash_u8_Basis, WordChars, phraseRuns);
-        //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
 
-        StreamSet * const runIndex = P->CreateStreamSet(5);
-        StreamSet * const overflow = P->CreateStreamSet(1);
-        P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow);
+    /// TODO: use length group decompression which builds the hashtable using the compressed data
+    // and replaces the codewords with phrases.
+    StreamSet * u8bytes = ztfHash_u8bytes;
+    for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+        StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
+        P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {i}));
+        //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
+        StreamSet * const groupDecoded = P->CreateStreamSet(1);
+        P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {i}));
+        //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
-        StreamSet * const bixHashes = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
-        P->CreateKernelCall<BixHash>(ztfHash_u8_Basis, phraseRuns, bixHashes, 0);
-
-        StreamSet * const hashValues = P->CreateStreamSet(1, 16);
-        std::vector<StreamSet *> combinedHashData = {bixHashes, runIndex};
-        P->CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
-
-        u8bytes = ztfHash_u8bytes;
-        unsigned startLgIdx = 0;
-        if (sym > 0) {
-            startLgIdx = 3; // k-symbol compressible phrase min length = 9 bytes
-        }
-        for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) {
-            StreamSet * groupMarks = P->CreateStreamSet(1);
-            P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, runIndex, overflow, groupMarks);
-            //P->CreateKernelCall<DebugDisplayKernel>("groupMarks", groupMarks);
-            unsigned streamSelIdx = i;
-            if (i > 2) {
-                unsigned relativeIdx =  sym + ((SymCount-1) * (i-3));
-                streamSelIdx += relativeIdx;
-            }
-            StreamSet * groupDecoded = P->CreateStreamSet(1); // 0, 1, 2, {3, 3..}, {4, 4..}
-            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {streamSelIdx}));
-            //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
-
-            StreamSet * input_bytes = u8bytes;
-            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-            P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, sym, i, groupMarks, hashValues, groupDecoded, input_bytes, output_bytes);
-            u8bytes = output_bytes;
-        }
-        StreamSet * u8_Basis = P->CreateStreamSet(8);
-        P->CreateKernelCall<S2PKernel>(u8bytes, u8_Basis);
-        ztfHash_u8_Basis = u8_Basis;
+        StreamSet * input_bytes = u8bytes;
+        StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+        // hashGroupMarks -> hashtable codeword group marks
+        // groupDecoded -> to decompress codeword marks
+        P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, i, hashGroupMarks, groupDecoded, input_bytes, output_bytes);
+        u8bytes = output_bytes;
     }
+
     P->CreateKernelCall<StdOutKernel>(u8bytes);
     return reinterpret_cast<ztfHashDecmpFunctionType>(P->compile());
 }

@@ -104,10 +104,10 @@ class ZTF_PhraseDecodeLengths : public pablo::PabloKernel {
 public:
     ZTF_PhraseDecodeLengths(BuilderRef b,
                       EncodingInfo & encodingScheme,
-                      unsigned decodeStreamCount,
-                      unsigned numSym,
                       StreamSet * basisBits,
-                      StreamSet * groupStreams);
+                      StreamSet * hashtableSpan,
+                      StreamSet * groupStreams,
+                      StreamSet * hashtableStreams);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;
@@ -120,7 +120,9 @@ public:
     ZTF_PhraseExpansionDecoder(BuilderRef b,
                          EncodingInfo & encodingScheme,
                          StreamSet * const basis,
-                         StreamSet * insertBixNum);
+                         StreamSet * insertBixNum,
+                         StreamSet * hashtableSpan,
+                         StreamSet * countStream);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;

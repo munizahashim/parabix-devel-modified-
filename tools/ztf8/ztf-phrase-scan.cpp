@@ -52,19 +52,16 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
 void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     ScanWordParameters sw(b, mStride);
     LengthGroupParameters lg(b, mEncodingScheme, mGroupNo);
-    Constant * sz_DELAYED = b->getSize(mEncodingScheme.maxSymbolLength());
     Constant * sz_STRIDE = b->getSize(mStride);
     Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
     Constant * sz_ZERO = b->getSize(0);
     Constant * sz_ONE = b->getSize(1);
-    Constant * sz_TWO = b->getSize(2);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
     Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
 
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
-    Type * countTy = b->getIntNTy(8U * 4);
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const stridePrologue = b->CreateBasicBlock("stridePrologue");
@@ -351,7 +348,17 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     // add PREFIX_LENGTH_MASK bits for larger index space
     hashcodePos = b->CreateSub(hashcodePos, sz_ONE);
     Value * pfxByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
+
+    Value * writtenVal = codewordVal;
     codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(pfxByte, lg.PREFIX_LENGTH_MASK));
+
+    pfxByte = b->CreateTrunc(b->CreateAnd(pfxByte, lg.PREFIX_LENGTH_MASK), b->getInt64Ty());
+
+    Value * lgthBase1 = b->CreateSub(keyLength, lg.LO);
+    Value * pfxOffset1 = b->CreateAdd(lg.PREFIX_BASE, lgthBase1);
+    Value * multiplier1 = b->CreateMul(lg.RANGE, pfxByte);
+
+    Value * ZTF_prefix1 = b->CreateAdd(pfxOffset1, multiplier1);
 
     Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(33334)));
     /// TODO: experiment the number of bits in sz_TABLEMASK
@@ -385,16 +392,28 @@ and mark its compression mask.
     b->CreateCondBr(isEmptyEntry, storeKey, nextKey);
 
     b->SetInsertPoint(storeKey);
-#if 0
+//#if 0
     b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
-#endif
+    // write writtenVal into a buffer and then write into STDOUT
+    writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1);
+    Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, lg.ENC_BYTES);
+    Value * outputCodeword = b->CreateAlloca(b->getInt8Ty(), copyLen);
+    //b->CallPrintInt("writtenVal", writtenVal);
+    //b->CreateMemCpy(outputCodeword, writtenVal, lg.ENC_BYTES, 1);
+    //b->CallPrintInt("outputCodeword", outputCodeword);
+    //writtenVal = b->CreatePointerCast(writtenVal, b->getInt8PtrTy());
+    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("hashValues", keyMarkPos), copyLen);
+//#endif
     // We have a new symbol that allows future occurrences of the symbol to
     // be compressed using the hash code.
     b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
     b->CreateMonitoredScalarFieldStore("hashTable", sym2, tblPtr2);
-    b->CreateBr(nextKey);
 
+    // markCompression even for the first occurrence
+    //b->CreateBr(nextKey);
+    b->CreateBr(markCompression);
     b->SetInsertPoint(markCompression);
+
     Value * maskLength = b->CreateZExt(b->CreateSub(keyLength, lg.ENC_BYTES, "maskLength"), sizeTy);
     //b->CallPrintInt("maskLength", maskLength);
     // Compute a mask of bits, with zeroes marking positions to eliminate.
@@ -426,7 +445,6 @@ and mark its compression mask.
     b->CreateStore(last_suffix, b->getRawOutputPointer("encodedBytes", curPos));
     curPos = b->CreateSub(curPos, sz_ONE);
 #if 0
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", keyStartPos), keyLength);
     Value * writtenVal = b->CreateZExt(b->CreateAdd(lg.LAST_SUFFIX_BASE, b->CreateAnd(curHash, lg.LAST_SUFFIX_MASK, "ZTF_suffix_last")), sizeTy);
 #endif
 
@@ -460,10 +478,6 @@ and mark its compression mask.
     */
     Value * pfxLgthMask = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", curPos)), sizeTy);
     pfxLgthMask = b->CreateTrunc(b->CreateAnd(pfxLgthMask, lg.PREFIX_LENGTH_MASK), b->getInt64Ty());
-#if 0
-    writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), b->CreateAnd(pfxLgthMask, lg.SUFFIX_MASK));
-    b->CallPrintInt("cmp-writtenVal", writtenVal);
-#endif
 
     Value * lgthBase = b->CreateSub(keyLength, lg.LO);
     Value * pfxOffset = b->CreateAdd(lg.PREFIX_BASE, lgthBase);
@@ -472,6 +486,7 @@ and mark its compression mask.
     Value * ZTF_prefix = b->CreateAdd(pfxOffset, multiplier, "ZTF_prefix");
     //b->CallPrintInt("prefix", b->CreateTrunc(pfxOffset, b->getInt8Ty()));
     //b->CallPrintInt("ZTF_prefix", ZTF_prefix);
+
     b->CreateStore(b->CreateTrunc(ZTF_prefix, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
 
     b->CreateBr(nextKey);
@@ -514,15 +529,12 @@ and mark its compression mask.
 
 SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                                                    EncodingInfo encodingScheme,
-                                                   unsigned numSym,
                                                    unsigned groupNo,
-                                                   StreamSet * keyMarks,
-                                                   StreamSet * hashValues,
+                                                   StreamSet * const codeWordMarks,
                                                    StreamSet * const hashMarks, StreamSet * const byteData,
                                                    StreamSet * const result, unsigned strideBlocks)
-: MultiBlockKernel(b, "SymbolGroupDecompression" + std::to_string(numSym) + lengthGroupSuffix(encodingScheme, groupNo),
-                   {Binding{"keyMarks0", keyMarks},
-                       Binding{"hashValues", hashValues},
+: MultiBlockKernel(b, "SymbolGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
+                   {Binding{"keyMarks0", codeWordMarks},
                        Binding{"hashMarks0", hashMarks},
                        Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}
                    },
@@ -530,7 +542,7 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                    {InternalScalar{ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"}/*,
                        // Hash table 8 length-based tables with 256 16-byte entries each.
                        InternalScalar{ArrayType::get(b->getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}*/}),
-    mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSym) {
+    mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -547,7 +559,7 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
 void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
 
     ScanWordParameters sw(b, mStride);
-    LengthGroupParameters lg(b, mEncodingScheme, mGroupNo, mNumSym);
+    LengthGroupParameters lg(b, mEncodingScheme, mGroupNo);
     Constant * sz_STRIDE = b->getSize(mStride);
     Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
     Constant * sz_ZERO = b->getSize(0);
@@ -622,37 +634,42 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * keyMarkPos = b->CreateAdd(keyWordPos, keyMarkPosInWord, "keyEndPos");
     DEBUG_PRINT("keyMarkPos", keyMarkPos);
     /* Determine the key length. */
-    Value * const hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy);
-    Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_TWO, "keyLength");
-    Value * keyStartPos = b->CreateSub(keyMarkPos, b->CreateSub(keyLength, sz_ONE), "keyStartPos");
+    // determine keyLength from the codeword prefix
+    Value * pfxPos = b->CreateSub(keyMarkPos, lg.MAX_INDEX);
+    Value * const thePfx = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("byteData", pfxPos)), sizeTy);
+    Value * theGroupLen = b->CreateSub(thePfx, lg.PREFIX_BASE);
+    Value * keyLength = b->CreateAdd(b->CreateAnd(theGroupLen, lg.PHRASE_EXTENSION_MASK), lg.LO, "keyLength");
+    Value * keyStartPos = b->CreateSub(pfxPos, keyLength, "keyStartPos");
     DEBUG_PRINT("keyLength", keyLength);
+
+    // fetch the phrase and corresponding codeword
+    // calculate the hashtable index and store the phrase
+    // step over to the next phrase of same length
 
     // keyOffset for accessing the final half of an entry.
     Value * keyOffset = b->CreateSub(keyLength, lg.HALF_LENGTH);
     DEBUG_PRINT("keyOffset", keyOffset);
-    Value * lookUpHashVal = hashValue;
     // Build up a single encoded value for table lookup from the hashcode sequence.
-    Value * codewordVal = b->CreateAnd(lookUpHashVal, lg.LAST_SUFFIX_MASK);
     Value * hashcodePos = keyMarkPos;
-    for (unsigned j = 1; j < lg.groupInfo.encoding_bytes - 1/* + mNumSym*/; j++) { // same # encoding_bytes for k-sym phrases
+    Value * codewordVal = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("byteData", hashcodePos)), sizeTy);
+    for (unsigned j = 1; j < lg.groupInfo.encoding_bytes - 1; j++) {
         hashcodePos = b->CreateSub(hashcodePos, sz_ONE);
-        Value * suffixByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
-        codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(suffixByte, lg.SUFFIX_MASK));
+        Value * sfxByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("byteData", hashcodePos)), sizeTy);
+        codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(sfxByte, lg.SUFFIX_MASK));
     }
-
+    Value * keylen_range = b->CreateSub(keyLength, lg.LO);
+    Value * thePfxOffset = b->CreateAdd(lg.PREFIX_BASE, keylen_range);
+    Value * theMultiplier = b->CreateSub(thePfx, thePfxOffset);
+    Value * thePfxHashBits = b->CreateUDiv(theMultiplier, lg.RANGE);
+    /// CHECK: Assertion for CreateUDiv(multiplier, lg.RANGE)
+    codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(thePfxHashBits, lg.PREFIX_LENGTH_MASK));
 #if 0
     b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", keyStartPos), keyLength);
     Value * hashLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
     Value * hashStart = b->CreateSub(keyMarkPos, hashLen);
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("hashValues", hashStart), hashLen);
+    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", hashStart), hashLen);
     Value * codewordVal_debug = codewordVal;
 #endif
-
-    // add PREFIX_LENGTH_MASK bits for larger index space
-    hashcodePos = b->CreateSub(hashcodePos, sz_ONE);
-    Value * pfxByteBits = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
-    //lookUpHashVal = b->CreateLShr(lookUpHashVal, b->getSize(16));
-    codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(pfxByteBits, lg.PREFIX_LENGTH_MASK));
 
 #if 0
     b->CallPrintInt("decmp-tableIdxHash", b->CreateAnd(codewordVal, sz_TABLEMASK));
@@ -662,7 +679,7 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * tableIdxHash = b->CreateAnd(codewordVal, sz_TABLEMASK, "tableIdx");
     Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
 
-    // Use two 8-byte loads to get hash and symbol values.
+    // Use two halfSymLen loads to get hash and symbol values.
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
     Value * tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
     Value * symPtr1 = b->CreateBitCast(b->getRawInputPointer("byteData", keyStartPos), lg.halfSymPtrTy);
@@ -673,6 +690,8 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * sym2 = b->CreateLoad(symPtr2);
     Value * entry1 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr1);
     Value * entry2 = b->CreateMonitoredScalarFieldLoad("hashTable", tblPtr2);
+    // hash collisions may exists between k-symbol phrases, just replace the collisions with latest phrase
+    // as we would have already replaced (k+1)-symbol phrase already mapped to the same hashtable index
     Value * isEmptyEntry = b->CreateIsNull(b->CreateOr(entry1, entry2));
     b->CreateCondBr(isEmptyEntry, storeKey, nextKey);
     b->SetInsertPoint(storeKey);
@@ -766,7 +785,7 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     * multiplier/lg.RANGE = PREFIX_LENGTH_MASK bits
     */
     Value * len_range = b->CreateSub(symLength, lg.LO);
-    Value * pfxOffset = b->CreateAnd(lg.PREFIX_BASE, len_range);
+    Value * pfxOffset = b->CreateAdd(lg.PREFIX_BASE, len_range);
     Value * multiplier = b->CreateSub(hashPfx, pfxOffset);
     Value * pfxHashBits = b->CreateUDiv(multiplier, lg.RANGE);
     /// CHECK: Assertion for CreateUDiv(multiplier, lg.RANGE)
@@ -787,7 +806,7 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(symLength, lg.LO), b->getSize(33334)/*lg.SUBTABLE_SIZE)*/));
     tableIdxHash = b->CreateAnd(encodedVal, sz_TABLEMASK);
     tblEntryPtr = b->CreateGEP(subTablePtr, tableIdxHash);
-    // Use two 8-byte loads to get hash and symbol values.
+    // Use two halfSymLen loads to get hash and symbol values.
     tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
     tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, symOffset), lg.halfSymPtrTy);
     entry1 = b->CreateAlignedLoad(tblPtr1, 1);
