@@ -366,7 +366,8 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
     ASCII_lookaheads.push_back(ASCII_lookahead);
     //pb.createDebugPrint(ASCII_lookahead, "ASCII_lookahead");
     // for lg 3,4
-    PabloAST * hashTableBoundary = pb.createAnd(pb.createLookahead(basis[7], 1), pb.createLookahead(basis[6], 1));
+    PabloAST * hashTableBoundary = pb.createAnd3(pb.createLookahead(basis[7], 1), pb.createLookahead(basis[6], 1), pb.createLookahead(basis[5], 1));
+    //pb.createDebugPrint(hashTableBoundary, "hashTableBoundary");
     hashTableBoundary = pb.createAnd(hashTableBoundary, pb.createAdvance(hashTableBoundary, 1));
     PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * hashTableRange = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {fileStart, hashTableBoundary});

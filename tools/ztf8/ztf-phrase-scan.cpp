@@ -396,7 +396,7 @@ and mark its compression mask.
     b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
     // write writtenVal into a buffer and then write into STDOUT
     writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1);
-    Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, lg.ENC_BYTES);
+    Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
     Value * outputCodeword = b->CreateAlloca(b->getInt8Ty(), copyLen);
     //b->CallPrintInt("writtenVal", writtenVal);
     //b->CreateMemCpy(outputCodeword, writtenVal, lg.ENC_BYTES, 1);
