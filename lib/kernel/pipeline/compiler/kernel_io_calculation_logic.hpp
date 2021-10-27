@@ -95,7 +95,11 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
-        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(MaximumNumOfStrides[FirstKernelInPartition]));
+        auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
+        if (in_degree(mKernelId, mBufferGraph) != 0) {
+            numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
+        }
+        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
 
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
@@ -129,7 +133,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
-
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
         if (port.CanModifySegmentLength) {
@@ -139,17 +142,13 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     }
 
     Value * numOfLinearStrides = nullptr;
-
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
-
-    if (isSourceKernel || !mIsPartitionRoot) {
-        if (mMayLoopToEntry) {
-            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-        } else {
-            numOfLinearStrides = mMaximumNumOfStrides;
-        }
-        assert (numOfLinearStrides);
+    if ((isSourceKernel || !mIsPartitionRoot) && mMayLoopToEntry) {
+        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+    } else {
+        numOfLinearStrides = mMaximumNumOfStrides;
     }
+    assert (numOfLinearStrides);
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -182,27 +181,23 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
 
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, + "mNumOfLinearStrides = %" PRIu64, numOfLinearStrides);
+    #endif
+
     mNumOfLinearStrides = numOfLinearStrides;
 
     if (mMayLoopToEntry) {
         mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+
+#ifdef PRINT_DEBUG_MESSAGES
+debugPrint(b, + "mUpdatedNumOfStrides = %" PRIu64, numOfLinearStrides);
+#endif
+
     } else {
         mUpdatedNumOfStrides = numOfLinearStrides;
     }
 
-    assert (mUpdatedNumOfStrides);
-
-    if (LLVM_UNLIKELY(CheckAssertions && mIsPartitionRoot)) {
-
-        ConstantInt * const scale = b->getSize(MaximumNumOfStrides[FirstKernelInPartition] * THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR);
-        Value * const maximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, scale);
-
-        Value * const check = b->CreateICmpULE(mUpdatedNumOfStrides, maximumNumOfStrides);
-        b->CreateAssert(check,
-                        "%s: number of strides (%" PRIu64 ") exceeds maximum bound (%" PRIu64 ")",
-                        mCurrentKernelName,
-                        mUpdatedNumOfStrides, maximumNumOfStrides);
-    }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
@@ -264,10 +259,20 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
     getInputVirtualBaseAddresses(b, inputVirtualBaseAddress);
 
+#ifdef PRINT_DEBUG_MESSAGES
+debugPrint(b, + "_numOfLinearStrides = %" PRIu64, numOfLinearStrides);
+#endif
+
     Value * nonFinalNumOfLinearStrides = numOfLinearStrides;
     if (LLVM_UNLIKELY(mIsPartitionRoot && StrideStepLength[mKernelId] > 1)) {
         ConstantInt * const STEP = b->getSize(StrideStepLength[mKernelId]);
         nonFinalNumOfLinearStrides = b->CreateRoundDown(numOfLinearStrides, STEP);
+
+
+#ifdef PRINT_DEBUG_MESSAGES
+debugPrint(b, + "_nonFinalNumOfLinearStrides = %" PRIu64, nonFinalNumOfLinearStrides);
+#endif
+
     }
 
     if (LLVM_LIKELY(in_degree(mKernelId, mBufferGraph) > 0)) {
@@ -334,6 +339,10 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             }
         }
 
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, + "_numOfFinalLinearStrides = %" PRIu64, numOfFinalLinearStrides);
+        #endif
+
         Value * const isFinal = b->CreateICmpEQ(numOfFinalLinearStrides, sz_ZERO);
 
         /// -------------------------------------------------------------------------------------
@@ -351,6 +360,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * fixedItemFactor = nullptr;
         Value * partialPartitionStride = nullptr;
+
 
         calculateFinalItemCounts(b, accessibleItems, writableItems, fixedItemFactor, partialPartitionStride);
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
@@ -390,7 +400,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
                     inputVirtualBaseAddress[i] = phi;
                 }
             }
-
         }
     }
 
@@ -420,7 +429,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
                      fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO);
 
     b->CreateBr(mKernelCheckOutputSpace);
-
     b->SetInsertPoint(mKernelCheckOutputSpace);
     return mNumOfLinearStridesPhi;
 }
@@ -586,6 +594,9 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
     assert (mMayLoopToEntry);
 
     Value * const nonFinal = b->CreateIsNull(mIsFinalInvocation);
+    assert (mMaximumNumOfStrides);
+
+    Value * const notAtSegmentLimit = b->CreateICmpNE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
 
     if (mIsPartitionRoot) {
 
@@ -599,10 +610,15 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         graph_traits<BufferGraph>::in_edge_iterator ei, ei_end;
         std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
 
-        Value * enoughInput = nonFinal;
+        Value * enoughInput = b->CreateAnd(notAtSegmentLimit, nonFinal);
 
         ConstantInt * const amount = b->getSize(StrideStepLength[mKernelId]);
         Value * const nextStrideIndex = b->CreateAdd(mNumOfLinearStrides, amount);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "_nextStrideIndex = %" PRIu64, nextStrideIndex);
+        #endif
+
 
         while (ei != ei_end) {
             const auto e = *ei++;
@@ -673,21 +689,16 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         b->CreateBr(lastTestExit);
 
         b->SetInsertPoint(lastTestExit);
-//        Value * hasMore = enoughInputPhi;
-//        if (LLVM_UNLIKELY(firstTest)) {
-//            hasMore = notAtSegmentLimit;
-//        } else {
-//            hasMore = enoughInputPhi;
-//        }
-//        return hasMore;
-        assert (enoughInputPhi);
-        return enoughInputPhi;
+        Value * hasMore = enoughInputPhi;
+        if (LLVM_UNLIKELY(firstTest)) {
+            hasMore = notAtSegmentLimit;
+        } else {
+            hasMore = enoughInputPhi;
+        }
+        return hasMore;
     } else {
         //  (final segment OR up<max) AND NOT final stride
 
-        assert (mMaximumNumOfStrides);
-
-        Value * const notAtSegmentLimit = b->CreateICmpNE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
 
         return b->CreateAnd(b->CreateOr(mFinalPartitionSegment, notAtSegmentLimit), nonFinal);
    }
@@ -1317,12 +1328,13 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
         ConstantInt * const sz_ONE = b->getSize(1);
 
         const auto step = getPopCountStepSize(ref);
-        ConstantInt * sz_STEP = sz_ONE;
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "_offset = %" PRIu64, offset);
+        #endif
 
         if (step > 1) {
-
-            sz_STEP = b->getSize(step);
-
+            ConstantInt * const sz_STEP = b->getSize(step);
             if (LLVM_UNLIKELY(CheckAssertions)) {
                 const Binding & binding = partialSumPort.Binding;
                 b->CreateAssert(b->CreateICmpEQ(b->CreateURem(position, sz_STEP), sz_ZERO),
@@ -1333,7 +1345,12 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
             }
 
             offset = b->CreateMul(offset, sz_STEP);
+
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, "_offset' = %" PRIu64, offset);
+            #endif
         }
+
         offset = b->CreateSub(offset, sz_ONE);
         position = b->CreateAdd(position, offset);
 
@@ -1343,16 +1360,31 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
             Value * const total = mLocallyAvailableItems[streamSet];
 
             const Binding & binding = partialSumPort.Binding;
+            Constant * bindingName = b->GetString(binding.getName());
+
             b->CreateAssert(b->CreateICmpULT(position, total),
-                            "%s.%s: partial sum reference position exceeds available items (%" PRIu64 " vs. %" PRIu64 ")",
+                            "%s.%s: partial sum reference position is not less than available items (%" PRIu64 " vs. %" PRIu64 ")",
                             mCurrentKernelName,
-                            b->GetString(binding.getName()),
+                            bindingName,
                             position, total);
+
+
+            Value * const alreadyProcessed = mAlreadyProcessedPhi[ref];
+
+            b->CreateAssert(b->CreateICmpUGE(position, alreadyProcessed),
+                            "%s.%s: partial sum reference position is less than its processed count (%" PRIu64 " vs. %" PRIu64 ")",
+                            mCurrentKernelName,
+                            bindingName,
+                            position, alreadyProcessed);
+
         }
 
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
+
+
+
     if (LLVM_UNLIKELY(CheckAssertions)) {
 
         const auto streamSet = getInputBufferVertex(mKernelId, ref);
@@ -1382,6 +1414,10 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     }
     Value * current = b->CreateLoad(currentPtr);
 
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, "  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
+               position, current, currentPtr);
+    #endif
 
     if (mBranchToLoopExit) {
         current = b->CreateSelect(mBranchToLoopExit, previouslyTransferred, current);
@@ -1391,7 +1427,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
         const Binding & binding = partialSumPort.Binding;
         b->CreateAssert(b->CreateICmpULE(previouslyTransferred, current),
                         "%s.%s: partial sum is not non-decreasing at %" PRIu64
-                        " (prior %" PRIu64 " > current %" PRIu64 ")",
+                        " (prior %" PRIu64 " > current %" PRIu64 ") @ getPartialSumItemCount",
                         mCurrentKernelName,
                         b->GetString(binding.getName()),
                         position, previouslyTransferred, current);
@@ -1473,7 +1509,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         b->CreateBasicBlock(prefix + "Loop", mKernelCheckOutputSpace);
     BasicBlock * const popCountLoopExit =
         b->CreateBasicBlock(prefix + "LoopExit", mKernelCheckOutputSpace);
-    Value * const baseAddress = popCountBuffer->getRawItemPointer(b, sz_ZERO, mAlreadyProcessedPhi[ref]);
+
     BasicBlock * const popCountEntry = b->GetInsertBlock();
 
     Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
@@ -1494,6 +1530,20 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * const strideIndex = b->CreateSub(numOfStrides, sz_ONE);
 
+
+
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+
+        const Binding & binding = partialSumPort.Binding;
+        Constant * bindingName = b->GetString(binding.getName());
+
+        b->CreateAssert(b->CreateICmpUGE(numOfStrides, sz_ONE),
+                        "%s.%s: partial sum reference offset is zero (%" PRIu64 " vs. %" PRIu64 ")",
+                        mCurrentKernelName,
+                        bindingName);
+
+    }
+
     Value * offset = strideIndex;
 
     // get the popcount kernel's input rate so we can calculate the
@@ -1501,9 +1551,11 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     // stream.
     const auto step = getPopCountStepSize(ref);
     if (LLVM_UNLIKELY(step > 1)) {
-        offset = b->CreateMul(offset, b->getSize(step));
+        offset = b->CreateSub(b->CreateMul(numOfLinearStrides, b->getSize(step)), sz_ONE);
     }
-    Value * const ptr = b->CreateInBoundsGEP(baseAddress, offset);
+
+    Value * const pos = b->CreateAdd(mAlreadyProcessedPhi[ref], offset);
+    Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
     Value * const requiredItems = b->CreateLoad(ptr);
 
     Value * const notEnough = b->CreateICmpUGT(requiredItems, sourceItemCount);
@@ -1513,11 +1565,11 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & input = getInputBinding(ref);
         Value * const inputName = b->GetString(input.getName());
-        b->CreateAssert(b->CreateICmpULE(initialItemCount, requiredItems),
+        b->CreateAssert(b->CreateICmpULE(requiredItems, nextRequiredItems),
                         "%s.%s: partial sum is not non-decreasing at %" PRIu64
-                        " (prior %" PRIu64 " > current %" PRIu64 ")",
+                        " (prior %" PRIu64 " > current %" PRIu64 ") @ getMaximumNumOfPartialSumStrides",
                         mCurrentKernelName, inputName,
-                        strideIndex, initialItemCount, requiredItems);
+                        pos, requiredItems, nextRequiredItems);
     }
 
     nextRequiredItems->addIncoming(requiredItems, popCountLoop);
@@ -1584,38 +1636,50 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
         const auto maxStepFactor = round_up_to(mPartialSumStepFactorGraph[e], stepsPerBlock);
-        assert (maxStepFactor > 1);
+        assert (maxStepFactor >= stepsPerBlock);
         const auto spanLength = (fw * maxStepFactor) / bw;
         assert (spanLength > 0);
 
+        const auto prefix = makeBufferName(mKernelId, outputPort.Port);
+
         ConstantInt * const sz_stepsPerBlock = b->getSize(stepsPerBlock);
         ConstantInt * const sz_ONE = b->getSize(1);
-        Value * const index = b->CreateSub(produced, sz_ONE);
+
+        Value * const index = b->CreateSaturatingSub(produced, sz_ONE);
+
         ConstantInt * const sz_maxStepFactor = b->getSize(maxStepFactor);
 
-        Value * const alignedStart = b->CreateRoundDown(index, sz_maxStepFactor);
+        Value * const start = b->CreateRoundDown(index, sz_maxStepFactor);
 
         StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
-        PointerType * const bbPtrTy = b->getBitBlockType()->getPointerTo();
+
+        VectorType * const vecTy = b->fwVectorType(fw);
+
+        PointerType * const vecPtrTy = vecTy->getPointerTo();
+
         ConstantInt * const sz_ZERO = b->getSize(0);
-        Value * const baseAddr = buffer->getRawItemPointer(b, sz_ZERO, alignedStart);
-        Value * const basePtr = b->CreatePointerCast(baseAddr, bbPtrTy);
-        Value * const start = b->CreateURem(index, sz_maxStepFactor);
-        Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
-        Value * initialPtr = b->CreateGEP(basePtr, initial);
+
+        Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
+
+        Value * const vecAddr = b->CreatePointerCast(addr, vecPtrTy);
+
+        Value * const baseValue = b->CreateBlockAlignedLoad(vecAddr);
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
-        Value * const baseValue = b->fwCast(fw, b->CreateBlockAlignedLoad(initialPtr));
+
         Value * const total = b->CreateExtractElement(baseValue, offset);
+
         Value * const splat = b->simd_fill(fw, total);
-        Value * const allOnes = b->simd_fill(fw, ConstantInt::getAllOnesValue(splat->getType()));
+        Value * const allOnes = b->simd_fill(fw, ConstantInt::getAllOnesValue(vecTy));
         Value * const mask = b->mvmd_sll(fw, allOnes, offset);
         Value * const maskedSplat = b->CreateAnd(splat, mask);
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
-        b->CreateBlockAlignedStore(b->bitCast(mergedValue), basePtr);
 
-        Value * const newProducedCount = b->CreateRoundUp(index, sz_maxStepFactor);
+        b->CreateBlockAlignedStore(mergedValue, vecAddr);
 
         if (spanLength > 1) {
+            VectorType * const bbTy = b->getBitBlockType();
+            PointerType * const bbPtrTy = bbTy->getPointerTo();
+
             const auto prefix = makeBufferName(mKernelId, outputPort.Port);
             BasicBlock * const splatLoopEntry = b->GetInsertBlock();
             BasicBlock * const nextNode = splatLoopEntry->getNextNode();
@@ -1624,14 +1688,20 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
             ConstantInt * const sz_spanLength = b->getSize(spanLength);
 
+            Value * const bbAddr = b->CreatePointerCast(addr, bbPtrTy);
+
+            Value * const start = b->CreateURem(index, sz_maxStepFactor);
+            Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
+
             Value * const bitblockSplat = b->bitCast(splat);
-            Value * const cond = b->CreateICmpNE(initial, sz_spanLength);
+            Value * const cond = b->CreateICmpULT(initial, sz_spanLength);
             b->CreateCondBr(cond, splatLoopBody, splatLoopExit);
 
             b->SetInsertPoint(splatLoopBody);
             PHINode * const indexPhi = b->CreatePHI(b->getSizeTy(), 2);
             indexPhi->addIncoming(initial, splatLoopEntry);
-            Value * const ptr = b->CreateGEP(basePtr, indexPhi);
+            Value * const ptr = b->CreateGEP(bbAddr, indexPhi);
+
             b->CreateBlockAlignedStore(bitblockSplat, ptr);
             Value * const nextIndex = b->CreateAdd(indexPhi, sz_ONE);
             indexPhi->addIncoming(nextIndex, splatLoopBody);
@@ -1641,7 +1711,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
             b->SetInsertPoint(splatLoopExit);
         }
 
-        mProducedAtTermination[outputPort.Port] = newProducedCount;
+        mProducedAtTermination[outputPort.Port] = b->CreateRoundUp(produced, sz_maxStepFactor);
     }
 
 }

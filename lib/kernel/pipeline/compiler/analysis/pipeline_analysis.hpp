@@ -307,7 +307,6 @@ public:
     BitVector                       PartitionOnHybridThread;
 
     std::vector<unsigned>           mPartitionJumpIndex;
-//    PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;

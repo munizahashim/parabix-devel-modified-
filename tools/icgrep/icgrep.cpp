@@ -169,7 +169,7 @@ int main(int argc, char *argv[]) {
     if ((argv::ColorFlag == argv::alwaysColor) ||
         ((argv::ColorFlag == argv::autoColor) && isatty(STDOUT_FILENO))) {
         grep->setColoring();
-    }
+    }    
     grep->initFileResult(allFiles); // unnecessary copy!
     grep->initREs(REs);
     grep->grepCodeGen();

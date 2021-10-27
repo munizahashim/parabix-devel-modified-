@@ -114,21 +114,10 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
             }
         }
 
-        mMayLoopToEntry = false;
-
-        if (in_degree(mKernelId, mBufferGraph) > 0) {
-            if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
-                mMayLoopToEntry = true;
-            } else {
-                for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-                    const BufferPort & port = mBufferGraph[output];
-                    if (port.CanModifySegmentLength) {
-                        mMayLoopToEntry = true;
-                        break;
-                    }
-                }
-            }
+        if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
+            mMayLoopToEntry = true;
         }
+
     }
 
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];

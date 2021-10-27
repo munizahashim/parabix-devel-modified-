@@ -650,9 +650,9 @@ void PipelineAnalysis::calculatePartialSumStepFactors() {
                     maxStepFactor = std::max(maxStepFactor, G[e]);
                 }
                 assert (maxStepFactor > 0);
-                if (maxStepFactor > 1) {
+               // if (maxStepFactor > 1) {
                     add_edge(kernel, streamSet, maxStepFactor, G);
-                }
+               // }
             }
         }
     }

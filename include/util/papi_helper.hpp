@@ -31,10 +31,10 @@ public:
 
 private:
 
-    int                    fEventSet;									// PAPI event set
-    papi_counter_t         fStartedAt[N];
-    papi_counter_t         fIntervals[N];
-    int                    fEvent[N];
+    int                    fEventSet = 0; // PAPI event set
+    papi_counter_t         fStartedAt[N] = {0};
+    papi_counter_t         fIntervals[N] = {0};
+    int                    fEvent[N] = {0};
 };
 
 template <unsigned N>
@@ -46,15 +46,13 @@ PapiCounter<N>::PapiCounter(std::initializer_list<int> events) {
         throw std::runtime_error("PAPI Library Init Error: " + std::string(PAPI_strerror(rval)));
     }
     std::copy(events.begin(), events.end(), fEvent);
-    memset(fStartedAt, 0, sizeof(papi_counter_t) * N);
-    memset(fIntervals, 0, sizeof(papi_counter_t) * N);
 
     // PAPI create event set
     fEventSet = PAPI_NULL;
     if ((rval = PAPI_create_eventset(&fEventSet)) != PAPI_OK) {
         throw std::runtime_error("PAPI Create Event Set Error: " + std::string(PAPI_strerror(rval)));
     }
-
+    assert (fEventSet != PAPI_NULL);
     // PAPI fill event set
     if ((rval = PAPI_add_events(fEventSet, fEvent, N)) != PAPI_OK) {
         throw std::runtime_error("PAPI Add Events Error: " + std::string(PAPI_strerror(rval < PAPI_OK ? rval : PAPI_EINVAL)));
@@ -69,22 +67,19 @@ PapiCounter<N>::PapiCounter(std::initializer_list<int> events) {
 
 template <unsigned N>
 PapiCounter<N>::~PapiCounter() {
-    // Call PAPI stop on destruction
-    int rval = PAPI_stop(fEventSet, nullptr);
+    auto rval =  PAPI_cleanup_eventset(fEventSet);
     if (rval != PAPI_OK) {
-        throw std::runtime_error(" PAPI code: " + std::string(PAPI_strerror(rval)));
-    }
-    if ((rval =  PAPI_cleanup_eventset(fEventSet) != PAPI_OK)) {
         throw std::runtime_error("PAPI code: " + std::string(PAPI_strerror(rval)));
     }
     // PAPI free all events
     if ((rval = PAPI_destroy_eventset(&fEventSet) != PAPI_OK)) {
         throw std::runtime_error("PAPI code: " + std::string(PAPI_strerror(rval)));
     }
+    PAPI_shutdown();
 }
 
 template <unsigned N>
-void PapiCounter<N>::start() {
+void PapiCounter<N>::start() { 
     int rval = PAPI_read(fEventSet, fStartedAt);
     if (rval != PAPI_OK) {
         throw std::runtime_error("PAPI code: " + std::string(PAPI_strerror(rval)));
@@ -95,7 +90,7 @@ void PapiCounter<N>::start() {
 template <unsigned N>
 void PapiCounter<N>::stop() {
     papi_counter_t endedAt[N];
-    int rval = PAPI_read(fEventSet, endedAt);
+    auto rval = PAPI_stop(fEventSet, endedAt);
     if (rval != PAPI_OK) {
         throw std::runtime_error("PAPI code: " + std::string(PAPI_strerror(rval)));
     }
