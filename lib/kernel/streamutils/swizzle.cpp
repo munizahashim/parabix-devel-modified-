@@ -9,6 +9,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+#include <llvm/IR/IntrinsicsX86.h>
+#endif
 
 using namespace llvm;
 
@@ -175,10 +178,10 @@ void SwizzleByGather::generateDoBlockMethod(BuilderRef b) {
                     }
             );
 
-            inputBytePtr = b->CreateGEP(inputBytePtr, b->getInt32(8));
+            inputBytePtr = b->CreateGEP(b->getInt8Ty(), inputBytePtr, b->getInt32(8));
 
             b->CreateStore(gather_result, outputStreamPtr);
-            outputStreamPtr = b->CreateGEP(outputStreamPtr, b->getSize(1));
+            outputStreamPtr = b->CreateGEP(b->getBitBlockType(), outputStreamPtr, b->getSize(1));
         }
     }
 }

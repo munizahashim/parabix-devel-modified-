@@ -17,19 +17,14 @@ namespace IDISA {
 class IDISA_AVX_Builder : public IDISA_SSE2_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX_width;
-    IDISA_AVX_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-    : IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
-    , IDISA_SSE2_Builder(C, vectorWidth, laneWidth)
-    {
-        llvm::StringMap<bool> features;
-        hasBMI1 = llvm::sys::getHostCPUFeatures(features) && features.lookup("bmi");
-        hasBMI2 = llvm::sys::getHostCPUFeatures(features) && features.lookup("bmi2");
-    }
+    IDISA_AVX_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
 
     llvm::Value * hsimd_signmask(unsigned fw, llvm::Value * a) override;
     llvm::Value * CreateZeroHiBitsFrom(llvm::Value * bits, llvm::Value * pos, const llvm::Twine Name = "") override;
+    llvm::Value * CreatePextract(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
+    llvm::Value * CreatePdeposit(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
 
     ~IDISA_AVX_Builder() {}
 protected:
@@ -40,10 +35,7 @@ protected:
 class IDISA_AVX2_Builder : public IDISA_AVX_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX_width;
-    IDISA_AVX2_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-    : IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
-    , IDISA_AVX_Builder(C, vectorWidth, laneWidth) {
-    }
+    IDISA_AVX2_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
     llvm::Value * hsimd_packh(unsigned fw, llvm::Value * a, llvm::Value * b) override;
@@ -72,11 +64,7 @@ public:
 class IDISA_AVX512F_Builder : public IDISA_AVX2_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX512_width;
-    IDISA_AVX512F_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-    : IDISA_Builder(C, AVX512_width, vectorWidth, laneWidth)
-    , IDISA_AVX2_Builder(C, vectorWidth, laneWidth) {
-        getAVX512Features();
-    }
+    IDISA_AVX512F_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
     void getAVX512Features();

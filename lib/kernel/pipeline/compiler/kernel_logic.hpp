@@ -9,7 +9,6 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal) {
     assert (kernelId >= FirstKernel && kernelId <= LastKernel);
-    assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), kernelId) != ActiveKernels.end());
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
@@ -26,14 +25,6 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadKernelState
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadKernelState(BuilderRef b) {
-
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeFullyProcessedItemCounts
@@ -54,8 +45,9 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         if (CheckAssertions) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-
-            if (bn.Locality == BufferLocality::ThreadLocal) {
+            const auto producer = parent(streamSet, mBufferGraph);
+            if (mCurrentPartitionId == KernelPartitionId[producer]) {
+            // if (bn.Locality == BufferLocality::ThreadLocal) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
                 // NOTE: static linear buffers are assumed to be threadlocal.
                 Value * const fullyConsumed = b->CreateICmpEQ(produced, processed);
@@ -89,6 +81,7 @@ void PipelineCompiler::computeFullyProducedItemCounts(BuilderRef b, Value * cons
         } else {
             produced = computeFullyProducedItemCount(b, mKernelId, port, mUpdatedProducedPhi[port], terminated);
         }
+        assert (isFromCurrentFunction(b, produced, false));
         mFullyProducedItemCount[port]->addIncoming(produced, mKernelLoopExitPhiCatch);
     }
 }
@@ -503,6 +496,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProducedItemCount.reset(numOfOutputs);
     mProducedDeferredItemCountPtr.reset(numOfOutputs);
     mProducedDeferredItemCount.reset(numOfOutputs);
+    mProducedAtJumpPhi.reset(numOfOutputs);
     mProducedAtTerminationPhi.reset(numOfOutputs);
     mProducedAtTermination.reset(numOfOutputs);
     mUpdatedProducedPhi.reset(numOfOutputs);

@@ -1295,7 +1295,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                         assert (itemsPerStride > Rational{0});
                         add_edge(j, i, itemsPerStride, G);
                     } else {
-                        #warning handle greedy rates better here
+                        //TODO: handle greedy rates better here
                         add_edge(j, i, Rational{1}, G);
                     }
                 } else {

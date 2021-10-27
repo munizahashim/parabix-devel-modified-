@@ -705,26 +705,36 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         }
         ActiveKernels.push_back(PipelineOutput);
         ActivePartitions.assign(partitions.begin(), partitions.end());
+        assert (KernelPartitionId[PipelineInput] == 0);
+        assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
         ActivePartitions.push_back(PartitionCount - 1);
 
         // generate the pipeline logic for this thread
         mCompilingHybridThread = isHybridThread;
+        if (isHybridThread) {
+            KernelOnHybridThread.set(PipelineInput);
+            KernelOnHybridThread.set(PipelineOutput);
+            PartitionOnHybridThread.set(0);
+            PartitionOnHybridThread.set(PartitionCount - 1);
+        } else {
+            KernelOnHybridThread.reset(PipelineInput);
+            KernelOnHybridThread.reset(PipelineOutput);
+            PartitionOnHybridThread.reset(0);
+            PartitionOnHybridThread.reset(PartitionCount - 1);
+        }
         start(b);
         const auto m = ActiveKernels.size() - 1;
         auto kernel = FirstKernel;
         for (ActiveKernelIndex = 0; ActiveKernelIndex < m; ++ActiveKernelIndex) {
             const auto nextKernel = ActiveKernels[ActiveKernelIndex];
             assert (kernel <= nextKernel);
-            while (kernel < nextKernel) {
-                setActiveKernel(b, kernel, false);
-                loadKernelState(b);
-                ++kernel;
-            }
-            assert (kernel == nextKernel);
+            loadTerminationSignalsBetweenKernels(b, kernel, nextKernel);
+            loadCrossHybridThreadProducedItemCounts(b, kernel, nextKernel);
             setActiveKernel(b, nextKernel, true);
             executeKernel(b);
-            ++kernel;
+            kernel = nextKernel + 1;
         }
+        assert (kernel <= PipelineOutput);
         mKernel = nullptr;
         mKernelId = 0;
         end(b);
@@ -748,7 +758,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     makeThreadFunction(fixedDataThreadFunc, false);
     if (numOfHybridThreads) {
-        clearInternalState();
+        clearInternalState(b);
         makeThreadFunction(hybridThreadFunc, true);
     }
 
@@ -1150,6 +1160,10 @@ void PipelineCompiler::verifyBufferRelationships() const {
 void PipelineCompiler::initializeForAllKernels() {
     assert (ActiveKernels.empty());
     assert (ActivePartitions.empty());
+    KernelOnHybridThread.reset(PipelineInput);
+    KernelOnHybridThread.reset(PipelineOutput);
+    PartitionOnHybridThread.reset(KernelPartitionId[PipelineInput]);
+    PartitionOnHybridThread.reset(KernelPartitionId[PipelineOutput]);
     ActiveKernels.reserve(LastKernel - PipelineOutput + 1);
     for (unsigned i = FirstKernel; i <= PipelineOutput; ++i) {
         ActiveKernels.push_back(i);
@@ -1164,12 +1178,16 @@ void PipelineCompiler::initializeForAllKernels() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief clearInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::clearInternalState() {
+void PipelineCompiler::clearInternalState(BuilderRef b) {
 
     mPartitionEntryPoint.reset(0, PartitionCount);
     mPartitionTerminationSignal.reset(0, PartitionCount - 1);
     mExhaustedPipelineInputAtPartitionEntry.reset(0, PartitionCount - 1);
-    mInitialConsumedItemCount.reset(FirstStreamSet, LastStreamSet);
+
+    ConstantInt * const sz_ZERO = b->getSize(0);
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        mLocallyAvailableItems[streamSet] = sz_ZERO;
+    }
 
     std::fill_n(mPartitionProducedItemCountPhi.data(), mPartitionProducedItemCountPhi.num_elements(), nullptr);
     std::fill_n(mPartitionConsumedItemCountPhi.data(), mPartitionConsumedItemCountPhi.num_elements(), nullptr);

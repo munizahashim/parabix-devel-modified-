@@ -11,6 +11,10 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_None F_None
+#endif
+
 using namespace llvm;
 
 namespace pablo {
@@ -31,12 +35,12 @@ DebugOptions(cl::desc("Pablo Debug Flags"),
 std::string ShowPabloOption = codegen::OmittedOption;
 static cl::opt<std::string, true> PabloOutputOption("ShowPablo", cl::location(ShowPabloOption), cl::ValueOptional,
                                                     cl::desc("Print generated Pablo code to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(PabloOptions));
-sys::fs::OpenFlags PabloOutputFileFlag = sys::fs::OpenFlags::F_None;
+sys::fs::OpenFlags PabloOutputFileFlag = sys::fs::OpenFlags::OF_None;
     
 std::string ShowOptimizedPabloOption = codegen::OmittedOption;
 static cl::opt<std::string, true> OptimizedPabloOutputOption("ShowOptimizedPablo", cl::location(ShowOptimizedPabloOption), cl::ValueOptional,
                                                     cl::desc("Print optimized Pablo code to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(PabloOptions));
-sys::fs::OpenFlags PabloOptimizedOutputFileFlag = sys::fs::OpenFlags::F_None;
+sys::fs::OpenFlags PabloOptimizedOutputFileFlag = sys::fs::OpenFlags::OF_None;
 
 static cl::bits<PabloCompilationFlags> 
     PabloOptimizationsOptions(cl::values(clEnumVal(Flatten, "Flatten all the Ifs in the Pablo AST"),

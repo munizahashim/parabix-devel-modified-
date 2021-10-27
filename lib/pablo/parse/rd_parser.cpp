@@ -934,6 +934,12 @@ static inline void lazyInitializeFunctionGenMap() {
         ASSERT_ARG_NUM(1);
         return pb->createIntrinsicCall(Intrinsic::PrintRegister, args);
     });
+
+    FUNC_GEN_DEF("EveryNth", {
+        ASSERT_ARG_NUM(2);
+        ASSERT_ARG_TYPE_INT(1);
+        return pb->createEveryNth(args[0], llvm::cast<Integer>(args[1]));
+    });
 }
 
 

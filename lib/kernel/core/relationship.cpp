@@ -1,14 +1,17 @@
 #include <kernel/core/relationship.h>
 
 #include <llvm/IR/Constant.h>
-#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Constant.h>
+#include <idisa/idisa_builder.h>
+#include <toolchain/toolchain.h>
 
 using namespace llvm;
+using namespace IDISA;
 
 namespace kernel {
 
 inline VectorType * LLVM_READNONE getStreamTy(LLVMContext & C, const unsigned FieldWidth) {
-    return VectorType::get(IntegerType::getIntNTy(C, FieldWidth), 0);
+    return FixedVectorType::get(IntegerType::getIntNTy(C, FieldWidth), static_cast<unsigned>(0));
 }
 
 inline ArrayType * LLVM_READNONE getStreamSetTy(LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth) {
@@ -20,7 +23,7 @@ unsigned StreamSet::getNumElements() const {
 }
 
 unsigned StreamSet::getFieldWidth() const {
-    return mType->getArrayElementType()->getVectorElementType()->getIntegerBitWidth();
+    return cast<VectorType>(mType->getArrayElementType())->getElementType()->getIntegerBitWidth();
 }
 
 std::string StreamSet::shapeString() {

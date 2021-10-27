@@ -68,8 +68,8 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     Constant * const ZERO = b->getSize(0);
     Constant * BLOCK_WIDTH = ConstantInt::get(sizeTy, b->getBitBlockWidth());
     Constant * FIELD_WIDTH = ConstantInt::get(sizeTy, mFieldWidth);
-    Constant * fwSplat = ConstantVector::getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth));
-    Constant * fw_sub1Splat = ConstantVector::getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth - 1));
+    Constant * fwSplat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth));
+    Constant * fw_sub1Splat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth - 1));
 
     BasicBlock * entry = b->GetInsertBlock();
     BasicBlock * expandLoop = b->CreateBasicBlock("expandLoop");
@@ -241,16 +241,16 @@ void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     }
 }
 
+//#define PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
+
 void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsigned fieldWidth, unsigned streamCount, unsigned stride) {
+#ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
     Type * fieldTy = kb->getIntNTy(fieldWidth);
     Type * fieldPtrTy = PointerType::get(fieldTy, 0);
-    Function * PDEP_func = nullptr;
-    if (fieldWidth == 64) {
-        PDEP_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pdep_64);
-    } else if (fieldWidth == 32) {
-        PDEP_func = Intrinsic::getDeclaration(kb->getModule(), Intrinsic::x86_bmi_pdep_32);
-    }
-    FunctionType * fTy = PDEP_func->getFunctionType();
+#elif PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
+    Type * fieldTy = kb->getIntNTy(fieldWidth);
+    Type * fieldPtrTy = PointerType::get(fieldTy, 0);
+#endif
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
@@ -273,12 +273,11 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
     //  while field store is better.   Vector insert then store creates long dependence
     //  chains.
     //
-//#define PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
     Value * depositMaskPtr = kb->getInputStreamBlockPtr("depositMask", ZERO, blockOffsetPhi);
     depositMaskPtr = kb->CreatePointerCast(depositMaskPtr, fieldPtrTy);
     for (unsigned i = 0; i < fieldsPerBlock; i++) {
-        mask[i] = kb->CreateLoad(kb->CreateGEP(depositMaskPtr, kb->getInt32(i)));
+        mask[i] = kb->CreateLoad(kb->CreateGEP(fieldTy, depositMaskPtr, kb->getInt32(i)));
     }
 #else
 
@@ -304,13 +303,13 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
 #endif
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
-            Value * field = kb->CreateLoad(kb->CreateGEP(inputPtr, kb->getInt32(i)));
+            Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
 #else
             Value * field = kb->CreateExtractElement(inputStrm, kb->getInt32(i));
 #endif
-            Value * compressed = kb->CreateCall(fTy, PDEP_func, {field, mask[i]});
+            Value * compressed = kb->CreatePdeposit(field, mask[i]);
 #ifdef PREFER_FIELD_STORES_OVER_INSERT_ELEMENT
-            kb->CreateStore(compressed, kb->CreateGEP(outputPtr, kb->getInt32(i)));
+            kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }
 #else
         outputStrm = kb->CreateInsertElement(outputStrm, compressed, kb->getInt32(i));
@@ -521,13 +520,20 @@ void UnitInsertionExtractionMasks::generateFinalBlockMethod(BuilderRef b, Value 
     b->setScalarField("EOFmask", b->bitblock_mask_from(remainingBytes));
     RepeatDoBlockLogic(b);
 }
-
+#define USE_FILTER_BY_MASK_KERNEL
 StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P, StreamSet * insertion_mask, InsertPosition p) {
     auto stream01 = P->CreateStreamSet(1);
     auto valid01 = P->CreateStreamSet(1);
     P->CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
     auto spread_mask = P->CreateStreamSet(1);
+#ifndef USE_FILTER_BY_MASK_KERNEL
     FilterByMask(P, valid01, stream01, spread_mask);
+#else
+    P->CreateKernelCall<FilterByMaskKernel>
+        (Select(valid01, {0}),
+         SelectOperationList{Select(stream01, {0})},
+         spread_mask);
+#endif
     return spread_mask;
 }
 

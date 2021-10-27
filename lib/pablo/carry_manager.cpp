@@ -22,6 +22,7 @@
 #include <array>
 
 using namespace llvm;
+using namespace IDISA;
 
 using BuilderRef = pablo::CarryManager::BuilderRef;
 
@@ -273,6 +274,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
 
         assert (mCarryInfo->hasSummary());
 
+        Type * const int8Ty = b->getInt8Ty();
         Type * const int8PtrTy = b->getInt8PtrTy();
         Type * const carryTy = b->getBitBlockType();
         PointerType * const carryPtrTy = carryTy->getPointerTo();
@@ -310,7 +312,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->CreateMemCpy(newArray, array, capacitySize, b->getCacheAlignment());
         b->CreateFree(array);
         b->CreateStore(newArray, arrayPtr);
-        Value * const startNewArrayPtr = b->CreateGEP(b->CreatePointerCast(newArray, int8PtrTy), capacitySize);
+        Value * const startNewArrayPtr = b->CreateGEP(int8Ty, b->CreatePointerCast(newArray, int8PtrTy), capacitySize);
         b->CreateMemZero(startNewArrayPtr, capacitySize, BlockWidth);
         Value * const newCapacity = b->CreateShl(capacity, 1);
         b->CreateStore(newCapacity, capacityPtr);
@@ -322,7 +324,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->CreateMemCpy(newSummary, summary, summarySize, BlockWidth);
         b->CreateFree(summary);
         b->CreateStore(b->CreatePointerCast(newSummary, carryPtrTy), summaryPtr);
-        Value * const startNewSummaryPtr = b->CreateGEP(b->CreatePointerCast(newSummary, int8PtrTy), summarySize);
+        Value * const startNewSummaryPtr = b->CreateGEP(int8Ty, b->CreatePointerCast(newSummary, int8PtrTy), summarySize);
         b->CreateMemZero(startNewSummaryPtr, additionalSpace, BlockWidth);
         b->CreateBr(resumeKernel);
 
@@ -794,8 +796,8 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
             Value * carry = b->CreateZExt(b->bitblock_any(value), streamTy);
             const auto summaryBlocks = ceil_udiv(shiftAmount, blockWidth);
             const auto summarySize = ceil_udiv(summaryBlocks, blockWidth);
-            VectorType * const bitBlockTy = b->getBitBlockType();
-            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getVectorElementType());
+            FixedVectorType * const bitBlockTy = b->getBitBlockType();
+            IntegerType * const laneTy = cast<IntegerType>(bitBlockTy->getElementType());
             const auto laneWidth = laneTy->getIntegerBitWidth();
 
             assert (summarySize > 0);
@@ -821,7 +823,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                 }
                 Value * stream = b->CreateBitCast(advanced, bitBlockTy);
                 if (LLVM_LIKELY(i == summarySize)) {
-                    const auto n = bitBlockTy->getVectorNumElements();
+                    const auto n = bitBlockTy->getNumElements();
                     SmallVector<Constant *, 16> mask(n);
                     const auto m = udiv(summaryBlocks, laneWidth);
                     if (m) {

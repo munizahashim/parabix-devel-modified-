@@ -21,7 +21,7 @@ namespace { // start of anonymous namespace
 
 using RefVector = SmallVector<ProgramGraph::Vertex, 4>;
 
-#warning change enum tag to distinguish relationships and streamsets
+//TODO: change enum tag to distinguish relationships and streamsets
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addProducerRelationships
@@ -1032,7 +1032,11 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 
     for (auto i = numOfKernels; i < n; ++i) {
 
+
         size_t strideLength = 0;
+        #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
+        strideLength = b->getBitBlockWidth();
+        #endif
         CountingType type = CountingType::Unknown;
         for (const auto e : make_iterator_range(out_edges(i, H))) {
             const Edge & ed = H[e];
@@ -1172,7 +1176,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
         const StreamSetVector Streams;
         const ScalarVector Scalars;
 
-        KernelId(const std::string && id, const StreamSetVector & streams, const ScalarVector & scalars)
+        KernelId(const std::string & id, const StreamSetVector & streams, const ScalarVector & scalars)
         : Id(id), Streams(streams), Scalars(scalars) {
 
         }

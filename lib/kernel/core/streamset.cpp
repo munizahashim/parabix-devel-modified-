@@ -13,16 +13,17 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Format.h>
 #include <boost/intrusive/detail/math.hpp>
+#include <llvm/Analysis/ConstantFolding.h>
 #include <array>
 
 namespace llvm { class Constant; }
 namespace llvm { class Function; }
 
 using namespace llvm;
+using namespace IDISA;
 using IDISA::IDISA_Builder;
 
 using boost::intrusive::detail::is_pow2;
-
 
 namespace kernel {
 
@@ -54,7 +55,8 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
     }
-    return cast<IntegerType>(ty->getVectorElementType())->getBitWidth();
+    ty = cast<FixedVectorType>(ty)->getElementType();
+    return cast<IntegerType>(ty)->getBitWidth();
 }
 
 LLVM_READNONE inline size_t getArraySize(const Type * ty) {
@@ -139,11 +141,12 @@ unsigned StreamSetBuffer::getFieldWidth() const {
  * The type of the pointer is i8* for fields of 8 bits or less, otherwise iN* for N-bit fields.
  */
 Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Value * absolutePosition) const {
-    Type * const itemTy = mBaseType->getArrayElementType()->getVectorElementType();
-    #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(13, 0, 0)
-    const auto itemWidth = itemTy->getPrimitiveSizeInBits();
+    Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
+    Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+    #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
+    const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
     #else
-    const auto itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
+    const unsigned itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
     #endif
     IntegerType * const sizeTy = b->getSizeTy();
     streamIndex = b->CreateZExt(streamIndex, sizeTy);
@@ -203,8 +206,8 @@ Type * StreamSetBuffer::resolveType(BuilderPtr b, Type * const streamSetType) {
         numElements = type->getArrayNumElements();
         type = type->getArrayElementType();
     }
-    if (LLVM_LIKELY(type->isVectorTy() && type->getVectorNumElements() == 0)) {
-        type = type->getVectorElementType();
+    if (LLVM_LIKELY(type->isVectorTy() && cast<FixedVectorType>(type)->getNumElements() == 0)) {
+        type = cast<FixedVectorType>(type)->getElementType();
         if (LLVM_LIKELY(type->isIntegerTy())) {
             const auto fieldWidth = cast<IntegerType>(type)->getBitWidth();
             type = b->getBitBlockType();
@@ -307,7 +310,7 @@ void ExternalBuffer::copyBackLinearOutputBuffer(BuilderPtr /* b */, llvm::Value 
     /* do nothing */
 }
 
-Value * ExternalBuffer::reserveCapacity(BuilderPtr /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */, Value * /* overflowItems */) const  {
+Value * ExternalBuffer::reserveCapacity(BuilderPtr /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */, Value * /* syncLock */, Value * const /* segNo */, const unsigned /* syncStep */) const  {
     unsupported("reserveCapacity", "External");
 }
 
@@ -585,7 +588,7 @@ void StaticBuffer::copyBackLinearOutputBuffer(BuilderPtr b, llvm::Value * consum
 
 }
 
-Value * StaticBuffer::reserveCapacity(BuilderPtr b, Value * produced, Value * consumed, Value * const required, Value * overflowItems) const  {
+Value * StaticBuffer::reserveCapacity(BuilderPtr b, Value * produced, Value * consumed, Value * const required, Value * syncLock, Value * const segNo, const unsigned syncStep) const  {
     if (mLinear) {
 
         SmallVector<char, 200> buf;
@@ -599,7 +602,7 @@ Value * StaticBuffer::reserveCapacity(BuilderPtr b, Value * produced, Value * co
         const auto streamCount = ty->getArrayNumElements();
         name << streamCount << 'x';
         ty = ty->getArrayElementType();
-        ty = ty->getVectorElementType();
+        ty = cast<FixedVectorType>(ty)->getElementType();;
         const auto itemWidth = ty->getIntegerBitWidth();
         name << itemWidth << '_' << mAddressSpace;
 
@@ -707,17 +710,23 @@ Type * DynamicBuffer::getHandleType(BuilderPtr b) const {
     PointerType * const typePtr = getPointerType();
     IntegerType * const sizeTy = b->getSizeTy();
     Type * const emptyTy = StructType::get(C);
-    FixedArray<Type *, 5> types;
+    FixedArray<Type *, 7> types;
+
     types[BaseAddress] = typePtr;
     types[InternalCapacity] = sizeTy;
-    types[PriorAddress] = typePtr;
+    types[AlternateAddress] = typePtr;
     if (mLinear) {
         types[MallocedAddress] = typePtr;
         types[EffectiveCapacity] = sizeTy;
+        types[AlternateCapacity] = sizeTy;
+        types[DelayUntilAcquiringSyncNumber] = sizeTy;
     } else {
         types[MallocedAddress] = emptyTy;
         types[EffectiveCapacity] = emptyTy;
+        types[AlternateCapacity] = emptyTy;
+        types[DelayUntilAcquiringSyncNumber] = emptyTy;
     }
+
     return StructType::get(C, types);
 }
 
@@ -734,29 +743,50 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         b->CreateAssert(capacity, "Dynamic buffer capacity cannot be 0.");
     }
 
-    indices[1] = b->getInt32(InternalCapacity);
-    Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
-    b->CreateStore(capacity, capacityField);
 
     indices[1] = b->getInt32(BaseAddress);
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
-
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
     Value * const baseAddress = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
-    indices[1] = b->getInt32(PriorAddress);
-    Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
-    b->CreateStore(nullPointerFor(b, baseAddress, mUnderflow), priorAddressField);
+    indices[1] = b->getInt32(EffectiveCapacity);
+    Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
+    b->CreateStore(capacity, effCapacityField);
 
     if (mLinear) {
         indices[1] = b->getInt32(MallocedAddress);
         Value * const initialField = b->CreateInBoundsGEP(handle, indices);
         b->CreateStore(adjBaseAddress, initialField);
-        indices[1] = b->getInt32(EffectiveCapacity);
-        Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
-        b->CreateStore(capacity, effCapacityField);
+
+        indices[1] = b->getInt32(InternalCapacity);
+        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(capacity, capacityField);
+
+        indices[1] = b->getInt32(AlternateAddress);
+        Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
+        Value * const altAddress = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
+        Value * const adjAltBaseAddress = addUnderflow(b, altAddress, mUnderflow);
+        b->CreateStore(adjAltBaseAddress, priorAddressField);
+
+        indices[1] = b->getInt32(AlternateCapacity);
+        Value * const altCapacityField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(capacity, altCapacityField);
+
+        indices[1] = b->getInt32(DelayUntilAcquiringSyncNumber);
+        Value * const delayField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(b->getSize(0), delayField);
+
+    } else {
+
+        indices[1] = b->getInt32(InternalCapacity);
+        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(capacity, capacityField);
+
+        indices[1] = b->getInt32(AlternateAddress);
+        Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(nullPointerFor(b, baseAddress, mUnderflow), priorAddressField);
     }
 }
 
@@ -765,7 +795,7 @@ void DynamicBuffer::releaseBuffer(BuilderPtr b) const {
     Value * const handle = getHandle();
     FixedArray<Value *, 2> indices;
     indices[0] = b->getInt32(0);
-    indices[1] = b->getInt32(PriorAddress);
+    indices[1] = b->getInt32(AlternateAddress);
     Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
     Value * const priorAddress = b->CreateLoad(priorAddressField);
     b->CreateFree(subtractUnderflow(b, priorAddress, mUnderflow));
@@ -855,7 +885,9 @@ void DynamicBuffer::copyBackLinearOutputBuffer(BuilderPtr /* b */, llvm::Value *
     /* do nothing */
 }
 
-Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Value * const consumed, Value * const required, Value * overflowItems) const {
+#if 0
+
+Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Value * const consumed, Value * const required) const {
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -920,8 +952,19 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
         assert (is_pow2(blockWidth));
         const auto blockSize = blockWidth / 8;
 
+        DataLayout DL(b->getModule());
+
         ConstantInt * const BLOCK_WIDTH = b->getSize(blockWidth);
-        Constant * const CHUNK_SIZE = ConstantExpr::getSizeOf(mType);
+        ConstantInt * const sz_ZERO = b->getSize(0);
+        Constant * const CHUNK_SIZE = ConstantFoldConstant(ConstantExpr::getSizeOf(mType), DL);
+        assert (isa<ConstantInt>(CHUNK_SIZE));
+        const auto bytesPerChunk = cast<ConstantInt>(CHUNK_SIZE)->getLimitedValue();
+        assert ((bytesPerChunk % blockSize) == 0 && bytesPerChunk >= blockSize);
+        const auto blocksPerChunk = bytesPerChunk / blockSize;
+        assert (blocksPerChunk > 0);
+        ConstantInt * const BLOCKS_PER_CHUNK = b->getSize(blocksPerChunk);
+
+        PointerType * const blockAlignedPtrTy = b->getBitBlockType()->getPointerTo();
 
         FixedArray<Value *, 2> indices;
         indices[0] = b->getInt32(0);
@@ -934,16 +977,14 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
         Value * const producedChunks = b->CreateCeilUDiv(produced, BLOCK_WIDTH);
         Value * const requiredCapacity = b->CreateAdd(produced, required);
         Value * const requiredChunks = b->CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
-        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);        
-        Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
+        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);
 
         indices[1] = b->getInt32(BaseAddress);
         Value * const virtualBaseField = b->CreateInBoundsGEP(handle, indices);
         Value * const virtualBase = b->CreateLoad(virtualBaseField);
         assert (virtualBase->getType()->getPointerElementType() == mType);
 
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
+        const auto sizeTyWidth = sizeTy->getBitWidth() / 8;
 
         if (mLinear) {
 
@@ -955,23 +996,26 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             BasicBlock * const expandAndCopyBack = BasicBlock::Create(C, "expandAndCopyBack", func);
             BasicBlock * const updateBaseAddress = BasicBlock::Create(C, "updateBaseAddress", func);
 
+            BasicBlock * const memCopyLoop = BasicBlock::Create(C, "memCopyLoop", func);
+            BasicBlock * const memCopyExit = BasicBlock::Create(C, "memCopyExit", func);
+
+
+
             Value * const unreadDataPtr = b->CreateInBoundsGEP(virtualBase, consumedChunks);
-
-
             Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
             Value * const wouldWriteUpToPtr = b->CreateInBoundsGEP(mallocAddress, chunksToReserve);
-            Value * const canCopy = b->CreateICmpULE(wouldWriteUpToPtr, unreadDataPtr);
-            b->CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
+            Value * const cannotCopy = b->CreateICmpUGT(wouldWriteUpToPtr, unreadDataPtr);
+            b->CreateUnlikelyCondBr(cannotCopy, expandAndCopyBack, copyBack);
 
             b->SetInsertPoint(copyBack);
-            b->CreateMemCpy(mallocAddress, unreadDataPtr, bytesToCopy, blockSize);
+            // b->CreateMemCpy(mallocAddress, unreadDataPtr, bytesToCopy, blockSize);
             BasicBlock * const copyBackExit = b->GetInsertBlock();
             b->CreateBr(updateBaseAddress);
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const two_x_Capacity = b->CreateShl(internalCapacity, 1);
-            Value * const newInternalCapacity = b->CreateRoundUp(chunksToReserve, two_x_Capacity);
+            Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
+            Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
@@ -983,8 +1027,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * priorBuffer = b->CreateLoad(priorBufferField);
             b->CreateFree(b->CreateInBoundsGEP(priorBuffer, b->CreateNeg(underflow)));
             b->CreateStore(mallocAddress, priorBufferField);
+            // b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
             b->CreateStore(expandedBuffer, mallocAddrField);
-            b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
             BasicBlock * const expandAndCopyBackExit = b->GetInsertBlock();
             b->CreateBr(updateBaseAddress);
 
@@ -995,24 +1039,60 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             PHINode * const internalCapacityPhi = b->CreatePHI(sizeTy, 2);
             internalCapacityPhi->addIncoming(internalCapacity, copyBackExit);
             internalCapacityPhi->addIncoming(newInternalCapacity, expandAndCopyBackExit);
-            PHINode * const retValPhi = b->CreatePHI(b->getInt1Ty(), 2);
-            retValPhi->addIncoming(b->getFalse(), copyBackExit);
-            retValPhi->addIncoming(b->getTrue(), expandAndCopyBackExit);
 
-            Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
-            b->CreateStore(newBaseAddress, virtualBaseField);
+            Value * initialCond = b->CreateICmpNE(unconsumedChunks, sz_ZERO);
+            Value * const copyTo = b->CreatePointerCast(newBaseBuffer, blockAlignedPtrTy);
+            Value * const copyFrom = b->CreatePointerCast(unreadDataPtr, blockAlignedPtrTy);
+            Value * const blocksToCopy = b->CreateMul(unconsumedChunks, BLOCKS_PER_CHUNK);
+            b->CreateCondBr(initialCond, memCopyLoop, memCopyExit);
+
+            b->SetInsertPoint(memCopyLoop);
+            PHINode * const offset = b->CreatePHI(sizeTy, 2);
+            offset->addIncoming(sz_ZERO, updateBaseAddress);
+            SmallVector<Value *, 64> idx(blocksPerChunk);
+            SmallVector<Value *, 64> loads(blocksPerChunk);
+            for (unsigned i = 0; i < blocksPerChunk; ++i) {
+                idx[i] = b->CreateAdd(offset, b->getSize(i));
+                loads[i] = b->CreateAlignedLoad(b->CreateGEP(copyFrom, idx[i]), blockSize);
+            }
+            for (unsigned i = 0; i < blocksPerChunk; ++i) {
+                b->CreateAlignedStore(loads[i], b->CreateGEP(copyTo, idx[i]), blockSize);
+            }
+            Value * const nextOffset = b->CreateAdd(offset, BLOCKS_PER_CHUNK);
+            offset->addIncoming(nextOffset, memCopyLoop);
+            Value * const innerCond = b->CreateICmpNE(offset, blocksToCopy);
+            b->CreateCondBr(innerCond, memCopyLoop, memCopyExit);
+
+
+            b->SetInsertPoint(memCopyExit);
+//            Function * fSleep = m->getFunction("usleep");
+//            if (fSleep == nullptr) {
+//                FunctionType * fty = FunctionType::get(b->getInt32Ty(), {b->getInt32Ty()}, false);
+//                fSleep = Function::Create(fty, Function::ExternalLinkage, "usleep", m);
+//                fSleep->setCallingConv(CallingConv::C);
+//            }
+//            b->CreateCall(fSleep, b->getInt32(10));
+
             Value * const effectiveCapacity = b->CreateAdd(consumedChunks, internalCapacityPhi);
+            Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
+
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
-            b->CreateStore(effectiveCapacity, effCapacityField);
-            b->CreateRet(retValPhi);
+            b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(newBaseAddress, virtualBaseField, sizeTyWidth);
+
+            b->CreateRet(cannotCopy);
 
         } else { // Circular
+
+            Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
+
+            Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
 
             // make sure the new capacity is at least 2x the current capacity and a multiple of it
             if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
                 Value * const check = b->CreateICmpUGE(requiredChunks, internalCapacity);
-                b->CreateAssert(check, "unnecessary buffer expansion occurred");                
+                b->CreateAssert(check, "unnecessary buffer expansion occurred");
             }
 
             Value * const newChunks = b->CreateSub(requiredChunks, consumedChunks);
@@ -1066,9 +1146,9 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(PriorAddress);
             Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
             Value * const priorBuffer = b->CreateLoad(priorBufferField);
-            b->CreateStore(newCapacity, intCapacityField);
-            b->CreateStore(virtualBase, priorBufferField);
             b->CreateStore(newBuffer, virtualBaseField);
+            b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth);
             b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
 
             b->CreateRet(b->getTrue());
@@ -1080,6 +1160,310 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
     return b->CreateCall(funcTy, func, { myHandle, produced, consumed, required, b->getSize(mUnderflow), b->getSize(mOverflow) });
 }
+
+#else
+
+Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Value * const consumed, Value * const required, Value * const syncLock, Value * const segNo, const unsigned syncStep) const {
+
+    SmallVector<char, 200> buf;
+    raw_svector_ostream name(buf);
+
+    assert ("unspecified module" && b.get() && b->getModule());
+
+    name << "__DynamicBuffer_";
+    if (mLinear) {
+        name << "linearCopyBackOrExpand_";
+    } else {
+        name << "reserveCapacity_";
+    }
+
+    Type * ty = getBaseType();
+    const auto streamCount = ty->getArrayNumElements();
+    name << streamCount << 'x';
+    ty = ty->getArrayElementType();
+    ty = cast<FixedVectorType>(ty)->getElementType();
+    const auto itemWidth = ty->getIntegerBitWidth();
+    name << itemWidth << '@' << mAddressSpace;
+
+    const bool hasSyncLock = mLinear && syncLock;
+
+    if (hasSyncLock) {
+        name << '_' << syncStep;
+    }
+
+
+    Value * const myHandle = getHandle();
+
+    Module * const m = b->getModule();
+
+    Function * func = m->getFunction(name.str());
+    if (func == nullptr) {
+
+        IntegerType * const sizeTy = b->getSizeTy();
+        PointerType * const sizePtrTy = sizeTy->getPointerTo(mAddressSpace);
+        FunctionType * funcTy = nullptr;
+        if (hasSyncLock) {
+            funcTy = FunctionType::get(b->getInt1Ty(), {myHandle->getType(), sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizePtrTy, sizeTy}, false);
+        } else {
+            funcTy = FunctionType::get(b->getInt1Ty(), {myHandle->getType(), sizeTy, sizeTy, sizeTy, sizeTy, sizeTy}, false);
+        }
+
+
+        const auto ip = b->saveIP();
+
+        LLVMContext & C = m->getContext();
+        func = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
+
+        b->SetInsertPoint(BasicBlock::Create(C, "entry", func));
+
+        auto arg = func->arg_begin();
+        auto nextArg = [&]() {
+            assert (arg != func->arg_end());
+            Value * const v = &*arg;
+            std::advance(arg, 1);
+            return v;
+        };
+
+        Value * const handle = nextArg();
+        handle->setName("handle");
+        Value * const produced = nextArg();
+        produced->setName("produced");
+        Value * const consumed = nextArg();
+        consumed->setName("consumed");
+        Value * const required = nextArg();
+        required->setName("required");
+        Value * const underflow = nextArg();
+        underflow->setName("underflow");
+        Value * const overflow = nextArg();
+        overflow->setName("overflow");
+        Value * syncLock = nullptr;
+        Value * segNo = nullptr;
+        if (hasSyncLock) {
+            syncLock = nextArg();
+            syncLock->setName("syncLock");
+            segNo = nextArg();
+            segNo->setName("segNo");
+        }
+        assert (arg == func->arg_end());
+
+        setHandle(handle);
+
+
+        const auto blockWidth = b->getBitBlockWidth();
+        assert (is_pow2(blockWidth));
+        const auto blockSize = blockWidth / 8;
+
+        ConstantInt * const BLOCK_WIDTH = b->getSize(blockWidth);
+        Constant * const CHUNK_SIZE = ConstantExpr::getSizeOf(mType);
+
+        FixedArray<Value *, 2> indices;
+        indices[0] = b->getInt32(0);
+
+
+        Value * const consumedChunks = b->CreateUDiv(consumed, BLOCK_WIDTH);
+        Value * const producedChunks = b->CreateCeilUDiv(produced, BLOCK_WIDTH);
+        Value * const requiredCapacity = b->CreateAdd(produced, required);
+        Value * const requiredChunks = b->CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
+
+        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);        
+        Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
+
+        indices[1] = b->getInt32(BaseAddress);
+        Value * const virtualBaseField = b->CreateInBoundsGEP(handle, indices);
+        Value * const virtualBase = b->CreateLoad(virtualBaseField);
+        assert (virtualBase->getType()->getPointerElementType() == mType);
+
+        DataLayout DL(b->getModule());
+        Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
+
+        const auto sizeTyWidth = sizeTy->getBitWidth() / 8;
+
+        if (mLinear) {
+
+            indices[1] = b->getInt32(MallocedAddress);
+            Value * const primaryAddressField = b->CreateInBoundsGEP(handle, indices);
+            Value * const primaryAddress = b->CreateAlignedLoad(primaryAddressField, sizeTyWidth);
+            assert (virtualBase->getType()->getPointerElementType() == mType);
+
+            indices[1] = b->getInt32(InternalCapacity);
+            Value * const intCapacityField = b->CreateInBoundsGEP(handle, indices);
+            Value * const internalCapacity = b->CreateAlignedLoad(intCapacityField, sizeTyWidth);
+
+            indices[1] = b->getInt32(AlternateAddress);
+            Value * const alternateAddrField = b->CreateInBoundsGEP(handle, indices);
+            Value * const alternateAddress = b->CreateAlignedLoad(alternateAddrField, sizeTyWidth);
+            b->CreateAlignedStore(primaryAddress, alternateAddrField, sizeTyWidth);
+
+            indices[1] = b->getInt32(AlternateCapacity);
+            Value * const altCapacityField = b->CreateInBoundsGEP(handle, indices);
+            Value * const alternateCapacity = b->CreateAlignedLoad(altCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(internalCapacity, altCapacityField, sizeTyWidth);
+
+            Value * extraCapacity = nullptr;
+
+            if (hasSyncLock) {
+
+                BasicBlock * const checkForPendingConsumer = BasicBlock::Create(C, "checkForPendingConsumer", func);
+                BasicBlock * const updateBaseAddress = BasicBlock::Create(C, "updateBaseAddress", func);
+
+                indices[1] = b->getInt32(DelayUntilAcquiringSyncNumber);
+                Value * const requiredDelayPtr = b->CreateInBoundsGEP(handle, indices);
+                Value * const requiredDelay = b->CreateAlignedLoad(requiredDelayPtr, sizeTyWidth);
+                b->CreateAlignedStore(segNo, requiredDelayPtr, sizeTyWidth);
+
+                b->CreateBr(checkForPendingConsumer);
+
+                // If the segment number of the syncLock is at least the value of our required delay then all consumers
+                // must be looking at the current buffer. We can safely reuse the alternate buffer as our current one.
+                b->SetInsertPoint(checkForPendingConsumer);
+                Value * const consumerSegNo = b->CreateAtomicLoadAcquire(syncLock);
+                Value * const cond = b->CreateICmpUGE(consumerSegNo, requiredDelay);
+                b->CreateLikelyCondBr(cond, updateBaseAddress, checkForPendingConsumer);
+
+                // Check whether we have enough space to satisfy our required capacity
+                b->SetInsertPoint(updateBaseAddress);
+            }
+
+            BasicBlock * const checkCapacityRequirement = b->GetInsertBlock();
+
+            BasicBlock * const expandAndCopyBack = BasicBlock::Create(C, "expandAndCopyBack", func);
+            BasicBlock * const copyBack = BasicBlock::Create(C, "copyBack", func);
+
+            Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
+            Value * const mustExpand = b->CreateICmpUGT(chunksToReserve, alternateCapacity);
+            b->CreateUnlikelyCondBr(mustExpand, expandAndCopyBack, copyBack);
+
+            b->SetInsertPoint(expandAndCopyBack);
+            // if not, discard the alternate buffer create a larger one
+            b->CreateFree(b->CreateInBoundsGEP(alternateAddress, b->CreateNeg(underflow)));
+            // newInternalCapacity tends to be 2x internalCapacity
+            Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
+            Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
+            Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
+            Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
+            Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
+            expandedBuffer = b->CreateInBoundsGEP(expandedBuffer, underflow);
+            BasicBlock * const expandAndCopyBackExit = b->GetInsertBlock();
+            b->CreateBr(copyBack);
+
+
+            b->SetInsertPoint(copyBack);
+            PHINode * const newBaseBuffer = b->CreatePHI(virtualBase->getType(), 2);
+            newBaseBuffer->addIncoming(alternateAddress, checkCapacityRequirement);
+            newBaseBuffer->addIncoming(expandedBuffer, expandAndCopyBackExit);
+            PHINode * const internalCapacityPhi = b->CreatePHI(sizeTy, 2);
+            internalCapacityPhi->addIncoming(alternateCapacity, checkCapacityRequirement);
+            internalCapacityPhi->addIncoming(newInternalCapacity, expandAndCopyBackExit);
+
+            Value * const unreadDataPtr = b->CreateInBoundsGEP(virtualBase, consumedChunks);
+            b->CreateMemCpy(newBaseBuffer, unreadDataPtr, bytesToCopy, blockSize);
+
+            b->CreateAlignedStore(internalCapacityPhi, intCapacityField, sizeTyWidth);
+
+            Value * const effectiveCapacity = b->CreateAdd(consumedChunks, internalCapacityPhi);
+            indices[1] = b->getInt32(EffectiveCapacity);
+            Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
+            b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
+
+            b->CreateAlignedStore(newBaseBuffer, primaryAddressField, sizeTyWidth);
+
+            Value * const newVirtualAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
+            b->CreateAlignedStore(newVirtualAddress, virtualBaseField, sizeTyWidth);
+
+            b->CreateRet(mustExpand);
+
+        } else { // Circular
+
+            indices[1] = b->getInt32(InternalCapacity);
+
+            Value * const intCapacityField = b->CreateInBoundsGEP(handle, indices);
+            Value * const internalCapacity = b->CreateLoad(intCapacityField);
+
+            // make sure the new capacity is at least 2x the current capacity and a multiple of it
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                Value * const check = b->CreateICmpUGE(requiredChunks, internalCapacity);
+                b->CreateAssert(check, "unnecessary buffer expansion occurred");                
+            }
+
+
+            Value * const newChunks = b->CreateSub(requiredChunks, consumedChunks);
+            Value * const newCapacity = b->CreateRoundUp(newChunks, internalCapacity);
+            Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
+            Value * const requiredCapacity = b->CreateAdd(newCapacity, additionalCapacity);
+
+            Value * newBuffer = b->CreatePageAlignedMalloc(mType, requiredCapacity, mAddressSpace);
+            newBuffer = b->CreateInBoundsGEP(newBuffer, { underflow });
+
+            Value * const consumedOffset = b->CreateURem(consumedChunks, internalCapacity);
+            Value * const producedOffset = b->CreateURem(producedChunks, internalCapacity);
+            Value * const newConsumedOffset = b->CreateURem(consumedChunks, newCapacity);
+            Value * const newProducedOffset = b->CreateURem(producedChunks, newCapacity);
+            Value * const consumedOffsetEnd = b->CreateAdd(consumedOffset, unconsumedChunks);
+            Value * const sourceLinear = b->CreateICmpULE(consumedOffsetEnd, producedOffset);
+            Value * const newConsumedOffsetEnd = b->CreateAdd(newConsumedOffset, unconsumedChunks);
+            Value * const targetLinear = b->CreateICmpULE(newConsumedOffsetEnd, newProducedOffset);
+            Value * const linearCopy = b->CreateAnd(sourceLinear, targetLinear);
+
+            Value * const consumedOffsetPtr = b->CreateInBoundsGEP(virtualBase, consumedOffset);
+            Value * const newConsumedOffsetPtr = b->CreateInBoundsGEP(newBuffer, newConsumedOffset);
+
+            BasicBlock * const copyLinear = BasicBlock::Create(C, "copyLinear", func);
+            BasicBlock * const copyNonLinear = BasicBlock::Create(C, "copyNonLinear", func);
+            BasicBlock * const storeNewBuffer = BasicBlock::Create(C, "storeNewBuffer", func);
+            b->CreateCondBr(linearCopy, copyLinear, copyNonLinear);
+
+            b->SetInsertPoint(copyLinear);
+            b->CreateMemCpy(newConsumedOffsetPtr, consumedOffsetPtr, bytesToCopy, blockSize);
+            b->CreateBr(storeNewBuffer);
+
+            b->SetInsertPoint(copyNonLinear);
+            Value * const bufferLength1 = b->CreateSub(internalCapacity, consumedOffset);
+            Value * const newBufferLength1 = b->CreateSub(newCapacity, newConsumedOffset);
+            Value * const partialLength1 = b->CreateUMin(bufferLength1, newBufferLength1);
+            Value * const copyEndPtr = b->CreateInBoundsGEP(virtualBase, b->CreateAdd(consumedOffset, partialLength1));
+            Value * const copyEndPtrInt = b->CreatePtrToInt(copyEndPtr, intPtrTy);
+            Value * const consumedOffsetPtrInt = b->CreatePtrToInt(consumedOffsetPtr, intPtrTy);
+            Value * const bytesToCopy1 = b->CreateSub(copyEndPtrInt, consumedOffsetPtrInt);
+            b->CreateMemCpy(newConsumedOffsetPtr, consumedOffsetPtr, bytesToCopy1, blockSize);
+            Value * const sourceOffset = b->CreateURem(b->CreateAdd(consumedOffset, partialLength1), internalCapacity);
+            Value * const sourcePtr = b->CreateInBoundsGEP(virtualBase, sourceOffset);
+            Value * const targetOffset = b->CreateURem(b->CreateAdd(newConsumedOffset, partialLength1), newCapacity);
+            Value * const targetPtr = b->CreateInBoundsGEP(newBuffer, targetOffset);
+            Value * const bytesToCopy2 = b->CreateSub(bytesToCopy, bytesToCopy1);
+            b->CreateMemCpy(targetPtr, sourcePtr, bytesToCopy2, blockSize);
+            b->CreateBr(storeNewBuffer);
+
+            b->SetInsertPoint(storeNewBuffer);
+            indices[1] = b->getInt32(AlternateAddress);
+            Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
+            Value * const priorBuffer = b->CreateLoad(priorBufferField);
+            b->CreateStore(newBuffer, virtualBaseField);
+            b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth);
+            b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
+
+            b->CreateRet(b->getTrue());
+        }
+
+        b->restoreIP(ip);
+        setHandle(myHandle);
+    }
+
+    SmallVector<Value *, 8> args(6);
+    args[0] = myHandle;
+    args[1] = produced;
+    args[2] = consumed;
+    args[3] = required;
+    args[4] = b->getSize(mUnderflow);
+    args[5] = b->getSize(mOverflow);
+    if (hasSyncLock) {
+        args.push_back(syncLock);
+        args.push_back(segNo);
+    }
+    return b->CreateCall(func->getFunctionType(), func, args);
+}
+
+#endif
 
 // Constructors
 

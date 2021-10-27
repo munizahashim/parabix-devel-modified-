@@ -186,6 +186,18 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief loadTerminationSignalsBetweenKernels
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::loadTerminationSignalsBetweenKernels(BuilderRef b, unsigned firstKernel, unsigned lastKernel) {
+    const auto startPartId = KernelPartitionId[firstKernel];
+    const auto endPartId = KernelPartitionId[lastKernel];
+    assert (startPartId <= endPartId);
+    for (auto partId = startPartId; partId < endPartId; ++partId) {
+        mPartitionTerminationSignal[partId] = readTerminationSignal(b, partId);
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 inline Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned partitionId) {

@@ -37,11 +37,17 @@
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
 #include <llvm/ExecutionEngine/MCJIT.h>
 #endif
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
+#define OF_None F_None
+#endif
 #include <llvm/ADT/Statistic.h>
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(8, 0, 0)
 #include <llvm/IR/LegacyPassManager.h>
 #else
 #include <llvm/IR/PassTimingInfo.h>
+#endif
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
+#include <llvm/Support/Host.h>
 #endif
 #ifndef NDEBUG
 #define IN_DEBUG_MODE true
@@ -148,7 +154,7 @@ inline void CPUDriver::preparePassManager() {
         if (LLVM_LIKELY(mIROutputStream == nullptr)) {
             if (!codegen::ShowUnoptimizedIROption.empty()) {
                 std::error_code error;
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::F_None);
+                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::OF_None);
             } else {
                 mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
             }
@@ -165,7 +171,7 @@ inline void CPUDriver::preparePassManager() {
         if (LLVM_LIKELY(mIROutputStream == nullptr)) {
             if (!codegen::ShowIROption.empty()) {
                 std::error_code error;
-                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::F_None);
+                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::OF_None);
             } else {
                 mIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
             }
@@ -189,15 +195,18 @@ inline void CPUDriver::preparePassManager() {
     if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
         if (!codegen::ShowASMOption.empty()) {
             std::error_code error;
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::F_None);
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
         } else {
             mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
         }
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-        if (LLVM_UNLIKELY(mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile))) {
-#else
-        if (LLVM_UNLIKELY(mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile))) {
-#endif
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
+        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
+        #else
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
+        #endif
+        if (r) {
             report_fatal_error("LLVM error: could not add emit assembly pass");
         }
     }
@@ -312,14 +321,22 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
     mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
     mEngine->addModule(std::move(mainModule));
     mEngine->finalizeObject();
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
+    auto mainFnPtr = mEngine->getFunctionAddress(main->getName().str());
+    #else
     auto mainFnPtr = mEngine->getFunctionAddress(main->getName());
+    #endif
     removeModules(Normal);
     removeModules(Infrequent);
     return reinterpret_cast<void *>(mainFnPtr);
 }
 
 bool CPUDriver::hasExternalFunction(llvm::StringRef functionName) const {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
+    return RTDyldMemoryManager::getSymbolAddressInProcess(functionName.str());
+    #else
     return RTDyldMemoryManager::getSymbolAddressInProcess(functionName);
+    #endif
 }
 
 CPUDriver::~CPUDriver() {

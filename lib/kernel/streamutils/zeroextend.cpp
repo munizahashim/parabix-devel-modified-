@@ -5,6 +5,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
+using namespace IDISA;
 
 namespace kernel {
 
@@ -53,16 +54,15 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     }
 
     const auto inputVectorSize = (blockWidth / inputFieldWidth); assert (is_power_2(inputVectorSize));
-    const auto outputVectorSize = (blockWidth / outputFieldWidth); assert (is_power_2(outputVectorSize));
 
     IntegerType * const sizeTy = b->getSizeTy();
 
     Value * const ZERO = b->getSize(0);
 
-    VectorType * const inputTy = VectorType::get(b->getIntNTy(inputFieldWidth), inputVectorSize);
+    VectorType * const inputTy = b->fwVectorType(inputFieldWidth);
     PointerType * const inputPtrTy = inputTy->getPointerTo();
 
-    VectorType * const outputTy = VectorType::get(b->getIntNTy(outputFieldWidth), outputVectorSize);
+    VectorType * const outputTy = b->fwVectorType(outputFieldWidth);
     PointerType * const outputPtrTy = outputTy->getPointerTo();
 
     Value * const processed = b->getProcessedItemCount(input.getName());
@@ -86,7 +86,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const baseInputOffset = b->CreateMul(index, b->getSize(inputFieldWidth));
     for (unsigned i = 0; i < inputFieldWidth; ++i) {
         Value * const offset = b->CreateAdd(baseInputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(baseInputPtr, offset);
+        Value * const ptr = b->CreateGEP(inputTy, baseInputPtr, offset);
         inputBuffer[i] = b->CreateAlignedLoad(ptr, (inputFieldWidth / CHAR_BIT));
     }
 
@@ -98,9 +98,9 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     // expand by doubling repeatidly until we've reached the desired output size
     for (;;) {
 
-        VectorType * const inputTy = cast<VectorType>(inputBuffer[0]->getType());
+        FixedVectorType * const inputTy = cast<FixedVectorType>(inputBuffer[0]->getType());
 
-        const auto n = inputTy->getVectorElementType()->getIntegerBitWidth();
+        const auto n = inputTy->getElementType()->getIntegerBitWidth();
         const auto count = blockWidth / n;
 
         const auto halfCount = (count / 2);
@@ -117,7 +117,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         }
         Constant * const UPPER_MASK = ConstantVector::get(upperHalf);
 
-        VectorType * const outputTy = VectorType::get(b->getIntNTy(n * 2), halfCount);
+        FixedVectorType * const outputTy = b->fwVectorType(n * 2);
 
         Constant * const ZEROES = ConstantVector::getNullValue(inputTy);
         for (unsigned i = 0; i < inputBuffer.size(); ++i) {
@@ -141,7 +141,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const baseOutputOffset = b->CreateMul(index, b->getSize(outputFieldWidth));
     for (unsigned i = 0; i < outputFieldWidth; ++i) {
         Value * const offset = b->CreateAdd(baseOutputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(baseOutputPtr, offset);
+        Value * const ptr = b->CreateGEP(outputTy, baseOutputPtr, offset);
         b->CreateAlignedStore(outputBuffer[i], ptr, (outputFieldWidth / CHAR_BIT));
     }
 

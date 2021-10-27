@@ -6,7 +6,7 @@ parabix_add_executable(
 NAME
     csv2json
 SRC
-    csv2json
+    csv2json.cpp
 DEPS
     pablo
     kernel.basis

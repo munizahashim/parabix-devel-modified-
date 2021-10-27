@@ -193,6 +193,14 @@ inline StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) 
     return StringRef(tmp.data(), tmp.size());
 }
 
+inline StructType * getTypeByName(Module * const m, StringRef name) {
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    return StructType::getTypeByName(m->getContext(), name);
+#else
+    return m->getTypeByName(name);
+#endif
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ensureLoaded
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -201,8 +209,8 @@ void Kernel::ensureLoaded() {
         return;
     }
     SmallVector<char, 256> tmp;
-    mSharedStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), SHARED_SUFFIX, tmp)));
-    mThreadLocalStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
+    mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
+    mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -212,8 +220,8 @@ void Kernel::loadCachedKernel(BuilderRef b) {
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b->getModule(); assert (mModule);
     SmallVector<char, 256> tmp;
-    mSharedStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), SHARED_SUFFIX, tmp)));
-    mThreadLocalStateType = nullIfEmpty(mModule->getTypeByName(concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
+    mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
+    mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
     linkExternalMethods(b);
     mGenerated = true;
 }
@@ -236,10 +244,10 @@ void Kernel::constructStateTypes(BuilderRef b) {
     Module * const m = getModule(); assert (b->getModule() == m);
     SmallVector<char, 256> tmpShared;
     auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
-    mSharedStateType = m->getTypeByName(strShared);
+    mSharedStateType = getTypeByName(m, strShared);
     SmallVector<char, 256> tmpThreadLocal;
     auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
-    mThreadLocalStateType = m->getTypeByName(strThreadLocal);
+    mThreadLocalStateType = getTypeByName(m, strThreadLocal);
     if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
 
         flat_set<unsigned> sharedGroups;
@@ -723,7 +731,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
             fields.push_back(voidPtrTy);
         }
 
-        #warning if an I/O rate is deferred and this is internally synchronized, we need both item counts
+        //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
         // produced output items
         if (internallySynchronized || hasTerminationSignal || isAddressable(output)) {
@@ -1062,7 +1070,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
-        #warning fix this so BufferSegments is an argument to main
+        //TODO: fix this so BufferSegments is an argument to main
         allocArgs.push_back(b->getSize(codegen::BufferSegments));
         b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (hasThreadLocal()) {
