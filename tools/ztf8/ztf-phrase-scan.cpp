@@ -338,7 +338,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Hence HASH_MASK_NEW -> mask of FFFFFFFF, FFFFFFFFFFFF, FFFFFFFFFFFFFFFF for LG {0,1,2}, 3, 4 respectively.
     */
     // Build up a single encoded value for table lookup from the hashcode sequence.
-    Value * codewordVal = b->CreateAnd(hashValue, lg.LAST_SUFFIX_MASK);
+    Value * codewordVal = b->CreateAdd(lg.LAST_SUFFIX_BASE, b->CreateAnd(hashValue, lg.LAST_SUFFIX_MASK));
     Value * hashcodePos = keyMarkPos;
     for (unsigned j = 1; j < lg.groupInfo.encoding_bytes - 1/* + mNumSym*/; j++) { // same # encoding_bytes for k-sym phrases
         hashcodePos = b->CreateSub(hashcodePos, sz_ONE);
@@ -394,15 +394,14 @@ and mark its compression mask.
     b->SetInsertPoint(storeKey);
 //#if 0
     b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
+
     // write writtenVal into a buffer and then write into STDOUT
-    writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1);
+    writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1, "writtenVal");
     Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
     Value * outputCodeword = b->CreateAlloca(b->getInt8Ty(), copyLen);
-    //b->CallPrintInt("writtenVal", writtenVal);
-    //b->CreateMemCpy(outputCodeword, writtenVal, lg.ENC_BYTES, 1);
+    b->CreateAlignedStore(writtenVal, outputCodeword, 1);
     //b->CallPrintInt("outputCodeword", outputCodeword);
-    //writtenVal = b->CreatePointerCast(writtenVal, b->getInt8PtrTy());
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("hashValues", keyMarkPos), copyLen);
+    b->CreateWriteCall(b->getInt32(STDERR_FILENO), outputCodeword, copyLen);
 //#endif
     // We have a new symbol that allows future occurrences of the symbol to
     // be compressed using the hash code.

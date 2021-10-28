@@ -259,17 +259,17 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     StreamSet * countStream = P->CreateStreamSet(1);
     StreamSet * const hashtableSpan = P->CreateStreamSet(1);
     P->CreateKernelCall<ZTF_PhraseExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths, hashtableSpan, countStream);
-    //P->CreateKernelCall<DebugDisplayKernel>("ztfInsertionLengths", ztfInsertionLengths);
+    //P->CreateKernelCall<DebugDisplayKernel>("countStream", countStream);
     //P->CreateKernelCall<codeword_index>(ztfHashBasis, countStream);
     //P->CreateKernelCall<PopcountKernel>(countStream, P->getOutputScalar("count2"));
     StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
-    StreamSet * ztfHash_u8_Basis = P->CreateStreamSet(8);
+    StreamSet * const ztfHash_u8_Basis = P->CreateStreamSet(8);
     //P->CreateKernelCall<DebugDisplayKernel>("ztfRunSpreadMask", ztfRunSpreadMask);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
 
     StreamSet * decodedMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
     StreamSet * hashtableMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
-    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, ztfHash_u8_Basis, hashtableSpan, decodedMarks, hashtableMarks);
+    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, ztfHash_u8_Basis, decodedMarks, hashtableMarks);
 
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);

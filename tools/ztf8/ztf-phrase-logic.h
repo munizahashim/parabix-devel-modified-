@@ -105,7 +105,6 @@ public:
     ZTF_PhraseDecodeLengths(BuilderRef b,
                       EncodingInfo & encodingScheme,
                       StreamSet * basisBits,
-                      StreamSet * hashtableSpan,
                       StreamSet * groupStreams,
                       StreamSet * hashtableStreams);
 protected:

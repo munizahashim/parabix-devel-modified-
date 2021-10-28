@@ -283,12 +283,10 @@ void BixnumHashMarks::generatePabloMethod() {
 ZTF_PhraseDecodeLengths::ZTF_PhraseDecodeLengths(BuilderRef b,
                                                 EncodingInfo & encodingScheme,
                                                 StreamSet * basisBits,
-                                                StreamSet * hashtableSpan,
                                                 StreamSet * groupStreams,
                                                 StreamSet * hashtableStreams)
 : PabloKernel(b, "ZTF_PhraseDecodeLengths" + encodingScheme.uniqueSuffix(),
-              {Binding{"basisBits", basisBits},
-               Binding{"hashtableSpan", hashtableSpan}},
+              {Binding{"basisBits", basisBits}},
               {Binding{"groupStreams", groupStreams},
                Binding{"hashtableStreams", hashtableStreams}}),
     mEncodingScheme(encodingScheme) { }
@@ -298,7 +296,15 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
     std::vector<PabloAST *> groupStreams(mEncodingScheme.byLength.size());
-    PabloAST * hashTableSpan = getInputStreamSet("hashtableSpan")[0];
+
+    PabloAST * hashTableBoundary = pb.createAnd(pb.createAnd(basis[7], basis[6]), pb.createAnd(basis[5], basis[4]));
+    //pb.createDebugPrint(hashTableBoundary, "hashTableBoundary");
+    hashTableBoundary = pb.createAnd(hashTableBoundary, pb.createAdvance(hashTableBoundary, 1));
+    PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * hashTableSpan = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {fileStart, hashTableBoundary});
+    hashTableSpan = pb.createOr(hashTableSpan, hashTableBoundary);
+    //pb.createDebugPrint(hashTableSpan, "hashTableSpan");
+
     PabloAST * ASCII = bnc.ULT(basis, 0x80);
     PabloAST * suffix_80_BF = pb.createAnd(bnc.UGE(basis, 0x80), bnc.ULE(basis, 0xBF));
     Var * groupStreamVar = getOutputStreamVar("groupStreams");
@@ -337,7 +343,10 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
     }
     for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
         pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)));
+        //pb.createDebugPrint(groupStreams[i], "groupStreams["+std::to_string(i)+"]");
+        //pb.createDebugPrint(pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)), "groupStreamVar["+std::to_string(i)+"]");
         pb.createAssign(pb.createExtract(hashTableStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], hashTableSpan));
+        //pb.createDebugPrint(pb.createAnd(groupStreams[i], hashTableSpan), "hashTableBoundary["+std::to_string(i)+"]");
     }
 }
 
@@ -366,7 +375,7 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
     ASCII_lookaheads.push_back(ASCII_lookahead);
     //pb.createDebugPrint(ASCII_lookahead, "ASCII_lookahead");
     // for lg 3,4
-    PabloAST * hashTableBoundary = pb.createAnd3(pb.createLookahead(basis[7], 1), pb.createLookahead(basis[6], 1), pb.createLookahead(basis[5], 1));
+    PabloAST * hashTableBoundary = pb.createAnd(pb.createAnd(basis[7], basis[6]), pb.createAnd(basis[5], basis[4]));
     //pb.createDebugPrint(hashTableBoundary, "hashTableBoundary");
     hashTableBoundary = pb.createAnd(hashTableBoundary, pb.createAdvance(hashTableBoundary, 1));
     PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
