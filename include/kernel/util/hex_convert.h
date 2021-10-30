@@ -30,7 +30,7 @@ public:
     BinaryToHex(BuilderRef b, StreamSet * binStream, StreamSet * hexStream);
 protected:
     void generateDoBlockMethod(BuilderRef b) override;
-    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingBits) override;
+//    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingBits) override;
 };
 
 }
