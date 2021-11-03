@@ -152,27 +152,29 @@ void Hexify::generatePabloMethod() {
     lo[2] = pb.createSel(insertMask, spreadBasis[6], pb.createAdvance(spreadBasis[2], 1), "lo[2]");
     lo[1] = pb.createSel(insertMask, spreadBasis[5], pb.createAdvance(spreadBasis[1], 1), "lo[1]");
     lo[0] = pb.createSel(insertMask, spreadBasis[4], pb.createAdvance(spreadBasis[0], 1), "lo[0]");
-    //  Given these 4 bit streams, a position is in the hex A-F range when its binary code is >= 10.
+    //  Given these 4 bit streams, a position is in the hex A-F range when its
+    //  binary code is >= 10.
     PabloAST * hexA_F = bnc.UGE(lo, 10, "hexA_F");
     //  If a number is in the hexA_F range, the 4 bits of the hexBasis are determined by subtracting 9.
     BixNum lo1 = bnc.SubModular(lo, 9);
     std::vector<PabloAST *> hexBasis(8);
     // Now compute the high 4 bits of the hexBasis.
-    hexBasis[7] = pb.createZeroes();
-    hexBasis[6] = hexA_F;
-    if (LowerHex) {
-        hexBasis[5] = pb.createNot(LF);
-    } else {
-        hexBasis[5] = pb.createNot(hexA_F);
-    }
-    hexBasis[4] = pb.createNot(hexA_F);
     // High 4 bits are 0x40 for hex A-F, 0x30 for hex 0-9
+    hexBasis[7] = pb.createZeroes();  // bit 7 is always zero for ASCII.
+    hexBasis[6] = hexA_F;             // bit 6 is only 1 for [A-F] or [a-f]
+    if (LowerHex) {
+        hexBasis[5] = pb.createOnes(); // A 1 bit is needed for both [0-9] and [a-f]
+    } else {
+        hexBasis[5] = pb.createNot(hexA_F); // A 1 bit is needed for [0-9], but not [A-F].
+    }
+    hexBasis[4] = pb.createNot(hexA_F);  // A 1 bit is needed for [0-9] only.
     for (unsigned i = 0; i < 4; i++) {
         hexBasis[i] = pb.createSel(hexA_F, lo1[i], lo[i]);
     }
     Var * hexVar = getOutputStreamVar("hexBasis");
     for (unsigned i = 0; i < 8; i++) {
-        pb.createAssign(pb.createExtract(hexVar, pb.getInteger(i)), pb.createSel(LF, spreadBasis[i], hexBasis[i]));
+        pb.createAssign(pb.createExtract(hexVar, pb.getInteger(i)),
+                        pb.createSel(LF, spreadBasis[i], hexBasis[i]));
     }
 }
 
@@ -182,8 +184,7 @@ HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                    Binding{b->getIntAddrTy(), "callbackObject"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap
@@ -202,7 +203,7 @@ HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
     //  The Parabix CharacterClassKernelBuilder can create any desired stream for
     //  characters.   Note that the input is the set of byte values in the range
     //  [\x{00}-x{09}\x{0B}-\x{FF}] that is, all byte values except \x{0A}.
-    //  For our example input "Wolf!\b", the nonLF stream is "11111."
+    //  For our example input "Wolf!\n", the nonLF stream is "11111."
     StreamSet * nonLF = P->CreateStreamSet(1);
     std::vector<re::CC *> nonLF_CC = {re::makeCC(re::makeByte(0,9), re::makeByte(0xB, 0xff))};
     P->CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, BasisBits, nonLF);
