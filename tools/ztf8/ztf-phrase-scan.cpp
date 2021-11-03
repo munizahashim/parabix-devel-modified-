@@ -38,7 +38,7 @@ MarkRepeatedHashvalue::MarkRepeatedHashvalue(BuilderRef b,
                    {Binding{"symbolMarks", symbolMarks},
                     Binding{"hashValues", hashValues}},
                    {}, {}, {}, {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
-                       InternalScalar{ArrayType::get(b->getInt8Ty(), 33334), "hashTable"}}),
+                       InternalScalar{ArrayType::get(b->getInt8Ty(), 20000), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("hashMarks", hashMarks, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -58,7 +58,7 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     Constant * sz_ONE = b->getSize(1);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
-    Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
+    Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
 
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
@@ -126,7 +126,7 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
 
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK_NEW, "keyHash");
     //b->CallPrintInt("keyHash", keyHash);
-    Value * tableIdxHash = b->CreateAnd(keyHash, sz_TABLEMASK, "tableIdx");
+    Value * tableIdxHash = b->CreateAnd(b->CreateLShr(keyHash, 8), sz_TABLEMASK, "tableIdx");
     //b->CallPrintInt("hashValue", hashValue);
     //b->CallPrintInt("tableIdxHash", tableIdxHash);
 
@@ -220,7 +220,7 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                     Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}},
                    {}, {}, {},
                    {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
-                    InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (33334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
+                    InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -231,7 +231,7 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
         addInternalScalar(ArrayType::get(b->getInt8Ty(), 32), "pendingOutput");
     }
     Type * phraseType = ArrayType::get(b->getInt8Ty(), 32);
-    //mInternalScalars.emplace_back(ArrayType::get(phraseType, (33334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
+    //mInternalScalars.emplace_back(ArrayType::get(phraseType, (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
@@ -246,8 +246,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Constant * sz_TWO = b->getSize(2);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
-    Constant * sz_TABLEMASK = b->getSize((1U << 15) -1);
-
+    Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
 
@@ -360,10 +359,13 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
 
     Value * ZTF_prefix1 = b->CreateAdd(pfxOffset1, multiplier1);
 
-    Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(33334)));
+    Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(20000)));
     /// TODO: experiment the number of bits in sz_TABLEMASK
-    Value * tableIdxHash = b->CreateAnd(codewordVal, sz_TABLEMASK, "tableIdx");
+    Value * tableIdxHash = b->CreateAnd(b->CreateLShr(codewordVal, 8), sz_TABLEMASK, "tableIdx");
     Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
+
+    //b->CallPrintInt("->codewordVal-1", codewordVal);
+    //b->CallPrintInt("->codewordVal-2", b->CreateAnd(codewordVal, sz_TABLEMASK));
 
     // Use two 8-byte loads to get hash and symbol values.
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
@@ -541,7 +543,7 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                    {}, {}, {},
                    {InternalScalar{ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
                     // Hash table 8 length-based tables with 256 16-byte entries each.
-                    InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (33334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
+                    InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSym) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     if (DelayedAttributeIsSet()) {
@@ -553,7 +555,7 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
     //Type * phraseType = ArrayType::get(b->getInt8Ty(), 32);
-   // addInternalScalar(ArrayType::get(phraseType, (33334 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
+   // addInternalScalar(ArrayType::get(phraseType, (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
 }
 
 void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
@@ -565,7 +567,7 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Constant * sz_ZERO = b->getSize(0);
     Constant * sz_ONE = b->getSize(1);
     Constant * sz_TWO = b->getSize(2);
-    Constant * sz_TABLEMASK = b->getSize((1U << 15) -1); ///TODO: create mask of 32-bits and truncate 16-bits to extract suffix bits' mask
+    Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
     Type * sizeTy = b->getSizeTy();
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
@@ -673,8 +675,8 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->CallPrintInt("decmp-tableIdxHash", b->CreateAnd(codewordVal, sz_TABLEMASK));
 #endif
 
-    Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(33334)));
-    Value * tableIdxHash = b->CreateAnd(codewordVal, sz_TABLEMASK, "tableIdx");
+    Value * subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), b->getSize(20000)));
+    Value * tableIdxHash = b->CreateAnd(b->CreateLShr(codewordVal, 8), sz_TABLEMASK, "tableIdx");
     Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
 
     // Use two halfSymLen loads to get hash and symbol values.
@@ -801,8 +803,8 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * symStartPos = b->CreateSub(hashMarkPos, b->CreateSub(symLength, sz_ONE), "symStartPos");
     Value * symOffset = b->CreateSub(symLength, lg.HALF_LENGTH);
 
-    subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(symLength, lg.LO), b->getSize(33334)/*lg.SUBTABLE_SIZE)*/));
-    tableIdxHash = b->CreateAnd(encodedVal, sz_TABLEMASK);
+    subTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(symLength, lg.LO), b->getSize(20000)/*lg.SUBTABLE_SIZE)*/));
+    tableIdxHash = b->CreateAnd(b->CreateLShr(encodedVal, 8), sz_TABLEMASK);
     tblEntryPtr = b->CreateGEP(subTablePtr, tableIdxHash);
     // Use two halfSymLen loads to get hash and symbol values.
     tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
