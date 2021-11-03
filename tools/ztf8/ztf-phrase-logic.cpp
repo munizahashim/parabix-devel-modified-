@@ -282,6 +282,7 @@ void BixnumHashMarks::generatePabloMethod() {
 
 ZTF_PhraseDecodeLengths::ZTF_PhraseDecodeLengths(BuilderRef b,
                                                 EncodingInfo & encodingScheme,
+                                                unsigned numSym,
                                                 StreamSet * basisBits,
                                                 StreamSet * groupStreams,
                                                 StreamSet * hashtableStreams)
@@ -289,28 +290,31 @@ ZTF_PhraseDecodeLengths::ZTF_PhraseDecodeLengths(BuilderRef b,
               {Binding{"basisBits", basisBits}},
               {Binding{"groupStreams", groupStreams},
                Binding{"hashtableStreams", hashtableStreams}}),
-    mEncodingScheme(encodingScheme) { }
+    mEncodingScheme(encodingScheme), mNumSym(numSym) { }
 
 void ZTF_PhraseDecodeLengths::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
-    std::vector<PabloAST *> groupStreams(mEncodingScheme.byLength.size());
+    std::vector<PabloAST *> groupStreams(mNumSym * mEncodingScheme.byLength.size());
 
     PabloAST * hashTableBoundary = pb.createAnd(pb.createAnd(basis[7], basis[6]), pb.createAnd(basis[5], basis[4]));
-    //pb.createDebugPrint(hashTableBoundary, "hashTableBoundary");
     hashTableBoundary = pb.createAnd(hashTableBoundary, pb.createAdvance(hashTableBoundary, 1));
+    //pb.createDebugPrint(hashTableBoundary, "hashTableBoundary");
     PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * hashTableSpan = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {fileStart, hashTableBoundary});
-    hashTableSpan = pb.createOr(hashTableSpan, hashTableBoundary);
+    //hashTableSpan = pb.createOr(hashTableSpan, hashTableBoundary);
     //pb.createDebugPrint(hashTableSpan, "hashTableSpan");
 
     PabloAST * ASCII = bnc.ULT(basis, 0x80);
     PabloAST * suffix_80_BF = pb.createAnd(bnc.UGE(basis, 0x80), bnc.ULE(basis, 0xBF));
     Var * groupStreamVar = getOutputStreamVar("groupStreams");
     Var * hashTableStreamVar = getOutputStreamVar("hashtableStreams");
-    unsigned offsetIdx = 0;
     for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
+        for (unsigned j = 0; j < mNumSym; j++) {
+            unsigned idx = i + (j*mEncodingScheme.byLength.size());
+            groupStreams[idx] = pb.createZeroes();
+        }
         LengthGroupInfo groupInfo = mEncodingScheme.byLength[i];
         unsigned lo = groupInfo.lo;
         unsigned hi = groupInfo.hi;
@@ -337,11 +341,12 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
             if (j+1 == groupInfo.encoding_bytes) {
                 // PFX 00-7F{1,2} 80-BF
                 curGroupStream = pb.createAnd(pb.createAdvance(curGroupStream, groupInfo.encoding_bytes-2), suffix_80_BF);
-                groupStreams[i] = pb.createOr(groupStreams[i], curGroupStream);
+                groupStreams[i+mEncodingScheme.byLength.size()] = curGroupStream;
+                //pb.createOr(groupStreams[i], curGroupStream);
             }
         }
     }
-    for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
+    for (unsigned i = 0; i < (mNumSym * mEncodingScheme.byLength.size()); i++) {
         pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)));
         //pb.createDebugPrint(groupStreams[i], "groupStreams["+std::to_string(i)+"]");
         //pb.createDebugPrint(pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)), "groupStreamVar["+std::to_string(i)+"]");

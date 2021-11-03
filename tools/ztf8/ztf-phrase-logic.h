@@ -104,6 +104,7 @@ class ZTF_PhraseDecodeLengths : public pablo::PabloKernel {
 public:
     ZTF_PhraseDecodeLengths(BuilderRef b,
                       EncodingInfo & encodingScheme,
+                      unsigned numSym,
                       StreamSet * basisBits,
                       StreamSet * groupStreams,
                       StreamSet * hashtableStreams);

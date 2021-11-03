@@ -267,9 +267,9 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     //P->CreateKernelCall<DebugDisplayKernel>("ztfRunSpreadMask", ztfRunSpreadMask);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
 
-    StreamSet * decodedMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
-    StreamSet * hashtableMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
-    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, ztfHash_u8_Basis, decodedMarks, hashtableMarks);
+    StreamSet * decodedMarks = P->CreateStreamSet(SymCount * encodingScheme1.byLength.size());
+    StreamSet * hashtableMarks = P->CreateStreamSet(SymCount * encodingScheme1.byLength.size());
+    P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, SymCount, ztfHash_u8_Basis, decodedMarks, hashtableMarks);
 
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);

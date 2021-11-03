@@ -54,6 +54,7 @@ class SymbolGroupDecompression final : public MultiBlockKernel {
 public:
     SymbolGroupDecompression(BuilderRef b,
                              EncodingInfo encodingScheme,
+                             unsigned numSym,
                              unsigned groupNo,
                              StreamSet * const codeWordMarks,
                              StreamSet * const hashMarks,
@@ -65,6 +66,7 @@ private:
 
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
+    const unsigned mNumSym;
 };
 
 }
