@@ -668,7 +668,7 @@ void PipelineAnalysis::identifyKernelsOnHybridThread() {
     KernelOnHybridThread.reset();
     PartitionOnHybridThread.resize(PartitionCount);
     PartitionOnHybridThread.reset();
-    if (mPipelineKernel->getNumOfThreads() > 1) {
+    if (mPipelineKernel->getNumOfThreads() > 1 && codegen::EnableHybridThreadModel) {
         for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
             if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread))) {
                 KernelOnHybridThread.set(i);

@@ -137,6 +137,8 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
             }
         }
 
+        mKernelId = 0;
+
         // and allocate any output buffers
         for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);

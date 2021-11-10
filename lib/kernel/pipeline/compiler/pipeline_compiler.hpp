@@ -220,6 +220,7 @@ public:
     void detemineMaximumNumberOfStrides(BuilderRef b);
     void determineNumOfLinearStrides(BuilderRef b);
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
+    void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
     void ensureSufficientOutputSpace(BuilderRef b, const BufferPort & port, const unsigned streamSet);
     void updatePHINodesForLoopExit(BuilderRef b);
 
@@ -480,6 +481,8 @@ public:
     using PipelineCommonGraphFunctions::getReference;
 
     const StreamSetPort getReference(const StreamSetPort port) const;
+
+    LLVM_READNONE bool hasUsersOnFixedAndHybridThread(const size_t streamSet) const;
 
     using PipelineCommonGraphFunctions::getInputBufferVertex;
     using PipelineCommonGraphFunctions::getInputBuffer;

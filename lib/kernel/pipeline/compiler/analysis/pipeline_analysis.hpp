@@ -79,13 +79,13 @@ public:
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyLinearBuffers();
-        P.identifyPortsThatModifySegmentLength();
         P.identifyZeroExtendedStreamSets();
 
         P.determineBufferSize(b);
         P.determineBufferLayout(b, rng);
 
         P.identifyCrossHybridThreadStreamSets();
+        P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
 

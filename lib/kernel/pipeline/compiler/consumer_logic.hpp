@@ -38,7 +38,7 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
                 } else {
                     mTarget->addNonPersistentScalar(countTy, name);
                 }
-                if (bn.CrossesHybridThreadBarrier) {
+                if (bn.CrossesHybridThreadBarrier && hasUsersOnFixedAndHybridThread(streamSet)) {
                     assert (mNumOfThreads > 1);
                     const auto altId = getCacheLineGroupId(PipelineOutput) + groupId;
                     mTarget->addInternalScalar(countTy, prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX, altId);
@@ -49,6 +49,22 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
     }
 
 
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasUsersOnFixedAndHybridThread
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::hasUsersOnFixedAndHybridThread(const size_t streamSet) const {
+    const BufferNode & node = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(node.CrossesHybridThreadBarrier)) {
+        std::bitset<2> check(0);
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto kernel = target(input, mBufferGraph);
+            check.set(KernelOnHybridThread.test(kernel) ? 1 : 0);
+        }
+        return check.all();
+    }
+    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -149,7 +165,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         const BufferNode & bn = mBufferGraph[streamSet];
 
         Value * consumed = nullptr;
-        if (bn.CrossesHybridThreadBarrier) {
+        if (bn.CrossesHybridThreadBarrier && hasUsersOnFixedAndHybridThread(streamSet)) {
             assert (mNumOfThreads > 1);
             Value * ptr = b->getScalarFieldPtr(prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX);
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
@@ -163,7 +179,8 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
             Constant * const ZERO = b->getInt32(0);
             ptr = b->CreateInBoundsGEP(ptr, { ZERO, ZERO } );
         }
-        return b->CreateUMin(consumed, b->CreateLoad(ptr));
+        Value * const consumed1 = b->CreateLoad(ptr);
+        return b->CreateUMin(consumed, consumed1);
     } else {
         Value * const ptr = getProcessedInputItemsPtr(c.Port);
         assert (isFromCurrentFunction(b, ptr, false));
@@ -318,7 +335,7 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        if (mCompilingHybridThread && bn.CrossesHybridThreadBarrier) {
+        if (mCompilingHybridThread && bn.CrossesHybridThreadBarrier && hasUsersOnFixedAndHybridThread(streamSet)) {
             ptr = b->getScalarFieldPtr(prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX);
         } else {
             ptr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);

@@ -10,6 +10,7 @@
 #include <boost/container/flat_set.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Format.h>
+#include <llvm/Analysis/ConstantFolding.h>
 #if BOOST_VERSION < 106600
 #include <boost/uuid/sha1.hpp>
 #else
@@ -323,17 +324,17 @@ void Kernel::constructStateTypes(BuilderRef b) {
                                          StringRef name, const bool addGroupCacheLinePadding) {
 
             const auto n = structTypeVec.size();
+            std::vector<Type *> structTypes(n * 2);
             if (n == 0) {
-                return StructType::create(b->getContext(), name);
+                return StructType::create(b->getContext(), structTypes, name, true);
             }
 
-            std::vector<Type *> structTypes(n * 2);
-
+            #ifndef NDEBUG
+            unsigned expectedTotalBytes = 0;
+            #endif
             if (addGroupCacheLinePadding) {
                 // TODO: review LLVM code; I'm worried that I cannot rely on struct size to
                 // always account for internal struct alignments.
-
-                unsigned offset = 0;
                 for (unsigned i = 0; i < n; ++i) {
                     const auto & vec = structTypeVec[i];
                     StructType * const sty = StructType::create(b->getContext(), vec);
@@ -343,10 +344,13 @@ void Kernel::constructStateTypes(BuilderRef b) {
                     unsigned padding = 0;
                     if (paddingOffset != 0) {
                         padding = (cacheAlignment - paddingOffset);
-                    }
+                    }                    
                     structTypes[(i * 2)] = sty;
-                    structTypes[(i * 2) + 1] = ArrayType::get(int8Ty, padding);
-                    offset += typeSize + padding;
+                    Type * const paddingTy = ArrayType::get(int8Ty, padding);
+                    structTypes[(i * 2) + 1] = paddingTy;
+                    #ifndef NDEBUG
+                    expectedTotalBytes += typeSize + padding;
+                    #endif
                 }
             } else {
                 Type * const emptyTy = ArrayType::get(int8Ty, 0);
@@ -361,11 +365,15 @@ void Kernel::constructStateTypes(BuilderRef b) {
                 }
             }
 
-            StructType * const st = StructType::create(b->getContext(), structTypes, name);
+            StructType * const st = StructType::create(b->getContext(), structTypes, name, addGroupCacheLinePadding);
 
             #ifndef NDEBUG
             if (addGroupCacheLinePadding) {
                 const StructLayout * const sl = dl.getStructLayout(st);
+                Constant * const rawSize = ConstantExpr::getSizeOf(st);
+                ConstantInt * const size = cast<ConstantInt>(isa<ConstantInt>(rawSize) ? rawSize : ConstantFoldConstant(rawSize, dl));
+                assert ("StructLayout size does not match expected size? " && sl->getSizeInBytes() == expectedTotalBytes);
+                assert ("StructLayout size does not match getSizeOf(x)? " && size->getLimitedValue() == sl->getSizeInBytes());
                 for (unsigned i = 0; i < n; ++i) {
                     const auto offset = sl->getElementOffset(i * 2);
                     assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
@@ -388,6 +396,35 @@ void Kernel::constructStateTypes(BuilderRef b) {
     }
     mSharedStateType = nullIfEmpty(mSharedStateType);
     mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
+        DataLayout dl(b->getModule());
+        auto & out = errs();
+        out << "KERNEL: " << mKernelName << "SHARED STATE: ";
+        if (mSharedStateType) {
+            Constant * const rawSize = ConstantExpr::getSizeOf(mSharedStateType);
+            ConstantInt * const size = dyn_cast_or_null<ConstantInt>(ConstantFoldConstant(rawSize, dl));
+            if (size == nullptr) {
+                out << "unknown";
+            } else {
+                out << size->getLimitedValue() << " bytes";
+            }
+        } else {
+            out << "0" << " bytes";
+        }
+        out << ", THREAD LOCAL STATE: ";
+        if (mThreadLocalStateType) {
+            Constant * const rawSize = ConstantExpr::getSizeOf(mThreadLocalStateType);
+            ConstantInt * const size = dyn_cast_or_null<ConstantInt>(ConstantFoldConstant(rawSize, dl));
+            if (size == nullptr) {
+                out << "unknown";
+            } else {
+                out << size->getLimitedValue() << " bytes";
+            }
+        } else {
+            out << "0" << " bytes";
+        }
+        out << "\n";
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

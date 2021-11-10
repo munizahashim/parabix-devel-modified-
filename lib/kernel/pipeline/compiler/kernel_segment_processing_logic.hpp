@@ -97,6 +97,8 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     identifyPipelineInputs(mKernelId);
 
+    bool mayHaveInsufficientIO = false;
+
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
         mHasExplicitFinalPartialStride = false;
         mIsBounded = false;
@@ -110,6 +112,16 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
             const BufferPort & port = mBufferGraph[input];
             if (port.CanModifySegmentLength) {
                 mCheckInputChannels = true;
+                break;
+            }
+        }
+
+        mayHaveInsufficientIO = mCheckInputChannels;
+
+        for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & port = mBufferGraph[output];
+            if (port.CanModifySegmentLength) {
+                mayHaveInsufficientIO = true;
                 break;
             }
         }
@@ -144,7 +156,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     }
     mKernelLoopCall = b->CreateBasicBlock(prefix + "_executeKernel", mNextPartitionEntryPoint);
     mKernelCompletionCheck = b->CreateBasicBlock(prefix + "_normalCompletionCheck", mNextPartitionEntryPoint);
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         mKernelInsufficientInput = b->CreateBasicBlock(prefix + "_insufficientInput", mNextPartitionEntryPoint);
     }
     if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
@@ -204,7 +216,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (canJumpToAnotherPartition) {
         initializeJumpToNextUsefulPartitionPhis(b);
     }
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         initializeKernelInsufficientIOExitPhis(b);
     }
     initializeKernelTerminatedPhis(b);
@@ -226,7 +238,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
-    if (mCheckInputChannels && TraceIO) {
+    if (mayHaveInsufficientIO && TraceIO) {
         b->CreateUnlikelyCondBr(mBranchToLoopExit, mKernelInsufficientInput, mKernelLoopCall);
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mExhaustedPipelineInputPhi->addIncoming(mExhaustedInput, exitBlock);
@@ -295,7 +307,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL INSUFFICIENT IO EXIT
     /// -------------------------------------------------------------------------------------
 
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         writeInsufficientIOExit(b);
     }
 

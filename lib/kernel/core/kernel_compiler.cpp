@@ -449,11 +449,17 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         Value * const virtualBaseAddress = b->CreatePointerCast(nextArg(), buffer->getPointerType());
         Value * const localHandle = b->CreateAllocaAtEntryPoint(buffer->getHandleType(b));
         buffer->setHandle(localHandle);
+
+        if (LLVM_UNLIKELY(enableAsserts)) {
+            b->CreateAssert(localHandle, "%s.%s: virtual %s base address handle cannot be null",
+                            b->GetString(getName()), b->GetString(input.getName()), b->GetString("input"));
+        }
+
         buffer->setBaseAddress(b, virtualBaseAddress);
 
         if (LLVM_UNLIKELY(enableAsserts)) {
-            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual base address cannot be null",
-                            b->GetString(getName()), b->GetString(input.getName()));
+            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual %s base address cannot be null",
+                            b->GetString(getName()), b->GetString(input.getName()), b->GetString("input"));
         }
 
         /// ----------------------------------------------------
@@ -550,8 +556,12 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         }
         assert (buffer->getHandle());
         if (LLVM_UNLIKELY(enableAsserts)) {
-            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual base address cannot be null",
-                            b->GetString(getName()), b->GetString(output.getName()));
+
+            b->CreateAssert(buffer->getHandle(), "%s.%s: virtual %s base address handle cannot be null",
+                            b->GetString(getName()), b->GetString(output.getName()), b->GetString("output"));
+
+            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual base %s address cannot be null",
+                            b->GetString(getName()), b->GetString(output.getName()), b->GetString("output"));
         }
 
 
@@ -1398,7 +1408,8 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
     #ifndef NDEBUG
     SmallVector<char, 256> tmp;
     raw_svector_ostream msg(tmp);
-    if (LLVM_UNLIKELY(verifyModule(*m, &msg, nullptr))) {
+    bool BrokenDebugInfo = false;
+    if (LLVM_UNLIKELY(verifyModule(*m, &msg, &BrokenDebugInfo))) {
         m->print(errs(), nullptr);
         report_fatal_error(msg.str());
     }

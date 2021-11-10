@@ -308,6 +308,9 @@ ScanMatchKernel::ScanMatchKernel(BuilderRef b, StreamSet * const Matches, Stream
 {InternalScalar{b->getSizeTy(), "LineNum"}}) {
     addAttribute(SideEffecting());
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    if (codegen::EnableHybridThreadModel) {
+        addAttribute(IsolateOnHybridThread());
+    }
 }
 
 void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {

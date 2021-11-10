@@ -251,6 +251,11 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
                 addr = mInputVirtualBaseAddressPhi[rt.Port];
             }
 
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, rt.Port);
+            debugPrint(b, "* " + prefix + "_addr = %" PRIu64, addr);
+            #endif
+
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
 
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {

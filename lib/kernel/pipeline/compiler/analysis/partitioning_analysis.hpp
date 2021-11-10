@@ -234,8 +234,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                 // for now we simply prevent this case.
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
-                        case AttrId::InternallySynchronized:
                         case AttrId::IsolateOnHybridThread:
+                            if (mPipelineKernel->getNumOfThreads() == 1 || !codegen::EnableHybridThreadModel) {
+                                break;
+                            }
+                        case AttrId::InternallySynchronized:                        
                             V.set(nextRateId++);
                         case AttrId::CanTerminateEarly:
                         case AttrId::MayFatallyTerminate:
@@ -709,7 +712,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     BitVector onHybridThread(PartitionCount);
 
-    if (mPipelineKernel->getNumOfThreads() > 1) {
+    if (mPipelineKernel->getNumOfThreads() > 1 && codegen::EnableHybridThreadModel) {
         for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
             if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
                 assert ("more than one kernel in a hybrid partition?" && !onHybridThread.test(KernelPartitionId[i]));

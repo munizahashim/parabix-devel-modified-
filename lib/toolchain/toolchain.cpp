@@ -50,6 +50,8 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "executions due to insufficient data/space of a "
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
+                        clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
+                        clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr.")
                         CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
 
@@ -118,18 +120,23 @@ static cl::opt<unsigned, true> BufferSegmentsOption("buffer-segments", cl::locat
                                                cl::desc("Buffer Segments"), cl::value_desc("positive integer"));
 
 
-unsigned NumOfKernels = 0;
-unsigned NumOfStreamSets = 0;
-unsigned NumOfPartitions = 0;
+bool EnableHybridThreadModel = false;
+static cl::opt<bool, true> EnableHybridThreadModelOption("enable-hybrid-thread-model", cl::location(EnableHybridThreadModel), cl::init(false),
+                                               cl::desc("Enable pipeline to construct hybrid fixed data/code model."), cl::cat(CodeGenOptions));
 
-static cl::opt<unsigned, true> NumOfKernelsOption("num-kernels", cl::location(NumOfKernels), cl::init(1),
-                                               cl::desc("NumOfKernels"), cl::value_desc("positive integer"));
 
-static cl::opt<unsigned, true> NumOfStreamSetsOption("num-streamsets", cl::location(NumOfStreamSets), cl::init(1),
-                                               cl::desc("NumOfStreamSets"), cl::value_desc("positive integer"));
+//unsigned NumOfKernels = 0;
+//unsigned NumOfStreamSets = 0;
+//unsigned NumOfPartitions = 0;
 
-static cl::opt<unsigned, true> NumOfPartitionsOption("num-partitions", cl::location(NumOfPartitions), cl::init(1),
-                                               cl::desc("NumOfPartitions"), cl::value_desc("positive integer"));
+//static cl::opt<unsigned, true> NumOfKernelsOption("num-kernels", cl::location(NumOfKernels), cl::init(1),
+//                                               cl::desc("NumOfKernels"), cl::value_desc("positive integer"));
+
+//static cl::opt<unsigned, true> NumOfStreamSetsOption("num-streamsets", cl::location(NumOfStreamSets), cl::init(1),
+//                                               cl::desc("NumOfStreamSets"), cl::value_desc("positive integer"));
+
+//static cl::opt<unsigned, true> NumOfPartitionsOption("num-partitions", cl::location(NumOfPartitions), cl::init(1),
+//                                               cl::desc("NumOfPartitions"), cl::value_desc("positive integer"));
 
 
 static cl::opt<unsigned, true>
@@ -215,6 +222,7 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     return true;
     #else
     if (!TraceOption.empty()) return true;
+    if (DebugOptions.isSet(PrintKernelSizes)) return true;
     if (DebugOptions.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;

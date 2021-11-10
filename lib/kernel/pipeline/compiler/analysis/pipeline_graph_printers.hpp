@@ -284,7 +284,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             out << "]";
         }
         #endif
-
         out << "|{";
 
         if (buffer && buffer->getBufferKind() != BufferId::ExternalBuffer) {
@@ -311,6 +310,9 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         }
         if (bn.MaxAdd) {
             out << "|+" << bn.MaxAdd;
+        }
+        if (bn.CrossesHybridThreadBarrier) {
+            out << "|Hybrid";
         }
         #endif
 

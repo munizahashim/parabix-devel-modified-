@@ -1298,8 +1298,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * const alternateCapacity = b->CreateAlignedLoad(altCapacityField, sizeTyWidth);
             b->CreateAlignedStore(internalCapacity, altCapacityField, sizeTyWidth);
 
-            Value * extraCapacity = nullptr;
-
             if (hasSyncLock) {
 
                 BasicBlock * const checkForPendingConsumer = BasicBlock::Create(C, "checkForPendingConsumer", func);

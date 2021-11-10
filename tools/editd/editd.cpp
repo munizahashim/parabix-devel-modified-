@@ -357,6 +357,10 @@ multiEditdFunctionType multiEditdPipeline(CPUDriver & pxDriver) {
     P->CreateKernelCall<PreprocessKernel>(BasisBits, ChStream);
 
     const auto n = pattGroups.size();
+    if (n == 0) {
+        report_fatal_error("no patterns found");
+        exit(-1);
+    }
     std::vector<StreamSet *> MatchResults(n);
     for(unsigned i = 0; i < n; ++i){
         MatchResults[i] = P->CreateStreamSet(editDistance + 1);
@@ -420,6 +424,8 @@ editdIndexFunctionType editdIndexPatternPipeline(CPUDriver & pxDriver, unsigned 
     return reinterpret_cast<editdIndexFunctionType>(P->compile());
 }
 
+
+#undef REPORT_PAPI_TESTS
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv);

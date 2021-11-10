@@ -411,14 +411,13 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
     // kernel; otherwise we run the risk of mangling the buffer state. For safety, wait until we
     // can acquire the last consumer's lock but only release the locks that we end up skipping.
 
-    if (mCompilingHybridThread) return nullptr;
+    if (mCompilingHybridThread) {
+        return startCycleCounter(b);
+    }
 
     assert (std::find(ActivePartitions.begin(), ActivePartitions.end(), partitionId) != ActivePartitions.end());
 
     const auto n = LastStreamSet - FirstStreamSet;
-
-
-
 
     // mPartitionConsumedItemCountPhi[partitionId][k]
 

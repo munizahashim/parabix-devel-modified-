@@ -325,6 +325,12 @@ Kernel * PipelineBuilder::makeKernel() {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         out << "+SS";
     }
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
+        out << "-TL";
+    }
+    if (LLVM_UNLIKELY(codegen::EnableHybridThreadModel)) {
+        out << "+HT";
+    }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
         out << "+PAPI:" << codegen::PapiCounterOptions;
