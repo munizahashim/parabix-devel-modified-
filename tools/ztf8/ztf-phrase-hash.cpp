@@ -278,22 +278,23 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     /// TODO: use length group decompression which builds the hashtable using the compressed data
     // and replaces the codewords with phrases.
     StreamSet * u8bytes = ztfHash_u8bytes;
-    for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
-        StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
-        P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {i}));
-        //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
-        StreamSet * const groupDecoded = P->CreateStreamSet(1);
-        P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {i}));
-        //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
+    for(unsigned sym = 0; sym < SymCount; sym++) {
+        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+            StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
+            P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+            //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
+            StreamSet * const groupDecoded = P->CreateStreamSet(1);
+            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+            //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
-        StreamSet * input_bytes = u8bytes;
-        StreamSet * output_bytes = P->CreateStreamSet(1, 8);
-        // hashGroupMarks -> hashtable codeword group marks
-        // groupDecoded -> to decompress codeword marks
-        P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, i, hashGroupMarks, groupDecoded, input_bytes, output_bytes);
-        u8bytes = output_bytes;
+            StreamSet * input_bytes = u8bytes;
+            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+            // hashGroupMarks -> hashtable codeword group marks
+            // groupDecoded -> to decompress codeword marks
+            P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, sym, i, hashGroupMarks, groupDecoded, input_bytes, output_bytes);
+            u8bytes = output_bytes;
+        }
     }
-
     P->CreateKernelCall<StdOutKernel>(u8bytes);
     return reinterpret_cast<ztfHashDecmpFunctionType>(P->compile());
 }

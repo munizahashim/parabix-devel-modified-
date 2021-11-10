@@ -538,11 +538,10 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
 : MultiBlockKernel(b, "SymbolGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"keyMarks0", codeWordMarks},
                        Binding{"hashMarks0", hashMarks},
-                       Binding{"byteData", byteData, FixedRate(), LookBehind(32+1)}
+                       Binding{"byteData", byteData, BoundedRate(0,1), LookBehind(32+1)}
                    },
                    {}, {}, {},
-                   {InternalScalar{ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
-                    // Hash table 8 length-based tables with 256 16-byte entries each.
+                   {// Hash table 8 length-based tables with 256 16-byte entries each.
                     InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSym) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
@@ -550,9 +549,6 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
         mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
-    }
-    if (!DelayedAttributeIsSet()) {
-        addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
     //Type * phraseType = ArrayType::get(b->getInt8Ty(), 32);
    // addInternalScalar(ArrayType::get(phraseType, (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable");
@@ -586,16 +582,12 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * const initialPos = b->getProcessedItemCount("keyMarks0");
     Value * const avail = b->getAvailableItemCount("keyMarks0");
 
-    if (!DelayedAttributeIsSet()) {
-        // Copy pending output data.
-        Value * const initialProduced = b->getProducedItemCount("result");
-        b->CreateMemCpy(b->getRawOutputPointer("result", initialProduced), b->getScalarFieldPtr("pendingOutput"), lg.HI, 1);
-    }
-
     // Copy all new input to the output buffer; this will be then
     // overwritten when and as necessary for decompression of ZTF codes.
+    ///TODO: only copy the decompressed data, not the hashtable from the compressed data
     Value * toCopy = b->CreateMul(numOfStrides, sz_STRIDE);
     b->CreateMemCpy(b->getRawOutputPointer("result", initialPos), b->getRawInputPointer("byteData", initialPos), toCopy, 1);
+
     Type * phraseType = ArrayType::get(b->getInt8Ty(), 32);
     Value * hashTableBasePtr = b->CreateBitCast(b->getScalarFieldPtr("hashTable"), phraseType->getPointerTo());
     b->CreateBr(stridePrologue);
@@ -764,7 +756,8 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
 #if 0
     Value * encodedVal_debug = encodedVal;
 #endif
-    encodedVal = b->CreateSub(encodedVal, lg.LAST_SUFFIX_BASE);
+    //b->CallPrintInt("lastSuffixByte", encodedVal);
+    //encodedVal = b->CreateSub(encodedVal, lg.LAST_SUFFIX_BASE); //-> subtracting leads to incorrect tableIdx?
     for (unsigned i = 1; i < lg.groupInfo.encoding_bytes-1; i++) {
         curPos = b->CreateSub(curPos, sz_ONE);
         Value * suffixByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("byteData", curPos)), sizeTy);
@@ -841,13 +834,8 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
     }
-    // Although we have written the full input stream to output, there may
+    //CHECK: Although we have written the full input stream to output, there may
     // be an incomplete symbol at the end of this block.   Store the
     // data that may be overwritten as pending and set the produced item
     // count to that which is guaranteed to be correct.
-    if (!DelayedAttributeIsSet()) {
-        Value * guaranteedProduced = b->CreateSub(avail, lg.HI);
-        b->CreateMemCpy(b->getScalarFieldPtr("pendingOutput"), b->getRawOutputPointer("result", guaranteedProduced), lg.HI, 1);
-        b->setProducedItemCount("result", b->CreateSelect(b->isFinal(), avail, guaranteedProduced));
-    }
 }
