@@ -204,22 +204,22 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     addFamilyKernelProperties(b, kernelId);
 
     if (LLVM_LIKELY(kernel->isStateful())) {
-        PointerType * sharedStateTy = nullptr;
+        Type * sharedStateTy = nullptr;
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
             sharedStateTy = b->getVoidPtrTy();
         } else {
-            sharedStateTy = kernel->getSharedStateType()->getPointerTo(0);
+            sharedStateTy = kernel->getSharedStateType();
         }
         mTarget->addInternalScalar(sharedStateTy, name, groupId);
     }
 
     if (kernel->hasThreadLocal()) {
         // we cannot statically allocate a "family" thread local object.
-        PointerType * localStateTy = nullptr;
+        Type * localStateTy = nullptr;
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
             localStateTy = b->getVoidPtrTy();
         } else {
-            localStateTy = kernel->getThreadLocalStateType()->getPointerTo(0);
+            localStateTy = kernel->getThreadLocalStateType();
         }
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
@@ -288,13 +288,13 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 
     initializeKernelAssertions(b);
 
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        const Kernel * const kernel = getKernel(i);
-        if (LLVM_LIKELY(kernel->isStateful() && !kernel->externallyInitialized())) {
-            Value * const handle = kernel->createInstance(b);
-            b->setScalarField(makeKernelName(i), handle);
-        }
-    }
+//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+//        const Kernel * const kernel = getKernel(i);
+//        if (LLVM_LIKELY(kernel->isStateful() && !kernel->externallyInitialized())) {
+//            Value * const handle = kernel->createInstance(b);
+//            b->setScalarField(makeKernelName(i), handle);
+//        }
+//    }
 
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);

@@ -168,10 +168,10 @@ void PipelineKernel::addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params) const {
+void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const {
     for (const Kernel * const kernel : mKernels) {
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
-            kernel->constructFamilyKernels(b, args, params);
+            kernel->constructFamilyKernels(b, args, params, toFree);
         }
     }
 

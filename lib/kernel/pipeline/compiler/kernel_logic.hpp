@@ -13,9 +13,9 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
-        Value * handle = b->getScalarField(makeKernelName(kernelId));
+        Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId));
         if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
-            handle = b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo());
+            handle = b->CreateLoad(b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo()->getPointerTo()));
         }
         mKernelSharedHandle = handle;
     }

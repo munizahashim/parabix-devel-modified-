@@ -1074,6 +1074,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     }
 
     Value * sharedHandle = nullptr;
+    NestedStateObjs toFree;
     BEGIN_SCOPED_REGION
     ParamMap paramMap;
     for (const auto & input : getInputScalarBindings()) {
@@ -1082,7 +1083,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         paramMap.insert(std::make_pair(scalar, value));
     }
     InitArgs args;
-    sharedHandle = constructFamilyKernels(b, args, paramMap);
+    sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
     END_SCOPED_REGION
     assert (isStateful() || sharedHandle == nullptr);
 
@@ -1178,13 +1179,12 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         b->CreateBr(resumeProgram);
         b->SetInsertPoint(resumeProgram);
     }
-    if (isStateful()) {
-        // call and return the final output value(s)
-        Value * const retVal = finalizeInstance(b, sharedHandle);
-        b->CreateRet(retVal);
-    } else {
-        b->CreateRetVoid();
+
+    Value * const result = finalizeInstance(b, sharedHandle);
+    for (Value * stateObj : toFree) {
+        b->CreateFree(stateObj);
     }
+    b->CreateRet(result);
     return main;
 }
 
@@ -1258,7 +1258,7 @@ Value * Kernel::finalizeInstance(BuilderRef b, Value * const handle) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params) const {
+Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params, NestedStateObjs & toFree) const {
 
     // TODO: need to test for termination on init call
 
@@ -1276,6 +1276,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
     if (LLVM_LIKELY(isStateful())) {
         handle = createInstance(b);
         initArgs.push_back(handle);
+        toFree.push_back(handle);
         addHostArg(handle);
     }
     for (const Binding & input : mInputScalars) {
@@ -1289,7 +1290,8 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         }
         initArgs.push_back(f->second); assert (initArgs.back());
     }
-    recursivelyConstructFamilyKernels(b, initArgs, params);
+    NestedStateObjs toFree;
+    recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
     Function * init = getInitializeFunction(b);
     b->CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
@@ -1318,7 +1320,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */) const {
+void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */, NestedStateObjs & /* toFree */) const {
 
 }
 

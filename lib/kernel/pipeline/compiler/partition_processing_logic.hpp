@@ -46,42 +46,44 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
 
-            if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                continue;
-            }
-
             if (LLVM_UNLIKELY(KernelOnHybridThread.test(producer) != mCompilingHybridThread)) {
                 continue;
             }
 
-            auto lastReader = producer;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                lastReader = std::max(lastReader, consumer);
-            }
-
-            const auto prodPartId = KernelPartitionId[producer];
-            const auto readsPartId = KernelPartitionId[lastReader];
 
             const BufferPort & outputPort = mBufferGraph[output];
             const auto prefix = makeBufferName(producer, outputPort.Port);
 
-            const auto prodPrefix = prefix + "_produced@partition";
-
             const auto k = streamSet - FirstStreamSet;
 
-            for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
-                if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
-                    b->SetInsertPoint(mPartitionEntryPoint[partitionId]);
-                    PHINode * const phi = b->CreatePHI(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId));
-                    mPartitionProducedItemCountPhi[partitionId][k] = phi;
+            auto lastReader = producer;
+            if (producer != PipelineInput) {
+                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    const auto consumer = target(input, mBufferGraph);
+                    lastReader = std::max(lastReader, consumer);
+                }
+                const auto readsPartId = KernelPartitionId[lastReader];
+                const auto prodPrefix = prefix + "_produced@partition";
+                const auto prodPartId = KernelPartitionId[producer];
+                for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
+                    if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
+                        b->SetInsertPoint(mPartitionEntryPoint[partitionId]);
+                        PHINode * const phi = b->CreatePHI(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId));
+                        mPartitionProducedItemCountPhi[partitionId][k] = phi;
+                    }
                 }
             }
 
-            auto lastConsumer = producer;
+            auto firstConsumerOrProducer = producer;
+            auto lastConsumer = lastReader;
             if (LLVM_UNLIKELY(producer == PipelineInput)) {
                 // For the purpose of reporting the consumed item count, the pipeline output
                 // is always a "consumer" of the pipeline input.
+                firstConsumerOrProducer = PipelineOutput;
+                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    const auto consumer = target(input, mConsumerGraph);
+                    firstConsumerOrProducer = std::min(firstConsumerOrProducer, consumer);
+                }
                 lastConsumer = PipelineOutput;
             } else {
                 for (const auto input : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
@@ -90,12 +92,12 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
                 }
             }
 
+            const auto prodPartId = KernelPartitionId[firstConsumerOrProducer];
             const auto consPartId = KernelPartitionId[lastConsumer];
-            assert (consPartId >= readsPartId || consPartId == prodPartId);
 
             const auto consPrefix = prefix + "_consumed@partition";
 
-            for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
+            for (auto partitionId = prodPartId + 1; partitionId <= consPartId; ++partitionId) {
                 if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
                     b->SetInsertPoint(mPartitionEntryPoint[partitionId]);
                     PHINode * const phi = b->CreatePHI(sizeTy, PartitionCount, consPrefix + std::to_string(partitionId));
@@ -113,13 +115,6 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     assert (KernelPartitionId[PipelineInput] == 0);
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
-
-//    for (unsigned partId = 1; partId < (PartitionCount - 1); ++partId) {
-//        const auto t = mTerminationCheck[partId];
-//        if (t) {
-//            toCheck.set(partId);
-//        }
-//    }
 
     for (unsigned partId : ActivePartitions) {
         const auto t = mTerminationCheck[partId];
@@ -151,7 +146,7 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
                 for (const auto input : make_iterator_range(in_edges(k, mBufferGraph))) {
                     const auto streamSet = source(input, mBufferGraph);
                     const auto producer = parent(streamSet, mBufferGraph);
-                    if (LLVM_UNLIKELY(producer == PipelineInput)) {
+                    if (producer == PipelineInput) {
                         continue;
                     }
                     const auto prodPartId = KernelPartitionId[producer];

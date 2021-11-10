@@ -959,7 +959,6 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) 
  * @brief callGenerateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
-
     b->setCompiler(this);
     mCurrentMethod = mTarget->getFinalizeFunction(b);
     mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
@@ -976,10 +975,9 @@ inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
     initializeOwnedBufferHandles(b, InitializeOptions::SkipThreadLocal);
     mTarget->generateFinalizeMethod(b); // may be overridden by the Kernel subtype
     const auto outputs = getFinalOutputScalars(b);
-    if (LLVM_LIKELY(mTarget->isStateful())) {
-        b->CreateFree(mSharedHandle);
-    }
-
+//    if (LLVM_LIKELY(mTarget->isStateful())) {
+//        b->CreateFree(mSharedHandle);
+//    }
     if (outputs.empty()) {
         b->CreateRetVoid();
     } else {
@@ -991,9 +989,6 @@ inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
         }
     }
     clearInternalStateAfterCodeGen();
-
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

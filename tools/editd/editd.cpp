@@ -271,7 +271,7 @@ public:
         return mSignature;
     }
     bool hasSignature() const override { return true; }
-    bool hasFamilyName() const override { return true; }
+    // bool hasFamilyName() const override { return true; }
 
 protected:
     void generatePabloMethod() override;
@@ -423,9 +423,6 @@ editdIndexFunctionType editdIndexPatternPipeline(CPUDriver & pxDriver, unsigned 
     scan->link("wrapped_report_pos", wrapped_report_pos);
     return reinterpret_cast<editdIndexFunctionType>(P->compile());
 }
-
-
-#undef REPORT_PAPI_TESTS
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv);
