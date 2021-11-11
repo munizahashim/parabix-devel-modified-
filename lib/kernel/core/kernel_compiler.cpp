@@ -1003,6 +1003,8 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
     return outputs;
 }
 
+#if 1
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1099,7 +1101,6 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
     enumerate(mInputScalars, 0);
 
-
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
 
@@ -1155,8 +1156,196 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
             addToScalarFieldMap(alias.first, f->second, nullptr);
         }
     }
+}
+
+#else
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initializeScalarMap
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions options) {
+
+    FixedArray<Value *, 2> indices;
+    indices[0] = b->getInt32(0);
+
+    const auto sharedTy = mTarget->getSharedStateType();
+
+    const auto threadLocalTy = mTarget->getThreadLocalStateType();
+
+    #ifndef NDEBUG
+    auto verifyStateType = [](Value * const handle, StructType * const stateType) {
+        if (handle == nullptr && stateType == nullptr) {
+            return true;
+        }
+        if (handle == nullptr || stateType == nullptr) {
+            return false;
+        }
+        if (handle->getType() != stateType->getPointerTo()) {
+            return false;
+        }
+        return !stateType->isOpaque();
+    };
+    assert ("incorrect shared handle/type!" && verifyStateType(mSharedHandle, sharedTy));
+    if (options == InitializeOptions::IncludeThreadLocal) {
+        assert ("incorrect thread local handle/type!" && verifyStateType(mThreadLocalHandle, threadLocalTy));
+    }
+    #undef CHECK_TYPES
+    #endif
+
+    mScalarFieldMap.clear();
+
+    auto addToScalarFieldMap = [&](StringRef bindingName, Value * const scalar, Type * const expectedType) {
+        const auto i = mScalarFieldMap.insert(std::make_pair(bindingName, scalar));
+        if (LLVM_UNLIKELY(!i.second)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Kernel " << getName() << " contains two scalar or alias fields named " << bindingName;
+            report_fatal_error(out.str());
+        }
+        Type * const actualType = scalar->getType()->getPointerElementType();
+        if (LLVM_UNLIKELY(actualType != expectedType)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Scalar " << getName() << '.' << bindingName << " was expected to be a ";
+            expectedType->print(out);
+            out << " but was stored as a ";
+            actualType->print(out);
+            report_fatal_error(out.str());
+        }
+    };
+
+    flat_set<unsigned> sharedGroups;
+    flat_set<unsigned> threadLocalGroups;
+
+    if (mInputScalars.size() > 0) {
+        sharedGroups.insert(0);
+    }
+
+    for (const auto & scalar : mInternalScalars) {
+        assert (scalar.getValueType());
+        switch (scalar.getScalarType()) {
+            case ScalarType::Internal:
+                sharedGroups.insert(scalar.getGroup());
+                break;
+            case ScalarType::ThreadLocal:
+                threadLocalGroups.insert(scalar.getGroup());
+                break;
+            default: break;
+        }
+    }
+
+    if (mOutputScalars.size() > 0 && sharedGroups.size() > 1) {
+        sharedGroups.insert(-1U);
+    }
+
+    const auto n = sharedGroups.size();
+    std::vector<unsigned> sharedCount(n + 1, 0);
+
+    const auto inputCount = mInputScalars.size();
+    if (inputCount > 0) {
+        sharedCount[1] = inputCount;
+    }
+    const auto outputCount = mOutputScalars.size();
+    if (outputCount > 0) {
+        sharedCount[n] += outputCount;
+    }
+
+    const auto m = threadLocalGroups.size();
+    std::vector<unsigned> threadLocalCount(m + 1, 0);
+
+    auto getGroupIndex = [&](const flat_set<unsigned> & groups, const unsigned group) {
+        const auto f = groups.find(group);
+        assert (f != groups.end());
+        return static_cast<size_t>(std::distance(groups.begin(), f));
+    };
+
+    for (const auto & scalar : mInternalScalars) {
+        switch (scalar.getScalarType()) {
+            case ScalarType::Internal:
+                sharedCount[getGroupIndex(sharedGroups, scalar.getGroup()) + 1]++;
+                break;
+            case ScalarType::ThreadLocal:
+                threadLocalCount[getGroupIndex(threadLocalGroups, scalar.getGroup()) + 1]++;
+                break;
+            default: break;
+        }
+    }
+
+    sharedCount[0] = 1;
+    for (unsigned i = 1; i <= n; ++i) {
+        sharedCount[i] = (sharedCount[i] * 2) + sharedCount[i - 1];
+    }
+
+    threadLocalCount[0] = 1;
+    for (unsigned i = 1; i <= m; ++i) {
+        threadLocalCount[i] = (threadLocalCount[i] * 2) + threadLocalCount[i - 1];
+    }
+
+    auto enumerate = [&](const Bindings & bindings, const unsigned groupId) {
+        auto & k = sharedCount[groupId];
+        for (const auto & binding : bindings) {
+            assert (sharedTy && sharedTy->getStructElementType(k) == binding.getType());
+            indices[1] = b->getInt32(k);
+            k += 2;
+            Value * const scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
+            assert (scalar->getType()->getPointerElementType() == binding.getType());
+            addToScalarFieldMap(binding.getName(), scalar, binding.getType());
+        }
+    };
+
+    enumerate(mInputScalars, 0);
+
+    for (const auto & binding : mInternalScalars) {
+        Value * scalar = nullptr;
+        switch (binding.getScalarType()) {
+            case ScalarType::Internal:
+                assert (mSharedHandle);
+                BEGIN_SCOPED_REGION
+                const auto idx = getGroupIndex(sharedGroups, binding.getGroup());
+                auto & k = sharedCount[idx];
+                assert (k < sharedCount[idx + 1]);
+                assert (sharedTy && sharedTy->getStructElementType(k) == binding.getValueType());
+                indices[1] = b->getInt32(k);
+                k += 2;
+                scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
+                END_SCOPED_REGION
+                break;
+            case ScalarType::ThreadLocal:
+                if (options == InitializeOptions::SkipThreadLocal) continue;
+                assert (mThreadLocalHandle);
+                BEGIN_SCOPED_REGION
+                const auto idx = getGroupIndex(threadLocalGroups, binding.getGroup());
+                auto & k = threadLocalCount[idx];
+                assert (k < threadLocalCount[idx + 1]);
+                assert (threadLocalTy->getStructElementType(k) == binding.getValueType());
+                indices[1] = b->getInt32(k);
+                k += 2;
+                scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                END_SCOPED_REGION
+                break;
+            case ScalarType::NonPersistent:
+                scalar = b->CreateAllocaAtEntryPoint(binding.getValueType());
+                b->CreateStore(Constant::getNullValue(binding.getValueType()), scalar);
+                break;
+            default: llvm_unreachable("I/O scalars cannot be internal");
+        }
+        assert (scalar->getType()->getPointerElementType() == binding.getValueType());
+        addToScalarFieldMap(binding.getName(), scalar, binding.getValueType());
+    }
+
+    enumerate(mOutputScalars, n - 1U);
+
+    // finally add any aliases
+    for (const auto & alias : mScalarAliasMap) {
+        const auto f = mScalarFieldMap.find(alias.second);
+        if (f != mScalarFieldMap.end()) {
+            addToScalarFieldMap(alias.first, f->second, nullptr);
+        }
+    }
 
 }
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAlias
@@ -1296,6 +1485,7 @@ StreamSetPort KernelCompiler::getStreamPort(const StringRef name) const {
  * @brief getScalarValuePtr
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * /* b */, const StringRef name) const {
+    assert (this);
     if (LLVM_UNLIKELY(mScalarFieldMap.empty())) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);

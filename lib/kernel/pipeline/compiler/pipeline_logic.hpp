@@ -224,7 +224,6 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto bufferVertex = target(e, mBufferGraph);

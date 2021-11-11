@@ -314,7 +314,7 @@ public:
 
     virtual void setOutputScalarAt(const unsigned i, Scalar * value);
 
-    void addInternalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 1) {
+    void addInternalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
         mInternalScalars.emplace_back(ScalarType::Internal, type, name, group);
     }
@@ -324,7 +324,7 @@ public:
         mInternalScalars.emplace_back(ScalarType::NonPersistent, type, name, 0);
     }
 
-    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 1) {
+    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
         mInternalScalars.emplace_back(ScalarType::ThreadLocal, type, name, group);
     }

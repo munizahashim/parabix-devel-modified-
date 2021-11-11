@@ -47,7 +47,9 @@ Value * KernelBuilder::getScalarField(const StringRef fieldName) {
  * @brief setScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::setScalarField(const StringRef fieldName, Value * const value) {
-    CreateStore(value, getScalarFieldPtr(fieldName));
+    Value * const ptr = getScalarFieldPtr(fieldName);
+    assert (value->getType() == ptr->getType()->getPointerElementType());
+    CreateStore(value, ptr);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
