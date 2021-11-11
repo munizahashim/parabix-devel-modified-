@@ -43,7 +43,7 @@ PapiCounter<N>::PapiCounter(std::initializer_list<int> events) {
 
     fEventSet = PAPI_NULL;
 
-    if (codegen::PapiCounterOptions.empty()) {
+    if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) == 0)) {
 
         // PAPI init
         int rval = PAPI_library_init(PAPI_VER_CURRENT);
