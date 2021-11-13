@@ -27,3 +27,17 @@ DEPS
     re.cc
     re.parse
 )
+
+parabix_add_executable(
+NAME
+    gcount
+SRC
+    gcount.cpp
+DEPS
+    fileselect
+    kernel.basis
+    kernel.io
+    re.cc
+    re.parse
+    grep
+)
