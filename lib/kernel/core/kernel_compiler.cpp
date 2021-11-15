@@ -442,8 +442,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         /// virtual base address
         /// ----------------------------------------------------
         StreamSetBuffer * const buffer = mStreamSetInputBuffers[i].get();
-        assert (buffer && buffer->isLinear());
-        assert (isa<ExternalBuffer>(buffer));
 
         const Binding & input = mInputStreamSets[i];
         Value * const virtualBaseAddress = b->CreatePointerCast(nextArg(), buffer->getPointerType());
@@ -531,7 +529,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         /// logical buffer base address
         /// ----------------------------------------------------
         StreamSetBuffer * const buffer = mStreamSetOutputBuffers[i].get();
-        assert (buffer && buffer->isLinear());
 
         const Binding & output = mOutputStreamSets[i];
         const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);

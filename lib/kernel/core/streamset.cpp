@@ -751,18 +751,18 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
-    indices[1] = b->getInt32(EffectiveCapacity);
-    Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
-    b->CreateStore(capacity, effCapacityField);
+    indices[1] = b->getInt32(InternalCapacity);
+    Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
+    b->CreateStore(capacity, capacityField);
 
     if (mLinear) {
         indices[1] = b->getInt32(MallocedAddress);
         Value * const initialField = b->CreateInBoundsGEP(handle, indices);
         b->CreateStore(adjBaseAddress, initialField);
 
-        indices[1] = b->getInt32(InternalCapacity);
-        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
-        b->CreateStore(capacity, capacityField);
+        indices[1] = b->getInt32(EffectiveCapacity);
+        Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(capacity, effCapacityField);
 
         indices[1] = b->getInt32(AlternateAddress);
         Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
@@ -779,10 +779,6 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         b->CreateStore(b->getSize(0), delayField);
 
     } else {
-
-        indices[1] = b->getInt32(InternalCapacity);
-        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
-        b->CreateStore(capacity, capacityField);
 
         indices[1] = b->getInt32(AlternateAddress);
         Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
