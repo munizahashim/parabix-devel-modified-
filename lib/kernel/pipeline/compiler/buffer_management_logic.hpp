@@ -41,13 +41,6 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadExternalStreamSetHandles
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadExternalStreamSetHandles(BuilderRef /* b */) {
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadInternalStreamSetHandles
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal) {
@@ -173,28 +166,29 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                        buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
             #endif
 
-            if (LLVM_UNLIKELY(CheckAssertions)) {
-                DataLayout DL(b->getModule());
-                Value * const mAddr = buffer->getMallocAddress(b);
-                Type * const intPtrTy = DL.getIntPtrType(mAddr->getType());
-                Value * const mAddrInt = b->CreatePtrToInt(mAddr, intPtrTy);
+//            if (LLVM_UNLIKELY(CheckAssertions)) {
+//                DataLayout DL(b->getModule());
+//                Value * const mAddr = buffer->getMallocAddress(b);
+//                Type * const intPtrTy = DL.getIntPtrType(mAddr->getType());
+//                Value * const mAddrInt = b->CreatePtrToInt(mAddr, intPtrTy);
 
-                const BufferPort & rd = mBufferGraph[e];
-                const auto prefix = makeBufferName(i, rd.Port);
+//                const BufferPort & rd = mBufferGraph[e];
+//                const auto prefix = makeBufferName(i, rd.Port);
 
-                Constant * const prefixName = b->GetString(prefix);
+//                Constant * const prefixName = b->GetString(prefix);
 
-                Constant * const cacheAlign = ConstantInt::get(intPtrTy, b->getCacheAlignment());
-                Constant * const blockAlign = ConstantInt::get(intPtrTy, b->getBitBlockWidth() / 8);
+//                Constant * const cacheAlign = ConstantInt::get(intPtrTy, b->getCacheAlignment());
+//                Constant * const blockAlign = ConstantInt::get(intPtrTy, b->getBitBlockWidth() / 8);
 
-                b->CreateAssertZero(b->CreateURem(mAddrInt, cacheAlign),
-                                    "%s: malloc addr is not cache-aligned", prefixName);
+//                b->CreateAssertZero(b->CreateURem(mAddrInt, cacheAlign),
+//                                    "%s: malloc addr 0x%" PRIx64 " is not cache-aligned", prefixName, mAddrInt);
 
-                Value * const mOverInt = b->CreatePtrToInt(buffer->getOverflowAddress(b), intPtrTy);
 
-                b->CreateAssertZero(b->CreateURem(mOverInt, blockAlign),
-                                    "%s: overflow addr is not block-aligned", prefixName);
-            }
+//                Value * const mOverInt = b->CreatePtrToInt(buffer->getOverflowAddress(b), intPtrTy);
+
+//                b->CreateAssertZero(b->CreateURem(mOverInt, blockAlign),
+//                                    "%s: overflow addr 0x%" PRIx64 " is not block-aligned", prefixName, mOverInt);
+//            }
 
 
         }
@@ -239,16 +233,15 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief resetInternalBufferHandles
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::resetInternalBufferHandles() {
-    #ifndef NDEBUG
+void PipelineCompiler::resetInternalBufferHandles() {
     for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
         const BufferNode & bn = mBufferGraph[i];
-        if (LLVM_LIKELY(bn.isInternal())) {
-            StreamSetBuffer * const buffer = bn.Buffer;
-            buffer->setHandle(nullptr);
+        if (LLVM_UNLIKELY(bn.isExternal())) {
+            continue;
         }
+        StreamSetBuffer * const buffer = bn.Buffer;
+        buffer->setHandle(nullptr);
     }
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -286,6 +279,47 @@ void PipelineCompiler::constructStreamSetBuffers(BuilderRef /* b */) {
 
 }
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readAvailableItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
+
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = source(e, mBufferGraph);
+        const auto f = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(f, mBufferGraph);
+        const auto partitionId = KernelPartitionId[producer];
+
+        bool newTerm = false;
+
+        if (mPartitionTerminationSignal[partitionId] == nullptr) {
+            mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
+            newTerm = true;
+        }
+
+        if (mLocallyAvailableItems[streamSet] == nullptr) {
+            const BufferPort & outputPort = mBufferGraph[f];
+            assert (outputPort.Port.Type == PortType::Output);
+            const auto prefix = makeBufferName(producer, outputPort.Port);
+
+            Value * produced = nullptr;
+            if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            } else {
+                produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+            }
+            mLocallyAvailableItems[streamSet] = produced;
+        }
+
+        const ConsumerNode & cn = mConsumerGraph[streamSet];
+        if (cn.Consumed == nullptr) {
+            cn.Consumed = mLocallyAvailableItems[streamSet];
+        }
+
+    }
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readProcessedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -296,11 +330,23 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, inputPort);
         Value * const processed = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         mProcessedItemCountPtr[inputPort] = processed;
-        mInitiallyProcessedItemCount[inputPort] = b->CreateLoad(processed);
+        Value * itemCount = b->CreateLoad(processed);
+        mInitiallyProcessedItemCount[inputPort] = itemCount;
         if (br.IsDeferred) {
             Value * const deferred = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             mProcessedDeferredItemCountPtr[inputPort] = deferred;
-            mInitiallyProcessedDeferredItemCount[inputPort] = b->CreateLoad(deferred);
+            itemCount = b->CreateLoad(deferred);
+            mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
+        }
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            const auto streamSet = source(e, mBufferGraph);
+            const Binding & binding = getInputBinding(mKernelId, inputPort);
+            assert (mLocallyAvailableItems[streamSet]);
+            Value * valid = b->CreateICmpULE(itemCount, mLocallyAvailableItems[streamSet]);
+            b->CreateAssert(valid, "%s:%s processed count (%" PRIu64 ") "
+                                   "cannot be more than its avail count (%" PRIu64 ")",
+                            mCurrentKernelName,
+                            b->GetString(binding.getName()), processed, mLocallyAvailableItems[streamSet]);
         }
     }
 }

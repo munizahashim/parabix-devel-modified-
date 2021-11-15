@@ -747,6 +747,7 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
     Value * const baseAddress = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
+
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
@@ -1189,7 +1190,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
     if (hasSyncLock) {
         name << '_' << syncStep;
     }
-
 
     Value * const myHandle = getHandle();
 

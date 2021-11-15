@@ -669,7 +669,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
             if (LLVM_LIKELY(N.isOwned() && N.Locality != BufferLocality::ThreadLocal)) {
-                outputRate.CanModifySegmentLength = (!N.IsLinear) || N.CrossesHybridThreadBarrier;
+                outputRate.CanModifySegmentLength = (!N.IsLinear); // || N.CrossesHybridThreadBarrier;
             }
         }
     }
@@ -829,11 +829,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
-    auto id = out_degree(PipelineInput, mBufferGraph) + in_degree(PipelineOutput, mBufferGraph);
-
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
-
-
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
@@ -846,7 +842,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         const Binding & output = producerRate.Binding;
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isUnowned())) {
-            buffer = new ExternalBuffer(id++, b, output.getType(), true, 0);
+            buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
         } else { // is internal buffer
 
             // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
@@ -854,20 +850,19 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
             // analyze any consumption rates.
 
-            if (bn.Locality == BufferLocality::GloballyShared && !bn.CrossesHybridThreadBarrier) {
+            if (bn.Locality == BufferLocality::GloballyShared || bn.CrossesHybridThreadBarrier) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
                 auto bufferSize = bn.RequiredCapacity * (mNumOfThreads);
                 assert (bufferSize > 0);
-                buffer = new DynamicBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
-                bn.IsLinear &= !bn.CrossesHybridThreadBarrier;
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal || bn.CrossesHybridThreadBarrier) {
                     bufferSize *= (mNumOfThreads);
                 }
-                buffer = new StaticBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
         }
         assert ("missing buffer?" && buffer);

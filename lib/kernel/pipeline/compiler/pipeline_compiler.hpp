@@ -68,6 +68,8 @@ const static std::string LOGICAL_SEGMENT_SUFFIX = ".LSN";
 
 const static std::string DEBUG_FD = ".DFd";
 
+const static std::string HYBRID_SYNCHRONIZATION_SUFFIX = ".HSS";
+
 const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
@@ -149,7 +151,6 @@ private:
 
 public:
 
-    void addPipelinePriorItemCountProperties(BuilderRef b);
     void addInternalKernelProperties(BuilderRef b, const unsigned kernelId);
     void generateSingleThreadKernelMethod(BuilderRef b);
     void generateMultiThreadKernelMethod(BuilderRef b);
@@ -206,6 +207,7 @@ public:
 
 // inter-kernel codegen functions
 
+    void readAvailableItemCounts(BuilderRef b);
     void readProcessedItemCounts(BuilderRef b);
     void readProducedItemCounts(BuilderRef b);
 
@@ -317,7 +319,7 @@ public:
     void checkIfKernelIsAlreadyTerminated(BuilderRef b);
     Value * readTerminationSignal(BuilderRef b, const unsigned kernelId);
     void writeTerminationSignal(BuilderRef b, Value * const signal);
-    Value * hasPipelineTerminated(BuilderRef b) const;
+    Value * hasPipelineTerminated(BuilderRef b);
     void signalAbnormalTermination(BuilderRef b);
     LLVM_READNONE static Constant * getTerminationSignal(BuilderRef b, const TerminationSignal type);
 
@@ -339,12 +341,12 @@ public:
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
     unsigned getLastConsumerOfStreamSet(const size_t streamSet) const;
+    void resetConsumerGraphState();
 
 // buffer management codegen functions
 
     void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index);
     void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
-    void loadExternalStreamSetHandles(BuilderRef b);
     void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
     void releaseOwnedBuffers(BuilderRef b, const bool nonLocal);
     void resetInternalBufferHandles();
@@ -424,6 +426,9 @@ public:
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId);
     void verifyCurrentSynchronizationLock(BuilderRef b) const;
     Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const;
+
+    void acquireHybridThreadSynchronizationLock(BuilderRef b);
+    void releaseHybridThreadSynchronizationLock(BuilderRef b);
 
 // family functions
 
@@ -668,7 +673,7 @@ protected:
     PHINode *                                   mFixedRateFactorPhi = nullptr;
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
-    Value *                                     mAnyClosed = nullptr;
+    std::array<Value *, 2>                      mAnyClosed;
 
     BitVector                                   mHasPipelineInput;
 

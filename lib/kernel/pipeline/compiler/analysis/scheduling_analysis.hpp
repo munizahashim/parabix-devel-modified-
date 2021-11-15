@@ -108,9 +108,8 @@ void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, random_eng
     const auto partial = scheduleProgramGraph(P, rng);
     const auto full = assembleFullSchedule(P, partial);
     const auto schedule = selectScheduleFromDAWG(full);
-//    errs() << "addSchedulingConstraints\n";
     addSchedulingConstraints(schedule);
-//    printRelationshipGraph(Relationships, errs(), "Final");
+
 
 }
 

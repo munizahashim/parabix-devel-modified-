@@ -272,6 +272,7 @@ private:
 
 #ifndef NDEBUG
 static bool isFromCurrentFunction(BuilderRef b, const Value * const value, const bool allowNull = true) {
+    assert (value || allowNull);
     if (value == nullptr) {
         return allowNull;
     }

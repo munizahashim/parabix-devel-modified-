@@ -192,6 +192,45 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
 
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief acquireCurrentSegment
+ *
+ * Before the segment is processed, this loads the segment number of the kernel state and ensures the previous
+ * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
+    if (PartitionOnHybridThread.any()) {
+        const auto prefix = mCompilingHybridThread ? "1" : "0";
+        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + HYBRID_SYNCHRONIZATION_SUFFIX);
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
+        BasicBlock * const acquire = b->CreateBasicBlock("hybrid_sync_acquire" + LOGICAL_SEGMENT_SUFFIX, nextNode);
+        BasicBlock * const acquired = b->CreateBasicBlock("hybrid_sync_acquired" + LOGICAL_SEGMENT_SUFFIX, nextNode);
+        b->CreateBr(acquire);
+
+        b->SetInsertPoint(acquire);
+        Value * const currentSegNo = b->CreateAtomicLoadAcquire(waitingOnPtr);
+        Value * const limit = b->CreateAdd(currentSegNo, b->getSize(mNumOfThreads - 1));
+        Value * const ready = b->CreateICmpULE(mSegNo, limit);
+        b->CreateLikelyCondBr(ready, acquired, acquire);
+
+        b->SetInsertPoint(acquired);
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseCurrentSegment
+ *
+ * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
+    if (PartitionOnHybridThread.any()) {
+        const auto prefix = mCompilingHybridThread ? "0" : "1";
+        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + HYBRID_SYNCHRONIZATION_SUFFIX);
+        b->CreateAtomicStoreRelease(mNextSegNo, waitingOnPtr);
+    }
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {

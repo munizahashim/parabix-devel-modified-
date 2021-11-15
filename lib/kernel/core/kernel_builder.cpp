@@ -40,7 +40,11 @@ Value * KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
  * @brief getScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelBuilder::getScalarField(const StringRef fieldName) {
-    return CreateLoad(getScalarFieldPtr(fieldName));
+    Value * const ptr = getScalarFieldPtr(fieldName);
+    Type * const valTy = cast<PointerType>(ptr->getType())->getElementType();
+    assert (valTy->isSized());
+    const auto align = valTy->getPrimitiveSizeInBits();
+    return align ? CreateAlignedLoad(ptr, align / 8) : CreateLoad(ptr);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -48,8 +52,15 @@ Value * KernelBuilder::getScalarField(const StringRef fieldName) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::setScalarField(const StringRef fieldName, Value * const value) {
     Value * const ptr = getScalarFieldPtr(fieldName);
-    assert (value->getType() == ptr->getType()->getPointerElementType());
-    CreateStore(value, ptr);
+    Type * const valTy = value->getType();
+    assert (valTy == cast<PointerType>(ptr->getType())->getElementType());
+    assert (valTy->isSized());
+    const auto align = valTy->getPrimitiveSizeInBits();
+    if (align) {
+        CreateAlignedStore(value, ptr, align / 8);
+    } else {
+        CreateStore(value, ptr);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

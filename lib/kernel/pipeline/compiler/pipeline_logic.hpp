@@ -107,7 +107,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput);
     addConsumerKernelProperties(b, PipelineInput);
-    addPipelinePriorItemCountProperties(b);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
@@ -127,39 +126,10 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addPipelinePriorItemCountProperties
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addPipelinePriorItemCountProperties(BuilderRef b) {
-    // If we have external I/O, it's possible that the processed/produced counts passed into
-    // the pipeline are greater than the expected number. E.g.,, the OptimizationBranch kernel
-    // could perform a segment of work utilizing one branch A before switching to branch B. The
-    // latter would be unaware of any computations performed by the former and (unless the
-    // OptimizationBranch adjusted the item counts and the virtual base address of each stream)
-    // and would try to redo the work, likely leading to invalid output. To handle it in a
-    // general way, the pipeline automatically increments all of the internal processed/
-    // produced counts of the
-
-//    if (ExternallySynchronized) {
-
-//        IntegerType * const sizeTy = b->getSizeTy();
-
-//        for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-//            const BufferPort & br = mBufferGraph[input];
-//            const auto prefix = makeBufferName(PipelineInput, br.Port);
-//            mTarget->addInternalScalar(sizeTy, prefix + EXTERNAL_IO_PRIOR_ITEM_COUNT_SUFFIX, 0);
-//        }
-
-//        for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-//            const BufferPort & br = mBufferGraph[output];
-//            const auto prefix = makeBufferName(PipelineOutput, br.Port);
-//            mTarget->addInternalScalar(sizeTy, prefix + EXTERNAL_IO_PRIOR_ITEM_COUNT_SUFFIX, 0);
-//        }
-
-//    }
+    if (PartitionOnHybridThread.any()) {
+        mTarget->addInternalScalar(sizeTy, "0" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
+        mTarget->addInternalScalar(sizeTy, "1" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -431,10 +401,9 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     createThreadStateForSingleThread(b);
     initializeForAllKernels();
     start(b);
-    for (ActiveKernelIndex = 0; ActiveKernelIndex < ActiveKernels.size() - 1; ++ActiveKernelIndex) {
-        if (ActiveKernelIndex == 0) {
-            branchToInitialPartition(b);
-        }
+    ActiveKernelIndex = 0;
+    branchToInitialPartition(b);
+    for (; ActiveKernelIndex < ActiveKernels.size() - 1; ++ActiveKernelIndex) {
         setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
         executeKernel(b);
     }
@@ -724,63 +693,18 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             }
             assert (KernelPartitionId[PipelineInput] == 0);
             assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
-
-//            for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
-//                if (mTerminationCheck[partitionId] && PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread) {
-//                    requiresTerminationSignalFromAlternateThread.set(partitionId);
-//                }
-//            }
         }
-
-        auto loadCrossThreadIOState = [&](const unsigned firstKernel, const unsigned lastKernel, const unsigned nextPartitionId) {
-            auto lastPartitionId = 0U;
-            for (auto kernel = firstKernel; kernel < lastKernel; ++kernel) {
-                loadLastGoodVirtualBaseAddressesOfUnownedBuffers(b, kernel);
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    if (isInputFromAlternateThread.test(streamSet)) {
-                        const BufferPort & outputPort = mBufferGraph[output];
-                        Value * produced = nullptr;
-                        const auto prefix = makeBufferName(kernel, outputPort.Port);
-                        if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
-                            produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-                        } else {
-                            produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
-                        }
-                        mLocallyAvailableItems[streamSet] = produced;
-                        initializeConsumedItemCount(b, kernel, outputPort.Port, produced);
-                    }
-                }
-                const auto partId = KernelPartitionId[kernel];
-                assert (partId != nextPartitionId);
-                if (lastPartitionId != partId) {
-                    if (requiresTerminationSignalFromAlternateThread.test(partId)) {
-                        mPartitionTerminationSignal[partId] = readTerminationSignal(b, partId);
-                    }
-                    lastPartitionId = partId;
-                }
-            }
-        };
-
 
         start(b);
         const auto m = ActiveKernels.size() - 1;
-        auto kernel = FirstKernel;
         mCurrentPartitionId = 0;
-        for (ActiveKernelIndex = 0; ActiveKernelIndex < m; ++ActiveKernelIndex) {
+        ActiveKernelIndex = 0;
+        branchToInitialPartition(b);
+        for (; ActiveKernelIndex < m; ++ActiveKernelIndex) {
             const auto nextKernel = ActiveKernels[ActiveKernelIndex];
-            assert (kernel <= nextKernel);
-            const auto nextPartitionId = KernelPartitionId[nextKernel];
-            loadCrossThreadIOState(kernel, nextKernel, nextPartitionId);
-            if (ActiveKernelIndex == 0) {
-                branchToInitialPartition(b);
-            }
             setActiveKernel(b, nextKernel, true);
             executeKernel(b);
-            kernel = nextKernel + 1;
         }
-        assert (kernel <= PipelineOutput);
-        loadCrossThreadIOState(kernel, PipelineOutput, PartitionCount - 1);
         mKernel = nullptr;
         mKernelId = 0;
         end(b);
@@ -1231,10 +1155,8 @@ void PipelineCompiler::clearInternalState(BuilderRef b) {
     mPartitionTerminationSignal.reset(0, PartitionCount - 1);
     mExhaustedPipelineInputAtPartitionEntry.reset(0, PartitionCount - 1);
 
-    ConstantInt * const sz_ZERO = b->getSize(0);
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        mLocallyAvailableItems[streamSet] = sz_ZERO;
-    }
+    mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
+
 
     std::fill_n(mPartitionProducedItemCountPhi.data(), mPartitionProducedItemCountPhi.num_elements(), nullptr);
     std::fill_n(mPartitionConsumedItemCountPhi.data(), mPartitionConsumedItemCountPhi.num_elements(), nullptr);
@@ -1242,6 +1164,7 @@ void PipelineCompiler::clearInternalState(BuilderRef b) {
     mPartitionPipelineProgressPhi.reset(0, PartitionCount - 1);
 
     resetInternalBufferHandles();
+    resetConsumerGraphState();
 }
 
 }

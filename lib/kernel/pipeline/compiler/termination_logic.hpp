@@ -44,7 +44,10 @@ inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Va
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally) const {
     const auto partitionId = KernelPartitionId[kernel];
-    Value * const signal = mPartitionTerminationSignal[partitionId]; assert (signal);
+    Value * signal = mPartitionTerminationSignal[partitionId];
+    if (signal == nullptr) {
+        report_fatal_error("No termination signal for kernel " + std::to_string(kernel));
+    }
     if (normally) {
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         return b->CreateICmpEQ(signal, completed);
@@ -57,7 +60,7 @@ Value * PipelineCompiler::hasKernelTerminated(BuilderRef b, const size_t kernel,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief pipelineTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) const {
+inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
 
     Value * hard = mExhaustedInput;
     Value * soft = nullptr;
@@ -69,12 +72,19 @@ inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) const {
     assert (KernelPartitionId[PipelineInput] == 0);
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
 
-    for (const auto partitionId : ActivePartitions) {
-        Value * const signal = mPartitionTerminationSignal[partitionId];
+    for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
         const auto type = mTerminationCheck[partitionId];
+        if (type == 0) {
+            continue;
+        }
+
+        Value * signal = mPartitionTerminationSignal[partitionId];
+        if (LLVM_UNLIKELY(signal == nullptr)) {
+            signal = readTerminationSignal(b, partitionId);
+        }
+        assert (signal);
+
         if (type & TerminationCheckFlag::Hard) {
-            assert (signal);
-            assert (!isa<Constant>(signal));
             Value * const final = b->CreateICmpEQ(signal, fatal);
             if (hard) {
                 hard = b->CreateOr(hard, final);

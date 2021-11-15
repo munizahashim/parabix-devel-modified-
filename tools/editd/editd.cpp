@@ -271,7 +271,7 @@ public:
         return mSignature;
     }
     bool hasSignature() const override { return true; }
-    // bool hasFamilyName() const override { return true; }
+    bool hasFamilyName() const override { return true; }
 
 protected:
     void generatePabloMethod() override;

@@ -156,13 +156,15 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
     if (getStride() != kb->getBitBlockWidth()) {
         numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
     }
-
     kb->CreateBr(processBlock);
+
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
+
     std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, blockOffsetPhi);
     std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, blockOffsetPhi);
+
     if (BMI2_available()) {
         Type * fieldTy = kb->getIntNTy(mFW);
         Type * fieldPtrTy = PointerType::get(fieldTy, 0);
@@ -238,6 +240,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     }
     const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mPEXTWidth;
     kb->CreateBr(processBlock);
+
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);

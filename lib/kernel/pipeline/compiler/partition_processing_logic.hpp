@@ -181,7 +181,7 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief branchToInitialPartition
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
+void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     ActivePartitionIndex = 0;
     const auto firstKernel = ActiveKernels[0];
     const auto firstPartition = KernelPartitionId[firstKernel];
@@ -196,18 +196,20 @@ inline void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     #endif
     mKernelStartTime = startCycleCounter(b);
     if (mNumOfThreads > 1) {
+        acquireHybridThreadSynchronizationLock(b);
         acquireSynchronizationLock(b, firstKernel);
         updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
         accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, FirstKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
         #endif
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPartitionExitPoint
  ** ------------------------------------------------------------------------------------------------------------- */
-inline BasicBlock * PipelineCompiler::getPartitionExitPoint(BuilderRef /* b */) {
+BasicBlock * PipelineCompiler::getPartitionExitPoint(BuilderRef /* b */) {
     assert (mKernelId >= FirstKernel && mKernelId <= PipelineOutput);
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
     return mPartitionEntryPoint[nextPartitionId];

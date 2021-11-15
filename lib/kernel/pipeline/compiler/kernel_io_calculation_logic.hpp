@@ -28,12 +28,6 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 
     mKernelId = PipelineInput;
 
-    ConstantInt * const sz_ZERO = b->getSize(0);
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        mLocallyAvailableItems[streamSet] = sz_ZERO;
-    }
-
     // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
         const StreamSetPort inputPort = mBufferGraph[e].Port;
@@ -151,7 +145,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     Value * numOfLinearStrides = nullptr;
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
-    if ((isSourceKernel || !mIsPartitionRoot) && mMayLoopToEntry) {
+    if (mMayLoopToEntry) {
         numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     } else {
         numOfLinearStrides = mMaximumNumOfStrides;
@@ -168,7 +162,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
         assert ("no non-greedy input?" && numOfLinearStrides);
     } else if (!isSourceKernel) {
-        assert (!mMayLoopToEntry);
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
@@ -280,7 +273,13 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            isFinalSegment = mAnyClosed;
+            if (mAnyClosed[0] && mAnyClosed[1]) {
+                isFinalSegment = b->CreateAnd(mAnyClosed[0], mAnyClosed[1]);
+            } else if (mAnyClosed[0]) {
+                isFinalSegment = mAnyClosed[0];
+            } else {
+                isFinalSegment = mAnyClosed[1];
+            }
             assert ("partition has no inputs?" && isFinalSegment);
         } else {
             isFinalSegment = mFinalPartitionSegment;
@@ -460,10 +459,13 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
     if (mIsPartitionRoot) {
-        if (mAnyClosed) {
-            mAnyClosed = b->CreateOr(mAnyClosed, closed);
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto threadType = KernelOnHybridThread.test(producer) ? 1 : 0;
+        Value *& anyClosed = mAnyClosed[threadType];
+        if (anyClosed) {
+            anyClosed = b->CreateOr(anyClosed, closed);
         } else {
-            mAnyClosed = closed;
+            anyClosed = closed;
         }
     }
     Value * const sufficientInput = b->CreateOr(hasEnough, closed);

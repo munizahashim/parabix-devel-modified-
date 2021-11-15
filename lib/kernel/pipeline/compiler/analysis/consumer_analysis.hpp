@@ -131,7 +131,20 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     out << "digraph \"ConsumerGraph\" {\n";
     for (auto v : make_iterator_range(vertices(mConsumerGraph))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
+        out << "v" << v << " [label=\"";
+        if (v == PipelineInput) {
+            out << "P_in";
+        } else if (v < PipelineOutput) {
+            const Kernel * const kernel = getKernel(v); assert (kernel);
+            auto name = kernel->getName();
+            boost::replace_all(name, "\"", "\\\"");
+            out << v << ": " << name;
+        } else if (v == PipelineOutput) {
+            out << "P_out";
+        } else {
+            out << "";
+        }
+        out << "\"];\n";
     }
     for (auto e : make_iterator_range(edges(mConsumerGraph))) {
         const auto s = source(e, mConsumerGraph);

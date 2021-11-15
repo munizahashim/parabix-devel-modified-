@@ -48,10 +48,9 @@ void PipelineCompiler::start(BuilderRef b) {
         mThreadLocalStreamSetBaseAddress = b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
     }
 
-    loadExternalStreamSetHandles(b);
+    readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
-    readExternalConsumerItemCounts(b);
     initializePipelineInputTerminationSignal(b);
     identifyAllInternallySynchronizedKernels();
 
@@ -77,13 +76,13 @@ void PipelineCompiler::start(BuilderRef b) {
     obtainCurrentSegmentNumber(b, entryBlock);
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), mKernelId) != ActiveKernels.end());
+    assert (KernelOnHybridThread.test(mKernelId) == mCompilingHybridThread);
 
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
@@ -100,14 +99,15 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     bool mayHaveInsufficientIO = false;
 
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        mHasExplicitFinalPartialStride = false;
         mIsBounded = false;
+        mHasExplicitFinalPartialStride = false;
         mCheckInputChannels = false;
         mMayLoopToEntry = false;
     } else {
         mIsBounded = isBounded();
         mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
         mCheckInputChannels = false;
+        mMayLoopToEntry = false;
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
             if (port.CanModifySegmentLength) {
@@ -185,6 +185,8 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     verifyCurrentSynchronizationLock(b);
     checkIfKernelIsAlreadyTerminated(b);
+
+    readAvailableItemCounts(b);
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readConsumedItemCounts(b);
@@ -895,6 +897,7 @@ void PipelineCompiler::end(BuilderRef b) {
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
         incrementCurrentSegNo(b, exitBlock);
+        releaseHybridThreadSynchronizationLock(b);
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
     b->SetInsertPoint(mPipelineEnd);
