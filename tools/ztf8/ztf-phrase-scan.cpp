@@ -538,15 +538,16 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
 : MultiBlockKernel(b, "SymbolGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"keyMarks0", codeWordMarks},
                        Binding{"hashMarks0", hashMarks},
-                       Binding{"byteData", byteData, BoundedRate(0,1), LookBehind(32+1)}
+                       Binding{"byteData", byteData, BoundedRate(0,1)} //, {LookBehind(32+1)} }//, Deferred()} //FixedRate(), LookBehind(32+1)}//, Deferred()}
                    },
                    {}, {}, {},
-                   {// Hash table 8 length-based tables with 256 16-byte entries each.
+                   {InternalScalar{ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
+                    // Hash table 8 length-based tables with 256 16-byte entries each.
                     InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), 32), (20000 * (encodingScheme.byLength[groupNo].hi - encodingScheme.byLength[groupNo].lo + 1))), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSym) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     if (DelayedAttributeIsSet()) {
-        mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
+        mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1), Delayed(encodingScheme.maxSymbolLength())); //FixedRate(), Delayed(encodingScheme.maxSymbolLength()));
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
     }
@@ -581,6 +582,10 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
 
     Value * const initialPos = b->getProcessedItemCount("keyMarks0");
     Value * const avail = b->getAvailableItemCount("keyMarks0");
+
+    Value * const initialProduced = b->getProducedItemCount("result");
+    b->CreateMemCpy(b->getRawOutputPointer("result", initialProduced), b->getScalarFieldPtr("pendingOutput"), lg.HI, 1);
+    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getScalarFieldPtr("pendingOutput"), b->CreateAdd(lg.HI, sz_ZERO));
 
     // Copy all new input to the output buffer; this will be then
     // overwritten when and as necessary for decompression of ZTF codes.
@@ -828,12 +833,17 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
 
     b->SetInsertPoint(stridesDone);
+
     // If the segment ends in the middle of a 2-byte codeword, we need to
     // make sure that we still have access to the codeword in the next block.
-    if (DeferredAttributeIsSet()) {
-        Value * processed = b->CreateSub(avail, lg.HI);
-        b->setProcessedItemCount("byteData", processed);
-    }
+    Value * processed = b->CreateSub(avail, lg.HI);
+    b->setProcessedItemCount("byteData", processed);
+
+    Value * guaranteedProduced = b->CreateSub(avail, lg.HI);
+    b->CreateMemCpy(b->getScalarFieldPtr("pendingOutput"), b->getRawOutputPointer("result", guaranteedProduced), lg.HI, 1);
+    b->setProducedItemCount("result", b->CreateSelect(b->isFinal(), avail, guaranteedProduced));
+    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawOutputPointer("result", b->CreateSub(guaranteedProduced, lg.HI)), b->CreateAdd(lg.HI, sz_ZERO));
+    //b->CallPrintInt("processed", processed);
     //CHECK: Although we have written the full input stream to output, there may
     // be an incomplete symbol at the end of this block.   Store the
     // data that may be overwritten as pending and set the produced item

@@ -443,7 +443,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->SetInsertPoint(storeKey);
     // We have a new symbols that allows future occurrences of the symbol to
     // be compressed using the hash code.
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
+    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
 #ifdef CHECK_COMPRESSION_DECOMPRESSION_STORE
     b->CallPrintInt("hashCode", keyHash);
     b->CallPrintInt("keyStartPos", keyStartPos);

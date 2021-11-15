@@ -287,8 +287,8 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
             P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {(sym * encodingScheme1.byLength.size()) + i}));
             //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
-            StreamSet * input_bytes = u8bytes;
-            StreamSet * output_bytes = P->CreateStreamSet(1, 8);
+            StreamSet * const input_bytes = u8bytes;
+            StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
             // hashGroupMarks -> hashtable codeword group marks
             // groupDecoded -> to decompress codeword marks
             P->CreateKernelCall<SymbolGroupDecompression>(encodingScheme1, sym, i, hashGroupMarks, groupDecoded, input_bytes, output_bytes);
