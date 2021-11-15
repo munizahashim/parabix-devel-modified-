@@ -1689,8 +1689,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const total = b->CreateExtractElement(baseValue, offset);
 
         Value * const splat = b->simd_fill(fw, total);
-        Value * const allOnes = b->simd_fill(fw, ConstantInt::getAllOnesValue(vecTy));
-        Value * const mask = b->mvmd_sll(fw, allOnes, offset);
+        Value * const mask = b->mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b->CreateAnd(splat, mask);
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
 
