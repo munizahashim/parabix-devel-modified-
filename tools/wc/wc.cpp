@@ -248,7 +248,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
 
-    Kernel * mmapK = P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    Kernel * mmapK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     auto CountableStream = ByteStream;
     if (CountWords || CountChars) {

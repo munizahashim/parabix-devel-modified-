@@ -140,6 +140,20 @@ Constant * IDISA_Builder::getConstantVectorSequence(unsigned fw, unsigned first,
     return ConstantVector::get(elements);
 }
 
+Constant * IDISA_Builder::getRepeatingConstantVectorSequence(unsigned fw, unsigned repeat, unsigned first, unsigned last, unsigned by) {
+    const unsigned seqLgth = (last - first)/by + 1;
+    assert(((first + (seqLgth - 1) * by) == last) && "invalid element sequence");
+    Type * fwTy = getIntNTy(fw);
+    SmallVector<Constant *, 16> elements(seqLgth * repeat);
+    for (unsigned i = 0; i < seqLgth; i++) {
+        Constant * c = ConstantInt::get(fwTy, i*by + first);
+        for (unsigned j = 0; j < repeat; j++) {
+            elements[i + j * seqLgth] = c;
+        }
+    }
+    return ConstantVector::get(elements);
+}
+
 Value * IDISA_Builder::CreateHalfVectorHigh(Value * vec) {
     Value * v = fwCast(mLaneWidth, vec);
     const unsigned N = getVectorBitWidth(v)/mLaneWidth;
