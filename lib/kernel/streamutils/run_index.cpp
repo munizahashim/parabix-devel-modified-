@@ -135,10 +135,13 @@ void AccumRunIndex::generatePabloMethod() {
             runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
         }
     }
-    // remove 1 byte symbols like LF
+    // remove 1 byte symbols like LF -> mark consecutive 1-byte sym
     PabloAST * byteLenSym = pb.createAnd(symEndPos, pb.createAdvance(symEndPos, 1));
     // IndexedAdvance by consecutive k-1 positions to mark invalid k-symbol phrase positions
+    // -> symbol preceded by a 1-byte symbol; Eg: 1world (skip these so that the length can be safely calculated)
+    // TODO : change indexedAdvance idx to calculate RI for k-symbol phrases; k > 2
     byteLenSym = pb.createIndexedAdvance(byteLenSym, symEndPos, 1);
+    // eliminate single-byte symbols
     symEndPos = pb.createAnd(symEndPos, pb.createXor(symEndPos, pb.createAdvance(symEndPos, 1)));
     for (unsigned i = 0; i < mIndexCount; i++) {
         curSymLen[i] = pb.createAnd(runIndex[i], symEndPos);
@@ -147,11 +150,14 @@ void AccumRunIndex::generatePabloMethod() {
     // first symbol has no prev symbol
     // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
+    //pb.createDebugPrint(notFirstSymSum, "notFirstSymSum");
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
     BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 2);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
-    inRangeFinal = pb.createOr(inRangeFinal, pb.createNot(curOverflow));
-
+    //pb.createDebugPrint(curOverflow, "curOverflow");
+    inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
+    //pb.createDebugPrint(inRangeFinal, "inRangeFinal");
+    //pb.createDebugPrint(pb.createAnd(symEndPos, inRangeFinal), "included");
     for (unsigned i = 0; i < mIndexCount; i++) {
         // if either of the operands is 0, ignore the sum in final run -> avoids 1-byte symbols like LF
         pb.createAssign(pb.createExtract(accumRunIndexVar, pb.getInteger(i)), pb.createAnd3(sum[i], symEndPos, inRangeFinal));
