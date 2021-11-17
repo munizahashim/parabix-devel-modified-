@@ -48,7 +48,9 @@ void RunIndex::generatePabloMethod() {
     PabloAST * even = nullptr;
     PabloAST * overflow = nullptr;
     if (mOverflow) {
-        overflow = pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
+        // marks overflowLen + 2 positions
+        overflow = runMarks; //pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
+        //pb.createDebugPrint(overflow, "overflow-RI");
     }
     for (unsigned i = 0; i < mIndexCount; i++) {
         switch (i) {
@@ -77,8 +79,9 @@ void RunIndex::generatePabloMethod() {
             outputEnable = pb.createAnd(outputEnable, pb.createAdvance(outputEnable, 1<<i), "outputEnable");
         }
         if (mOverflow) {
+            //pb.createDebugPrint(pb.createAdvance(overflow, 1<<i), "mOverflow");
             overflow = pb.createAnd(overflow, pb.createAdvance(overflow, 1<<i), "overflow");
-        }
+        } // 1<<i => 1, 2, 4, 8, 16
     }
     if (mOverflow) {
         pb.createAssign(pb.createExtract(getOutputStreamVar("overflow"), pb.getInteger(0)), overflow);
