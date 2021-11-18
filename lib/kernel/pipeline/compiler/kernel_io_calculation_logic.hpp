@@ -12,7 +12,6 @@
 
 namespace kernel {
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readPipelineIOItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -491,7 +490,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_hasInputData = %" PRIu8, test);
     #endif
-
 
     if (mExhaustedPipelineInputPhi && !TraceIO) {
         Value * exhausted = mExhaustedInput;

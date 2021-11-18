@@ -810,7 +810,9 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     const StreamSetBuffer * const buffer = bufferNode.Buffer;
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
+
     Value * const baseAddress = buffer->getBaseAddress(b);
+
     if (bufferNode.isUnowned()) {
         assert (bufferNode.Locality != BufferLocality::ThreadLocal);
         return baseAddress;
@@ -874,18 +876,30 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
  * @brief getInputVirtualBaseAddresses
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const {
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & rt = mBufferGraph[e];
+    for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & inputPort = mBufferGraph[input];
         PHINode * processed = nullptr;
-        if (mAlreadyProcessedDeferredPhi[rt.Port]) {
-            processed = mAlreadyProcessedDeferredPhi[rt.Port];
+        if (mAlreadyProcessedDeferredPhi[inputPort.Port]) {
+            processed = mAlreadyProcessedDeferredPhi[inputPort.Port];
         } else {
-            processed = mAlreadyProcessedPhi[rt.Port];
+            processed = mAlreadyProcessedPhi[inputPort.Port];
         }
-        const auto buffer = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[buffer];
-        Value * const addr = getVirtualBaseAddress(b, rt, bn, processed, nullptr, bn.isNonThreadLocal(), false);
-        baseAddresses[rt.Port.Number] = addr;
+        const auto streamSet = source(input, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+
+        Value * addr = nullptr;
+        if (LLVM_UNLIKELY(bn.CrossesHybridThreadBarrier && bn.isUnowned() && bn.isInternal())) {
+            const auto output = in_edge(streamSet, mBufferGraph);
+            const auto producer = source(output, mBufferGraph);
+            assert (producer < mKernelId);
+            const BufferPort & outputPort = mBufferGraph[output];
+            const auto handleName = makeBufferName(producer, outputPort.Port);
+            addr = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
+        } else {
+            addr = getVirtualBaseAddress(b, inputPort, bn, processed, nullptr, bn.isNonThreadLocal(), false);
+        }
+
+        baseAddresses[inputPort.Port.Number] = addr;
     }
 }
 

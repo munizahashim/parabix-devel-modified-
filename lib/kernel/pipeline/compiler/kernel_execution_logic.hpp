@@ -252,7 +252,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
 
             #ifdef PRINT_DEBUG_MESSAGES
             const auto prefix = makeBufferName(mKernelId, rt.Port);
-            debugPrint(b, "* " + prefix + "_addr = %" PRIu64, addr);
+            debugPrint(b, "* " + prefix + "_addr = 0x%" PRIx64, addr);
             #endif
 
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));

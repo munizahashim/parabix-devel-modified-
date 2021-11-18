@@ -701,8 +701,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         ActiveKernelIndex = 0;
         branchToInitialPartition(b);
         for (; ActiveKernelIndex < m; ++ActiveKernelIndex) {
-            const auto nextKernel = ActiveKernels[ActiveKernelIndex];
-            setActiveKernel(b, nextKernel, true);
+            setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
             executeKernel(b);
         }
         mKernel = nullptr;
