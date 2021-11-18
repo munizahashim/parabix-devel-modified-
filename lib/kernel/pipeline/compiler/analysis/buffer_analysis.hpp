@@ -831,6 +831,8 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
+    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.Buffer != nullptr)) {
@@ -854,13 +856,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
-                auto bufferSize = bn.RequiredCapacity * (mNumOfThreads);
+                auto bufferSize = bn.RequiredCapacity * (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
                 assert (bufferSize > 0);
                 buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal || bn.CrossesHybridThreadBarrier) {
-                    bufferSize *= (mNumOfThreads);
+                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
                 }
                 buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
