@@ -48,11 +48,11 @@ enum KwMarker {
 class JSONStringMarker : public pablo::PabloKernel {
 public:
     JSONStringMarker(const std::unique_ptr<KernelBuilder> & b,
-                     StreamSet * const backslash, StreamSet * const dQuotes,
+                     StreamSet * const lexIn,
                      StreamSet * strMarker, StreamSet * strSpan)
     : pablo::PabloKernel(b,
                          "jsonStrMarker",
-                         {Binding{"backslash", backslash}, Binding{"dQuotes", dQuotes}},
+                         {Binding{"lexIn", lexIn}},
                          {Binding{"marker", strMarker}, Binding{"span", strSpan}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
@@ -75,15 +75,13 @@ class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
     JSONKeywordEndMarker(const std::unique_ptr<KernelBuilder> & b,
                       StreamSet * const basis,
-                      std::vector<StreamSet *> literals, StreamSet * const strSpan,
+                      StreamSet * const lexIn, StreamSet * const strSpan,
                       StreamSet * kwMarker)
     : pablo::PabloKernel(b,
                          "jsonKeywordMarker",
                          {
                             Binding{"basis", basis},
-                            Binding{"n", literals[0]},
-                            Binding{"t", literals[1]},
-                            Binding{"f", literals[2]},
+                            Binding{"lexIn", lexIn},
                             Binding{"strSpan", strSpan}
                          },
                          {
@@ -104,21 +102,14 @@ class JSONNumberSpan : public pablo::PabloKernel {
 public:
     JSONNumberSpan(const std::unique_ptr<KernelBuilder> & b,
                    StreamSet * const basis,
-                   std::vector<StreamSet *> numberStreams,
-                   std::vector<StreamSet *> validAfterValueStreams,
-                   StreamSet * const ws,
+                   StreamSet * const lexIn,
                    StreamSet * const strSpan,
                    StreamSet * nbrLex, StreamSet * nbrSpan, StreamSet * nbrErr)
     : pablo::PabloKernel(b,
                          "jsonNumberMarker",
                          {
                             Binding{"basis", basis, FixedRate(1), LookAhead(1)},
-                            Binding{"hyphen", numberStreams[0]},
-                            Binding{"digit", numberStreams[1]},
-                            Binding{"rCurly", validAfterValueStreams[0]},
-                            Binding{"rBracket", validAfterValueStreams[1]},
-                            Binding{"comma", validAfterValueStreams[2]},
-                            Binding{"ws", ws},
+                            Binding{"lexIn", lexIn},
                             Binding{"strSpan", strSpan}
                          },
                          {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
@@ -146,29 +137,27 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
     public:
     JSONFindKwAndExtraneousChars(
                         const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const firstLexsForCleaning,
+                        StreamSet * const lexIn,
                         StreamSet * const stringSpan,
                         StreamSet * const numberSpan,
                         StreamSet * const kwEndMarkers,
-                        StreamSet * const ws,
-                        StreamSet * const hyphen,
                         StreamSet * const kwMarker,
                         StreamSet * const firstLexs,
+                        StreamSet * const combinedBrackets,
                         StreamSet * const extraErr
     )
     : pablo::PabloKernel(b,
                          "jsonFindKwAndExtraneousChars",
                          {
-                            Binding{"firstLexsForCleaning", firstLexsForCleaning},
+                            Binding{"lexIn", lexIn},
                             Binding{"strSpan", stringSpan},
                             Binding{"numSpan", numberSpan},
                             Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
-                            Binding{"ws", ws},
-                            Binding{"hyphen", hyphen},
                          },
                          {
                             Binding{"kwMarker", kwMarker},
                             Binding{"firstLexs", firstLexs},
+                            Binding{"combinedBrackets", combinedBrackets},
                             Binding{"extraErr", extraErr}
                          }) {}
     bool isCachable() const override { return true; }

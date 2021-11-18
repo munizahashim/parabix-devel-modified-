@@ -146,9 +146,8 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
 }
 
 type UTF8Err = <i1>[1]
-type wsStream = <i1>[1]
 
-kernel ValidateUTF8 :: [BasisBits basis, wsStream ws] -> [UTF8Err utf8Err] {
+kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
     utf8Err[0] = <0>
 
     # If non-ascii, validate UTF-8
@@ -235,7 +234,7 @@ kernel ValidateUTF8 :: [BasisBits basis, wsStream ws] -> [UTF8Err utf8Err] {
         u8_error = u8_error | u8mismatch | u8_FFFE_FFFF
 
         # sanitize error
-        conflict = u8_error & ws[0]
+        conflict = u8_error & lex.ws
         utf8Err[0] = u8_error ^ conflict
     }
 }
