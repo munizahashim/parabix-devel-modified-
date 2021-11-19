@@ -196,8 +196,8 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     #endif
     mKernelStartTime = startCycleCounter(b);
     if (mNumOfThreads > 1) {
-        acquireHybridThreadSynchronizationLock(b);
         acquireSynchronizationLock(b, firstKernel);
+        acquireHybridThreadSynchronizationLock(b);
         updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
         accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, FirstKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
@@ -408,10 +408,6 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
     // kernel; otherwise we run the risk of mangling the buffer state. For safety, wait until we
     // can acquire the last consumer's lock but only release the locks that we end up skipping.
 
-    if (mCompilingHybridThread) {
-        return startCycleCounter(b);
-    }
-
     assert (std::find(ActivePartitions.begin(), ActivePartitions.end(), partitionId) != ActivePartitions.end());
 
     const auto n = LastStreamSet - FirstStreamSet;
@@ -442,8 +438,9 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
             for (const auto e : make_iterator_range(out_edges(FirstStreamSet + i, mConsumerGraph))) {
                 const auto consumer = target(e, mConsumerGraph);
                 if (RequiresSynchronization.test(consumer)) {
-                    assert (KernelOnHybridThread.test(consumer) == mCompilingHybridThread);
-                    lastConsumer = std::max<unsigned>(lastConsumer, consumer);
+                   // if (KernelOnHybridThread.test(consumer) == mCompilingHybridThread) {
+                        lastConsumer = std::max<unsigned>(lastConsumer, consumer);
+                   // }
                 }
             }
         }
@@ -451,8 +448,8 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
     assert (k > ActiveKernelIndex && k < m);
     assert (firstKernelInTargetPartition > mKernelId);
-
     const auto toAcquire = std::min(lastConsumer, LastKernel);
+//    assert (firstKernelInTargetPartition >= toAcquire);
 
     // TODO: experiment with a mutex lock here.
     #ifdef ENABLE_PAPI
@@ -460,11 +457,20 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
     #endif
     Value * const startTime = startCycleCounter(b);
     acquireSynchronizationLock(b, toAcquire);
-    for (unsigned i = ActiveKernelIndex; i < k; ++i) {
-        const auto kernel = ActiveKernels[i];
-        assert (KernelPartitionId[kernel] < partitionId);
-        releaseSynchronizationLock(b, kernel);
+    for (auto kernel = mKernelId; kernel < firstKernelInTargetPartition; ++kernel) {
+        if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
+            assert (KernelPartitionId[kernel] < partitionId);
+            releaseSynchronizationLock(b, kernel);
+        }
     }
+
+//    for (unsigned i = ActiveKernelIndex; i < k; ++i) {
+//        const auto kernel = ActiveKernels[i];
+//        assert (KernelOnHybridThread.test(kernel) == mCompilingHybridThread);
+//        assert (KernelPartitionId[kernel] < partitionId);
+//        releaseSynchronizationLock(b, kernel);
+//    }
+
     updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_PARTITION_JUMP_SYNCHRONIZATION);

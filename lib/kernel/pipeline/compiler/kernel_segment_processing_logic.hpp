@@ -52,7 +52,6 @@ void PipelineCompiler::start(BuilderRef b) {
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
     initializePipelineInputTerminationSignal(b);
-    identifyAllInternallySynchronizedKernels();
 
     mKernel = nullptr;
     mKernelId = 0;
@@ -888,20 +887,19 @@ void PipelineCompiler::end(BuilderRef b) {
         terminated = hasPipelineTerminated(b);
 
         Value * const done = b->CreateIsNotNull(terminated);
-
         if (LLVM_UNLIKELY(CheckAssertions && PartitionOnHybridThread.none())) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
             Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
         }
+        releaseHybridThreadSynchronizationLock(b);
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
         incrementCurrentSegNo(b, exitBlock);
-        releaseHybridThreadSynchronizationLock(b);
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
     b->SetInsertPoint(mPipelineEnd);
-
+    writeFinalHybridThreadSynchronizationNumber(b);
     writeExternalConsumedItemCounts(b);
     writeExternalProducedItemCounts(b);
     if (mCurrentThreadTerminationSignalPtr) {

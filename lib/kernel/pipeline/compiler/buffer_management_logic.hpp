@@ -291,11 +291,8 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
         const auto producer = source(f, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
 
-        bool newTerm = false;
-
         if (mPartitionTerminationSignal[partitionId] == nullptr) {
             mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
-            newTerm = true;
         }
 
         if (mLocallyAvailableItems[streamSet] == nullptr) {
@@ -887,18 +884,18 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        Value * addr = nullptr;
+
         if (LLVM_UNLIKELY(bn.CrossesHybridThreadBarrier && bn.isUnowned() && bn.isInternal())) {
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
             assert (producer < mKernelId);
             const BufferPort & outputPort = mBufferGraph[output];
             const auto handleName = makeBufferName(producer, outputPort.Port);
-            addr = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
-        } else {
-            addr = getVirtualBaseAddress(b, inputPort, bn, processed, nullptr, bn.isNonThreadLocal(), false);
+            Value * const vba = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
+            bn.Buffer->setBaseAddress(b.get(), vba);
         }
 
+        Value * addr = getVirtualBaseAddress(b, inputPort, bn, processed, nullptr, bn.isNonThreadLocal(), false);
         baseAddresses[inputPort.Port.Number] = addr;
     }
 }

@@ -81,6 +81,8 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // Non-family kernels can be contained within the shared state but family ones
     // must be allocated dynamically.
 
+    identifyAllInternallySynchronizedKernels();
+
     IntegerType * const sizeTy = b->getSizeTy();
 
     #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
@@ -123,13 +125,13 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
     }
+//    if (PartitionOnHybridThread.any()) {
+//        mTarget->addInternalScalar(sizeTy, "0" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
+//        mTarget->addInternalScalar(sizeTy, "1" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
+//    }
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
-    if (PartitionOnHybridThread.any()) {
-        mTarget->addInternalScalar(sizeTy, "0" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
-        mTarget->addInternalScalar(sizeTy, "1" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

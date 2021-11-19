@@ -429,6 +429,7 @@ public:
 
     void acquireHybridThreadSynchronizationLock(BuilderRef b);
     void releaseHybridThreadSynchronizationLock(BuilderRef b);
+    void writeFinalHybridThreadSynchronizationNumber(BuilderRef b);
 
 // family functions
 
