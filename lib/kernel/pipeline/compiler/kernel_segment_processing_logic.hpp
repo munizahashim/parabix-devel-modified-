@@ -131,9 +131,14 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     }
 
+
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
-    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];    
-    const auto canJumpToAnotherPartition = mIsPartitionRoot && (mIsBounded || nextPartitionId == jumpId);
+    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
+//    const auto mIsPartitionRoot = mIsPartitionRoot && (nextPartitionId != jumpId);
+
+    assert (nextPartitionId > mCurrentPartitionId);
+    assert (jumpId >= nextPartitionId);
+
 
     const auto prefix = makeKernelName(mKernelId);
 
@@ -160,15 +165,14 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     }
     if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-    }
-    if (canJumpToAnotherPartition) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream nm(tmp);
         nm << prefix << "_jumpFromPartition_" << mCurrentPartitionId
            << "_to_" << PartitionJumpTargetId[mCurrentPartitionId];
         mKernelJumpToNextUsefulPartition = b->CreateBasicBlock(nm.str(), mNextPartitionEntryPoint);
     } else {
-        mKernelJumpToNextUsefulPartition = mKernelInitiallyTerminated;
+        mKernelInitiallyTerminated = nullptr;
+        mKernelJumpToNextUsefulPartition = nullptr;
     }
 
     mKernelTerminated = b->CreateBasicBlock(prefix + "_terminated", mNextPartitionEntryPoint);
@@ -214,7 +218,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (!mKernelIsInternallySynchronized) {
         initializeKernelCheckOutputSpacePhis(b);
     }
-    if (canJumpToAnotherPartition) {
+    if (mIsPartitionRoot) {
         initializeJumpToNextUsefulPartitionPhis(b);
     }
     if (mayHaveInsufficientIO) {
@@ -343,7 +347,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL PREPARE FOR PARTITION JUMP
     /// -------------------------------------------------------------------------------------
 
-    if (canJumpToAnotherPartition) {
+    if (mIsPartitionRoot) {
         writeJumpToNextPartition(b);
     }
 
@@ -699,18 +703,18 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         assert (mInitialTerminationSignal);
         if (mExhaustedInputAtJumpPhi) {
             mExhaustedInputAtJumpPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
-        }
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const auto & br = mBufferGraph[e];
-            const auto port = br.Port;
-            Value * produced = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
-                produced = mAlreadyProducedDeferredPhi[port];
-            } else {
-                produced = mAlreadyProducedPhi[port];
+            for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+                const auto & br = mBufferGraph[e];
+                const auto port = br.Port;
+                Value * produced = nullptr;
+                if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    produced = mAlreadyProducedDeferredPhi[port];
+                } else {
+                    produced = mAlreadyProducedPhi[port];
+                }
+                assert (isFromCurrentFunction(b, produced, false));
+                mProducedAtJumpPhi[port]->addIncoming(produced, exitBlock);
             }
-            assert (isFromCurrentFunction(b, produced, false));
-            mProducedAtJumpPhi[port]->addIncoming(produced, exitBlock);
         }
         if (mMayLoopToEntry) {
             mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
@@ -887,7 +891,7 @@ void PipelineCompiler::end(BuilderRef b) {
         terminated = hasPipelineTerminated(b);
 
         Value * const done = b->CreateIsNotNull(terminated);
-        if (LLVM_UNLIKELY(CheckAssertions && PartitionOnHybridThread.none())) {
+        if (LLVM_UNLIKELY(CheckAssertions && !mCompilingHybridThread)) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
             Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");

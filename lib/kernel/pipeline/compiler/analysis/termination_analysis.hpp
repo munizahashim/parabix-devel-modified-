@@ -1,4 +1,4 @@
-#ifndef TERMINATION_ANALYSIS_HPP
+﻿#ifndef TERMINATION_ANALYSIS_HPP
 #define TERMINATION_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
@@ -23,12 +23,13 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     for (auto consumer = FirstKernel; consumer <= PipelineOutput; ++consumer) {
         const auto cid = KernelPartitionId[consumer];
+        const auto threadType = KernelOnHybridThread.test(consumer);
         for (const auto e : make_iterator_range(in_edges(consumer, mBufferGraph))) {
             const auto buffer = source(e, mBufferGraph);
             const auto producer = parent(buffer, mBufferGraph);
             const auto pid = KernelPartitionId[producer];
             assert (pid <= cid);
-            if (pid != cid) {
+            if (pid != cid && KernelOnHybridThread.test(producer) == threadType) {
                 add_edge(pid, cid, G);
             }
         }
@@ -60,31 +61,16 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     transitive_reduction_dag(G);
 
-    if (PartitionOnHybridThread.any()) {
-        using Vertex = TerminationGraph::vertex_descriptor;
-        std::vector<Vertex> V;
-        V.reserve(num_vertices(G));
-        topological_sort(G, std::back_inserter(V));
-        // V is a reverse topologogical ordering of G
-        for (const auto v : V) {
-            const auto threadType = PartitionOnHybridThread.test(v);
-            std::function<bool(Vertex)> dfs_check = [&](const Vertex u) {
-                if (u == terminal) {
-                    return true;
-                }
-                if (PartitionOnHybridThread.test(u) == threadType) {
-                    for (auto e : make_iterator_range(out_edges(u, G))) {
-                        if (dfs_check(target(e, G))) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            };
-            if (!dfs_check(v)) {
-                add_edge(v, terminal, G);
-            }
+    assert (KernelPartitionId[LastKernel] == (PartitionCount - 2));
+
+    for (auto i = KernelPartitionId[FirstKernel]; i < (PartitionCount - 1); ++i) {
+        if (out_degree(i, G) == 0) {
+            add_edge(i, terminal, G);
         }
+    }
+
+    if (in_degree(terminal, G) == 0) {
+        report_fatal_error("Internal error: no termination signal propagated to pipeline end?");
     }
 
     mTerminationCheck.resize(PartitionCount, 0U);

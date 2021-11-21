@@ -74,15 +74,12 @@ inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
 
     for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
         const auto type = mTerminationCheck[partitionId];
-        if (type == 0) {
+        if (type == 0 || PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread) {
             continue;
         }
 
         Value * signal = mPartitionTerminationSignal[partitionId];
-        if (LLVM_UNLIKELY(signal == nullptr)) {
-            signal = readTerminationSignal(b, partitionId);
-        }
-        assert (signal);
+        assert (isFromCurrentFunction(b, signal, false));
 
         if (type & TerminationCheckFlag::Hard) {
             Value * const final = b->CreateICmpEQ(signal, fatal);

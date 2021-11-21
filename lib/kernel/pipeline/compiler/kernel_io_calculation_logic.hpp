@@ -866,9 +866,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
-    //    debugPrint(b, prefix + "_addr [%" PRIx64 ",%" PRIx64 ")",
-    //               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
-    debugPrint(b, prefix + "_capacity = %" PRIu64, buffer->getCapacity(b));
     debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     #endif
 
@@ -892,7 +889,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 
-    Value * const syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
+    Value * syncLock = nullptr;
+    if (mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U)) {
+        syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
+    }
 
     Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
 

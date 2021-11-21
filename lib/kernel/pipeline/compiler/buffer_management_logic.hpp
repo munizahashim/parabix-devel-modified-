@@ -291,11 +291,12 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
         const auto producer = source(f, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
 
-        if (mPartitionTerminationSignal[partitionId] == nullptr) {
+        const auto fromOtherThread = PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread;
+
+        if (fromOtherThread) {
             mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
         }
-
-        if (mLocallyAvailableItems[streamSet] == nullptr) {
+        if (fromOtherThread || mLocallyAvailableItems[streamSet] == nullptr) {
             const BufferPort & outputPort = mBufferGraph[f];
             assert (outputPort.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(producer, outputPort.Port);
@@ -884,8 +885,10 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
 
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto fromOtherThread = KernelOnHybridThread.test(producer) != mCompilingHybridThread;
 
-        if (LLVM_UNLIKELY(bn.CrossesHybridThreadBarrier && bn.isUnowned() && bn.isInternal())) {
+        if (LLVM_UNLIKELY(fromOtherThread && bn.isUnowned() && bn.isInternal())) {
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
             assert (producer < mKernelId);
