@@ -359,7 +359,7 @@ multiEditdFunctionType multiEditdPipeline(CPUDriver & pxDriver) {
     const auto n = pattGroups.size();
     if (n == 0) {
         report_fatal_error("no patterns found");
-        exit(-1);
+        exit(-2);
     }
     std::vector<StreamSet *> MatchResults(n);
     for(unsigned i = 0; i < n; ++i){
@@ -434,9 +434,7 @@ int main(int argc, char *argv[]) {
 
     CPUDriver pxDriver("editd");
     if (MultiEditdKernels) {
-
         auto editd = multiEditdPipeline(pxDriver);
-
         const auto & fileName = inputFiles[0];
         const int fd = open(inputFiles[0].c_str(), O_RDONLY);
         if (LLVM_UNLIKELY(fd == -1)) {
@@ -451,9 +449,12 @@ int main(int argc, char *argv[]) {
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);
+        std::cerr << std::flush;
         #endif
         close(fd);
+        #ifndef REPORT_PAPI_TESTS
         run_second_filter(pattern_segs, total_len, 0.15);
+        #endif
         return 0;
     }
 

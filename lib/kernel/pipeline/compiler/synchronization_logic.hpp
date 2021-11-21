@@ -42,12 +42,17 @@ namespace kernel {
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
     if (mNumOfThreads > 1 || ExternallySynchronized) {
         if (LLVM_UNLIKELY(KernelOnHybridThread.any() && mNumOfThreads == 2)) {
-            const auto a = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-            assert (a < PipelineOutput);
-            RequiresSynchronization.set(a);
-            const auto b = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-            assert (b < PipelineOutput);
-            RequiresSynchronization.set(b);
+
+            const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+            auto lastOnFixedDataThread = firstOnHybridThread;
+            if (firstOnHybridThread == FirstKernel) {
+                lastOnFixedDataThread = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
+            } else {
+                lastOnFixedDataThread = firstOnHybridThread - 1;
+            }
+            RequiresSynchronization.set(firstOnHybridThread);
+            RequiresSynchronization.set(lastOnFixedDataThread);
+
         } else {
             if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
                 const auto b = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
@@ -217,12 +222,22 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
         BasicBlock * const waiting = b->CreateBasicBlock("hybrid_sync_waiting" , nextNode);
         BasicBlock * const waited = b->CreateBasicBlock("hybrid_sync_waited", nextNode);
 
-        int syncLock;
+        const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+        auto syncLock = firstOnHybridThread;
         if (mCompilingHybridThread) {
-            syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-        } else {
-            syncLock = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+            if (firstOnHybridThread == FirstKernel) {
+                syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
+            } else {
+                syncLock = firstOnHybridThread - 1;
+            }
         }
+
+//        int syncLock;
+//        if (mCompilingHybridThread) {
+//            syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
+//        } else {
+//            syncLock = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+//        }
         assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
 
         assert (FirstKernel <= syncLock && syncLock <= LastKernel);
@@ -252,26 +267,7 @@ void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
  * @brief releaseHybridThreadSynchronizationLock
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeFinalHybridThreadSynchronizationNumber(BuilderRef b) {
-//    int syncLock;
-//    if (mCompilingHybridThread) {
-//        syncLock = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-//    } else {
-//        syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-//    }
-//    assert (KernelOnHybridThread.test(syncLock) == mCompilingHybridThread);
-//    assert (FirstKernel <= syncLock && syncLock <= LastKernel);
-//    Value * const sharedThread = getSynchronizationLockPtrForKernel(b, syncLock);
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        Value * const currentSegNo = b->CreateLoad(sharedThread);
-//        Value * const unchanged = b->CreateICmpEQ(mNextSegNo, currentSegNo);
-//        SmallVector<char, 256> tmp;
-//        raw_svector_ostream out(tmp);
-//        out << "hybrid logical segment number is %" PRIu64
-//               " but was expected to be %" PRIu64;
-//        b->CreateAssert(unchanged, out.str(), currentSegNo, mNextSegNo);
-//    }
-//    Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
-//    b->CreateAtomicStoreRelease(MAX_INT, sharedThread);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

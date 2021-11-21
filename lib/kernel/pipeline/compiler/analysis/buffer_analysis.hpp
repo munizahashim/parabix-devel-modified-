@@ -856,11 +856,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
-
                 auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
-                if (bn.CrossesHybridThreadBarrier) {
-                    mult *= 100;
-                }
                 auto bufferSize = bn.RequiredCapacity * mult;
                 assert (bufferSize > 0);
                 buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
