@@ -361,11 +361,13 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, outputPort);
         Value * const produced = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         mProducedItemCountPtr[outputPort] = produced;
-        mInitiallyProducedItemCount[streamSet] = b->CreateLoad(produced);
+        Value * const itemCount = b->CreateLoad(produced);
+        mInitiallyProducedItemCount[streamSet] = itemCount;
         if (br.IsDeferred) {
             Value * const deferred = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             mProducedDeferredItemCountPtr[outputPort] = deferred;
-            mInitiallyProducedDeferredItemCount[streamSet] = b->CreateLoad(deferred);
+            Value * const itemCount = b->CreateLoad(deferred);
+            mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
         }
     }
 }
@@ -403,7 +405,6 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, inputPort);
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, mUpdatedProcessedPhi[inputPort]);
         #endif
-
         if (br.IsDeferred) {
             b->CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
             #ifdef PRINT_DEBUG_MESSAGES

@@ -41,24 +41,28 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
     if (mNumOfThreads > 1 || ExternallySynchronized) {
-        if (LLVM_UNLIKELY(KernelOnHybridThread.any() && mNumOfThreads == 2)) {
+        if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
 
             const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-            auto lastOnFixedDataThread = firstOnHybridThread;
-            if (firstOnHybridThread == FirstKernel) {
-                lastOnFixedDataThread = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-            } else {
-                lastOnFixedDataThread = firstOnHybridThread - 1;
-            }
-            RequiresSynchronization.set(firstOnHybridThread);
-            RequiresSynchronization.set(lastOnFixedDataThread);
+            assert (firstOnHybridThread != -1);
+            HybridSyncLock = static_cast<unsigned>(firstOnHybridThread);
 
-        } else {
-            if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
-                const auto b = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-                assert (b < PipelineOutput);
-                RequiresSynchronization.set(b);
+            auto maxProducer = PipelineInput;
+            for (const auto kernel : KernelOnHybridThread.set_bits()) {
+                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    const auto producer = parent(source(e, mBufferGraph), mBufferGraph);
+                    assert (producer < kernel);
+                    maxProducer = std::max<unsigned>(maxProducer, producer);
+                }
             }
+            assert (maxProducer < firstOnHybridThread);
+            FixedDataSyncLock = maxProducer;
+
+            RequiresSynchronization.set(HybridSyncLock);
+            RequiresSynchronization.set(FixedDataSyncLock);
+        }
+
+        if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
             for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
                 const Kernel * const kernelObj = getKernel(kernel);
                 if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
@@ -222,22 +226,7 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
         BasicBlock * const waiting = b->CreateBasicBlock("hybrid_sync_waiting" , nextNode);
         BasicBlock * const waited = b->CreateBasicBlock("hybrid_sync_waited", nextNode);
 
-        const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-        auto syncLock = firstOnHybridThread;
-        if (mCompilingHybridThread) {
-            if (firstOnHybridThread == FirstKernel) {
-                syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-            } else {
-                syncLock = firstOnHybridThread - 1;
-            }
-        }
-
-//        int syncLock;
-//        if (mCompilingHybridThread) {
-//            syncLock = KernelOnHybridThread.find_first_unset_in(FirstKernel, PipelineOutput);
-//        } else {
-//            syncLock = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-//        }
+        const auto syncLock = mCompilingHybridThread ? FixedDataSyncLock : HybridSyncLock;
         assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
 
         assert (FirstKernel <= syncLock && syncLock <= LastKernel);

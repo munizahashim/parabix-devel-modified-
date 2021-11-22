@@ -581,6 +581,8 @@ protected:
     std::vector<unsigned>                       ActivePartitions;
     unsigned                                    ActiveKernelIndex;
     unsigned                                    ActivePartitionIndex;
+    unsigned                                    FixedDataSyncLock = 0;
+    unsigned                                    HybridSyncLock = 0;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
