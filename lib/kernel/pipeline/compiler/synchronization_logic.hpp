@@ -185,11 +185,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
-    if (RequiresSynchronization.test(kernelId)) {
-        return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
-    } else {
-        return nullptr;
-    }
+    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
