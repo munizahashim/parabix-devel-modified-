@@ -972,7 +972,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const newInternalCapacity = b->CreateRoundUp(b->CreateAdd(chunksToReserve, internalCapacity), internalCapacity);
+            Value * const two_x_Capacity = b->CreateShl(internalCapacity, 1);
+            Value * const newInternalCapacity = b->CreateRoundUp(chunksToReserve, two_x_Capacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);

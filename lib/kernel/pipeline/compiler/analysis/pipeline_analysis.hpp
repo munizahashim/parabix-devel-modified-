@@ -59,15 +59,9 @@ public:
 
         P.identifyOutputNodeIds();
 
-//        errs() << "-- max t\n";
-
-//        P.computeMaximumDataflow(true);
-
-        errs() << "-- max f\n";
+        P.computeExpectedDataflow();
 
         P.computeMaximumDataflow(false);
-
-        errs() << "-- xx\n";
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
@@ -221,6 +215,8 @@ private:
     void computeMinimumExpectedDataflow(PartitionGraph & P);
 
     void recomputeMinimumExpectedDataflow();
+
+    void computeExpectedDataflow();
 
     void computeMaximumDataflow(const bool expected);
 
