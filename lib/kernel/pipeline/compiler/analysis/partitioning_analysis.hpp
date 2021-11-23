@@ -771,6 +771,36 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 #endif
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makePartitionJumpGraph
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::makePartitionJumpTree() {
+    mPartitionJumpTree = PartitionJumpTree(PartitionCount);
+    for (auto i = 0U; i < (PartitionCount - 1); ++i) {
+        assert (mPartitionJumpIndex[i] >= i && mPartitionJumpIndex[i] < PartitionCount);
+        add_edge(i, mPartitionJumpIndex[i], mPartitionJumpTree);
+    }
+
+#if 0
+
+    auto & out = errs();
+
+    out << "digraph \"" << "J2" << "\" {\n";
+    for (auto v : make_iterator_range(vertices(mPartitionJumpTree))) {
+        out << "v" << v << " [label=\"" << v << "\"];\n";
+    }
+    for (auto e : make_iterator_range(edges(mPartitionJumpTree))) {
+        const auto s = source(e, mPartitionJumpTree);
+        const auto t = target(e, mPartitionJumpTree);
+        out << "v" << s << " -> v" << t << ";\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+
+#endif
+}
+
 } // end of namespace kernel
 
 #endif // PARTITIONING_ANALYSIS_HPP

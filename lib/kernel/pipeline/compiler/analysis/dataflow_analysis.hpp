@@ -133,7 +133,7 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
                                 assert (VarList[consumer]);
                                 const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
 
-                                if (producerPartitionId == consumerPartitionId) {
+                                if (producerPartitionId == consumerPartitionId && rate.isFixed()) {
                                     hard_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                                 } else {
                                     hard_assert(Z3_mk_ge(ctx, expOutRate, expInRate));
@@ -195,19 +195,8 @@ void PipelineAnalysis::computeMaximumDataflow(const bool expected) {
     Z3_set_param_value(cfg, "proof", "false");
     const auto ctx = Z3_mk_context(cfg);
     Z3_del_config(cfg);
-
     const auto solver = Z3_mk_optimize(ctx);
     Z3_optimize_inc_ref(ctx, solver);
-
-
-    Z3_params params = Z3_mk_params(ctx);
-    Z3_params_inc_ref(ctx, params);
-
-    Z3_symbol r = Z3_mk_string_symbol(ctx, ":timeout");
-    Z3_params_set_uint(ctx, params, r, 1000);
-    Z3_optimize_set_params(ctx, solver, params);
-    Z3_params_dec_ref(ctx, params);
-
 
     auto hard_assert = [&](Z3_ast c) {
         Z3_optimize_assert(ctx, solver, c);
@@ -255,197 +244,256 @@ void PipelineAnalysis::computeMaximumDataflow(const bool expected) {
 
     std::vector<Z3_ast> VarList(LastStreamSet + 1, nullptr);
 
-    //std::vector<unsigned> minVarBound(MinimumNumOfStrides.size());
-
-    MaximumNumOfStrides.resize(MinimumNumOfStrides.size());
-
     bool useIntNumbers = true;
 
 retry:
 
-//    for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
-//        minVarBound[kernel] = MinimumNumOfStrides[kernel];
-//    }
+    Z3_optimize_push(ctx, solver);
 
+    const auto ZERO = constant_real(0);
+    const auto ONE = constant_real(1);
+    const auto TWO = constant_real(2);
 
+    BEGIN_SCOPED_REGION
 
-    //for (unsigned maxBound = 64;; maxBound *= 2) {
+    auto make_partition_vars = [&](const unsigned first, const unsigned last) {
+        auto rootVar = Z3_mk_fresh_const(ctx, nullptr, useIntNumbers ? intType : realType);
+        hard_assert(Z3_mk_ge(ctx, rootVar, ONE));
+        if (expected) {
+            hard_assert(Z3_mk_le(ctx, rootVar, TWO));
+        }
+        for (auto kernel = first; kernel <= last; ++kernel) {
+            VarList[kernel] = multiply(rootVar, constant_real(MinimumNumOfStrides[kernel]));
+        }
+    };
 
-        Z3_optimize_push(ctx, solver);
+    auto currentPartitionId = KernelPartitionId[firstKernel];
+    auto firstKernelInPartition = firstKernel;
+    for (auto kernel = (firstKernel + 1U); kernel < lastKernel; ++kernel) {
+        const auto partitionId = KernelPartitionId[kernel];
+        if (partitionId != currentPartitionId) {
+            make_partition_vars(firstKernelInPartition, kernel - 1U);
+            // set the first kernel for the next partition
+            firstKernelInPartition = kernel;
+            currentPartitionId = partitionId;
+        }
+    }
+    make_partition_vars(firstKernelInPartition, lastKernel);
 
-        const auto ONE = constant_real(1);
+    END_SCOPED_REGION
 
-        const auto MAX = constant_real(64);
+    std::vector<std::array<Z3_ast, 2>> inputVars;
+    std::vector<Z3_ast> tempVars;
 
-        auto make_partition_vars = [&](const unsigned first, const unsigned last) {
-            auto rootVar = Z3_mk_fresh_const(ctx, nullptr, useIntNumbers ? intType : realType);
-            hard_assert(Z3_mk_ge(ctx, rootVar, ONE));
-            hard_assert(Z3_mk_le(ctx, rootVar, MAX));
+    for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
-            for (auto kernel = first; kernel <= last; ++kernel) {
-                const auto var = multiply(rootVar, constant_real(MinimumNumOfStrides[kernel]));
-                //hard_assert(Z3_mk_ge(ctx, var, constant_real(minVarBound[kernel])));
-                VarList[kernel] = var;
+        const auto partitionId = KernelPartitionId[kernel];
+
+        const auto stridesPerSegmentVar = VarList[kernel];
+        assert (stridesPerSegmentVar);
+
+        inputVars.clear();
+        tempVars.clear();
+
+        bool noNonGreedyRates = true;
+
+        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+            const auto streamSet = source(input, mBufferGraph);
+            const auto producer = parent(streamSet, mBufferGraph);
+
+            // we're only interested in inter-partition dataflow here
+            if (KernelPartitionId[producer] == partitionId) {
+                continue;
             }
+
+            const BufferPort & inputRate = mBufferGraph[input];
+            const Binding & binding = inputRate.Binding;
+            const ProcessingRate & rate = binding.getRate();
+
+            const auto producedRate = VarList[streamSet]; assert (producedRate);
+
+            if (LLVM_UNLIKELY(rate.isGreedy())) {
+                // ideally we want to always have enough data to execute
+                soft_assert(Z3_mk_ge(ctx, producedRate, minimum(inputRate)), 10);
+            } else { // Fixed, Bounded or Partial Sum
+
+                noNonGreedyRates = false;
+
+                Z3_ast consumedRate = nullptr;
+//                if (expected) {
+                    consumedRate = multiply(stridesPerSegmentVar, minimum(inputRate));
+//                } else {
+//                    consumedRate = multiply(stridesPerSegmentVar, minimum_non_zero(inputRate));
+//                }
+                hard_assert(Z3_mk_ge(ctx, producedRate, consumedRate));
+//                soft_assert(Z3_mk_eq(ctx, producedRate, consumedRate), 100);
+
+                const auto ratio = Z3_mk_div(ctx, producedRate, consumedRate);
+                tempVars.push_back(ratio);
+
+//                if (expected) {
+//                    Z3_ast args[2] = { producedRate, consumedRate };
+//                    const auto diff = Z3_mk_sub(ctx, 2, args);
+//                    Z3_optimize_minimize(ctx, solver, diff);
+//                } else {
+//                    inputVars.emplace_back(std::array<Z3_ast, 2>{{producedRate, consumedRate}});
+//                }
+
+            }
+        }
+
+        // Any kernel with all greedy rates must exhaust its input in a single iteration.
+        if (LLVM_UNLIKELY(noNonGreedyRates)) {
+            Z3_optimize_minimize(ctx, solver, stridesPerSegmentVar);
+        } else {
+            const auto m = tempVars.size();
+            assert (m > 0);
+            auto maxStrides = tempVars[0];
+            for (unsigned i = 1; i < m; ++i) {
+                const auto cond = Z3_mk_gt(ctx, tempVars[i], maxStrides);
+                maxStrides = Z3_mk_ite(ctx, cond, tempVars[i], maxStrides);
+            }
+            hard_assert(Z3_mk_ge(ctx, stridesPerSegmentVar, maxStrides));
+
+
+//        } else {
+//            const auto m = inputVars.size();
+//            if (m == 1) {
+//                const std::array<Z3_ast, 2> & A = inputVars[0];
+//                hard_assert(Z3_mk_eq(ctx, A[0], A[1]));
+//            } else {
+
+//               // tempVars.clear();
+
+//                for (const auto & P : inputVars) {
+//                    const auto diff = Z3_mk_sub(ctx, 2, P.data());
+//                  //  soft_assert(Z3_mk_eq(ctx, P[0], P[1]), 10);
+//                   // tempVars.push_back(diff);
+
+//                    Z3_optimize_minimize(ctx, solver, diff);
+//                }
+
+////                assert (tempVars.size() == m);
+////                const auto sum = Z3_mk_add(ctx, m, tempVars.data());
+////                Z3_optimize_minimize(ctx, solver, sum);
+
+////                Z3_ast subs[2];
+////                tempVars.resize(m);
+////                for (unsigned i = 0; i < m; ++i) {
+////                    tempVars[i] = inputVars[i][0];
+////                }
+////                subs[0] = Z3_mk_add(ctx, m, tempVars.data());
+////                for (unsigned i = 0; i < m; ++i) {
+////                    tempVars[i] = inputVars[i][1];
+////                }
+////                subs[1] = Z3_mk_add(ctx, m, tempVars.data());
+////                const auto sum = Z3_mk_sub(ctx, 2, subs);
+////                soft_assert(Z3_mk_eq(ctx, sum, ZERO), 10);
+////                Z3_optimize_minimize(ctx, solver, sum);
+//            }
+
+        }
+
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const BufferPort & outputRate = mBufferGraph[output];
+            const Binding & binding = outputRate.Binding;
+            const ProcessingRate & rate = binding.getRate();
+            const auto streamSet = target(output, mBufferGraph);
+
+            assert (VarList[streamSet] == nullptr);
+
+            if (LLVM_UNLIKELY(rate.isUnknown())) {
+                // TODO: is there a better way to handle unknown outputs? This
+                // free variable represents the ideal amount of data to transfer
+                // to subsequent kernels but that isn't very meaningful here.
+                auto v = Z3_mk_fresh_const(ctx, nullptr, intType);
+                hard_assert(Z3_mk_ge(ctx, v, minimum(outputRate)));
+                VarList[streamSet] = v;
+            } else { // Fixed, Bounded or Partial Sum
+                VarList[streamSet] = multiply(stridesPerSegmentVar, maximum(outputRate));
+            }
+        }
+    }
+
+    // Include any length equality assertions
+    if (!mLengthAssertions.empty()) {
+        flat_map<const StreamSet *, unsigned> M;
+
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            const auto output = in_edge(streamSet, mBufferGraph);
+            const BufferPort & br = mBufferGraph[output];
+            const Binding & binding = br.Binding;
+            M.emplace(cast<StreamSet>(binding.getRelationship()), streamSet);
+        }
+
+        auto offset = [&](const StreamSet * streamSet) {
+            const auto f = M.find(streamSet);
+            assert (f != M.end());
+            return f->second;
         };
 
-        auto currentPartitionId = KernelPartitionId[firstKernel];
-        auto firstKernelInPartition = firstKernel;
-        for (auto kernel = (firstKernel + 1U); kernel < lastKernel; ++kernel) {
-            const auto partitionId = KernelPartitionId[kernel];
-            if (partitionId != currentPartitionId) {
-                make_partition_vars(firstKernelInPartition, kernel - 1U);
-                // set the first kernel for the next partition
-                firstKernelInPartition = kernel;
-                currentPartitionId = partitionId;
-            }
+        for (const LengthAssertion & la : mLengthAssertions) {
+            const auto A = VarList[offset(la[0])];
+            const auto B = VarList[offset(la[1])];
+            soft_assert(Z3_mk_eq(ctx, A, B), 1);
         }
-        make_partition_vars(firstKernelInPartition, lastKernel);
+    }
 
-        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
-
-            const auto partitionId = KernelPartitionId[kernel];
-
-            const auto stridesPerSegmentVar = VarList[kernel];
-            assert (stridesPerSegmentVar);
-
-            bool noNonGreedyInputs = true;
-
-            for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                const auto streamSet = source(input, mBufferGraph);
-                const auto producer = parent(streamSet, mBufferGraph);
-
-                // we're only interested in inter-partition dataflow here
-                if (KernelPartitionId[producer] == partitionId) {
-                    continue;
-                }
-
-                const BufferPort & inputRate = mBufferGraph[input];
-                const Binding & binding = inputRate.Binding;
-                const ProcessingRate & rate = binding.getRate();
-
-                const auto producedRate = VarList[streamSet]; assert (producedRate);
-
-                if (rate.isGreedy()) {
-                    // ideally we want to always have enough data to execute
-                    soft_assert(Z3_mk_ge(ctx, producedRate, constant_real(inputRate.Minimum)), 10);
-                } else {
-                    noNonGreedyInputs = false;
-                    const auto consumedRate = multiply(stridesPerSegmentVar, constant_real(inputRate.Minimum));
-                    hard_assert(Z3_mk_ge(ctx, producedRate, consumedRate));
-                    Z3_ast args[2] = { producedRate, consumedRate };
-                    const auto diff = Z3_mk_sub(ctx, 2, args);
-                    Z3_optimize_minimize(ctx, solver, diff);
-                }
-            }
-
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const BufferPort & outputRate = mBufferGraph[output];
-                const Binding & binding = outputRate.Binding;
-                const ProcessingRate & rate = binding.getRate();
-                const auto streamSet = target(output, mBufferGraph);
-
-                assert (VarList[streamSet] == nullptr);
-
-                if (LLVM_UNLIKELY(rate.isUnknown())) {
-                    // TODO: is there a better way to handle unknown outputs? This
-                    // free variable represents the ideal amount of data to transfer
-                    // to subsequent kernels but that isn't very meaningful here.
-                    auto v = Z3_mk_fresh_const(ctx, nullptr, intType);
-                    hard_assert(Z3_mk_ge(ctx, v, minimum(outputRate)));
-                    VarList[streamSet] = v;
-                } else { // Fixed, Bounded or Partial Sum
-                    VarList[streamSet] = multiply(stridesPerSegmentVar, maximum(outputRate));
-                }
-            }
-
-            if (noNonGreedyInputs) { // || out_degree(kernel, mBufferGraph) == 0) {
-                Z3_optimize_minimize(ctx, solver, stridesPerSegmentVar);
-            }
-
+    if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
+        if (useIntNumbers) {
+            // Earlier versions of Z3 seem to have an issue working out a solution to some problems
+            // when using int-type variables. However, using real numbers generates an "infinite"
+            // number of potential solutions and takes considerably longer to finish. Thus we only
+            // fall back to using rational variables if this test fails.
+            Z3_optimize_pop(ctx, solver);
+            useIntNumbers = false;
+            #ifndef NDEBUG
+            std::fill(VarList.begin(), VarList.end(), nullptr);
+            #endif
+            goto retry;
         }
+        report_fatal_error("Z3 failed to find a solution to the maximum permitted dataflow problem");
+    }
 
-        // Include any length equality assertions
-        if (!mLengthAssertions.empty()) {
-            flat_map<const StreamSet *, unsigned> M;
-
-            for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-                const auto output = in_edge(streamSet, mBufferGraph);
-                const BufferPort & br = mBufferGraph[output];
-                const Binding & binding = br.Binding;
-                M.emplace(cast<StreamSet>(binding.getRelationship()), streamSet);
-            }
-
-            auto offset = [&](const StreamSet * streamSet) {
-                const auto f = M.find(streamSet);
-                assert (f != M.end());
-                return f->second;
-            };
-
-            for (const LengthAssertion & la : mLengthAssertions) {
-                const auto A = VarList[offset(la[0])];
-                const auto B = VarList[offset(la[1])];
-                soft_assert(Z3_mk_eq(ctx, A, B), 1);
-            }
-        }
-
-        if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
-            if (useIntNumbers) {
-                // Earlier versions of Z3 seem to have an issue working out a solution to some problems
-                // when using int-type variables. However, using real numbers generates an "infinite"
-                // number of potential solutions and takes considerably longer to finish. Thus we only
-                // fall back to using rational variables if this test fails.
-                Z3_optimize_pop(ctx, solver);
-
-                useIntNumbers = false;
-                #ifndef NDEBUG
-                std::fill(VarList.begin(), VarList.end(), nullptr);
-                #endif
-                goto retry;
-            }
-            report_fatal_error("Z3 failed to find a solution to the maximum permitted dataflow problem");
-        }
-
+    auto updateStrideModel = [&](std::vector<unsigned> & numOfStrides) {
+        numOfStrides.resize(PipelineOutput + 1);
 
         const auto model = Z3_optimize_get_model(ctx, solver);
         Z3_model_inc_ref(ctx, model);
-
-//        bool noChange = true;
-
         for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+
             Z3_ast const stridesPerSegmentVar = VarList[kernel];
             Z3_ast value;
             if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, stridesPerSegmentVar, Z3_L_TRUE, &value) != Z3_L_TRUE)) {
                 report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
             }
+
             Z3_int64 num, denom;
             if (LLVM_LIKELY(useIntNumbers)) {
                 if (LLVM_UNLIKELY(Z3_get_numeral_int64(ctx, value, &num) != Z3_L_TRUE)) {
                     report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
                 }
-                MaximumNumOfStrides[kernel] = num;
+                numOfStrides[kernel] = num;
             } else {
                 if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &num, &denom) != Z3_L_TRUE)) {
                     report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
                 }
-                MaximumNumOfStrides[kernel]  = ceiling(Rational{num, denom});
+
+                const auto x = MinimumNumOfStrides[kernel];
+                const auto y = ceiling(Rational{num, denom * x});
+                numOfStrides[kernel]  = y * x;
             }
-//            if (minVarBound[kernel] != MaximumNumOfStrides[kernel]) {
-//                assert (minVarBound[kernel] <= MaximumNumOfStrides[kernel]);
-//                noChange = false;
-//            }
+
+
         }
         Z3_model_dec_ref(ctx, model);
+    };
 
-        Z3_optimize_pop(ctx, solver);
-
-//        if (noChange) break;
-
-//        minVarBound.swap(MaximumNumOfStrides);
-//        #ifndef NDEBUG
-//        std::fill(VarList.begin(), VarList.end(), nullptr);
-//        #endif
-    //}
+    if (expected) {
+        updateStrideModel(ExpectedNumOfStrides);
+    } else {
+        updateStrideModel(MaximumNumOfStrides);
+    }
 
     Z3_optimize_dec_ref(ctx, solver);
     Z3_del_context(ctx);

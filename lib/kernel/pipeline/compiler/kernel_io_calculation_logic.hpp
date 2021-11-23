@@ -194,10 +194,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     }
 
     if (LLVM_UNLIKELY(CheckAssertions && mIsPartitionRoot)) {
-
-        ConstantInt * const oversize = b->getSize(THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR);
-
-        Value * const check = b->CreateICmpULE(mUpdatedNumOfStrides, b->CreateMul(mMaximumNumOfStrides, oversize));
+        Value * const check = b->CreateICmpULE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
         b->CreateAssert(check,
                         "%s: number of strides (%" PRIu64 ") exceeds maximum bound (%" PRIu64 ")",
                         mCurrentKernelName,
@@ -719,19 +716,6 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     Value * const available = getLocallyAvailableItemCount(b, inputPort);
 
     Value * const processed = mAlreadyProcessedPhi[inputPort];
-
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        if (out_degree(streamSet, mConsumerGraph) != 0) {
-//            Value * const consumed = readConsumedItemCount(b, streamSet);
-//            Value * const valid = b->CreateICmpULE(consumed, processed);
-//            const Binding & inputBinding = port.Binding;
-//            b->CreateAssert(valid,
-//                            "%s.%s: consumed count (%" PRIu64 ") exceeds processed count (%" PRIu64 ")",
-//                            mCurrentKernelName,
-//                            b->GetString(inputBinding.getName()),
-//                            consumed, processed);
-//        }
-//    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);

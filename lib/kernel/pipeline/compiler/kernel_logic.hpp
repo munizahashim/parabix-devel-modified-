@@ -45,9 +45,8 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         if (CheckAssertions) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            const auto producer = parent(streamSet, mBufferGraph);
-            if (mCurrentPartitionId == KernelPartitionId[producer]) {
-            // if (bn.Locality == BufferLocality::ThreadLocal) {
+
+            if (bn.Locality == BufferLocality::ThreadLocal) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
                 // NOTE: static linear buffers are assumed to be threadlocal.
                 Value * const fullyConsumed = b->CreateICmpEQ(produced, processed);

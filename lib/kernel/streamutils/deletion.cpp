@@ -219,7 +219,7 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
-   // setStride(4 * b->getBitBlockWidth());
+    //setStride(4 * b->getBitBlockWidth());
 }
 
 void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {

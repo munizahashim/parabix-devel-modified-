@@ -489,9 +489,9 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         out << "];\n";
     }
 
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        const auto a = i;
-        const auto b = mPartitionJumpIndex[i];
+    for (const auto e : make_iterator_range(edges(mPartitionJumpTree))) {
+        const auto a = source(e, mPartitionJumpTree);
+        const auto b = target(e, mPartitionJumpTree);
         if (b > (a + 1)) {
             const auto s = firstKernelOfPartition[a];
             const auto t = firstKernelOfPartition[b];
@@ -502,21 +502,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
                    "];\n";
         }
     }
-
-    for (const auto e : make_iterator_range(edges(mConsumerGraph))) {
-
-        const auto a = source(e, mConsumerGraph);
-        const auto b = target(e, mConsumerGraph);
-        const ConsumerEdge & c = mConsumerGraph[e];
-
-        if (c.Flags & ConsumerEdge::WriteConsumedCount) {
-            out << "v" << a << " -> v" << b <<
-                   " [style=dotted,color=\"blue\",dir=none];\n";
-        }
-
-
-    }
-
 
     out << "}\n\n";
     out.flush();

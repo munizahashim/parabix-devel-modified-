@@ -89,7 +89,6 @@ const static std::string STATISTICS_SEGMENT_COUNT_SUFFIX = ".SSC";
 const static std::string STATISTICS_BLOCKING_IO_SUFFIX = ".SBY";
 const static std::string STATISTICS_BLOCKING_IO_HISTORY_SUFFIX = ".SHY";
 const static std::string STATISTICS_BUFFER_EXPANSION_SUFFIX = ".SBX";
-const static std::string STATISTICS_BUFFER_EXPANSION_TEMP_STACK = "@SBTS";
 const static std::string STATISTICS_STRIDES_PER_SEGMENT_SUFFIX = ".SSPS";
 const static std::string STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX = ".SPIC";
 const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
@@ -295,6 +294,8 @@ public:
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
     Value * truncateBlockSize(BuilderRef b, const Binding & binding, Value * itemCount, Value * const terminationSignal) const;
 
+    void initializeLocallyAvailableItemCounts(BuilderRef b, BasicBlock * const entryBlock);
+    void updateLocallyAvailableItemCounts(BuilderRef b, BasicBlock * const entryBlock);
     Value * getLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort) const;
     void setLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort, Value * const available);
 
@@ -337,9 +338,8 @@ public:
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
-    void storeConsumedItemCount(BuilderRef b, const size_t bufferVertex, not_null<Value *> consumed, const unsigned slot) const;
+    void setConsumedItemCount(BuilderRef b, const size_t bufferVertex, not_null<Value *> consumed, const unsigned slot) const;
     void writeExternalConsumedItemCounts(BuilderRef b);
-    void readAllConsumerItemCounts(BuilderRef b);
 
 // buffer management codegen functions
 
@@ -561,6 +561,7 @@ protected:
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
     const std::vector<unsigned>                 PartitionJumpTargetId;
+    const PartitionJumpTree                     mPartitionJumpTree;
     const ConsumerGraph                         mConsumerGraph;
     const PartialSumStepFactorGraph             mPartialSumStepFactorGraph;
     const TerminationChecks                     mTerminationCheck;
@@ -790,9 +791,9 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 #else
 , CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts))
 #endif
-, mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
+, mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
-, mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
+, mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
 , mNumOfThreads(pipelineKernel->getNumOfThreads())
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
@@ -829,6 +830,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mBufferGraph(std::move(P.mBufferGraph))
 
 , PartitionJumpTargetId(std::move(P.mPartitionJumpIndex))
+, mPartitionJumpTree(std::move(P.mPartitionJumpTree))
 , mConsumerGraph(std::move(P.mConsumerGraph))
 , mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
