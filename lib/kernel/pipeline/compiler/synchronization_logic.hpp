@@ -120,7 +120,8 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
-        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx);
+        const auto waitingOn = makeKernelName(waitingOnIdx);
+        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), waitingOn + LOGICAL_SEGMENT_SUFFIX);
 //        #ifdef PRINT_DEBUG_MESSAGES
 //        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
 //        #endif
@@ -160,7 +161,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     const auto required = RequiresSynchronization.test(kernelId);
     if (LLVM_LIKELY(required || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
-        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId);
+        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
         Value * currentSegNo = nullptr;
         if (LLVM_UNLIKELY(CheckAssertions)) {
             currentSegNo = b->CreateLoad(waitingOnPtr);
@@ -178,14 +179,6 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
             b->CreateAssert(unchanged, out.str(), mKernelName[kernelId], currentSegNo, mSegNo);
         }
     }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getSynchronizationLockPtrForKernel
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
-    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -282,25 +282,26 @@ inline void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
-        const auto streamSet = source(e, mConsumerGraph);
-        const ConsumerNode & cn = mConsumerGraph[streamSet];
         if (c.Flags & ConsumerEdge::UpdatePhi) {
+            const auto streamSet = source(e, mConsumerGraph);
+            const ConsumerNode & cn = mConsumerGraph[streamSet];
             if (LLVM_LIKELY(cn.PhiNode != nullptr)) {
                 cn.PhiNode->addIncoming(cn.Consumed, mKernelLoopExitPhiCatch);
                 cn.Consumed = cn.PhiNode;
                 cn.PhiNode = nullptr;
             }
-        }
-        // check to see if we've fully finished processing any stream
-        if (c.Flags & ConsumerEdge::WriteConsumedCount) {
-            #ifdef PRINT_DEBUG_MESSAGES
-            const auto output = in_edge(streamSet, mBufferGraph);
-            const BufferPort & br = mBufferGraph[output];
-            const auto producer = source(output, mBufferGraph);
-            const auto prefix = makeBufferName(producer, br.Port);
-            debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, cn.Consumed);
-            #endif
-            setConsumedItemCount(b, streamSet, cn.Consumed, 0);
+            // check to see if we've fully finished processing any stream
+            if (c.Flags & ConsumerEdge::WriteConsumedCount) {
+                #ifdef PRINT_DEBUG_MESSAGES
+                const auto output = in_edge(streamSet, mBufferGraph);
+                const BufferPort & br = mBufferGraph[output];
+                const auto producer = source(output, mBufferGraph);
+                const auto prefix = makeBufferName(producer, br.Port);
+                debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, cn.Consumed);
+                #endif
+                setConsumedItemCount(b, streamSet, cn.Consumed, 0);
+            }
+
         }
     }
 }
@@ -388,19 +389,6 @@ inline void PipelineCompiler::writeExternalConsumedItemCounts(BuilderRef b) {
 //        Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 //        b->CreateStore(consumed, ptr);
 //    }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getLastConsumerOfStreamSet
- ** ------------------------------------------------------------------------------------------------------------- */
-unsigned PipelineCompiler::getLastConsumerOfStreamSet(const size_t streamSet) const {
-    auto lastConsumer = PipelineInput;
-    for (const auto input : make_iterator_range(in_edges(streamSet, mConsumerGraph))) {
-        const auto consumer = target(input, mConsumerGraph);
-        lastConsumer = std::max<unsigned>(lastConsumer, consumer);
-    }
-    return lastConsumer;
 }
 
 }

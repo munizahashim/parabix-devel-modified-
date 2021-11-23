@@ -340,7 +340,6 @@ public:
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
-    unsigned getLastConsumerOfStreamSet(const size_t streamSet) const;
 
 // buffer management codegen functions
 
@@ -427,7 +426,6 @@ public:
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId);
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId);
     void verifyCurrentSynchronizationLock(BuilderRef b) const;
-    Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const;
 
 // family functions
 
