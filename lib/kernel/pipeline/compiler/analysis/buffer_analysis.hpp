@@ -298,22 +298,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
     }
 
-//    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
-//        const RelationshipNode & node = mStreamGraph[kernel];
-//        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
-//        if (isa<PopCountKernel>(kernelObj)) {
-//            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//                const auto streamSet = target(output, mBufferGraph);
-//                BufferNode & bn = mBufferGraph[streamSet];
-//                if (bn.Locality == BufferLocality::ThreadLocal) {
-//                    bn.Locality = BufferLocality::GloballyShared;
-//                }
-//            }
-//        }
-
-
-//    }
 
 }
 
@@ -692,27 +677,6 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         auto maxLookBehind = producerRate.LookBehind;
 
         const auto producer = source(producerOutput, mBufferGraph);
-
-//        const RelationshipNode & node = mStreamGraph[producer];
-//        const Kernel * const kernelObj = node.Kernel;
-//        const auto isPopCountStreamSet = isa<PopCountKernel>(kernelObj);
-
-        //    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
-
-        //        const RelationshipNode & node = mStreamGraph[kernel];
-        //        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
-        //        if (isa<PopCountKernel>(kernelObj)) {
-        //            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-        //                const auto streamSet = target(output, mBufferGraph);
-        //                BufferNode & bn = mBufferGraph[streamSet];
-        //                if (bn.Locality == BufferLocality::ThreadLocal) {
-        //                    bn.Locality = BufferLocality::GloballyShared;
-        //                }
-        //            }
-        //        }
-
-
-        //    }
 
         #ifndef NDEBUG
         const auto & processingRate = producerRate.Binding.get().getRate();

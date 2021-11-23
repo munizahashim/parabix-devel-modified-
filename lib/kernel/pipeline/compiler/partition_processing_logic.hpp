@@ -193,6 +193,51 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 produced = mProducedAtJumpPhi[br.Port];
             }
 
+#if 0
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                produced = mInitiallyProducedDeferredItemCount[streamSet];
+            } else {
+                produced = mInitiallyProducedItemCount[streamSet];
+            }
+
+            assert (produced);
+
+            if (!fromKernelEntryBlock) {
+
+                Value * const initiallyProduced = produced;
+
+                if (mMayLoopToEntry) {
+                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                        produced = mAlreadyProducedDeferredPhi[br.Port];
+                    } else {
+                        produced = mProducedAtJumpPhi[br.Port]; // mAlreadyProducedPhi[br.Port];
+                    }
+                }
+
+                const auto nextPartitionId = mCurrentPartitionId + 1U;
+                const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
+
+                assert (nextPartitionId <= jumpId);
+
+                if (LLVM_UNLIKELY(nextPartitionId == jumpId)) {
+
+                    const auto ip = b->saveIP();
+                    b->SetInsertPoint(entryPoint, entryPoint->begin());
+                    PHINode * const phi = b->CreatePHI(b->getSizeTy(), 3);
+                    assert ((mKernelInitiallyTerminatedExit == nullptr) ^ (mKernelInitiallyTerminated != nullptr));
+                    if (mKernelInsufficientInput) {
+                        phi->addIncoming(produced, mKernelInsufficientInput);
+                    }
+                    if (mKernelInitiallyTerminatedExit) {
+                        phi->addIncoming(initiallyProduced, mKernelInitiallyTerminatedExit);
+                    }
+
+                    produced = phi;
+                    b->restoreIP(ip);
+                }
+            }
+#endif
+
         } else { // if (kernel > mKernelId) {
             const auto prefix = makeBufferName(kernel, br.Port);
             if (LLVM_UNLIKELY(br.IsDeferred)) {
@@ -226,13 +271,11 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
 
         if (prepareConsumedPhi) {
             Value * consumed = nullptr;
-            // TODO: this could be optimized further; if we know we had to load the consumed item count
-            // along all paths to this kernel, the initial consumed count will be up to date.
-            if (kernel >= mKernelId) { // || hasJumpedOverConsumer(streamSet, targetPartitionId)) {
+            if (kernel >= mKernelId || mCompilingHybridThread) {
                 consumed = readConsumedItemCount(b, streamSet);
             } else {
                 consumed = mInitialConsumedItemCount[streamSet];
-            }
+            }            
             assert (isFromCurrentFunction(b, consumed, false));
 
             #ifdef PRINT_DEBUG_MESSAGES
@@ -272,30 +315,6 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
 
     phiOut(producedSet, mPartitionProducedItemCountPhi, "partitionProduced");
     phiOut(consumedSet, mPartitionConsumedItemCountPhi, "partitionConsumed");
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasJumpedOverConsumer
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const {
-//    if (mNumOfThreads > 1) {
-//        bool hasPreTargetUsage = false;
-//        bool hasPostTargetUsage = false;
-//        for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-//            const auto consumer = target(e, mConsumerGraph);
-//            const auto partitionId = KernelPartitionId[consumer];
-//            //if (partitionId >= mCurrentPartitionId) {
-//                if (partitionId < targetPartitionId) {
-//                    hasPreTargetUsage = true;
-//                } else {
-//                    hasPostTargetUsage = true;
-//                }
-//            //}
-//        }
-//        return hasPostTargetUsage;
-//    }
-//    return false;
-    return true;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

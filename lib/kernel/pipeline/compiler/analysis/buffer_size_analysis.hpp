@@ -357,13 +357,10 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
                 const auto streamSet = target(output, mBufferGraph);
                 const auto i = streamSet - FirstStreamSet;
                 const auto j = mapping[i];
-                if (j == -1U) {
-                    assert (mBufferGraph[streamSet].Locality != BufferLocality::ThreadLocal);
-                } else {
+                if (j != -1U) {
                     BufferNode & bn = mBufferGraph[streamSet];
                     const auto & interval = intervals[j];
                     bn.BufferStart = interval.lower();
-                    bn.BufferEnd = interval.upper();
                 }
             }
         }

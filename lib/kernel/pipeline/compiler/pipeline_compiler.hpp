@@ -189,8 +189,6 @@ public:
     void identifyPartitionKernelRange();
     void determinePartitionStrideRateScalingFactor();
 
-    bool hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const;
-
     void writePartitionEntryIOGuard(BuilderRef b);
     Value * calculatePartitionSegmentLength(BuilderRef b);
 
@@ -354,12 +352,9 @@ public:
     void loadCrossHybridThreadProducedItemCounts(BuilderRef b, unsigned firstKernel, unsigned lastKernel);
 
     void prepareLinearThreadLocalOutputBuffers(BuilderRef b);
-
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, Value * isFinal, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
     void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
-
-
 
 // prefetch instructions
 
@@ -608,7 +603,6 @@ protected:
 
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;
     Value *                                     mExpectedNumOfStridesMultiplier = nullptr;
-    Value *                                     mThreadLocalSizeMultiplier = nullptr;
 
     Vec<AllocaInst *, 16>                       mAddressableItemCountPtr;
     Vec<AllocaInst *, 16>                       mVirtualBaseAddressPtr;

@@ -59,9 +59,7 @@ public:
 
         P.identifyOutputNodeIds();
 
-        P.computeExpectedDataflow();
-
-        P.computeMaximumDataflow(false);
+        P.computeMaximumExpectedDataflow();
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
@@ -86,12 +84,12 @@ public:
 
         P.identifyCrossHybridThreadStreamSets();
 
+        P.makeConsumerGraph();
+
         P.calculatePartialSumStepFactors();
 
         P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
-
-        P.makeConsumerGraph();
 
         // Finish the buffer graph
         // P.identifyDirectUpdatesToStateObjects();
@@ -216,9 +214,7 @@ private:
 
     void recomputeMinimumExpectedDataflow();
 
-    void computeExpectedDataflow();
-
-    void computeMaximumDataflow(const bool expected);
+    void computeMaximumExpectedDataflow();
 
     void identifyInterPartitionSymbolicRates();
 
@@ -292,7 +288,6 @@ public:
     KernelIdVector                  KernelPartitionId;
 
     std::vector<unsigned>           MinimumNumOfStrides;
-    std::vector<unsigned>           ExpectedNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
 
