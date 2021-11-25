@@ -166,6 +166,37 @@ protected:
     void generatePabloMethod() override;
 };
 
+class JSONValidateAndDeleteInnerBrackets : public pablo::PabloKernel {
+    public:
+    JSONValidateAndDeleteInnerBrackets(
+                        const std::unique_ptr<KernelBuilder> & b,
+                        StreamSet * const lexIn,
+                        StreamSet * const compressed,
+                        StreamSet * const stringMarker,
+                        StreamSet * const keywordMarker,
+                        StreamSet * const numberMarker,
+                        StreamSet * const toPostProcess,
+                        StreamSet * const syntaxErr
+    )
+    : pablo::PabloKernel(b,
+                         "jsonValidateAndDeleteInnerBrackets",
+                         {
+                            Binding{"lexIn", lexIn},
+                            Binding{"compressed", compressed, FixedRate(1), LookAhead(1)},
+                            Binding{"strMarker", stringMarker},
+                            Binding{"kwMarker", keywordMarker},
+                            Binding{"nbrMarker", numberMarker},
+                         },
+                         {
+                            Binding{"toPostProcess", toPostProcess},
+                            Binding{"syntaxErr", syntaxErr}
+                         }) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+protected:
+    void generatePabloMethod() override;
+};
+
 }
 
 #endif

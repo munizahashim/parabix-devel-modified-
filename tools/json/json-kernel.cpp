@@ -251,3 +251,28 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::comma)), sanitizeComma);
     pb.createAssign(pb.createExtract(brackets, pb.getInteger(0)), orAllBrackets);
 }
+
+void JSONValidateAndDeleteInnerBrackets::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+
+    PabloAST * lCurly = getInputStreamSet("lexIn")[Lex::lCurly];
+    PabloAST * rCurly = getInputStreamSet("lexIn")[Lex::rCurly];
+    PabloAST * lBracket = getInputStreamSet("lexIn")[Lex::lBracket];
+    PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
+    PabloAST * colon = getInputStreamSet("lexIn")[Lex::colon];
+    PabloAST * comma = getInputStreamSet("lexIn")[Lex::comma];
+
+    PabloAST * strMarker = getInputStreamSet("strMarker")[0];
+    PabloAST * kwMarker = getInputStreamSet("kwMarker")[0];
+    PabloAST * nbrMarker = getInputStreamSet("nbrMarker")[0];
+
+    Var * const syntaxErr = getOutputStreamVar("syntaxErr");
+    Var * const toPostProcess = getOutputStreamVar("toPostProcess");
+
+    PabloAST *orBrackets1 = pb.createOr3(lCurly, rCurly, lBracket);
+    PabloAST *orBrackets2 = pb.createOr3(rBracket, colon, comma);
+    PabloAST *orMarker = pb.createOr3(strMarker, kwMarker, nbrMarker);
+    PabloAST *finalOr = pb.createOr3(orBrackets1, orBrackets2, orMarker);
+
+    pb.createAssign(pb.createExtract(toPostProcess, pb.getInteger(0)), finalOr);
+}

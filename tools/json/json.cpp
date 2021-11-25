@@ -157,29 +157,51 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     );
 
     // 9.1 Prepare StreamSets for validation
-    StreamSet * allLex;
+    StreamSet * collapsedLex;
+    StreamSet * Errors;
     if (ToCSVFlag) {
-        allLex = P->CreateStreamSet(10, 1);
+        StreamSet * const allLex = P->CreateStreamSet(10, 1);
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex, stringSpan},
             allLex
         );
-    } else {
-        allLex = P->CreateStreamSet(9, 1);
+        collapsedLex = su::Collapse(P, allLex);
+        Errors = P->CreateStreamSet(3, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
-            allLex
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
+            Errors
+        );
+    } else {
+        collapsedLex = P->CreateStreamSet(1);
+        StreamSet * const compressed = utf8Err;//P->CreateStreamSet(6);
+        StreamSet * const syntaxErr = P->CreateStreamSet(1);
+        // FilterByMask(P, combinedBrackets, firstLexers, compressed);
+        P->CreateKernelCall<JSONValidateAndDeleteInnerBrackets>(
+            firstLexers,
+            compressed,
+            stringMarker,
+            keywordMarker,
+            numberLex,
+            collapsedLex,
+            syntaxErr
+        );
+        // StreamSet * allLex = P->CreateStreamSet(9, 1);
+        // P->CreateKernelCall<StreamsMerge>(
+        //     std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
+        //     allLex
+        // );
+        // collapsedLex = su::Collapse(P, allLex);
+
+        Errors = P->CreateStreamSet(4, 1);
+        P->CreateKernelCall<StreamsMerge>(
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
+            Errors
         );
     }
-    StreamSet * const collapsedLex = su::Collapse(P, allLex);
+
     StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
 
     // 9.2 Prepare error StreamSets
-    StreamSet * const Errors = P->CreateStreamSet(3, 1);
-    P->CreateKernelCall<StreamsMerge>(
-        std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
-        Errors
-    );
     StreamSet * const Errs = su::Collapse(P, Errors);
     StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
     StreamSet * const Codes = su::Multiplex(P, Errs);
@@ -229,7 +251,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", extraErr}
+            Binding {"span", collapsedLex}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}
