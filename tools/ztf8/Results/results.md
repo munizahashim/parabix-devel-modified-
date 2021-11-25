@@ -3,7 +3,7 @@ Compression results on an extensively diverse set of Wikibooks files.
 1. Basic compression and decompression.
 * Min-max symbol length: 3-32 bytes
 * Git tag: https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/tags/CMP_DeCMP_v1
-* Max # sym in phrase: 2
+* Max number of Unicode word (ztf-symbol) in phrase: 2
 
 | Filename | Size (MB) | Compressed size (MB) | Hashtable (MB) | Time (sec) | Decompression time (sec) |
 |---------:|----------:|---------------------:|---------------:|----------: |-------------------------:|
