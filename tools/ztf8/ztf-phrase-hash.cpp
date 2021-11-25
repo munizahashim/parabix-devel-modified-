@@ -279,7 +279,11 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     // and replaces the codewords with phrases.
     StreamSet * u8bytes = ztfHash_u8bytes;
     for(unsigned sym = 0; sym < SymCount; sym++) {
-        for (unsigned i = 0; i < encodingScheme1.byLength.size(); i++) {
+        unsigned startIdx = 0;
+        if (sym > 0) {
+            startIdx = 3;
+        }
+        for (unsigned i = startIdx; i < encodingScheme1.byLength.size(); i++) {
             StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {(sym * encodingScheme1.byLength.size()) + i}));
             //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
