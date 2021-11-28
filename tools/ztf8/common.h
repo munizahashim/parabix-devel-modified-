@@ -42,6 +42,7 @@ struct LengthGroupParameters {
     Constant * RANGE;
     // All subtables are sized the same.
     Constant * SUBTABLE_SIZE;
+    Constant * PHRASE_SUBTABLE_SIZE;
     Constant * HASH_BITS;
     Constant * EXTENDED_BITS;
     Constant * PHRASE_EXTENSION_MASK;
@@ -54,13 +55,14 @@ struct LengthGroupParameters {
     Constant * PREFIX_LENGTH_MASK;
     Constant * LENGTH_MASK;
     Constant * EXTENSION_MASK;
+    Constant * TABLE_MASK;
     Constant * TABLE_IDX_MASK;
 
     LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo, unsigned numSym = 0);
 };
 
 unsigned hashTableSize(LengthGroupInfo g);
-unsigned phraseHashTableSize(LengthGroupInfo g, unsigned sz_stride);
+unsigned phraseHashTableSize(LengthGroupInfo g);
 std::string lengthRangeSuffix(EncodingInfo encodingScheme, unsigned lo, unsigned hi);
 std::string lengthGroupSuffix(EncodingInfo encodingScheme, unsigned groupNo);
 std::vector<llvm::Value *> initializeCompressionMasks(Kernel::BuilderRef b,

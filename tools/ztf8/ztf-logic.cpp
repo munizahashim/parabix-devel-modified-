@@ -104,6 +104,27 @@ unsigned EncodingInfo::lastSuffixHashBits(unsigned numSym, unsigned groupNo) con
     return 7;
 }
 
+unsigned EncodingInfo::getSubtableSize(unsigned groupNo) const {
+    auto g = byLength[groupNo];
+    unsigned subtables = 1;
+    if ((g.hi - g.lo) < 4) {
+        subtables = 5;
+    }
+    return subtables * (1UL << (g.hash_bits + g.encoding_bytes)) * g.hi;
+}
+ 
+unsigned EncodingInfo::tableSizeBits(unsigned groupNo) const {
+    auto g = byLength[groupNo];
+    switch(groupNo) {
+        case 0: return 13;
+        case 1: return 14;
+        case 2: return 14;
+        case 3: return 15;
+        case 4: return 17;
+        default: return 0;
+    }
+}
+
 WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
 : PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 

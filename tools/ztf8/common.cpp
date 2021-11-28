@@ -56,6 +56,7 @@ LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encoding
     RANGE(b->getSize((groupInfo.hi - groupInfo.lo) + 1UL)),
     // All subtables are sized the same.
     SUBTABLE_SIZE(b->getSize((1UL << groupInfo.hash_bits) * groupInfo.hi)),
+    PHRASE_SUBTABLE_SIZE(b->getSize(encodingScheme.getSubtableSize(groupNo))),
     HASH_BITS(b->getSize(groupInfo.hash_bits)),
     EXTENDED_BITS(b->getSize(std::max((groupInfo.hash_bits + groupInfo.length_extension_bits), ((groupInfo.encoding_bytes - 1U) * 7U)))),
     PHRASE_EXTENSION_MASK(b->getSize(( 1UL << std::min(groupInfo.hi - groupInfo.lo, groupNo)) - 1UL)),
@@ -68,6 +69,7 @@ LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encoding
     LENGTH_MASK(b->getSize(2UL * groupHalfLength - 1UL)),
     PREFIX_LENGTH_MASK(b->getSize((1UL << encodingScheme.prefixLengthMaskBits(groupInfo.lo)) - 1UL)),
     EXTENSION_MASK(b->getSize((1UL << groupInfo.length_extension_bits) - 1UL)),
+    TABLE_MASK(b->getSize((1U << encodingScheme.tableSizeBits(groupNo)) -1)),
     TABLE_IDX_MASK(b->getSize((1U << (8*groupInfo.encoding_bytes)) -1)) {
         assert(groupInfo.hi <= (1UL << (boost::intrusive::detail::floor_log2(groupInfo.lo) + 1UL)));
     }
@@ -77,11 +79,17 @@ unsigned hashTableSize(LengthGroupInfo g) {
     return numSubTables * g.hi * (1<<g.hash_bits);
 }
 
-unsigned phraseHashTableSize(LengthGroupInfo g, unsigned sz_stride) {
-    unsigned segmentSizeInBytes = 8 * sz_stride; // numStrides * sz_stride
-    unsigned maxSyms = segmentSizeInBytes / g.lo;
-    return 32768; // temp
-
+unsigned phraseHashTableSize(LengthGroupInfo g) {
+    unsigned numSubTables = (g.hi - g.lo + 1);
+    if (g.hi - g.lo < 4) {
+        numSubTables *= 5;
+    }
+    return numSubTables * g.hi * (1<<(g.hash_bits + g.encoding_bytes));
+    // 3 * 1024 = 3072 (* 5 = 15360; TABLEMASK = 13bits)
+    // 4 * 1024 = 4096 (* 5 = 20480; TABLEMASK = 14bits)
+    // 8 * 1024 = 8192 (* 5 = 40960; TABLEMASK = 14bits)
+    // 16 * 2048 = 32768; TABLEMASK = 15bits
+    // 32 * 4096 = 131072; TABLEMASK = 17bits
 }
 
 std::string lengthRangeSuffix(EncodingInfo encodingScheme, unsigned lo, unsigned hi) {
