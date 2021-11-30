@@ -333,7 +333,11 @@ Kernel * PipelineBuilder::makeKernel() {
     }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
-        out << "+PAPI:" << codegen::PapiCounterOptions;
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+            out << "+PPO:" << codegen::PapiCounterOptions;
+        } else {
+            out << "+PPA:" << codegen::PapiCounterOptions;
+        }
     }
     #endif
     for (unsigned i = 0; i < numOfKernels; ++i) {

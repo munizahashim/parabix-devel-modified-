@@ -43,6 +43,9 @@ enum DebugFlags {
     EnableMProtect,
     EnableCycleCounter,
     EnableBlockingIOCounter,
+    #ifdef ENABLE_PAPI
+    DisplayPAPICounterThreadTotalsOnly,
+    #endif
     DisableIndirectBranch,
     DisableThreadLocalStreamSets,
     PrintPipelineGraph,

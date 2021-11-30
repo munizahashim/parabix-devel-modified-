@@ -84,6 +84,7 @@ const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCY";
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
 const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY = "!PCS";
+const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX = "!PCI";
 const static std::string STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY = "tPCS";
 #endif
 const static std::string STATISTICS_SEGMENT_COUNT_SUFFIX = ".SSC";

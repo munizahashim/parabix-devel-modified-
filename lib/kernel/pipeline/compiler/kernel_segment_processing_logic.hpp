@@ -39,6 +39,7 @@ void PipelineCompiler::start(BuilderRef b) {
     debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
     #endif
 
+    readFirstSegmentNumber(b);
     #ifdef ENABLE_PAPI
     createEventSetAndStartPAPI(b);
     #endif
@@ -62,7 +63,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mNumOfTruncatedInputBuffers = 0;
     mTruncatedInputBuffer.clear();
 
-    readFirstSegmentNumber(b);
     BasicBlock * const entryBlock = b->GetInsertBlock();
     b->CreateBr(mPipelineLoop);
 
