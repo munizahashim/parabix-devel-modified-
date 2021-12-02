@@ -171,7 +171,13 @@ void PipelineCompiler::createEventSetAndStartPAPI(BuilderRef b) {
         Module * const m = b->getModule();
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            b->setScalarField(STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX, mSegNo);
+            Value * idx = mSegNo;
+            if (LLVM_UNLIKELY(mCompilingHybridThread)) {
+                idx = b->getSize(0);
+            } else if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
+                idx = b->CreateAdd(mSegNo, b->getSize(1));
+            }
+            b->setScalarField(STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX, idx);
         }
 
         IntegerType * const intTy = TypeBuilder<int, false>::get(b->getContext());
