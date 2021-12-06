@@ -462,7 +462,13 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
         acquireSynchronizationLock(b, lastConsumer);
     }
+
+    unsigned releasedPartitionId = 0;
     for (auto kernel = mKernelId; kernel < firstKernelInTargetPartition; ++kernel) {
+        if (releasedPartitionId != KernelPartitionId[kernel]) {
+            releasedPartitionId = KernelPartitionId[kernel];
+            recordStridesPerSegment(b, kernel, b->getSize(0));
+        }
         assert (KernelPartitionId[kernel] < partitionId);
         if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
             releaseSynchronizationLock(b, kernel);

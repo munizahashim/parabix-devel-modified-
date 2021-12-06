@@ -357,7 +357,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     b->SetInsertPoint(mKernelExit);
     recordFinalProducedItemCounts(b);
-    recordStridesPerSegment(b);
+    if (mIsPartitionRoot) {
+        recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
+    }
     recordProducedItemCountDeltas(b);
     writeConsumedItemCounts(b);
     setCurrentTerminationSignal(b, mTerminatedAtExitPhi);

@@ -117,7 +117,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
             addTerminationProperties(b, i);
             currentPartitionId = partitionId;
         }
-        addInternalKernelProperties(b, i);
+        addInternalKernelProperties(b, i, isRoot);
         addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
         addPAPIEventCounterKernelProperties(b, i, isRoot);
@@ -125,10 +125,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
     }
-//    if (PartitionOnHybridThread.any()) {
-//        mTarget->addInternalScalar(sizeTy, "0" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
-//        mTarget->addInternalScalar(sizeTy, "1" + HYBRID_SYNCHRONIZATION_SUFFIX, PipelineOutput);
-//    }
+
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
@@ -137,7 +134,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned kernelId) {
+void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned kernelId, const bool isRoot) {
     const Kernel * const kernel = getKernel(kernelId);
     IntegerType * const sizeTy = b->getSizeTy();
 
@@ -222,12 +219,12 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         }
     }
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(isRoot && DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         LLVMContext & C = b->getContext();
-        FixedArray<Type *, 2> recordStruct;
-        recordStruct[0] = sizeTy; // segment num
-        recordStruct[1] = sizeTy; // # of strides
-        Type * const recordStructTy = StructType::get(C, recordStruct);
+//        FixedArray<Type *, 2> recordStruct;
+//        recordStruct[0] = sizeTy; // segment num
+//        recordStruct[1] = sizeTy; // # of strides
+        Type * const recordStructTy = ArrayType::get(sizeTy, 2);
 
         FixedArray<Type *, 4> traceStruct;
         traceStruct[0] = sizeTy; // last num of strides (to avoid unnecessary loads of the trace
@@ -272,17 +269,27 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
 
     Value * terminated = nullptr;
-    auto partitionId = KernelPartitionId[FirstKernel];
+    auto partitionId = KernelPartitionId[PipelineInput];
 
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+
+        const auto curPartitionId = KernelPartitionId[i];
+        const auto isRoot = (curPartitionId != partitionId);
+        partitionId = curPartitionId;
+
+
+
 
         // Family kernels must be initialized in the "main" method.
         const Kernel * kernel = getKernel(i);
-        if (LLVM_LIKELY(!kernel->externallyInitialized())) {
-            setActiveKernel(b, i, false);
-            initializeStridesPerSegment(b);
-            ArgVec args;
 
+        setActiveKernel(b, i, false);
+        if (isRoot) {
+            initializeStridesPerSegment(b);
+        }
+
+        if (LLVM_LIKELY(!kernel->externallyInitialized())) {
+            ArgVec args;
             if (LLVM_LIKELY(mKernel->isStateful())) {
                 args.push_back(mKernelSharedHandle);
             }
@@ -316,7 +323,6 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
         if (terminated && partitionId != nextPartitionId) {
             Value * const signal = b->CreateSelect(terminated, aborted, unterminated);
             writeTerminationSignal(b, signal);
-            partitionId = nextPartitionId;
             terminated = nullptr;
         }
 
@@ -797,19 +803,19 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     initializeForAllKernels();
     mScalarValue.reset(FirstKernel, LastScalar);
-    // calculate the last segment # used by any kernel in case any reports require it.
-    mSegNo = nullptr;
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
-                      DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-        for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            if (RequiresSynchronization.test(i)) {
-                const auto prefix = makeKernelName(i);
-                Value * const ptr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
-                Value * const segNo = b->CreateLoad(ptr);
-                mSegNo = b->CreateUMax(mSegNo, segNo);
-            }
-        }
-    }
+//    // calculate the last segment # used by any kernel in case any reports require it.
+//    mSegNo = nullptr;
+//    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
+//                      DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+//        for (auto i = FirstKernel; i <= LastKernel; ++i) {
+//            if (RequiresSynchronization.test(i)) {
+//                const auto prefix = makeKernelName(i);
+//                Value * const ptr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
+//                Value * const segNo = b->CreateLoad(ptr);
+//                mSegNo = b->CreateUMax(mSegNo, segNo);
+//            }
+//        }
+//    }
     printOptionalCycleCounter(b);
     #ifdef ENABLE_PAPI
     printPAPIReportIfRequested(b);

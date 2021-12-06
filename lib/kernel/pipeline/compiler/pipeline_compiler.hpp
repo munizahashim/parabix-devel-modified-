@@ -152,7 +152,7 @@ private:
 
 public:
 
-    void addInternalKernelProperties(BuilderRef b, const unsigned kernelId);
+    void addInternalKernelProperties(BuilderRef b, const unsigned kernelId, const bool isRoot);
     void generateSingleThreadKernelMethod(BuilderRef b);
     void generateMultiThreadKernelMethod(BuilderRef b);
 
@@ -385,7 +385,7 @@ public:
     void printOptionalBufferExpansionHistory(BuilderRef b);
 
     void initializeStridesPerSegment(BuilderRef b) const;
-    void recordStridesPerSegment(BuilderRef b) const;
+    void recordStridesPerSegment(BuilderRef b, unsigned kernelId, Value * totalStrides) const;
     void printOptionalStridesPerSegment(BuilderRef b) const;
     void printOptionalBlockedIOPerSegment(BuilderRef b) const;
 
