@@ -111,21 +111,15 @@ void LengthSelector::generatePabloMethod() {
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     Var * selectedHashMarksPosStreamVar = getOutputStreamVar("selectedHashMarksPos");
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
-    std::vector<PabloAST *> selectedLengthMarks;
     unsigned offset = 2;
-    unsigned lo = mEncodingScheme.minSymbolLength()+2; // min k-sym phrase length = 5 bytes
+    unsigned lo = mEncodingScheme.minSymbolLength()+6; // min k-sym phrase length = 9 bytes
     unsigned hi = mEncodingScheme.maxSymbolLength();
     unsigned groupSize = hi - lo + 1;
-    //std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
+    std::vector<PabloAST *> selectedLengthMarks(groupSize);
     for (unsigned i = lo; i <= hi; i++) {
         PabloAST * lenBixnum = bnc.EQ(groupLenBixnum, i - offset);
-        selectedLengthMarks.push_back(pb.createAnd(hashMarks, lenBixnum));
-        //pb.createDebugPrint(pb.createCount(pb.createInFile(lenBixnum)), "count"+std::to_string(i));
+        pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i-lo)), pb.createAnd(hashMarks, lenBixnum));
     }
-    for (unsigned i = 0; i < selectedLengthMarks.size(); i++) {
-        pb.createAssign(pb.createExtract(selectedHashMarksPosStreamVar, pb.getInteger(i)), selectedLengthMarks[i]);
-    }
-    //pb.createAssign(pb.createExtract(getOutputStreamVar("countStream2"), pb.getInteger(0)), selectedLengthMarks[mDebugIdx]);
 }
 
 
@@ -145,7 +139,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
     Var * selectedStreamVar = getOutputStreamVar("selected");
     std::vector<PabloAST *> lengthwiseHashMarks = getInputStreamSet("lengthwiseHashMarks");
     PabloAST * prevSelected = getInputStreamSet("prevSelected")[0];
-    unsigned offset = 5;
+    unsigned offset = 9;
     unsigned curPhraseLen = mGroupNo;
     unsigned idx = mGroupNo-offset;
     /*
@@ -156,7 +150,7 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
         select the max number of non-overlapping phrases.
     */
     /// TODO: add an assertion to check mGroupNo is valid array index
-    PabloAST * curLenPos = lengthwiseHashMarks[idx];
+    PabloAST * curLenPos = pb.createAnd(lengthwiseHashMarks[idx], prevSelected);
     PabloAST * toAdvance = curLenPos;
     //for (unsigned loop = 0; loop < 2; loop++) { // loop depends on the max number of consecutive phrases of same length
         PabloAST * notSelected = pb.createZeroes();
@@ -170,9 +164,9 @@ void OverlappingLengthGroupMarker::generatePabloMethod() {
 
     PabloAST * toEliminate = pb.createZeroes();
     for (unsigned i = idx+1; i < lengthwiseHashMarks.size(); i++) {
-        PabloAST * phrasePos = lengthwiseHashMarks[i];
+        PabloAST * phrasePos = pb.createAnd(lengthwiseHashMarks[i], prevSelected);
         // get all the phrases marked for compression of length i+3 Eg: 29+3 -> mGroupNo+3 = 32
-        phrasePos = pb.createAnd(phrasePos, prevSelected); // update prevSelected correctly
+        //phrasePos = pb.createAnd(phrasePos, prevSelected); // update prevSelected correctly
         PabloAST * preceededByLongerPhrase = pb.createZeroes();
         // check if any of the current selected phrases (of length Eg: 16) are preceeded by any longer length phrases (> 16)
         // already marked for compression; Eliminate such phrases from current selected group
@@ -218,7 +212,7 @@ void OverlappingLookaheadMarker::generatePabloMethod() {
         selected(curLen) = XOR(eliminateFinal, selected(curLen))
         selected(curLen) = OR(selected(curLen), selectedLongerPhrases)
     */
-    unsigned offset = 5;
+    unsigned offset = 9;
     unsigned phraseLenIdx = mGroupNo - offset;
     if (phraseLenIdx+1 < groupLenBixnum.size()) {
         PabloAST * eliminateFinal = pb.createZeroes();
@@ -368,12 +362,10 @@ ZTF_PhraseExpansionDecoder::ZTF_PhraseExpansionDecoder(BuilderRef b,
                                            EncodingInfo & encodingScheme,
                                            StreamSet * const basis,
                                            StreamSet * insertBixNum,
-                                           StreamSet * hashtableSpan,
                                            StreamSet * countStream)
 : pablo::PabloKernel(b, "ZTF_PhraseExpansionDecoder" + encodingScheme.uniqueSuffix(),
                      {Binding{"basis", basis, FixedRate(), LookAhead(encodingScheme.maxEncodingBytes() - 1)}},
                      {Binding{"insertBixNum", insertBixNum},
-                      Binding{"hashtableSpan", hashtableSpan},
                       Binding{"countStream", countStream}}),
     mEncodingScheme(encodingScheme)  {}
 
@@ -484,10 +476,12 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
     Var * lengthVar = getOutputStreamVar("insertBixNum");
     for (unsigned i = 0; i < 5; i++) {
         //pb.createDebugPrint(insertLgth[i], "insertLgth["+std::to_string(i)+"]");
+        //if(i == 0) {
+        //    pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), pb.createAnd(pb.createNot(hashTableRange), insertLgth[i]));
+        //}
         pb.createAssign(pb.createExtract(lengthVar, pb.getInteger(i)), pb.createAnd(pb.createNot(hashTableRange), insertLgth[i]));
     }
 
     //pb.createDebugPrint(hashTableRange, "hashTableRange");
-    pb.createAssign(pb.createExtract(getOutputStreamVar("hashtableSpan"), pb.getInteger(0)), hashTableRange);
     pb.createAssign(pb.createExtract(getOutputStreamVar("countStream"), pb.getInteger(0)), hashTableBoundary);
 }

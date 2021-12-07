@@ -121,7 +121,6 @@ public:
                          EncodingInfo & encodingScheme,
                          StreamSet * const basis,
                          StreamSet * insertBixNum,
-                         StreamSet * hashtableSpan,
                          StreamSet * countStream);
 protected:
     void generatePabloMethod() override;
