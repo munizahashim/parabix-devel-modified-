@@ -140,10 +140,7 @@ To run the ztf-phrase-hash application, follow the below steps.
 `python3 ../tools/ztf8/scripts/writeBoundaryByte.py`
 `python3 ../tools/ztf8/scripts/mergeFiles.py`
 
-3. Decompression: takes in the hashtable and the compressed data. Creates the hashtable first and then replaces the codeword in the compressed data referring to the hashtable entries. `original` contains the hashtable in the preamble of the file and the uncompressed data in the subsequent part of the output file.
+3. Decompression: takes in the hashtable and the compressed data. Creates the hashtable first and then replaces the codeword in the compressed data referring to the hashtable entries. `decompressed` contains the hashtable in the preamble of the file and the uncompressed data in the subsequent part of the output file.
 
-`bin/ztf-phrase-hash -d finalCompressed.z > original`
+`bin/ztf-phrase-hash -d finalCompressed.z > decompressed`
 
-4. In order to separate the hashtable from `original`, run the following command. The parameter `<hashtable_size>` takes in the size of hashtable (from compression) in bytes.
-
-`python3 ../tools/ztf8/scripts/readAfterOffset.py <hashtable_size>`
