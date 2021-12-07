@@ -59,7 +59,7 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     Constant * sz_TWO = b->getSize(2);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
-    //Constant * lg.TABLE_MASK = lg.TABLE_MASK;
+    Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
 
     Type * sizeTy = b->getSizeTy();
     Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();

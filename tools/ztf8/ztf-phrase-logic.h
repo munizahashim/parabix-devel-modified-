@@ -107,7 +107,8 @@ public:
                       unsigned numSym,
                       StreamSet * basisBits,
                       StreamSet * groupStreams,
-                      StreamSet * hashtableStreams);
+                      StreamSet * hashtableStreams,
+                      StreamSet * hashtableSpan);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;
