@@ -39,6 +39,7 @@
 #include "json-kernel.h"
 #include "postprocess/json-simple.h"
 #include "postprocess/json-detail.h"
+#include "postprocess/json-parens.h"
 #include "postprocess/json2csv.h"
 
 namespace su = kernel::streamutils;
@@ -177,12 +178,16 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         // collapsedLex = P->CreateStreamSet(1);
         // StreamSet * const compressed = P->CreateStreamSet(6);
         // FilterByMask(P, combinedBrackets, firstLexers, compressed);
-        StreamSet * allLex = P->CreateStreamSet(9, 1);
-        P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
-            allLex
-        );
-        collapsedLex = su::Collapse(P, allLex);
+        if (ShowLinesFlag) {
+            StreamSet * allLex = P->CreateStreamSet(9, 1);
+            P->CreateKernelCall<StreamsMerge>(
+                std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
+                allLex
+            );
+            collapsedLex = su::Collapse(P, allLex);
+        } else {
+            collapsedLex = combinedBrackets;
+        }
 
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
@@ -201,7 +206,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 9.3 Prepare StreamSets in case we want to show lines on error
     //    If flag -c is provided, parse for CSV
     auto normalJsonFn = SCAN_CALLBACK(postproc_validateObjectsAndArrays);
-    auto simpleJsonFn = SCAN_CALLBACK(postproc_simpleValidateJSON);
+    auto simpleJsonFn = SCAN_CALLBACK(postproc_parensValidate);
     auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
 
     auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);
@@ -209,7 +214,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
 
     auto normalErrFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
-    auto simpleErrFn = SCAN_CALLBACK(postproc_simpleError);
+    auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
 
     if (ShowLinesFlag) {
         auto const LineBreaks = P->CreateStreamSet(1);
@@ -243,7 +248,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", syntaxErr}
+            Binding {"span", collapsedLex}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}

@@ -12,6 +12,7 @@ SRC
     json.cpp
     postprocess/json-simple.cpp
     postprocess/json-detail.cpp
+    postprocess/json-parens.cpp
     postprocess/json2csv.cpp
     json-kernel.cpp
 DEPS
