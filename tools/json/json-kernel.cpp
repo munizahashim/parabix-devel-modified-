@@ -261,18 +261,49 @@ void JSONValidateAndDeleteInnerBrackets::generatePabloMethod() {
     PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
     PabloAST * colon = getInputStreamSet("lexIn")[Lex::colon];
     PabloAST * comma = getInputStreamSet("lexIn")[Lex::comma];
+    PabloAST * ws = getInputStreamSet("lexStream")[Lex::ws];
 
     PabloAST * strMarker = getInputStreamSet("strMarker")[0];
-    PabloAST * kwMarker = getInputStreamSet("kwMarker")[0];
-    PabloAST * nbrMarker = getInputStreamSet("nbrMarker")[0];
+    std::vector<PabloAST *> kwEndMarkers = getInputStreamSet("kwEndMarkers");
+    PabloAST * nbrSpan = getInputStreamSet("nbrSpan")[0];
 
     Var * const syntaxErr = getOutputStreamVar("syntaxErr");
-    Var * const toPostProcess = getOutputStreamVar("toPostProcess");
 
-    PabloAST *orBrackets1 = pb.createOr3(lCurly, rCurly, lBracket);
-    PabloAST *orBrackets2 = pb.createOr3(rBracket, colon, comma);
-    PabloAST *orMarker = pb.createOr3(strMarker, kwMarker, nbrMarker);
-    PabloAST *finalOr = pb.createOr3(orBrackets1, orBrackets2, orMarker);
+    PabloAST * kwMarker = pb.createOr3(
+        kwEndMarkers[KwMarker::kwNullEnd],
+        kwEndMarkers[KwMarker::kwTrueEnd],
+        kwEndMarkers[KwMarker::kwFalseEnd]
+    );
 
-    pb.createAssign(pb.createExtract(toPostProcess, pb.getInteger(0)), finalOr);
+    PabloAST * notNbrSpan = pb.createNot(nbrSpan);
+    PabloAST * nbrMarker = pb.createAnd(pb.createAdvance(nbrSpan, 1), notNbrSpan);
+    PabloAST * clearNbrMarker = pb.createXor(
+        pb.createAnd(nbrMarker, kwMarker),
+        nbrMarker
+    );
+
+    PabloAST * terminalBrackets = pb.createOr(rCurly, rBracket);
+    PabloAST * terminalAfterValue = pb.createOr(comma, terminalBrackets);
+    PabloAST * allTerminals = pb.createOr(terminalAfterValue, colon);
+
+    PabloAST * strFirstQuote = pb.createEveryNth(strMarker, pb.getInteger(2));
+    PabloAST * strSecondQuote = pb.createXor(strFirstQuote, strMarker);
+    PabloAST * nextKwMarker = pb.createAdvance(kwMarker, 1);
+    PabloAST * allValuesMinusStr = pb.createOr(nextKwMarker, clearNbrMarker);
+
+    // <String> [':', '}', ']', ',']
+    PabloAST * wsThruStr = pb.createAdvanceThenScanThru(strSecondQuote, ws);
+    PabloAST * errStr = pb.createAnd(wsThruStr, pb.createNot(allTerminals));
+    // <Value> ['}', ']', ',']
+    PabloAST * wsThruValues = pb.createScanThru(allValuesMinusStr, ws);
+    PabloAST * errValues = pb.createAnd(wsThruValues, pb.createNot(terminalAfterValue));
+
+    // [':', ','] <value>
+    PabloAST * colonOrComma = pb.createOr(comma, colon);
+    PabloAST * wsThruColonOrComma = pb.createAdvanceThenScanThru(colonOrComma, ws);
+    PabloAST * errTerminals = pb.createAnd(wsThruColonOrComma, allTerminals);
+
+    PabloAST * allErrs = pb.createOr3(errStr, errValues, errTerminals);
+
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(0)), allErrs);
 }

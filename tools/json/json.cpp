@@ -158,6 +158,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     // 9.1 Prepare StreamSets for validation
     StreamSet * collapsedLex;
+    StreamSet * syntaxErr;
     StreamSet * Errors;
     if (ToCSVFlag) {
         StreamSet * const allLex = P->CreateStreamSet(10, 1);
@@ -173,28 +174,29 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         );
     } else {
         collapsedLex = P->CreateStreamSet(1);
-        StreamSet * const compressed = utf8Err;//P->CreateStreamSet(6);
-        StreamSet * const syntaxErr = P->CreateStreamSet(1);
-        // FilterByMask(P, combinedBrackets, firstLexers, compressed);
+        syntaxErr = P->CreateStreamSet(1);
         P->CreateKernelCall<JSONValidateAndDeleteInnerBrackets>(
             firstLexers,
-            compressed,
+            lexStream,
             stringMarker,
-            keywordMarker,
-            numberLex,
-            collapsedLex,
+            keywordEndMarkers,
+            numberSpan,
             syntaxErr
         );
-        // StreamSet * allLex = P->CreateStreamSet(9, 1);
-        // P->CreateKernelCall<StreamsMerge>(
-        //     std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
-        //     allLex
-        // );
-        // collapsedLex = su::Collapse(P, allLex);
+        
+        // collapsedLex = P->CreateStreamSet(1);
+        // StreamSet * const compressed = P->CreateStreamSet(6);
+        // FilterByMask(P, combinedBrackets, firstLexers, compressed);
+        StreamSet * allLex = P->CreateStreamSet(9, 1);
+        P->CreateKernelCall<StreamsMerge>(
+            std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
+            allLex
+        );
+        collapsedLex = su::Collapse(P, allLex);
 
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, syntaxErr},
             Errors
         );
     }
@@ -251,7 +253,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         jsonPabloSrc,
         "SpanLocations",
         Bindings { // Input Stream Bindings
-            Binding {"span", collapsedLex}
+            Binding {"span", syntaxErr}
         },
         Bindings { // Output Stream Bindings
             Binding {"output", filteredBasis}
