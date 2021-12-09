@@ -144,7 +144,8 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                         StreamSet * const kwMarker,
                         StreamSet * const firstLexs,
                         StreamSet * const combinedBrackets,
-                        StreamSet * const extraErr
+                        StreamSet * const extraErr,
+                        StreamSet * const syntaxErr
     )
     : pablo::PabloKernel(b,
                          "jsonFindKwAndExtraneousChars",
@@ -158,36 +159,8 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                             Binding{"kwMarker", kwMarker},
                             Binding{"firstLexs", firstLexs},
                             Binding{"combinedBrackets", combinedBrackets},
-                            Binding{"extraErr", extraErr}
-                         }) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
-class JSONValidateAndDeleteInnerBrackets : public pablo::PabloKernel {
-    public:
-    JSONValidateAndDeleteInnerBrackets(
-                        const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const sanitizedLexIn,
-                        StreamSet * const lexStream,
-                        StreamSet * const stringMarker,
-                        StreamSet * const keywordEndMarker,
-                        StreamSet * const numberSpan,
-                        StreamSet * const syntaxErr
-    )
-    : pablo::PabloKernel(b,
-                         "jsonValidateAndDeleteInnerBrackets",
-                         {
-                            Binding{"lexIn", sanitizedLexIn},
-                            Binding{"lexStream", lexStream},
-                            Binding{"strMarker", stringMarker},
-                            Binding{"kwEndMarkers", keywordEndMarker},
-                            Binding{"nbrSpan", numberSpan},
-                         },
-                         {
-                            Binding{"syntaxErr", syntaxErr}
+                            Binding{"extraErr", extraErr},
+                            Binding{"syntaxErr", syntaxErr},
                          }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }

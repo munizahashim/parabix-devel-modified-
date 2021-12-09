@@ -141,10 +141,11 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 7. Clean lexers (in case there's special chars inside string)
     // 8. Validate rest of the output (check for extraneous chars)
     // We also take the opportunity to create the keyword marker
-    StreamSet * const firstLexers = P->CreateStreamSet(6);
+    StreamSet * const firstLexers = P->CreateStreamSet(7);
     StreamSet * const extraErr = P->CreateStreamSet(1);
     StreamSet * const keywordMarker = P->CreateStreamSet(1);
     StreamSet * const combinedBrackets = P->CreateStreamSet(1);
+    StreamSet * const syntaxErr = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
         lexStream,
         stringSpan,
@@ -153,12 +154,12 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         keywordMarker,
         firstLexers,
         combinedBrackets,
-        extraErr
+        extraErr,
+        syntaxErr
     );
 
     // 9.1 Prepare StreamSets for validation
     StreamSet * collapsedLex;
-    StreamSet * syntaxErr;
     StreamSet * Errors;
     if (ToCSVFlag) {
         StreamSet * const allLex = P->CreateStreamSet(10, 1);
@@ -173,17 +174,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             Errors
         );
     } else {
-        collapsedLex = P->CreateStreamSet(1);
-        syntaxErr = P->CreateStreamSet(1);
-        P->CreateKernelCall<JSONValidateAndDeleteInnerBrackets>(
-            firstLexers,
-            lexStream,
-            stringMarker,
-            keywordEndMarkers,
-            numberSpan,
-            syntaxErr
-        );
-        
         // collapsedLex = P->CreateStreamSet(1);
         // StreamSet * const compressed = P->CreateStreamSet(6);
         // FilterByMask(P, combinedBrackets, firstLexers, compressed);
