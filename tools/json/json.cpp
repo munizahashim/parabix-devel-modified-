@@ -175,9 +175,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             Errors
         );
     } else {
-        // collapsedLex = P->CreateStreamSet(1);
-        // StreamSet * const compressed = P->CreateStreamSet(6);
-        // FilterByMask(P, combinedBrackets, firstLexers, compressed);
         if (ShowLinesFlag) {
             StreamSet * allLex = P->CreateStreamSet(9, 1);
             P->CreateKernelCall<StreamsMerge>(
@@ -186,7 +183,21 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            collapsedLex = combinedBrackets;
+            StreamSet * const selectedBrackets = P->CreateStreamSet(7);
+            FilterByMask(P, combinedBrackets, firstLexers, selectedBrackets);
+            StreamSet * const toPostProcess = P->CreateStreamSet(1);
+            P->CreateKernelCall<PabloSourceKernel>(
+                parser,
+                jsonPabloSrc,
+                "DeleteInlineBraces",
+                Bindings {
+                    Binding {"brackets", selectedBrackets, FixedRate(1), LookAhead(1)}
+                },
+                Bindings {
+                    Binding {"toPostProcess", toPostProcess}
+                }
+            );
+            collapsedLex = su::Collapse(P, toPostProcess);
         }
 
         Errors = P->CreateStreamSet(4, 1);
@@ -241,7 +252,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     }
     
 // uncomment lines below for debugging
-/*
+
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
@@ -257,7 +268,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
     P->CreateKernelCall<StdOutKernel>(filtered);
-*/
+
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }

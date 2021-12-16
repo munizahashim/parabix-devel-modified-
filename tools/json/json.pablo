@@ -239,6 +239,21 @@ kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
     }
 }
 
+type Brackets = <i1>[7]
+type Compressed = <i1>[1]
+kernel DeleteInlineBraces :: [Brackets brackets] -> [Compressed toPostProcess] {
+    lCurly = brackets[0]
+    lBracket = brackets[2]
+    rCurlyAhead = Lookahead(brackets[1], 1)
+    rBracketAhead = Lookahead(brackets[3], 1)
+    matchedCurly = lCurly & rCurlyAhead
+    matchedBracket = lBracket & rBracketAhead
+    matchedL = matchedCurly | matchedBracket
+    advMatchedL = Advance(matchedL)
+    matched = matchedL | advMatchedL
+    toPostProcess[0] = ~matched
+}
+
 type StringSpan = <i1>[1]
 
 kernel LexLocations :: [Lex lex] -> [BasisBits output] {
