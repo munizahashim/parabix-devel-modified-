@@ -147,7 +147,7 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
 
 type UTF8Err = <i1>[1]
 
-kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
+kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
     utf8Err[0] = <0>
 
     # If non-ascii, validate UTF-8
@@ -232,26 +232,29 @@ kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
         }
         u8mismatch = u8anyscope ^ suffix
         u8_error = u8_error | u8mismatch | u8_FFFE_FFFF
-        utf8Err[0] = u8_error
+
+        # sanitize error
+        conflict = u8_error & lex.ws
+        utf8Err[0] = u8_error ^ conflict
     }
 }
 
-type StringMarker = <i1>[1]
-type StringSpan = <i1>[1]
-
-# Get the string span not sequentially (EveryNth)
-#          json: { "key1": value1, "key2"  : null }
-# input example: ..1....1..........1....1..........
-#        output: ...1111............1111...........
-#
-kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
-    mStream = marker[0]
-    every2 = EveryNth(mStream, 2)
-    endStream = every2 ^ mStream
-    beginStream = endStream ^ mStream
-    inSpan = InclusiveSpan(beginStream, endStream)
-    span[0] = inSpan
+type Brackets = <i1>[7]
+type Compressed = <i1>[1]
+kernel DeleteInlineBraces :: [Brackets brackets] -> [Compressed toPostProcess] {
+    lCurly = brackets[0]
+    lBracket = brackets[2]
+    rCurlyAhead = Lookahead(brackets[1], 1)
+    rBracketAhead = Lookahead(brackets[3], 1)
+    matchedCurly = lCurly & rCurlyAhead
+    matchedBracket = lBracket & rBracketAhead
+    matchedL = matchedCurly | matchedBracket
+    advMatchedL = Advance(matchedL)
+    matched = matchedL | advMatchedL
+    toPostProcess[0] = ~matched
 }
+
+type StringSpan = <i1>[1]
 
 kernel LexLocations :: [Lex lex] -> [BasisBits output] {
     rOrLCurly = lex.lCurly | lex.rCurly

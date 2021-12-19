@@ -1033,18 +1033,18 @@ Value * IDISA_AVX512F_Builder::simd_ternary(unsigned char mask, Value * a, Value
 }
 
 std::pair<Value *, Value *> IDISA_AVX512F_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
-    Value * a0 = bitCast(a);
     if (shift == 1 && shiftin->getType() == getInt8Ty()) {
         const uint32_t fw = 64;
         Value * const ci_mask = CreateBitCast(shiftin, FixedVectorType::get(getInt1Ty(), 8));
         Value * const v8xi64_1 = simd_fill(fw, ConstantInt::get(getInt64Ty(), 0x8000000000000000));
         Value * const ecarry_in = CreateSelect(ci_mask, v8xi64_1, Constant::getNullValue(FixedVectorType::get(getInt64Ty(), 8)));
-        Value * const a1 = mvmd_dslli(fw, a0, ecarry_in, shift);
-        Value * const result = simd_or(CreateLShr(a1, fw - shift), CreateShl(a0, shift));
+        Value * const a1 = mvmd_dslli(fw, a, ecarry_in, shift);
+        Value * const result = simd_or(CreateLShr(a1, fw - shift), CreateShl(fwCast(fw, a), shift));
+
         std::vector<Constant *> v(8, ConstantInt::get(getInt64Ty(), (uint64_t) -1));
         v[7] = ConstantInt::get(getInt64Ty(), 0x7fffffffffffffff);
         Value * const v8xi64_cout_mask = ConstantVector::get(ArrayRef<Constant *>(v));
-        Value * shiftout = CreateICmpUGT(a0, v8xi64_cout_mask);
+        Value * shiftout = CreateICmpUGT(a, v8xi64_cout_mask);
         shiftout = CreateBitCast(shiftout, getInt8Ty());
         return std::make_pair(shiftout, result);
     } else {
