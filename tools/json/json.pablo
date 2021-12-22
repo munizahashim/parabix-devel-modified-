@@ -240,8 +240,8 @@ kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
 }
 
 type Brackets = <i1>[7]
-type Compressed = <i1>[1]
-kernel DeleteInlineBraces :: [Brackets brackets] -> [Compressed toPostProcess] {
+type ToPostProcess = <i1>[1]
+kernel DeleteInlineBraces :: [Brackets brackets] -> [ToPostProcess toPostProcess] {
     lCurly = brackets[0]
     lBracket = brackets[2]
     rCurlyAhead = Lookahead(brackets[1], 1)

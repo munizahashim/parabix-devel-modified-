@@ -197,7 +197,9 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
                     Binding {"toPostProcess", toPostProcess}
                 }
             );
-            collapsedLex = su::Collapse(P, toPostProcess);
+            StreamSet * const spreadFinal = P->CreateStreamSet(1);
+            SpreadByMask(P, combinedBrackets, toPostProcess, spreadFinal);
+            collapsedLex = su::Collapse(P, spreadFinal);
         }
 
         Errors = P->CreateStreamSet(4, 1);
