@@ -6,6 +6,7 @@
 #include <testing/testing.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/stream_shift.h>
 #include <kernel/util/debug_display.h>
 
 using namespace kernel;
@@ -58,11 +59,23 @@ TEST_CASE(spread1, filter_mask, filtered, spread) {
     AssertEQ(T, Result, Input<2>(T));
 }
 
+auto marker =    BinaryStreamSet({"1011101001010000"});
+auto indexStrm = BinaryStreamSet({"1011101101011000"});
+auto advmarker = BinaryStreamSet({"0011101100011000"});
+
+TEST_CASE(indexedadvance1, marker, indexStrm, advmarker) {
+    auto Result = T->CreateStreamSet(1);
+    P->CreateKernelCall<IndexedAdvance>(Input<0>(T), Input<1>(T), Result, 1);
+    AssertEQ(T, Result, Input<2>(T));
+}
+
+
 RUN_TESTS(
           CASE(insert_before1),
           CASE(insert_after1),
           CASE(insert_mult_after),
           CASE(insert_mult_before),
           CASE(filter1),
-          CASE(spread1)
+          CASE(spread1),
+          CASE(indexedadvance1)
 )
