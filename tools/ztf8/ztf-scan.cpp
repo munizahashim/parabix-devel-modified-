@@ -1241,7 +1241,7 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(hashValues.size()) {
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     mInternalScalars.emplace_back(b->getBitBlockType(), "pendingMaskInverted");
     Type * phraseType = ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi + 4 /* 35 */); // 32bytes for phrase + 3 bytes for count
-    addThreadLocalScalar(ArrayType::get(phraseType, phraseHashTableSize(encodingScheme.byLength[groupNo], mStride)), "hashTableTemp");
+    addThreadLocalScalar(ArrayType::get(phraseType, phraseHashTableSize(encodingScheme.byLength[groupNo])), "hashTableTemp");
 }
 
 void PhraseCompression::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {

@@ -248,6 +248,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Constant * sz_ZERO = b->getSize(0);
     Constant * sz_ONE = b->getSize(1);
     Constant * sz_TWO = b->getSize(2);
+    Constant * sz_HASH_TABLE_START = b->getInt8(254);
+    Constant * sz_HASH_TABLE_END = b->getInt8(255);
     Constant * sz_BITS = b->getSize(SIZE_T_BITS);
     Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
     Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
@@ -260,6 +262,9 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     BasicBlock * const keyProcessingLoop = b->CreateBasicBlock("keyProcessingLoop");
     BasicBlock * const tryStore = b->CreateBasicBlock("tryStore");
     BasicBlock * const storeKey = b->CreateBasicBlock("storeKey");
+    BasicBlock * const tryWriteBoundaryStart = b->CreateBasicBlock("tryWriteBoundaryStart");
+    BasicBlock * const writeHashtableStart = b->CreateBasicBlock("writeHashtableStart");
+    BasicBlock * const proceedFurther = b->CreateBasicBlock("proceedFurther");
     BasicBlock * const markCompression = b->CreateBasicBlock("markCompression");
     BasicBlock * const nextKey = b->CreateBasicBlock("nextKey");
     BasicBlock * const keysDone = b->CreateBasicBlock("keysDone");
@@ -296,10 +301,35 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
+
+    //if in first stride, write the hashtable start boundary
+    b->CreateUnlikelyCondBr(b->CreateICmpEQ(strideNo, sz_ZERO), tryWriteBoundaryStart, proceedFurther);
+
+    b->SetInsertPoint(tryWriteBoundaryStart);
+    Value * writeHtStart = b->CreateMul(b->getSize(mNumSym), lg.LO);
+
+    writeHtStart = b->CreateICmpEQ(strideNo, sz_ZERO);
+    //b->CreateICmpEQ(writeHtStart, b->getSize(9));//b->CreateOr(b->CreateICmpEQ(writeHtStart, b->getSize(9)), b->CreateICmpEQ(lg.LO, b->getSize(3)));
+    b->CreateUnlikelyCondBr(writeHtStart, writeHashtableStart, proceedFurther);
+    b->SetInsertPoint(writeHashtableStart);
+
+    Value * const boundaryByteLen1 = b->CreateAdd(sz_ZERO, sz_ONE);
+    Value * hashTableStartBoundary = b->CreateAlloca(b->getInt8Ty(), boundaryByteLen1);
+    b->CreateAlignedStore(sz_HASH_TABLE_START, hashTableStartBoundary, 1);
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableStartBoundary, boundaryByteLen1);
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableStartBoundary, boundaryByteLen1);
+
+    b->CreateBr(proceedFurther);
+    b->SetInsertPoint(proceedFurther);
+
     ///TODO: optimize if there are no hashmarks in the keyMasks stream
     std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, strideMasksReady);
     Value * keyMask = keyMasks[0];
+
     b->SetInsertPoint(strideMasksReady);
+
+    // b->CreateBr(strideMasksReady);
+    // b->SetInsertPoint(strideMasksReady);
     // Iterate through key symbols and update the hash table as appropriate.
     // As symbols are encountered, the hash value is retrieved from the
     // hashValues stream.   There are then three possibilities:
@@ -326,7 +356,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyWordIdx = b->CreateCountForwardZeroes(keyMaskPhi, "keyWordIdx");
     Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keyWordBasePtr, keyWordIdx)), sizeTy);
     Value * theKeyWord = b->CreateSelect(b->CreateICmpEQ(keyWordPhi, sz_ZERO), nextKeyWord, keyWordPhi);
-    //b->CallPrintInt("keyWordIdx", keyWordIdx);
     Value * keyWordPos = b->CreateAdd(stridePos, b->CreateMul(keyWordIdx, sw.WIDTH));
     Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
     Value * keyMarkPos = b->CreateAdd(keyWordPos, keyMarkPosInWord, "keyEndPos");
@@ -372,11 +401,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * tableIdxHash = b->CreateAnd(b->CreateLShr(codewordVal, 8), lg.TABLE_MASK, "tableIdx");
     Value * tblEntryPtr = b->CreateInBoundsGEP(subTablePtr, tableIdxHash);
 
-    /*Value * const copyLen1 = b->CreateAdd(sz_TWO, sz_ZERO);
-    Value * outputCodeword1 = b->CreateAlloca(b->getInt64Ty(), copyLen1); // debug mode type mismatch error
-    b->CreateAlignedStore(tableIdxHash, outputCodeword1, 1);
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), outputCodeword1, copyLen1);*/
-
     // Use two 8-byte loads to get hash and symbol values.
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
     Value * tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
@@ -404,24 +428,19 @@ and mark its compression mask.
     b->CreateCondBr(isEmptyEntry, storeKey, nextKey);
 
     b->SetInsertPoint(storeKey);
-//#if 0
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
-
-    // write writtenVal into a buffer and then write into STDOUT
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), symPtr1, keyLength);
     writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1, "writtenVal");
     Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
-    Value * outputCodeword = b->CreateAlloca(b->getInt8Ty(), copyLen);
+    Value * outputCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
     b->CreateAlignedStore(writtenVal, outputCodeword, 1);
     //b->CallPrintInt("outputCodeword", outputCodeword);
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), outputCodeword, copyLen);
-//#endif
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
     // We have a new symbol that allows future occurrences of the symbol to
     // be compressed using the hash code.
     b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
     b->CreateMonitoredScalarFieldStore("hashTable", sym2, tblPtr2);
 
     // markCompression even for the first occurrence
-    //b->CreateBr(nextKey);
     b->CreateBr(markCompression);
     b->SetInsertPoint(markCompression);
 
@@ -439,13 +458,11 @@ and mark its compression mask.
     Value * markBase = b->CreateSub(keyMarkPos, b->CreateURem(keyMarkPos, sz_BITS));
     Value * keyBase = b->CreateSelect(b->CreateICmpULT(startBase, markBase), startBase, markBase);
     Value * bitOffset = b->CreateSub(keyStartPos, keyBase);
-    //b->CallPrintInt("bitOffset", bitOffset);
 
     mask = b->CreateShl(mask, bitOffset);
     Value * const keyBasePtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", keyBase), sizeTy->getPointerTo());
     Value * initialMask = b->CreateAlignedLoad(keyBasePtr, 1);
     Value * updated = b->CreateAnd(initialMask, b->CreateNot(mask));
-    //b->CallPrintInt("updated", updated);
     b->CreateAlignedStore(updated, keyBasePtr, 1);
     Value * curPos = keyMarkPos;
     Value * curHash = keyHash;
@@ -493,11 +510,7 @@ and mark its compression mask.
     Value * lgthBase = b->CreateSub(keyLength, lg.LO);
     Value * pfxOffset = b->CreateAdd(lg.PREFIX_BASE, lgthBase);
     Value * multiplier = b->CreateMul(lg.RANGE, pfxLgthMask);
-
     Value * ZTF_prefix = b->CreateAdd(pfxOffset, multiplier, "ZTF_prefix");
-    //b->CallPrintInt("prefix", b->CreateTrunc(pfxOffset, b->getInt8Ty()));
-    //b->CallPrintInt("ZTF_prefix", ZTF_prefix);
-
     b->CreateStore(b->CreateTrunc(ZTF_prefix, b->getInt8Ty()), b->getRawOutputPointer("encodedBytes", curPos));
 
     b->CreateBr(nextKey);
@@ -510,19 +523,32 @@ and mark its compression mask.
     BasicBlock * currentBB = b->GetInsertBlock();
     keyMaskPhi->addIncoming(nextKeyMask, currentBB);
     keyWordPhi->addIncoming(dropKey, currentBB);
+
+    //Value * nextWritePos = b->CreateAdd(hashTableProducedPhi, keyLength); //b->CreateAdd(lg.ENC_BYTES, keyLength));
+    //hashTableProducedPhi->addIncoming(nextWritePos, currentBB);
+
     b->CreateCondBr(b->CreateICmpNE(nextKeyMask, sz_ZERO), keyProcessingLoop, keysDone);
 
     b->SetInsertPoint(keysDone);
     strideNo->addIncoming(nextStrideNo, keysDone);
+
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
 
     b->SetInsertPoint(stridesDone);
+    Value * const boundaryByteLen = b->CreateAdd(sz_ZERO, sz_ONE);
+    Value * hashTableEndBoundary = b->CreateAlloca(b->getInt8Ty(), boundaryByteLen);
+    b->CreateAlignedStore(sz_HASH_TABLE_END, hashTableEndBoundary, 1);
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableEndBoundary, boundaryByteLen);
+    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableEndBoundary, boundaryByteLen);
+    //TODO: single boundary for a segment
+
     // In the next segment, we may need to access byte data in the last
     // 16 bytes of this segment.
     if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
     }
+
     // Although we have written the last block mask, we do not include it as
     // produced, because we may need to update it in the event that there is
     // a compressible symbol starting in this segment and finishing in the next.
