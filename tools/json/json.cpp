@@ -254,7 +254,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     }
     
 // uncomment lines below for debugging
-
+/*
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
@@ -270,7 +270,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
     P->CreateKernelCall<StdOutKernel>(filtered);
-
+*/
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }
