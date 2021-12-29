@@ -218,6 +218,12 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag) {
     return DebugOptions.isSet(flag);
 }
 
+bool LLVM_READONLY AnyDebugOptionIsSet() {
+    #ifdef FORCE_ASSERTIONS
+    return true;
+    #endif
+    return DebugOptions.getBits() != 0;
+}
 
 std::string ProgramName;
 

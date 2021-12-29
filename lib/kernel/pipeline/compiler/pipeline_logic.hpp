@@ -109,7 +109,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput);
     addConsumerKernelProperties(b, PipelineInput);
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
@@ -803,19 +803,19 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     initializeForAllKernels();
     mScalarValue.reset(FirstKernel, LastScalar);
-//    // calculate the last segment # used by any kernel in case any reports require it.
-//    mSegNo = nullptr;
-//    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
-//                      DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-//        for (auto i = FirstKernel; i <= LastKernel; ++i) {
-//            if (RequiresSynchronization.test(i)) {
-//                const auto prefix = makeKernelName(i);
-//                Value * const ptr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
-//                Value * const segNo = b->CreateLoad(ptr);
-//                mSegNo = b->CreateUMax(mSegNo, segNo);
-//            }
-//        }
-//    }
+    // calculate the last segment # used by any kernel in case any reports require it.
+    mSegNo = nullptr;
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
+                      DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+        for (auto i = FirstKernel; i <= LastKernel; ++i) {
+            if (RequiresSynchronization.test(i)) {
+                const auto prefix = makeKernelName(i);
+                Value * const ptr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
+                Value * const segNo = b->CreateLoad(ptr);
+                mSegNo = b->CreateUMax(mSegNo, segNo);
+            }
+        }
+    }
     printOptionalCycleCounter(b);
     #ifdef ENABLE_PAPI
     printPAPIReportIfRequested(b);

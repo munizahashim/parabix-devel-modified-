@@ -55,6 +55,8 @@ enum DebugFlags {
 
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
 
+bool LLVM_READONLY AnyDebugOptionIsSet();
+
 // Options for generating IR or ASM to files
 const std::string OmittedOption = ".";
 extern std::string ShowUnoptimizedIROption;

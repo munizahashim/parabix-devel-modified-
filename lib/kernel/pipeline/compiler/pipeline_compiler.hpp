@@ -12,6 +12,7 @@
 #include <boost/multi_array.hpp>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/utility/value_init.hpp>
+#include <boost/format.hpp>
 #include "config.h"
 
 using namespace boost;
@@ -36,8 +37,11 @@ enum CycleCounter {
   , BUFFER_COPY
   , KERNEL_EXECUTION
   , TOTAL_TIME
-  // ------------------
+  // ----------------------
   , NUM_OF_CYCLE_COUNTERS
+  // ----------------------
+  , SQ_SUM_TOTAL_TIME = NUM_OF_CYCLE_COUNTERS
+  , NUM_OF_INVOCATIONS = NUM_OF_CYCLE_COUNTERS + 1
 };
 
 #ifdef ENABLE_PAPI
@@ -80,7 +84,8 @@ const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 const static std::string DEBUG_CONSUMED_ITEM_COUNT_SUFFIX = ".DCON";
 
-const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCY";
+const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
+const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
 const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY = "!PCS";
@@ -371,6 +376,7 @@ public:
     Value * startCycleCounter(BuilderRef b);
     void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, const CycleCounter type) const;
 
+    static void linkInstrumentationFunctions(BuilderRef b);
 
     void incrementNumberOfSegmentsCounter(BuilderRef b) const;
     void recordBlockingIO(BuilderRef b, const StreamSetPort port) const;

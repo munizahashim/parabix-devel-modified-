@@ -114,6 +114,9 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
+    if (codegen::AnyDebugOptionIsSet()) {
+        PipelineCompiler::linkInstrumentationFunctions(b);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
