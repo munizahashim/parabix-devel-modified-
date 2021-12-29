@@ -1,4 +1,4 @@
-#include "post_process.h"
+#include "json-detail.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -9,8 +9,7 @@
 #include <llvm/ADT/SmallVector.h>
 
 /*
- * <Json> ::= <Object>
- *          | <Array>
+ * <Json> ::= <Value>
  * 
  * <Object> ::= '{' '}'
  *            | '{' <Members> '}'
@@ -194,7 +193,7 @@ void postproc_doneCallback() {
 
 void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
     if (currentState == JInit) {
-        postproc_parseArrOrObj(ptr, lineBegin, lineNum, position);
+        postproc_parseValue(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JObjInit) {
         postproc_parseStrOrPop(true, ptr, lineBegin, lineNum, position);
     } else if (currentState == JArrInit) {
@@ -210,10 +209,6 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
     } else if (currentState == JDone) {
         postproc_reportError(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
-}
-
-void postproc_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
-    postproc_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
 }
 
 void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {
@@ -234,8 +229,4 @@ void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegi
         postproc_reportError("Unprocessed error stream");
     }
     fprintf(stderr, "\n");
-}
-
-void postproc_simpleError(const uint8_t * /*ptr*/) {
-    postproc_reportError("The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.");
 }

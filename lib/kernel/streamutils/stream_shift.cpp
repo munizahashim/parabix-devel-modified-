@@ -41,4 +41,22 @@ void ShiftBack::generatePabloMethod() {
         pb.createAssign(pb.createExtract(getOutput(0), i), pb.createLookahead(sourceStreams[i], mShiftAmount, "shiftback_" + std::to_string(i)));
     }
 }
+
+IndexedAdvance::IndexedAdvance(BuilderRef b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount)
+: PabloKernel(b, "IndexedAdvance" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
+{Binding{"inputs", inputs}, Binding{"index", index}}, {Binding{"outputs", outputs}}),
+mShiftAmount(shiftAmount)
+{   assert(outputs->getNumElements() == inputs->getNumElements());
+}
+
+void IndexedAdvance::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> sourceStreams = getInputStreamSet("inputs");
+    PabloAST * index = getInputStreamSet("index")[0];
+    for (unsigned i = 0; i < sourceStreams.size(); i++) {
+        pb.createAssign(pb.createExtract(getOutput(0), i), pb.createIndexedAdvance(sourceStreams[i], index, mShiftAmount));
+    }
+}
+
+
 }

@@ -1,4 +1,4 @@
-#include "json2csv_process.h"
+#include "json2csv.h"
 
 #include <cassert>
 #include <cstdlib>
