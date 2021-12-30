@@ -27,7 +27,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     std::vector<unsigned> mapping(n, -1U);
 
-    unsigned numOfKernels = 2;
+    //unsigned numOfKernels = 2;
 
     BEGIN_SCOPED_REGION
 
@@ -476,13 +476,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         const RelationshipNode & node = Relationships[u];
         if (node.Type == RelationshipNode::IsRelationship) {
             const auto j = parent(i, G);
-            const auto producer = sequence[j];
-            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = componentId[j];
             for (const auto e : make_iterator_range(out_edges(i, G))) {
                 const auto k = target(e, G);
-                const auto consumer = sequence[k];
-                assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
                 const auto consPartId = componentId[k];
                 if (prodPartId != consPartId) {
                     assert (consPartId > 0);

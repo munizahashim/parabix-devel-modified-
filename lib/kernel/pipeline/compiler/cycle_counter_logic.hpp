@@ -1,4 +1,4 @@
-﻿#include "pipeline_compiler.hpp"
+#include "pipeline_compiler.hpp"
 
 // TODO: Print Total CPU Cycles
 
@@ -185,11 +185,11 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
 
     long double maxCyclesPerItem = 0.0L;
 
-    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
+    //const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
         const auto k = i * (NUM_OF_CYCLE_COUNTERS + 3);
-        assert ((k + TOTAL_TIME) < REQ_INTEGERS);
+        assert ((k + TOTAL_TIME) < numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3));
         const uint64_t itemCount = values[k];
         maxItemCount = std::max(maxItemCount, itemCount);
         const auto cycleCount = values[k + TOTAL_TIME + 1];
@@ -270,7 +270,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
             const auto v = values[k++];
             knownOverheads += v;
             const long double cycles = v;
-            const double cycPerc = (((long double)v) * 100.0L) / fSubTotal;
+            const double cycPerc = (cycles * 100.0L) / fSubTotal;
             out << (boost::format("%5.1f") % cycPerc).str() << ' ';
         }
         assert (k < REQ_INTEGERS);

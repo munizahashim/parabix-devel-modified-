@@ -197,8 +197,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             prior_out = port;
             #endif
             const auto binding = target(e, mStreamGraph);
-            const RelationshipNode & rn = mStreamGraph[binding];
-            assert (rn.Type == RelationshipNode::IsBinding);
+            assert (mStreamGraph[binding].Type == RelationshipNode::IsBinding);
             const auto portNum = port.Number + numOfInputs;
             E[portNum] = e;
             if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {

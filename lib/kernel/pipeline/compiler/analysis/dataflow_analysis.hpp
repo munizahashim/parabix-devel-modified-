@@ -517,7 +517,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             bs.set(KernelPartitionId[kernel]);
             const auto k = m + streamSet - FirstStreamSet;
             assert (k < portRateSet.size());
-            const BitSet & src = portRateSet[m + streamSet - FirstStreamSet];
+            const BitSet & src = portRateSet[k];
             assert (src.size() == bs.size());
             bs |= src;
             accum |= bs;
@@ -530,7 +530,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             bs.resize(nextRateId);
             const auto k = m + streamSet - FirstStreamSet;
             assert (k < portRateSet.size());
-            BitSet & dst = portRateSet[m + streamSet - FirstStreamSet];
+            BitSet & dst = portRateSet[k];
             dst.resize(nextRateId);
             bs |= accum;
             dst |= bs;
