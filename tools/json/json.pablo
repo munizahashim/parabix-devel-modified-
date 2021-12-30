@@ -239,16 +239,27 @@ kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
     }
 }
 
+# Create a multiplexed streamiest for left/right brackets and braces
+# mpx[0] = 1 for right, 0 for left
+# mpx[1] = 1 for square bracket, 0 for brace
+type MultiplexedBrackets = <i1>[2]
 type Brackets = <i1>[7]
-type ToPostProcess = <i1>[1]
-kernel DeleteInlineBraces :: [Brackets brackets] -> [ToPostProcess toPostProcess] {
-    lCurly = brackets[0]
+kernel MultiplexBrackets :: [Brackets brackets] -> [MultiplexedBrackets mpx] {
+    rCurly = brackets[1]
     lBracket = brackets[2]
-    rCurlyAhead = Lookahead(brackets[1], 1)
-    rBracketAhead = Lookahead(brackets[3], 1)
-    matchedCurly = lCurly & rCurlyAhead
-    matchedBracket = lBracket & rBracketAhead
-    matchedL = matchedCurly | matchedBracket
+    rBracket = brackets[3]
+    mpx[0] = rCurly | rBracket
+    mpx[1] = rBracket | lBracket
+}
+
+
+type ToPostProcess = <i1>[1]
+kernel DeleteInlineBraces :: [MultiplexedBrackets mpx] -> [ToPostProcess toPostProcess] {
+    rightAhead = Lookahead(mpx[0], 1)
+    bracketAhead = Lookahead(mpx[1], 1)
+    leftRightMatch = rightAhead & ~mpx[0]
+    typeMatch = ~(bracketAhead ^ mpx[1])
+    matchedL = leftRightMatch & typeMatch
     advMatchedL = Advance(matchedL)
     matched = matchedL | advMatchedL
     toPostProcess[0] = ~matched

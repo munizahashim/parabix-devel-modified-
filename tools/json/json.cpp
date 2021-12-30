@@ -1,4 +1,4 @@
-/*
+    /*
  *  Copyright (c) 2019 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  */
@@ -183,15 +183,27 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            StreamSet * const selectedBrackets = P->CreateStreamSet(7);
-            FilterByMask(P, combinedBrackets, firstLexers, selectedBrackets);
+            StreamSet * const multiplexedBrackets = P->CreateStreamSet(2);
+            P->CreateKernelCall<PabloSourceKernel>(
+                parser,
+                jsonPabloSrc,
+                "MultiplexBrackets",
+                Bindings {
+                    Binding {"brackets", firstLexers}
+                },
+                Bindings {
+                    Binding {"mpx", multiplexedBrackets}
+                }
+            );
+            StreamSet * const selectedBrackets = P->CreateStreamSet(2);
+            FilterByMask(P, combinedBrackets, multiplexedBrackets, selectedBrackets);
             StreamSet * const toPostProcess = P->CreateStreamSet(1);
             P->CreateKernelCall<PabloSourceKernel>(
                 parser,
                 jsonPabloSrc,
                 "DeleteInlineBraces",
                 Bindings {
-                    Binding {"brackets", selectedBrackets, FixedRate(1), LookAhead(1)}
+                    Binding {"mpx", selectedBrackets, FixedRate(1), LookAhead(1)}
                 },
                 Bindings {
                     Binding {"toPostProcess", toPostProcess}
@@ -201,7 +213,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             SpreadByMask(P, combinedBrackets, toPostProcess, spreadFinal);
             collapsedLex = su::Collapse(P, spreadFinal);
         }
-
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr, syntaxErr},
