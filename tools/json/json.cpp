@@ -58,7 +58,7 @@ static cl::alias ToCSVAlias("to-csv", cl::desc("Alias for -c"), cl::aliasopt(ToC
 bool ShowLinesFlag;
 static cl::opt<bool, true> ShowLinesOption("s", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
 static cl::alias ShowLinesAlias("show-lines", cl::desc("Alias for -s"), cl::aliasopt(ShowLinesOption));
-
+static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Apply parallel bracket matching."), cl::cat(jsonOptions));
 typedef void (*jsonFunctionType)(uint32_t fd);
 
 jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> jsonPabloSrc) {
@@ -183,35 +183,39 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            StreamSet * const multiplexedBrackets = P->CreateStreamSet(2);
-            P->CreateKernelCall<PabloSourceKernel>(
-                parser,
-                jsonPabloSrc,
-                "MultiplexBrackets",
-                Bindings {
-                    Binding {"brackets", firstLexers}
-                },
-                Bindings {
-                    Binding {"mpx", multiplexedBrackets}
-                }
-            );
-            StreamSet * const selectedBrackets = P->CreateStreamSet(2);
-            FilterByMask(P, combinedBrackets, multiplexedBrackets, selectedBrackets);
-            StreamSet * const toPostProcess = P->CreateStreamSet(1);
-            P->CreateKernelCall<PabloSourceKernel>(
-                parser,
-                jsonPabloSrc,
-                "DeleteInlineBraces",
-                Bindings {
-                    Binding {"mpx", selectedBrackets, FixedRate(1), LookAhead(1)}
-                },
-                Bindings {
-                    Binding {"toPostProcess", toPostProcess}
-                }
-            );
-            StreamSet * const spreadFinal = P->CreateStreamSet(1);
-            SpreadByMask(P, combinedBrackets, toPostProcess, spreadFinal);
-            collapsedLex = su::Collapse(P, spreadFinal);
+            if (ParallelBracketMatch) {
+                StreamSet * const multiplexedBrackets = P->CreateStreamSet(2);
+                P->CreateKernelCall<PabloSourceKernel>(
+                    parser,
+                    jsonPabloSrc,
+                    "MultiplexBrackets",
+                    Bindings {
+                        Binding {"brackets", firstLexers}
+                    },
+                    Bindings {
+                        Binding {"mpx", multiplexedBrackets}
+                    }
+                );
+                StreamSet * const selectedBrackets = P->CreateStreamSet(2);
+                FilterByMask(P, combinedBrackets, multiplexedBrackets, selectedBrackets);
+                StreamSet * const toPostProcess = P->CreateStreamSet(1);
+                P->CreateKernelCall<PabloSourceKernel>(
+                    parser,
+                    jsonPabloSrc,
+                    "DeleteInlineBraces",
+                    Bindings {
+                        Binding {"mpx", selectedBrackets, FixedRate(1), LookAhead(1)}
+                    },
+                    Bindings {
+                        Binding {"toPostProcess", toPostProcess}
+                    }
+                );
+                StreamSet * const spreadFinal = P->CreateStreamSet(1);
+                SpreadByMask(P, combinedBrackets, toPostProcess, spreadFinal);
+                collapsedLex = su::Collapse(P, spreadFinal);
+            } else {
+                collapsedLex = combinedBrackets;
+            }
         }
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
