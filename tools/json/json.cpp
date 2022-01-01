@@ -59,6 +59,8 @@ bool ShowLinesFlag;
 static cl::opt<bool, true> ShowLinesOption("s", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
 static cl::alias ShowLinesAlias("show-lines", cl::desc("Alias for -s"), cl::aliasopt(ShowLinesOption));
 static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Apply parallel bracket matching."), cl::cat(jsonOptions));
+static cl::opt<bool> ShowSpanLocations("show-spans", cl::desc("Generate span locations debug output"), cl::cat(jsonOptions));
+
 typedef void (*jsonFunctionType)(uint32_t fd);
 
 jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> jsonPabloSrc) {
@@ -268,24 +270,24 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         scan::Reader(P, driver, simpleErrFn, codeUnitStream, { ErrIndices });
     }
     
-// uncomment lines below for debugging
-/*
-    StreamSet * filteredBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PabloSourceKernel>(
-        parser,
-        jsonPabloSrc,
-        "SpanLocations",
-        Bindings { // Input Stream Bindings
-            Binding {"span", collapsedLex}
-        },
-        Bindings { // Output Stream Bindings
-            Binding {"output", filteredBasis}
-        }
-    );
-    StreamSet * filtered = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
-    P->CreateKernelCall<StdOutKernel>(filtered);
-*/
+// for debugging
+    if (ShowSpanLocations) {
+        StreamSet * filteredBasis = P->CreateStreamSet(8);
+        P->CreateKernelCall<PabloSourceKernel>(
+            parser,
+            jsonPabloSrc,
+            "SpanLocations",
+            Bindings { // Input Stream Bindings
+                Binding {"span", collapsedLex}
+            },
+            Bindings { // Output Stream Bindings
+                Binding {"output", filteredBasis}
+            }
+        );
+        StreamSet * filtered = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
+        P->CreateKernelCall<StdOutKernel>(filtered);
+    }
 
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }
