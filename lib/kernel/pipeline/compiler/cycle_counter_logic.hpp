@@ -288,17 +288,17 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         const auto perc = (fSubTotal * 100.0L) / fTotalCycleCount;
         out << (boost::format("%5.1f") % perc).str();
         assert (k < REQ_INTEGERS);
-        const long double sqrTotalCycles = values[k++];
+        const long double fSqrTotalCycles = values[k++];
         assert (k < REQ_INTEGERS);
         const uint64_t n = values[k++];
         const long double N = n;
-        const auto x = sqrTotalCycles / N;
-        const auto mean = fSubTotal / N;
-        const auto stddev = std::sqrt(x - (mean * mean));
-
-        out << (boost::format("   %10.4E") % mean).str();
-
-        out << (boost::format(" +- %10.4E\n") % stddev).str();
+        const auto x = (fSqrTotalCycles / N);
+        const auto y = (fSubTotal / N);
+        const auto yy = (y * y);
+        assert (nx >= yy);
+        const auto z = (x > yy) ? (x - yy) : 0.0L;
+        const auto avgStddev = (std::sqrt(z) * 100.0L) / fTotalCycleCount;
+        out << (boost::format(" +- %4.1f\n") % avgStddev).str();
 
     }
     assert (k == REQ_INTEGERS);

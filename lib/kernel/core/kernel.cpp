@@ -363,7 +363,8 @@ void Kernel::constructStateTypes(BuilderRef b) {
         };
 
         // NOTE: StructType::create always creates a new type even if an identical one exists.
-        StructType * const sharedTy = makeStructType(shared, strShared, sharedGroupCount > 1);
+        const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
+        StructType * const sharedTy = makeStructType(shared, strShared, sharedGroupCount > 1 && allowStructPadding);
         assert (mSharedStateType == nullptr || mSharedStateType == nullIfEmpty(sharedTy));
         mSharedStateType = sharedTy;
 
@@ -1385,6 +1386,9 @@ inline std::string annotateKernelNameWithDebugFlags(std::string && name) {
     }
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableIndirectBranch))) {
         buffer << "_Ibranch";
+    }
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs))) {
+        buffer << "_DCacheAlign";
     }
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";

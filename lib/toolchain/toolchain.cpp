@@ -56,6 +56,8 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
                         #endif
 
+                        clEnumVal(DisableCacheAlignedKernelStructs, "Disable cache alignment of kernel state memory."),
+
                         clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr.")
                         CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));

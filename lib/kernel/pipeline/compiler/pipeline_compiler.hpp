@@ -141,6 +141,9 @@ public:
     #endif
 
     unsigned getCacheLineGroupId(const unsigned kernelId) const {
+        if (codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs)) {
+            return 0;
+        }
         #ifdef GROUP_SHARED_KERNEL_STATE_INTO_CACHE_LINE_ALIGNED_REGIONS
         // if (mNumOfThreads > 1) {
             return kernelId;
