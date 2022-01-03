@@ -214,6 +214,7 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                StreamSet * const byteData,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
+                                               StreamSet * codewordMask,
                                                unsigned strideBlocks)
 : MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(numSyms) + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
@@ -221,21 +222,19 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                     Binding{"byteData", byteData, FixedRate(), LookBehind(encodingScheme.byLength[groupNo].hi+1)}},
                    {}, {}, {},
                    {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
+                    InternalScalar{b->getBitBlockType(), "pendingPhraseMask"},
                     InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), phraseHashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
     if (DelayedAttributeIsSet()) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
-        //mOutputStreamSets.emplace_back("hashTableBytes", hashTableBytes, BoundedRate(0,1));
-        //addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
+        mOutputStreamSets.emplace_back("codewordMask", codewordMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, BoundedRate(0,1));
-        //mOutputStreamSets.emplace_back("hashTableBytes", hashTableBytes, BoundedRate(0,1));
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
     Type * phraseType = ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi);
-    //mInternalScalars.emplace_back(ArrayType::get(phraseType, phraseHashTableSize(encodingScheme.byLength[groupNo])), "hashTable");
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
@@ -262,9 +261,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     BasicBlock * const keyProcessingLoop = b->CreateBasicBlock("keyProcessingLoop");
     BasicBlock * const tryStore = b->CreateBasicBlock("tryStore");
     BasicBlock * const storeKey = b->CreateBasicBlock("storeKey");
-    BasicBlock * const tryWriteBoundaryStart = b->CreateBasicBlock("tryWriteBoundaryStart");
-    BasicBlock * const writeHashtableStart = b->CreateBasicBlock("writeHashtableStart");
-    BasicBlock * const proceedFurther = b->CreateBasicBlock("proceedFurther");
     BasicBlock * const markCompression = b->CreateBasicBlock("markCompression");
     BasicBlock * const nextKey = b->CreateBasicBlock("nextKey");
     BasicBlock * const keysDone = b->CreateBasicBlock("keysDone");
@@ -275,7 +271,12 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * const initialPos = b->getProcessedItemCount("symbolMarks");
     Value * const avail = b->getAvailableItemCount("symbolMarks");
     Value * const initialProduced = b->getProducedItemCount("compressionMask");
-    //Value * const intialHashTableProduced = b->getProducedItemCount("hashTableBytes");
+    Value * const phrasesProduced = b->getProducedItemCount("codewordMask");
+
+    Value * pendingPhraseMask = b->getScalarField("pendingPhraseMask");
+    Value * phrasesProducedPtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", phrasesProduced), bitBlockPtrTy);
+    b->CreateStore(pendingPhraseMask, phrasesProducedPtr);
+    Value * phraseMaskPtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", initialPos), bitBlockPtrTy);
 
     Value * pendingMask = b->CreateNot(b->getScalarField("pendingMaskInverted"));
     Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", initialProduced), bitBlockPtrTy);
@@ -302,28 +303,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
 
-    //if in first stride, write the hashtable start boundary
-    b->CreateUnlikelyCondBr(b->CreateICmpEQ(strideNo, sz_ZERO), tryWriteBoundaryStart, proceedFurther);
-
-    b->SetInsertPoint(tryWriteBoundaryStart);
-    Value * writeHtStart = b->CreateMul(b->getSize(mNumSym), lg.LO);
-
-    writeHtStart = b->CreateICmpEQ(strideNo, sz_ZERO);
-    //b->CreateICmpEQ(writeHtStart, b->getSize(9));//b->CreateOr(b->CreateICmpEQ(writeHtStart, b->getSize(9)), b->CreateICmpEQ(lg.LO, b->getSize(3)));
-    b->CreateUnlikelyCondBr(writeHtStart, writeHashtableStart, proceedFurther);
-    b->SetInsertPoint(writeHashtableStart);
-
-    Value * const boundaryByteLen1 = b->CreateAdd(sz_ZERO, sz_ONE);
-    Value * hashTableStartBoundary = b->CreateAlloca(b->getInt8Ty(), boundaryByteLen1);
-    b->CreateAlignedStore(sz_HASH_TABLE_START, hashTableStartBoundary, 1);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableStartBoundary, boundaryByteLen1);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableStartBoundary, boundaryByteLen1);
-
-    b->CreateBr(proceedFurther);
-    b->SetInsertPoint(proceedFurther);
-
     ///TODO: optimize if there are no hashmarks in the keyMasks stream
-    std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, strideMasksReady);
+    std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, phraseMaskPtr, strideMasksReady);
     Value * keyMask = keyMasks[0];
 
     b->SetInsertPoint(strideMasksReady);
@@ -347,8 +328,6 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateUnlikelyCondBr(b->CreateICmpEQ(keyMask, sz_ZERO), keysDone, keyProcessingLoop);
 
     b->SetInsertPoint(keyProcessingLoop);
-    //PHINode * const hashTableProducedPhi = b->CreatePHI(sizeTy, 2);
-    //hashTableProducedPhi->addIncoming(intialHashTableProduced, strideMasksReady);
     PHINode * const keyMaskPhi = b->CreatePHI(sizeTy, 2);
     keyMaskPhi->addIncoming(keyMask, strideMasksReady);
     PHINode * const keyWordPhi = b->CreatePHI(sizeTy, 2);
@@ -428,13 +407,27 @@ and mark its compression mask.
     b->CreateCondBr(isEmptyEntry, storeKey, nextKey);
 
     b->SetInsertPoint(storeKey);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), symPtr1, keyLength);
+    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
     writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1, "writtenVal");
     Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
     Value * outputCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
     b->CreateAlignedStore(writtenVal, outputCodeword, 1);
     //b->CallPrintInt("outputCodeword", outputCodeword);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
+    //b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
+
+    Value * phraseMaskLength = b->CreateZExt(keyLength, sizeTy);
+    Value * phraseMask = b->CreateSub(b->CreateShl(sz_ONE, phraseMaskLength), sz_ONE);
+    Value * phraseStartBase = b->CreateSub(keyStartPos, b->CreateURem(keyStartPos, b->getSize(8)));
+    Value * phraseMarkBase = b->CreateSub(keyMarkPos, b->CreateURem(keyMarkPos, sz_BITS));
+    Value * phraseBase = b->CreateSelect(b->CreateICmpULT(phraseStartBase, phraseMarkBase), phraseStartBase, phraseMarkBase);
+    Value * phraseBitOffset = b->CreateSub(keyStartPos, phraseBase);
+
+    phraseMask = b->CreateShl(phraseMask, phraseBitOffset);
+    Value * const codewordMaskBasePtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", phraseBase), sizeTy->getPointerTo());
+    Value * currentMask = b->CreateAlignedLoad(codewordMaskBasePtr, 1);
+    Value * updatedMask = b->CreateOr(currentMask, phraseMask);
+    b->CreateAlignedStore(updatedMask, codewordMaskBasePtr, 1);
+
     // We have a new symbol that allows future occurrences of the symbol to
     // be compressed using the hash code.
     b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
@@ -467,8 +460,6 @@ and mark its compression mask.
     Value * curPos = keyMarkPos;
     Value * curHash = keyHash;
     // Write the suffixes.
-
-    ///TODO: codeword version 2.0 - write extra suffix byte
     Value * last_suffix = b->CreateTrunc(b->CreateAdd(lg.LAST_SUFFIX_BASE, b->CreateAnd(curHash, lg.LAST_SUFFIX_MASK, "ZTF_suffix_last")), b->getInt8Ty());
     b->CreateStore(last_suffix, b->getRawOutputPointer("encodedBytes", curPos));
     curPos = b->CreateSub(curPos, sz_ONE);
@@ -524,9 +515,6 @@ and mark its compression mask.
     keyMaskPhi->addIncoming(nextKeyMask, currentBB);
     keyWordPhi->addIncoming(dropKey, currentBB);
 
-    //Value * nextWritePos = b->CreateAdd(hashTableProducedPhi, keyLength); //b->CreateAdd(lg.ENC_BYTES, keyLength));
-    //hashTableProducedPhi->addIncoming(nextWritePos, currentBB);
-
     b->CreateCondBr(b->CreateICmpNE(nextKeyMask, sz_ZERO), keyProcessingLoop, keysDone);
 
     b->SetInsertPoint(keysDone);
@@ -535,15 +523,8 @@ and mark its compression mask.
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
 
     b->SetInsertPoint(stridesDone);
-    Value * const boundaryByteLen = b->CreateAdd(sz_ZERO, sz_ONE);
-    Value * hashTableEndBoundary = b->CreateAlloca(b->getInt8Ty(), boundaryByteLen);
-    b->CreateAlignedStore(sz_HASH_TABLE_END, hashTableEndBoundary, 1);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableEndBoundary, boundaryByteLen);
-    b->CreateWriteCall(b->getInt32(STDOUT_FILENO), hashTableEndBoundary, boundaryByteLen);
-    //TODO: single boundary for a segment
-
     // In the next segment, we may need to access byte data in the last
-    // 16 bytes of this segment.
+    // 32 bytes of this segment.
     if (DeferredAttributeIsSet()) {
         Value * processed = b->CreateSub(avail, lg.HI);
         b->setProcessedItemCount("byteData", processed);
@@ -554,15 +535,19 @@ and mark its compression mask.
     // a compressible symbol starting in this segment and finishing in the next.
     Value * produced = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, sz_BLOCKWIDTH));
     b->setProducedItemCount("compressionMask", produced);
+    b->setProducedItemCount("codewordMask", produced);
     b->CreateCondBr(b->isFinal(), compressionMaskDone, updatePending);
     b->SetInsertPoint(updatePending);
     Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", produced), bitBlockPtrTy);
     Value * lastMask = b->CreateBlockAlignedLoad(pendingPtr);
     b->setScalarField("pendingMaskInverted", b->CreateNot(lastMask));
+
+    Value * pendingCWmaskPtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", produced), bitBlockPtrTy);
+    Value * lastCWMask = b->CreateBlockAlignedLoad(pendingCWmaskPtr);
+    b->setScalarField("pendingPhraseMask", lastCWMask);
     b->CreateBr(compressionMaskDone);
     b->SetInsertPoint(compressionMaskDone);
 }
-
 
 SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                                                    EncodingInfo encodingScheme,
