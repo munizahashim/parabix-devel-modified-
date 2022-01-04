@@ -215,6 +215,7 @@ SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                StreamSet * codewordMask,
+                                               StreamSet * dictBoundaryMask,
                                                unsigned strideBlocks)
 : MultiBlockKernel(b, "SymbolGroupCompression" + std::to_string(numSyms) + std::to_string(groupNo) + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"symbolMarks", symbolMarks},
@@ -229,6 +230,8 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSyms) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
         mOutputStreamSets.emplace_back("codewordMask", codewordMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
+        mOutputStreamSets.emplace_back("dictBoundaryMask", dictBoundaryMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
+        addInternalScalar(b->getInt64Ty(), "segmentSize");
     } else {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, BoundedRate(0,1));
@@ -257,6 +260,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const stridePrologue = b->CreateBasicBlock("stridePrologue");
+    BasicBlock * const writeHTStart = b->CreateBasicBlock("writeHTStart");
+    BasicBlock * const nextBlock = b->CreateBasicBlock("nextBlock");
     BasicBlock * const strideMasksReady = b->CreateBasicBlock("strideMasksReady");
     BasicBlock * const keyProcessingLoop = b->CreateBasicBlock("keyProcessingLoop");
     BasicBlock * const tryStore = b->CreateBasicBlock("tryStore");
@@ -267,6 +272,8 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
     BasicBlock * const updatePending = b->CreateBasicBlock("updatePending");
     BasicBlock * const compressionMaskDone = b->CreateBasicBlock("compressionMaskDone");
+    BasicBlock * const writeHTEnd = b->CreateBasicBlock("writeHTEnd");
+    BasicBlock * const proceed = b->CreateBasicBlock("proceed");
 
     Value * const initialPos = b->getProcessedItemCount("symbolMarks");
     Value * const avail = b->getAvailableItemCount("symbolMarks");
@@ -277,6 +284,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * phrasesProducedPtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", phrasesProduced), bitBlockPtrTy);
     b->CreateStore(pendingPhraseMask, phrasesProducedPtr);
     Value * phraseMaskPtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", initialPos), bitBlockPtrTy);
+    Value * dictMaskPtr = b->CreateBitCast(b->getRawOutputPointer("dictBoundaryMask", phrasesProduced), bitBlockPtrTy);
 
     Value * pendingMask = b->CreateNot(b->getScalarField("pendingMaskInverted"));
     Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", initialProduced), bitBlockPtrTy);
@@ -303,8 +311,18 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
 
+    Value * checkStartBoundary = b->CreateAnd(b->CreateICmpEQ(b->getSize(mGroupNo), b->getSize(4)), b->CreateICmpEQ(b->getSize(mNumSym), sz_ONE));
+    checkStartBoundary = b->CreateAnd(checkStartBoundary, b->CreateICmpEQ(initialProduced, sz_ZERO));
+    b->CreateCondBr(checkStartBoundary, writeHTStart, nextBlock);
+    b->SetInsertPoint(writeHTStart);
+    b->setScalarField("segmentSize", b->getSize(0xF4240));
+
+    b->CreateBr(nextBlock);
+    b->SetInsertPoint(nextBlock);
+
+
     ///TODO: optimize if there are no hashmarks in the keyMasks stream
-    std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, phraseMaskPtr, strideMasksReady);
+    std::vector<Value *> keyMasks = initializeCompressionMasks(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, compressMaskPtr, phraseMaskPtr, dictMaskPtr, strideMasksReady);
     Value * keyMask = keyMasks[0];
 
     b->SetInsertPoint(strideMasksReady);
@@ -364,7 +382,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     hashcodePos = b->CreateSub(hashcodePos, sz_ONE);
     Value * pfxByte = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashcodePos)), sizeTy);
 
-    Value * writtenVal = codewordVal;
+    //Value * writtenVal = codewordVal;
     codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(pfxByte, lg.PREFIX_LENGTH_MASK));
 
     pfxByte = b->CreateTrunc(b->CreateAnd(pfxByte, lg.PREFIX_LENGTH_MASK), b->getInt64Ty());
@@ -408,10 +426,10 @@ and mark its compression mask.
 
     b->SetInsertPoint(storeKey);
     //b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
-    writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1, "writtenVal");
-    Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
-    Value * outputCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
-    b->CreateAlignedStore(writtenVal, outputCodeword, 1);
+    // writtenVal = b->CreateOr(b->CreateShl(writtenVal, lg.MAX_HASH_BITS), ZTF_prefix1, "writtenVal");
+    // Value * const copyLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
+    // Value * outputCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
+    // b->CreateAlignedStore(writtenVal, outputCodeword, 1);
     //b->CallPrintInt("outputCodeword", outputCodeword);
     //b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
 
@@ -536,6 +554,22 @@ and mark its compression mask.
     Value * produced = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, sz_BLOCKWIDTH));
     b->setProducedItemCount("compressionMask", produced);
     b->setProducedItemCount("codewordMask", produced);
+    b->setProducedItemCount("dictBoundaryMask", produced);
+
+    Value * checkBoundary = b->CreateAnd(b->CreateICmpEQ(b->getSize(mGroupNo), b->getSize(4)), b->CreateICmpEQ(b->getSize(mNumSym), sz_ONE));
+    checkBoundary = b->CreateAnd(checkBoundary, b->CreateICmpUGE(produced, b->getScalarField("segmentSize")));
+    b->CreateCondBr(checkBoundary, writeHTEnd, proceed);
+    b->SetInsertPoint(writeHTEnd);
+    b->setScalarField("segmentSize", b->CreateAdd(b->getScalarField("segmentSize"), b->getSize(0xF4240)));
+    Value * const dictPtr = b->CreateBitCast(b->getRawOutputPointer("dictBoundaryMask", produced), sizeTy->getPointerTo() );
+    Value * initMask = b->CreateAlignedLoad(dictPtr, 1);
+    Value * update = b->CreateOr(initMask, sz_ONE);
+    b->CreateAlignedStore(update, dictPtr, 1);
+    //b->CallPrintInt("update", update);
+
+    b->CreateBr(proceed);
+    b->SetInsertPoint(proceed);
+
     b->CreateCondBr(b->isFinal(), compressionMaskDone, updatePending);
     b->SetInsertPoint(updatePending);
     Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("compressionMask", produced), bitBlockPtrTy);

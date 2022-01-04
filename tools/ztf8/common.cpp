@@ -159,6 +159,7 @@ std::vector<Value *> initializeCompressionMasks(BuilderRef b,
                                                 Value * strideBlockOffset,
                                                 Value * compressMaskPtr,
                                                 Value * phraseMaskPtr,
+                                                Value * dictBoundaryMaskPtr,
                                                 BasicBlock * strideMasksReady) {
     Constant * sz_ZERO = b->getSize(0);
     Constant * sz_ONE = b->getSize(1);
@@ -192,6 +193,7 @@ std::vector<Value *> initializeCompressionMasks(BuilderRef b,
     // Default initial compression mask is all ones (no zeroes => no compression).
     b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP(compressMaskPtr, strideBlockIndex));
     b->CreateBlockAlignedStore(b->allZeroes(), b->CreateGEP(phraseMaskPtr, strideBlockIndex));
+    b->CreateBlockAlignedStore(b->allZeroes(), b->CreateGEP(dictBoundaryMaskPtr, strideBlockIndex));
 
     Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
     blockNo->addIncoming(nextBlockNo, maskInitialization);

@@ -41,6 +41,7 @@ public:
                            StreamSet * compressionMask,
                            StreamSet * encodedBytes,
                            StreamSet * codewordMask,
+                           StreamSet * dictBoundaryMask,
                            unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;

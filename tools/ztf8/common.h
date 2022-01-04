@@ -79,6 +79,7 @@ std::vector<llvm::Value *> initializeCompressionMasks(Kernel::BuilderRef b,
                                                     llvm::Value * strideBlockOffset,
                                                     llvm::Value * compressMaskPtr,
                                                     llvm::Value * phraseMaskPtr,
+                                                    llvm::Value * dictBoundaryMaskPtr,
                                                     llvm::BasicBlock * strideMasksReady);
 void initializeDecompressionMasks(Kernel::BuilderRef b,
                                                     struct ScanWordParameters & sw,

@@ -209,6 +209,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * u8bytes = codeUnitStream;
     std::vector<StreamSet *> extractionMasks;
     std::vector<StreamSet *> phraseMasks;
+    std::vector<StreamSet *> dictBoundaryMasks;
     for (int sym = SymCount-1; sym >= 0; sym--) {
         unsigned startLgIdx = 0;
         if (sym > 0) {
@@ -220,11 +221,13 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
             StreamSet * const groupMarks = P->CreateStreamSet(1);
             StreamSet * const codewordMask = P->CreateStreamSet(1);
+            StreamSet * const dictBoundaryMask = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, allHashMarks[sym], phraseLenBixnum[sym], overflow, groupMarks);
             // mask of dictionary codeword positions
-            P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes, codewordMask);
+            P->CreateKernelCall<SymbolGroupCompression>(encodingScheme1, sym, i, groupMarks, allHashValues[sym], input_bytes, extractionMask, output_bytes, codewordMask, dictBoundaryMask);
             extractionMasks.push_back(extractionMask);
             phraseMasks.push_back(codewordMask);
+            dictBoundaryMasks.push_back(dictBoundaryMask);
             u8bytes = output_bytes;
             //Update sym-1 hashMarks to avoid compressing sub-phrases of any of the already compressed phrases
             for (unsigned j = 0; j < sym; j++) {
@@ -237,14 +240,17 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const combinedPhraseMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsMerge>(phraseMasks, combinedPhraseMask);
-    P->CreateKernelCall<PopcountKernel>(combinedPhraseMask, P->getOutputScalar("count2"));
+
+    StreamSet * const combinedDictBoundaryMask = P->CreateStreamSet(1);
+    P->CreateKernelCall<StreamsMerge>(dictBoundaryMasks, combinedDictBoundaryMask);
+    //P->CreateKernelCall<PopcountKernel>(combinedDictBoundaryMask, P->getOutputScalar("count2"));
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
 
-    StreamSet * const final_output_bytes = P->CreateStreamSet(1, 8);
-    StreamSet * const final_filter_mask = P->CreateStreamSet(1);
-    //P->CreateKernelCall<InterleaveCompressionSegment>(u8bytes, codeUnitStream, combinedMask, final_filter_mask, final_output_bytes);
+    StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
+    StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
+    //P->CreateKernelCall<InterleaveCompressionSegment>(u8bytes, codeUnitStream, combinedMask, combinedPhraseMask, nonfinal_filter_mask, nonfinal_output_bytes);
 
     StreamSet * const encoded = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
