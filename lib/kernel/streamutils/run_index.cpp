@@ -25,7 +25,7 @@ RunIndex::RunIndex(BuilderRef b,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, Kind kind, Numbering n)
     : PabloKernel(b, "RunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow") + (kind == Kind::RunOf0 ? "" : "_invert") + (n == Numbering::RunOnly ? "" : "_add1"),
            // input
-{Binding{"runMarks", runMarks}},
+{Binding{"runMarks", runMarks, FixedRate(), LookAhead(1)}},
            // output
 RunIndexOutputBindings(runIndex, overflow)),
 mIndexCount(runIndex->getNumElements()),
@@ -39,10 +39,27 @@ mNumbering(n) {
 void RunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
-    PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
-    PabloAST * runStart = pb.createAnd(runMarks, pb.createNot(pb.createAdvance(runMarks, 1)), "runStart");
-    PabloAST * selectZero = runMarks;
-    PabloAST * outputEnable = runMarks;
+    PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;;
+    PabloAST * runStart = nullptr;
+    if (mNumbering == Numbering::RunPlus1) {
+        runStart = pb.createNot(runMarks);
+        runMarks = pb.createLookahead(runMarks, 1);
+    }
+    else {
+        runStart = pb.createAnd(runMarks, pb.createNot(pb.createAdvance(runMarks, 1)), "runStart");
+    }
+    /*
+                                         hello world, this is a fine morning hello world, how are you?
+              e2 22 04 10 10 a4 20 41    1.....1......1....1..1.1....1.......1.....1......1...1...1...
+
+              15 54 aa aa a5 49 4a aa    .1.1.1.1.1.1..1.1..1..1.1.1..1.1.1.1.1.1.1.1.1.1..1.1.1.1.1.1
+              19 99 30 cc c6 11 93 0c    ..11....11..1..11...1....11...11..11..11....11..1..11..11..11
+              00 01 c3 0f 08 02 1c 30    ....11....111....1.........1....1111....11....111............
+    */
+    // pb.createDebugPrint(runStart, "runStart");
+    // pb.createDebugPrint(runMarks, "runMarks");
+    PabloAST * selectZero = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
+    PabloAST * outputEnable = selectZero;
     Var * runIndexVar = getOutputStreamVar("runIndex");
     std::vector<PabloAST *> runIndex(mIndexCount);
     PabloAST * even = nullptr;
@@ -66,9 +83,9 @@ void RunIndex::generatePabloMethod() {
         PabloAST * oddStart = pb.createAnd(odd, runStart);
         PabloAST * idx = pb.createOr(pb.createAnd(pb.createMatchStar(evenStart, runMarks), odd),
                                      pb.createAnd(pb.createMatchStar(oddStart, runMarks), even));
-        if (mNumbering == Numbering::RunOnly) {
+        //if (mNumbering == Numbering::RunOnly) {
             idx = pb.createAnd(idx, selectZero);
-        }
+        //}
         for (unsigned j = 0; j < i; j++) {
             idx = pb.createOr(idx, pb.createAdvance(idx, 1<<j));
         }

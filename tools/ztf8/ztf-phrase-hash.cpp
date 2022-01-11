@@ -105,7 +105,13 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const runIndex = P->CreateStreamSet(5);
     StreamSet * const overflow = P->CreateStreamSet(1);
     // Calculate the length of individual symbols as a bixnum
-    P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow);
+    P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow, RunIndex::Kind::RunOf1, RunIndex::Numbering::RunPlus1);
+
+    StreamSet * const phraseRunIndex = P->CreateStreamSet(8); //7 bits are enough
+    StreamSet * const phraseOverflow = P->CreateStreamSet(1);
+    //write 4,3,2,1-symbol phrase lengths at (n-3),(n-2),(n-1) and n-th byte of the phrase
+    //P->CreateKernelCall<AccumRunIndexNew>(numSym, phraseRuns/*lookahead(1)*/, runIndex, overflow, phraseRunIndex, phraseOverflow);
+
     phraseLenBixnum[0] = runIndex;
     phraseLenOverflow[0] = overflow;
 
