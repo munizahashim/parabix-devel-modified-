@@ -359,7 +359,7 @@ void SymbolGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     /* Determine the key length. */
     Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", keyMarkPos)), sizeTy);
 
-    Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_TWO, "keyLength");
+    Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_ONE, "keyLength");
     Value * keyStartPos = b->CreateSub(keyMarkPos, b->CreateSub(keyLength, sz_ONE), "keyStartPos");
     // keyOffset for accessing the final half of an entry.
     Value * keyOffset = b->CreateSub(keyLength, lg.HALF_LENGTH);

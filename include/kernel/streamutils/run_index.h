@@ -48,6 +48,17 @@ private:
     bool mOverflow;
 };
 
+class AccumRunIndexNew : public pablo::PabloKernel {
+public:
+    AccumRunIndexNew(BuilderRef b,
+               unsigned numSym, StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * phraseRunIndex, StreamSet * phraseOverflow = nullptr);
+    void generatePabloMethod() override;
+private:
+    unsigned mIndexCount;
+    unsigned mNumSym;
+    bool mOverflow;
+};
+
 }
 
 #endif // RUN_INDEX_H

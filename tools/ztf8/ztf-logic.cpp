@@ -513,9 +513,9 @@ void LengthGroupSelector::generatePabloMethod() {
     runFinal = pb.createAnd(runFinal, pb.createNot(overflow));
     Var * groupStreamVar = getOutputStreamVar("selected");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
-    // Run index codes count from 0 on the 2nd byte of a symbol.
-    // So the length is 2 more than the bixnum.
-    unsigned offset = 2;
+    // Run index codes count from 0 on the 1st byte of a symbol.
+    // So the length is 1 more than the bixnum.
+    unsigned offset = 1;
     unsigned lo = groupInfo.lo;
     unsigned hi = groupInfo.hi;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);

@@ -8,6 +8,7 @@
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>          // for Ones
 #include <pablo/pe_var.h>           // for Var
+#include <pablo/pe_zeroes.h>        // for Zeroes
 #include <pablo/pe_infile.h>
 
 #include <pablo/bixnum/bixnum.h>
@@ -39,7 +40,7 @@ mNumbering(n) {
 void RunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
-    PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;;
+    PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
     PabloAST * runStart = nullptr;
     if (mNumbering == Numbering::RunPlus1) {
         runStart = pb.createNot(runMarks);
@@ -66,7 +67,7 @@ void RunIndex::generatePabloMethod() {
     PabloAST * overflow = nullptr;
     if (mOverflow) {
         // marks overflowLen + 2 positions
-        overflow = runMarks; //pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
+        overflow = selectZero; //pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
         //pb.createDebugPrint(overflow, "overflow-RI");
     }
     for (unsigned i = 0; i < mIndexCount; i++) {
@@ -114,7 +115,7 @@ AccumRunIndex::AccumRunIndex(BuilderRef b,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * accumRunIndex, StreamSet * accumOverflow)
     : PabloKernel(b, "AccumRunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow"),
            // input
-{Binding{"runMarks", runMarks}, Binding{"runIndex", runIndex}, Binding{"overflow", overflow}},
+{Binding{"runMarks", runMarks, FixedRate(), LookAhead(1)}, Binding{"runIndex", runIndex}, Binding{"overflow", overflow}},
            // output
 AccumRunIndexOutputBindings(accumRunIndex, accumOverflow)),
 mIndexCount(accumRunIndex->getNumElements()),
@@ -125,7 +126,7 @@ mOverflow(accumOverflow != nullptr) {
 
 void AccumRunIndex::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * runMarks = getInputStreamSet("runMarks")[0];
+    PabloAST * runMarks = pb.createLookahead(getInputStreamSet("runMarks")[0], 1);
     PabloAST * symEndPos = pb.createNot(runMarks);
     std::vector<PabloAST *> runIndex = getInputStreamSet("runIndex");
     PabloAST * overflow = pb.createExtract(getInputStreamVar("overflow"), pb.getInteger(0));
@@ -169,7 +170,7 @@ void AccumRunIndex::generatePabloMethod() {
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     //pb.createDebugPrint(notFirstSymSum, "notFirstSymSum");
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
-    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 2);
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 1);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     //pb.createDebugPrint(curOverflow, "curOverflow");
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
@@ -183,6 +184,80 @@ void AccumRunIndex::generatePabloMethod() {
 
 }
 
+Bindings AccumRunIndexNewOutputBindings(StreamSet * phraseRunIndex, StreamSet * phraseOverflow) {
+    if (phraseOverflow == nullptr) return {Binding{"phraseRunIndex", phraseOverflow}};
+    return {Binding{"phraseRunIndex", phraseRunIndex}, Binding{"phraseOverflow", phraseOverflow}};
+}
+
+AccumRunIndexNew::AccumRunIndexNew(BuilderRef b, unsigned numSym,
+                                   StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * phraseRunIndex, StreamSet * phraseOverflow)
+    : PabloKernel(b, "AccumRunIndexNew-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow"),
+           // input
+{Binding{"runMarks", runMarks, FixedRate(), LookAhead(1)}, Binding{"runIndex", runIndex, FixedRate(), LookAhead(1)}, Binding{"overflow", overflow}},
+           // output
+AccumRunIndexNewOutputBindings(phraseRunIndex, phraseOverflow)),
+mIndexCount(phraseRunIndex->getNumElements() - 3),
+mNumSym(numSym),
+mOverflow(phraseOverflow != nullptr) {
+    assert(mIndexCount <= 5);
+}
+
+void AccumRunIndexNew::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * runMarks = pb.createLookahead(getInputStreamSet("runMarks")[0], 1);
+    PabloAST * symEndPos = pb.createNot(runMarks);
+    std::vector<PabloAST *> runIndex = getInputStreamSet("runIndex");
+    PabloAST * overflow = pb.createExtract(getInputStreamVar("overflow"), pb.getInteger(0));
+    // symbol is already marked for overflow or is following an overflow mark
+    PabloAST * curOverflow = pb.createOr(overflow, pb.createIndexedAdvance(overflow, symEndPos, 1));
+    overflow = pb.createNot(overflow);
+    // output
+    std::vector<PabloAST *> phraseRunIndex(mIndexCount);
+    Var * phraseRunIndexVar = getOutputStreamVar("phraseRunIndex");
+    Var * phraseOverflowVar = getOutputStreamVar("phraseOverflow");
+    BixNumCompiler bnc(pb);
+    BixNum curSymLen(mIndexCount);
+    BixNum prevSymLen(mIndexCount);
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        curSymLen[i] = pb.createLookahead(runIndex[i], 1);
+        // check ri[i] against symEndPos; set 0 if symEndPos is 0 => all the RI bixnum prior to symEndPos set to 0
+        runIndex[i] = pb.createAnd(runIndex[i], symEndPos);
+    }
+    //propagte last sym's length to cur sym stopping right before next sym's start pos
+    for (unsigned int i = 0; i < 32; i++) { // max symbol byte_length restricted to 32 (allow initializng at compile time)
+        for (unsigned ii = 0; ii < mIndexCount; ii++) {
+            PabloAST * priorBits = pb.createAdvance(runIndex[ii], 1);
+            priorBits = pb.createAnd3(priorBits, runMarks, overflow);
+            runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
+        }
+    }
+
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        prevSymLen[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symEndPos);
+    }
+    // first symbol has no prev symbol
+    // IndexedAdvance by consecutive k-1 positions to mark invalid k-gram phrase positions
+    PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
+    PabloAST * inRangeFinal = notFirstSymSum;
+
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, runIndex), 1);
+    curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
+    inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
+    for (unsigned i = 0; i < mIndexCount; i++) {
+        pb.createAssign(pb.createExtract(phraseRunIndexVar, pb.getInteger(i)), pb.createOr(curSymLen[i], pb.createAnd(sum[i], inRangeFinal)));
+    }
+    for (unsigned sym = 0; sym < mNumSym; sym++) {
+        PabloAST * ones = pb.createOnes();
+        if (sym == 0) {
+            pb.createAssign(pb.createExtract(phraseRunIndexVar, pb.getInteger(5)), pb.createAnd(ones, runMarks));
+        }
+        else if (sym == 1) {
+            pb.createAssign(pb.createExtract(phraseRunIndexVar, pb.getInteger(6)), pb.createAnd(ones, symEndPos));
+        }
+    }
+    pb.createAssign(pb.createExtract(phraseRunIndexVar, pb.getInteger(7)), pb.createZeroes());
+    pb.createAssign(pb.createExtract(phraseOverflowVar, pb.getInteger(0)), curOverflow);
 
 }
 
+}

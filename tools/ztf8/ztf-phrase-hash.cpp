@@ -106,26 +106,23 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const overflow = P->CreateStreamSet(1);
     // Calculate the length of individual symbols as a bixnum
     P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow, RunIndex::Kind::RunOf1, RunIndex::Numbering::RunPlus1);
+    //P->CreateKernelCall<DebugDisplayKernel>("runIndex", runIndex);
 
     StreamSet * const phraseRunIndex = P->CreateStreamSet(8); //7 bits are enough
     StreamSet * const phraseOverflow = P->CreateStreamSet(1);
     //write 4,3,2,1-symbol phrase lengths at (n-3),(n-2),(n-1) and n-th byte of the phrase
-    //P->CreateKernelCall<AccumRunIndexNew>(numSym, phraseRuns/*lookahead(1)*/, runIndex, overflow, phraseRunIndex, phraseOverflow);
+    P->CreateKernelCall<AccumRunIndexNew>(SymCount, phraseRuns, runIndex, overflow, phraseRunIndex, phraseOverflow);
+    //P->CreateKernelCall<DebugDisplayKernel>("phraseRunIndex", phraseRunIndex);
 
     phraseLenBixnum[0] = runIndex;
     phraseLenOverflow[0] = overflow;
-
-    StreamSet * const phraseRunsFinal = P->CreateStreamSet(1);
-    P->CreateKernelCall<ShiftBack>(phraseRuns, phraseRunsFinal, 1);
-    //P->CreateKernelCall<DebugDisplayKernel>("phraseRunsFinal", phraseRunsFinal);
-    //P->CreateKernelCall<DebugDisplayKernel>("phraseRuns", phraseRuns);
 
     // Calculate the length of k-symbol phrases as bixnum
     // Last byte of each symbol indicates the prev (k-1)-symbol + current_symbol_length
     for(unsigned i = 1; i < SymCount; i++) {
         StreamSet * const accumRunIndex = P->CreateStreamSet(5);
         StreamSet * const accumOverflow = P->CreateStreamSet(1);
-        P->CreateKernelCall<AccumRunIndex>(phraseRunsFinal, runIndex, phraseLenOverflow[i-1], accumRunIndex, accumOverflow);
+        P->CreateKernelCall<AccumRunIndex>(phraseRuns, runIndex, phraseLenOverflow[i-1], accumRunIndex, accumOverflow);
         phraseLenBixnum[i]= accumRunIndex;
         phraseLenOverflow[i] = accumOverflow;
         //P->CreateKernelCall<DebugDisplayKernel>("accumRunIndex", accumRunIndex);
