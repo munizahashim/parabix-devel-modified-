@@ -61,7 +61,7 @@ auto long_brak =  BinaryStreamSet({"..1.111...... .{333} ...................",
 auto long_depth = BinaryStreamSet({"..11.1....... .{333} .........111...111.",
                                    "....11....... .{333} .........111111....",
                                    "......1111111 1{333} 111111111.........."});
-auto long_errs     = BinaryStream({".............. .{333} ...................."});
+auto long_errs     = BinaryStream({"............. .{333} ...................."});
 
 TEST_CASE(multiblock, long_brak, long_depth, long_errs) {
     auto DepthResult = T->CreateStreamSet(3);
