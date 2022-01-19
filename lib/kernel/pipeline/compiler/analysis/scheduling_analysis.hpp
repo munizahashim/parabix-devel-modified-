@@ -1105,13 +1105,17 @@ void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, rando
 
         const auto S = makeIntraPartitionSchedulingGraph(P, currentPartitionId);
 
-        //constexpr auto fakeInput = 0U;
+#ifndef NDEBUG
+        constexpr auto fakeInput = 0U;
+#endif
         constexpr auto firstKernel = 1U;
 
         const auto & kernels = currentPartition.Kernels;
         const auto numOfKernels = kernels.size();
         assert (numOfKernels > 0);
-        //const auto fakeOutput = numOfKernels + 1U;
+#ifndef NDEBUG
+        const auto fakeOutput = numOfKernels + 1U;
+#endif
 
         // We want to generate a subgraph of S consisting of only the kernel nodes
         // but whose edges initially represent the transitive closure of S. Once we

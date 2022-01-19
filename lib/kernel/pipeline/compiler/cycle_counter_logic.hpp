@@ -185,7 +185,9 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
 
     long double maxCyclesPerItem = 0.0L;
 
-    //const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
+#ifndef NDEBUG
+    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
+#endif
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
         const auto k = i * (NUM_OF_CYCLE_COUNTERS + 3);
