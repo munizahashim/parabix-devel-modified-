@@ -431,19 +431,15 @@ and mark its compression mask.
     // Value * outputCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
     // b->CreateAlignedStore(writtenVal, outputCodeword, 1);
     //b->CallPrintInt("outputCodeword", outputCodeword);
-    //b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
+    // b->CreateWriteCall(b->getInt32(STDOUT_FILENO), outputCodeword, copyLen);
 
-    Value * phraseMaskLength = b->CreateZExt(keyLength, sizeTy);
-    Value * phraseMask = b->CreateSub(b->CreateShl(sz_ONE, phraseMaskLength), sz_ONE);
-    Value * phraseStartBase = b->CreateSub(keyStartPos, b->CreateURem(keyStartPos, b->getSize(8)));
+    // Mark the last byte of phrase
     Value * phraseMarkBase = b->CreateSub(keyMarkPos, b->CreateURem(keyMarkPos, sz_BITS));
-    Value * phraseBase = b->CreateSelect(b->CreateICmpULT(phraseStartBase, phraseMarkBase), phraseStartBase, phraseMarkBase);
-    Value * phraseBitOffset = b->CreateSub(keyStartPos, phraseBase);
-
-    phraseMask = b->CreateShl(phraseMask, phraseBitOffset);
-    Value * const codewordMaskBasePtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", phraseBase), sizeTy->getPointerTo());
-    Value * currentMask = b->CreateAlignedLoad(codewordMaskBasePtr, 1);
-    Value * updatedMask = b->CreateOr(currentMask, phraseMask);
+    Value * markOffset = b->CreateSub(keyMarkPos, phraseMarkBase);
+    Value * const codewordMaskBasePtr = b->CreateBitCast(b->getRawOutputPointer("codewordMask", phraseMarkBase), sizeTy->getPointerTo());
+    Value * initialMark = b->CreateAlignedLoad(codewordMaskBasePtr, 1);
+    Value * phraseEndPos = b->CreateSelect(b->CreateICmpEQ(b->getSize(mNumSym), sz_ONE), sz_ZERO, sz_ONE);
+    Value * updatedMask = b->CreateOr(initialMark, b->CreateShl(sz_ONE, b->CreateSub(markOffset, phraseEndPos)));
     b->CreateAlignedStore(updatedMask, codewordMaskBasePtr, 1);
 
     // We have a new symbol that allows future occurrences of the symbol to
@@ -582,6 +578,452 @@ and mark its compression mask.
     b->CreateBr(compressionMaskDone);
     b->SetInsertPoint(compressionMaskDone);
 }
+
+// Assumes phrases with frequency >= 2 are compressed
+WriteDictionary::WriteDictionary(BuilderRef b,
+                                EncodingInfo encodingScheme,
+                                unsigned numSyms,
+                                StreamSet * byteData,
+                                StreamSet * codedBytes,
+                                StreamSet * extractionMask,
+                                StreamSet * phraseMask,
+                                StreamSet * allLenHashValues,
+                                StreamSet * dictionaryBytes,
+                                StreamSet * dictionaryMask,
+                                unsigned strideBlocks)
+: MultiBlockKernel(b, "WriteDictionary",
+                   {Binding{"phraseMask", phraseMask},
+                    Binding{"codewordMask", extractionMask},
+                    Binding{"byteData", byteData, FixedRate(), LookBehind(33)},
+                    Binding{"codedBytes", codedBytes, FixedRate(), LookBehind(33)},
+                    Binding{"lengthData", allLenHashValues, FixedRate(), LookBehind(33)}},
+                   {}, {}, {},
+                   {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"},
+                    InternalScalar{b->getBitBlockType(), "pendingPhraseMask"}}),
+mNumSym(numSyms) {
+    if (DelayedAttributeIsSet()) {
+        mOutputStreamSets.emplace_back("dictionaryMask", dictionaryMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
+        mOutputStreamSets.emplace_back("dictionaryBytes", dictionaryBytes, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
+    } else {
+        mOutputStreamSets.emplace_back("dictionaryMask", dictionaryMask, BoundedRate(0,1));
+        mOutputStreamSets.emplace_back("dictionaryBytes", dictionaryBytes, BoundedRate(0,1));
+        addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
+    }
+    //setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(102400);
+}
+
+void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+    ScanWordParameters sw(b, mStride);
+    Constant * sz_STRIDE = b->getSize(mStride);
+    Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
+    Constant * sz_ZERO = b->getSize(0);
+    Constant * sz_ONE = b->getSize(1);
+    Constant * sz_TWO = b->getSize(2);
+    Constant * sz_FOUR = b->getSize(4);
+    Constant * sz_EIGHT = b->getSize(8);
+    Constant * sz_SYM_MASK = b->getSize(0x8F);
+    Constant * sz_HASH_TABLE_START = b->getSize(65278);
+    Constant * sz_HASH_TABLE_END = b->getSize(65535);
+
+    Type * sizeTy = b->getSizeTy();
+    Type * halfLengthTy = b->getIntNTy(8U * 8);
+    Type * halfSymPtrTy = halfLengthTy->getPointerTo();
+    Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
+
+    BasicBlock * const entryBlock = b->GetInsertBlock();
+    BasicBlock * const stridePrologue = b->CreateBasicBlock("stridePrologue");
+    BasicBlock * const writeHTStart = b->CreateBasicBlock("writeHTStart");
+    BasicBlock * const writeFEFE = b->CreateBasicBlock("writeFEFE");
+    BasicBlock * const FEFEDone = b->CreateBasicBlock("FEFEDone");
+    BasicBlock * const firstPhrase = b->CreateBasicBlock("firstPhrase");
+    BasicBlock * const firstPhraseDone = b->CreateBasicBlock("firstPhraseDone");
+    BasicBlock * const firstCodeword = b->CreateBasicBlock("firstCodeword");
+    BasicBlock * const firstCodewordDone = b->CreateBasicBlock("firstCodewordDone");
+    BasicBlock * const tryWriteMask = b->CreateBasicBlock("tryWriteMask");
+    BasicBlock * const writeMask = b->CreateBasicBlock("writeMask");
+    BasicBlock * const strideMasksReady = b->CreateBasicBlock("strideMasksReady");
+    BasicBlock * const dictProcessingLoop = b->CreateBasicBlock("dictProcessingLoop");
+    BasicBlock * const writePhrase = b->CreateBasicBlock("writePhrase");
+    BasicBlock * const writeSegPhrase = b->CreateBasicBlock("writeSegPhrase");
+    BasicBlock * const phraseWritten = b->CreateBasicBlock("phraseWritten");
+    BasicBlock * const writeCodeword = b->CreateBasicBlock("writeCodeword");
+    BasicBlock * const codewordWritten = b->CreateBasicBlock("codewordWritten");
+    BasicBlock * const tryUpdateMask = b->CreateBasicBlock("tryUpdateMask");
+    BasicBlock * const updateMask = b->CreateBasicBlock("updateMask");
+    BasicBlock * const nextPhrase = b->CreateBasicBlock("nextPhrase");
+    BasicBlock * const writeHTEnd = b->CreateBasicBlock("writeHTEnd");
+    BasicBlock * const checkLoopCond = b->CreateBasicBlock("checkLoopCond");
+    BasicBlock * const phrasesDone = b->CreateBasicBlock("phrasesDone");
+    BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
+    // BasicBlock * const updatePending = b->CreateBasicBlock("updatePending");
+    // BasicBlock * const compressionMaskDone = b->CreateBasicBlock("compressionMaskDone");
+
+    Value * const initialPos = b->getProcessedItemCount("phraseMask");
+    Value * const avail = b->getAvailableItemCount("phraseMask");
+    Value * const initialProduced = b->getProducedItemCount("dictionaryMask");
+
+    // Value * pendingMask = b->CreateNot(b->getScalarField("pendingMaskInverted"));
+    Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", initialProduced), bitBlockPtrTy);
+    Value * toCopy = b->CreateMul(numOfStrides, sz_STRIDE);
+    //b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", initialProduced), b->getRawInputPointer("byteData", initialProduced), toCopy, 1);
+    b->CreateBr(stridePrologue);
+
+    b->SetInsertPoint(stridePrologue);
+    // Set up the loop variables as PHI nodes at the beginning of each stride.
+    PHINode * const strideNo = b->CreatePHI(sizeTy, 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    //b->CallPrintInt("strideNo", strideNo);
+    Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
+    Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
+    Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
+
+    std::vector<Value *> phraseMasks = initializeCompressionMasks1(b, sw, sz_BLOCKS_PER_STRIDE, 1, strideBlockOffset, producedPtr, strideMasksReady);
+    Value * phraseMask = phraseMasks[0];
+
+    b->SetInsertPoint(strideMasksReady);
+    Value * phraseWordBasePtr = b->getInputStreamBlockPtr("phraseMask", sz_ZERO, strideBlockOffset);
+    phraseWordBasePtr = b->CreateBitCast(phraseWordBasePtr, sw.pointerTy);
+    b->CreateUnlikelyCondBr(b->CreateICmpEQ(phraseMask, sz_ZERO), phrasesDone, dictProcessingLoop);
+
+    b->SetInsertPoint(dictProcessingLoop);
+    PHINode * const phraseMaskPhi = b->CreatePHI(sizeTy, 2);
+    phraseMaskPhi->addIncoming(phraseMask, strideMasksReady);
+    PHINode * const phraseWordPhi = b->CreatePHI(sizeTy, 2);
+    phraseWordPhi->addIncoming(sz_ZERO, strideMasksReady);
+    PHINode * writePosPhi = b->CreatePHI(sizeTy, 2);
+    writePosPhi->addIncoming(sz_ZERO, strideMasksReady);
+
+    Value * phraseWordIdx = b->CreateCountForwardZeroes(phraseMaskPhi, "phraseWordIdx");
+    Value * nextphraseWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(phraseWordBasePtr, phraseWordIdx)), sizeTy);
+    Value * thephraseWord = b->CreateSelect(b->CreateICmpEQ(phraseWordPhi, sz_ZERO), nextphraseWord, phraseWordPhi);
+    Value * phraseWordPos = b->CreateAdd(stridePos, b->CreateMul(phraseWordIdx, sw.WIDTH));
+    Value * phraseMarkPosInWord = b->CreateCountForwardZeroes(thephraseWord);
+    Value * phraseMarkPos = b->CreateAdd(phraseWordPos, phraseMarkPosInWord, "phraseEndPos");
+    /* Determine the phrase length. */
+    Value * phraseLength = b->CreateZExtOrTrunc(b->CreateLoad(b->getRawInputPointer("lengthData", phraseMarkPos)), sizeTy);
+    Value * numSym = phraseLength;
+    numSym = b->CreateAnd(b->CreateLShr(numSym, b->getSize(5)), b->getSize(7));
+    //b->CallPrintInt("numSym", numSym);
+
+    //b->CallPrintInt("phraseLength-read", phraseLength);
+    phraseLength = b->CreateAnd(phraseLength, sz_SYM_MASK);
+    Value * phraseEndPos = b->CreateSelect(b->CreateICmpULT(numSym, b->getSize(mNumSym)), sz_ONE, sz_ZERO);
+    //b->CallPrintInt("phraseEndPos", phraseEndPos);
+    phraseLength = b->CreateAdd(phraseLength, phraseEndPos);
+    //b->CallPrintInt("phraseLength-final", phraseLength);
+
+    Value * phraseMarkPosFinal = b->CreateAdd(phraseMarkPos, b->CreateSub(b->getSize(mNumSym), numSym));
+    Value * phraseStartPos = b->CreateSub(phraseMarkPosFinal, b->CreateSub(phraseLength, sz_ONE), "phraseStartPos");
+
+    Value * codeWordLen = b->getSize(2);
+    codeWordLen = b->CreateSelect(b->CreateICmpUGT(phraseLength, b->getSize(8)), b->CreateAdd(codeWordLen, sz_ONE), codeWordLen);
+    codeWordLen = b->CreateSelect(b->CreateICmpUGT(phraseLength, b->getSize(16)), b->CreateAdd(codeWordLen, sz_ONE), codeWordLen);
+    // Write phrase followed by codeword
+    Value * codeWordStartPos =  b->CreateSub(phraseMarkPosFinal, b->CreateSub(codeWordLen, sz_ONE));
+    Value * checkStartBoundary = b->CreateICmpEQ(writePosPhi, sz_ZERO);
+    // Write initial hashtable boundary "fefe" and update dictionaryMask
+    b->CreateBr(writeHTStart);
+    //b->CreateCondBr(checkStartBoundary, writeHTStart, writeSegPhrase);
+    b->SetInsertPoint(writeHTStart);
+    PHINode * curWritePos = b->CreatePHI(sizeTy, 2);
+    PHINode * loopIdx = b->CreatePHI(sizeTy, 2);
+    curWritePos->addIncoming(writePosPhi, dictProcessingLoop);
+    loopIdx->addIncoming(sz_ZERO, dictProcessingLoop);
+    //b->CallPrintInt("loopIdx", loopIdx);
+    Value * writeLen = b->CreateSelect(b->CreateICmpEQ(loopIdx, sz_ZERO), sz_TWO, phraseLength);
+    writeLen = b->CreateSelect(b->CreateICmpEQ(loopIdx, sz_ONE), writeLen, codeWordLen);
+    writeLen = b->CreateSelect(checkStartBoundary, writeLen, sz_ZERO);
+    Value * nextLoopIdx = b->CreateAdd(loopIdx, sz_ONE);
+    Value * updateWritePos = b->CreateAdd(curWritePos, writeLen);
+    Value * maxLoopIdx = b->getSize(3);
+
+    b->CreateCondBr(b->CreateAnd(checkStartBoundary, b->CreateICmpEQ(loopIdx, sz_ZERO)), writeFEFE, FEFEDone);
+    b->SetInsertPoint(writeFEFE);
+    Value * const startBoundary = sz_TWO;
+    Value * sBoundaryCodeword = b->CreateAlloca(b->getInt64Ty(), startBoundary);
+    b->CreateAlignedStore(sz_HASH_TABLE_START, sBoundaryCodeword, 1);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", curWritePos), sBoundaryCodeword, startBoundary, 1);
+    b->CreateBr(FEFEDone);
+    // Write start boundary
+    b->SetInsertPoint(FEFEDone);
+    b->CreateCondBr(b->CreateAnd(checkStartBoundary, b->CreateICmpEQ(loopIdx, sz_ONE)), firstPhrase, firstPhraseDone);
+    b->SetInsertPoint(firstPhrase);
+    // Value * symPtr1 = b->CreateBitCast(b->getRawInputPointer("byteData", phraseStartPos), halfSymPtrTy);
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, phraseLength);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", curWritePos), b->getRawInputPointer("byteData", phraseStartPos), phraseLength, 1);
+    b->CreateBr(firstPhraseDone);
+    // Write phrase
+    b->SetInsertPoint(firstPhraseDone);
+    b->CreateCondBr(b->CreateAnd(checkStartBoundary, b->CreateICmpEQ(loopIdx, sz_TWO)), firstCodeword, firstCodewordDone);
+    b->SetInsertPoint(firstCodeword);
+    // Value * symPtr2 = b->CreateBitCast(b->getRawInputPointer("codedBytes", codeWordStartPos), halfSymPtrTy);
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr2, codeWordLen);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", curWritePos), b->getRawInputPointer("codedBytes", codeWordStartPos), codeWordLen, 1);
+    b->CreateBr(firstCodewordDone);
+    // Write codeword
+    b->SetInsertPoint(firstCodewordDone);
+    BasicBlock * thisBB = b->GetInsertBlock();
+    loopIdx->addIncoming(nextLoopIdx, thisBB);
+    curWritePos->addIncoming(updateWritePos, thisBB);
+    //b->CallPrintInt("updateWritePos", updateWritePos);
+    b->CreateCondBr(b->CreateAnd(checkStartBoundary, b->CreateICmpNE(nextLoopIdx, maxLoopIdx)), writeHTStart, tryWriteMask);
+
+    b->SetInsertPoint(tryWriteMask);
+    // Update dictionaryMask
+    b->CreateCondBr(checkStartBoundary, writeMask, writeSegPhrase);
+    b->SetInsertPoint(writeMask);
+    Value * const maskLength = b->CreateZExt(b->CreateAdd(sz_TWO, b->CreateAdd(phraseLength, codeWordLen)), sizeTy);
+    Value * mask = b->CreateSub(b->CreateShl(sz_ONE, maskLength), sz_ONE);
+    Value * const maskBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", writePosPhi), sizeTy->getPointerTo());
+    Value * initialBoundaryMask = b->CreateAlignedLoad(maskBasePtr, 1);
+    Value * updatedBoundaryMask = b->CreateOr(initialBoundaryMask, mask);
+    //b->CallPrintInt("updatedBoundaryMask", updatedBoundaryMask);
+    b->CreateAlignedStore(updatedBoundaryMask, maskBasePtr, 1);
+    b->CreateBr(writeSegPhrase);
+
+    b->SetInsertPoint(writeSegPhrase);
+    // If not first phrase of the segment
+    // Write phrase followed by codeword
+    PHINode * segWritePos = b->CreatePHI(sizeTy, 3);
+    PHINode * segLoopIdx = b->CreatePHI(sizeTy, 3);
+    segWritePos->addIncoming(writePosPhi, writeMask);
+    segLoopIdx->addIncoming(sz_ZERO, writeMask);
+    segWritePos->addIncoming(writePosPhi, tryWriteMask);
+    segLoopIdx->addIncoming(sz_ZERO, tryWriteMask);
+    // b->CallPrintInt("segWritePos", segWritePos);
+    // b->CallPrintInt("segLoopIdx", segLoopIdx);
+    Value * segWriteLen = b->CreateSelect(b->CreateICmpEQ(segLoopIdx, sz_ZERO), phraseLength, codeWordLen);
+    segWriteLen = b->CreateSelect(b->CreateNot(checkStartBoundary), segWriteLen, sz_ZERO);
+    Value * nextSegLoopIdx = b->CreateAdd(segLoopIdx, sz_ONE);
+    Value * updateSegWritePos = b->CreateAdd(segWritePos, segWriteLen);
+
+    b->CreateCondBr(b->CreateAnd(b->CreateNot(checkStartBoundary), b->CreateICmpEQ(segLoopIdx, sz_ZERO)), writePhrase, phraseWritten);
+    // Write phrase
+    b->SetInsertPoint(writePhrase);
+    // Value * symPtr3 = b->CreateBitCast(b->getRawInputPointer("byteData", phraseStartPos), halfSymPtrTy);
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr3, phraseLength);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", segWritePos), b->getRawInputPointer("byteData", phraseStartPos), phraseLength, 1);
+    b->CreateBr(phraseWritten);
+
+    b->SetInsertPoint(phraseWritten);
+    b->CreateCondBr(b->CreateAnd(b->CreateNot(checkStartBoundary), b->CreateICmpEQ(segLoopIdx, sz_ONE)), writeCodeword, codewordWritten);
+    // Write codeword
+    b->SetInsertPoint(writeCodeword);
+    // b->CallPrintInt("codeWordLen", codeWordLen);
+    // b->CallPrintInt("codeWordStartPos", codeWordStartPos);
+    // Value * symPtr4 = b->CreateBitCast(b->getRawInputPointer("codedBytes", codeWordStartPos), halfSymPtrTy);
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr4, codeWordLen);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", segWritePos), b->getRawInputPointer("codedBytes", codeWordStartPos), codeWordLen, 1);
+    b->CreateBr(codewordWritten);
+
+    b->SetInsertPoint(codewordWritten);
+    BasicBlock * thisSegBB = b->GetInsertBlock();
+    segLoopIdx->addIncoming(nextSegLoopIdx, thisSegBB);
+    segWritePos->addIncoming(updateSegWritePos, thisSegBB);
+    //b->CallPrintInt("updateSegWritePos", updateSegWritePos);
+    b->CreateCondBr(b->CreateICmpNE(nextSegLoopIdx, b->getSize(2)), writeSegPhrase, tryUpdateMask);
+
+    b->SetInsertPoint(tryUpdateMask);
+    b->CreateCondBr(checkStartBoundary, nextPhrase, updateMask);
+    b->SetInsertPoint(updateMask);
+    Value * phraseMaskLength = b->CreateZExt(b->CreateAdd(phraseLength, codeWordLen), sizeTy);
+    Value * lastMask = b->CreateSub(b->CreateShl(sz_ONE, phraseMaskLength), sz_ONE);
+    Value * dictBase = b->CreateSub(writePosPhi, b->CreateURem(writePosPhi, sz_EIGHT));
+    Value * bitOffset1 = b->CreateSub(writePosPhi, dictBase);
+    lastMask = b->CreateShl(lastMask, bitOffset1);
+    Value * const dictPhraseBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", dictBase), sizeTy->getPointerTo());
+    Value * initialdictPhraseMask = b->CreateAlignedLoad(dictPhraseBasePtr, 1);
+    Value * updatedDictPhraseMask = b->CreateOr(initialdictPhraseMask, lastMask);
+    //b->CallPrintInt("updatedDictPhraseMask", updatedDictPhraseMask);
+    b->CreateAlignedStore(updatedDictPhraseMask, dictPhraseBasePtr, 1);
+    b->CreateBr(nextPhrase);
+
+    b->SetInsertPoint(nextPhrase);
+    Value * dropPhrase = b->CreateResetLowestBit(thephraseWord);
+    Value * thisWordDone = b->CreateICmpEQ(dropPhrase, sz_ZERO);
+    // There may be more phrases in the phrase mask.
+    Value * nextphraseMask = b->CreateSelect(thisWordDone, b->CreateResetLowestBit(phraseMaskPhi), phraseMaskPhi);
+    Value * nextWritePos = b->CreateAdd(writePosPhi, b->CreateAdd(codeWordLen, phraseLength));
+    nextWritePos = b->CreateSelect(checkStartBoundary, b->CreateAdd(nextWritePos, sz_TWO), nextWritePos);
+    b->CreateCondBr(b->CreateAnd(b->CreateICmpEQ(nextStrideNo, numOfStrides), b->CreateICmpEQ(nextphraseMask, sz_ZERO)), writeHTEnd, checkLoopCond);
+    b->SetInsertPoint(writeHTEnd);
+    // Write hashtable end boundary FFFF
+    Value * const copyLen = sz_TWO;
+    Value * boundaryCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
+    b->CreateAlignedStore(sz_HASH_TABLE_END, boundaryCodeword, 1);
+    b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", nextWritePos), boundaryCodeword, copyLen, 1);
+    Value * lastBoundaryBase = b->CreateSub(nextWritePos, b->CreateURem(nextWritePos, sz_EIGHT));
+    Value * lastBoundaryBitOffset1 = b->CreateSub(nextWritePos, lastBoundaryBase);
+    Value * boundaryBits = b->getSize(0x3);
+    boundaryBits = b->CreateShl(boundaryBits, lastBoundaryBitOffset1);
+    Value * const dictPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", lastBoundaryBase), sizeTy->getPointerTo());
+    Value * initMask = b->CreateAlignedLoad(dictPtr, 1);
+    Value * update = b->CreateOr(initMask, boundaryBits);
+    b->CreateAlignedStore(update, dictPtr, 1);
+    b->CreateBr(checkLoopCond);
+
+    b->SetInsertPoint(checkLoopCond);
+    BasicBlock * currentBB = b->GetInsertBlock();
+    phraseMaskPhi->addIncoming(nextphraseMask, currentBB);
+    phraseWordPhi->addIncoming(dropPhrase, currentBB);
+    writePosPhi->addIncoming(nextWritePos, currentBB);
+    b->CreateCondBr(b->CreateICmpEQ(nextphraseMask, sz_ZERO), phrasesDone, dictProcessingLoop);
+    b->SetInsertPoint(phrasesDone);
+    strideNo->addIncoming(nextStrideNo, phrasesDone);
+    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
+    b->SetInsertPoint(stridesDone);
+
+    // b->CreateCondBr(b->isFinal(), compressionMaskDone, updatePending);
+    // b->SetInsertPoint(updatePending);
+    // // Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", produced), bitBlockPtrTy);
+    // // Value * lastMask = b->CreateBlockAlignedLoad(pendingPtr);
+    // // b->setScalarField("pendingMaskInverted", b->CreateNot(lastMask));
+
+    // b->CreateBr(compressionMaskDone);
+    // b->SetInsertPoint(compressionMaskDone);
+}
+
+
+InterleaveCompressionSegment::InterleaveCompressionSegment(BuilderRef b,
+                                    StreamSet * dictData,
+                                    StreamSet * codedBytes,
+                                    StreamSet * extractionMask,
+                                    StreamSet * dictionaryMask,
+                                    StreamSet * combinedBytes,
+                                    StreamSet * combinedMask,
+                                    unsigned strideBlocks)
+: MultiBlockKernel(b, "InterleaveCompressionSegment",
+                   {Binding{"dictData", dictData, FixedRate(1), LookBehind(32)},
+                    Binding{"codedBytes", codedBytes, FixedRate(1), LookBehind(32)},
+                    Binding{"compressionMask", extractionMask},
+                    Binding{"dictionaryMask", dictionaryMask}},
+                   {}, {}, {}, {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"}}),
+mStrideBlocks(strideBlocks) {
+    if (DelayedAttributeIsSet()) {
+        mOutputStreamSets.emplace_back("combinedBytes", combinedBytes, BoundedRate(1, 2), Delayed(32) );
+        mOutputStreamSets.emplace_back("combinedMask", combinedMask, BoundedRate(1, 2), Delayed(32) );
+    } else {
+        mOutputStreamSets.emplace_back("combinedBytes", combinedBytes, FixedRate(2), Delayed(32) );
+        mOutputStreamSets.emplace_back("combinedMask", combinedMask, FixedRate(2), Delayed(32) );
+    }
+    setStride(102400);
+}
+
+void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+    Constant * sz_ZERO = b->getSize(0);
+    Constant * sz_STRIDE = b->getSize(mStride);
+    Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
+    Constant * sz_ONE = b->getSize(1);
+    Type * sizeTy = b->getSizeTy();
+    BasicBlock * const entryBlock = b->GetInsertBlock();
+    BasicBlock * const stridePrologue = b->CreateBasicBlock("stridePrologue");
+    BasicBlock * const stridePrecomputation = b->CreateBasicBlock("stridePrecomputation");
+    BasicBlock * const strideMasksReady = b->CreateBasicBlock("strideMasksReady");
+    BasicBlock * const writeBlock = b->CreateBasicBlock("writeBlock");
+    BasicBlock * const writeDoneBlock = b->CreateBasicBlock("writeDoneBlock");
+    Value * const initialProduced = b->getProducedItemCount("combinedBytes");
+    Value * const dictAvail = b->getAccessibleItemCount("dictData");
+    Value * const dictMaskAvail = b->getAccessibleItemCount("dictionaryMask");
+    Value * const cmpAvail = b->getAccessibleItemCount("codedBytes");
+    Value * const dictProcessed = b->getProcessedItemCount("dictData");
+    Value * const cmpProcessed = b->getProcessedItemCount("codedBytes");
+    // b->CallPrintInt("initialProduced", initialProduced);
+    // b->CallPrintInt("dictAvail", dictAvail);
+    // b->CallPrintInt("dictMaskAvail", dictMaskAvail);
+    // b->CallPrintInt("cmpAvail", cmpAvail);
+    // b->CallPrintInt("dictProcessed", dictProcessed);
+    // b->CallPrintInt("cmpProcessed", cmpProcessed);
+    b->CreateBr(stridePrologue);
+    b->SetInsertPoint(stridePrologue);
+
+    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    PHINode* const curDictAvailable = b->CreatePHI(b->getSizeTy(), 2);
+    curDictAvailable->addIncoming(dictAvail, entryBlock);
+    PHINode* const curCmpAvailable = b->CreatePHI(b->getSizeTy(), 2);
+    curCmpAvailable->addIncoming(cmpAvail, entryBlock);
+    Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
+
+    b->CreateBr(stridePrecomputation);
+    // Precompute partial sum popcount of the dictionary mask to be copied.
+    b->SetInsertPoint(stridePrecomputation);
+    PHINode * const dictMaskAccum = b->CreatePHI(sizeTy, 2);
+    dictMaskAccum->addIncoming(sz_ZERO, stridePrologue);
+    PHINode * const blockNo = b->CreatePHI(sizeTy, 2);
+    blockNo->addIncoming(sz_ZERO, stridePrologue);
+
+    Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
+    Value * dictionaryBlock = b->loadInputStreamBlock("dictionaryMask", sz_ZERO, strideBlockIndex);
+    Value * const anyDictEntry = b->CreateAdd(dictMaskAccum, b->bitblock_popcount(dictionaryBlock));
+    Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
+    dictMaskAccum->addIncoming(anyDictEntry, stridePrecomputation);
+    blockNo->addIncoming(nextBlockNo, stridePrecomputation);
+    b->CreateCondBr(b->CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), stridePrecomputation, strideMasksReady);
+
+    b->SetInsertPoint(strideMasksReady);
+
+    Value * writeCond = b->CreateAnd(b->CreateICmpEQ(dictAvail, sz_ZERO), b->CreateICmpEQ(cmpAvail, sz_ZERO));
+    b->CreateCondBr(writeCond, writeDoneBlock, writeBlock);
+    b->SetInsertPoint(writeBlock);
+
+    // b->CallPrintInt("curDictAvailable", curDictAvailable);
+    // b->CallPrintInt("curCmpAvailable", curCmpAvailable);
+    // b->CallPrintInt("strideNo", strideNo);
+    Value * toCopyDict = b->CreateSelect(b->CreateICmpUGT(curDictAvailable, sz_STRIDE), sz_STRIDE, curDictAvailable);
+    Value * toCopyCmp = b->CreateSelect(b->CreateICmpUGT(curCmpAvailable, sz_STRIDE), sz_STRIDE, curCmpAvailable);
+    Value * const toCopyFinalDict = anyDictEntry;
+    // b->CallPrintInt("toCopyDict", toCopyDict);
+    // b->CallPrintInt("toCopyCmp", toCopyCmp);
+    // b->CallPrintInt("anyDictEntry", anyDictEntry);
+
+    Value * const bytesCopyOffset = b->CreateAdd(b->getProducedItemCount("combinedBytes"), toCopyFinalDict);
+    Value * const maskCopyOffset = b->CreateAdd(b->getProducedItemCount("combinedMask"), toCopyFinalDict);
+    // b->CallPrintInt("bytesCopyOffset", bytesCopyOffset);
+    // b->CallPrintInt("maskCopyOffset", maskCopyOffset);
+    Value * maskBase = b->CreateSub(maskCopyOffset, b->CreateURem(maskCopyOffset, b->getSize(8)));
+    Value * maskBitOffset = b->CreateSub(maskCopyOffset, maskBase);
+    // b->CallPrintInt("maskBitOffset", maskBitOffset);
+    Value * byteOffset = b->CreateSub(b->getSize(8), maskBitOffset);
+    // b->CallPrintInt("byteOffset", byteOffset);
+    // Interleave dictionary bytes followed by compressed bytes
+    b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", b->getProducedItemCount("combinedBytes")),
+                    b->getRawInputPointer("dictData", b->getProcessedItemCount("dictData")),
+                    toCopyFinalDict, 1);
+    b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", b->CreateAdd(byteOffset, bytesCopyOffset)),
+                    b->getRawInputPointer("codedBytes", b->getProcessedItemCount("codedBytes")),
+                    toCopyCmp, 1);
+    // Interleave dictionary mask followed by compression mask
+    b->CreateMemCpy(b->getRawOutputPointer("combinedMask", b->getProducedItemCount("combinedMask")),
+                    b->getRawInputPointer("dictionaryMask", b->getProcessedItemCount("dictionaryMask")),
+                    toCopyFinalDict, 1);
+    b->CreateMemCpy(b->getRawOutputPointer("combinedMask", b->CreateAdd(maskBitOffset, maskCopyOffset)),
+                    b->getRawInputPointer("compressionMask", b->getProcessedItemCount("compressionMask")),
+                    toCopyCmp, 1);
+
+    b->setProcessedItemCount("dictData", b->CreateAdd(b->getProcessedItemCount("dictData"), toCopyDict));
+    b->setProcessedItemCount("dictionaryMask", b->CreateAdd(b->getProcessedItemCount("dictionaryMask"), toCopyDict));
+    b->setProcessedItemCount("codedBytes", b->CreateAdd(b->getProcessedItemCount("codedBytes"), toCopyCmp));
+    b->setProcessedItemCount("compressionMask", b->CreateAdd(b->getProcessedItemCount("compressionMask"), toCopyCmp));
+    Value * producedBytesThisStride = b->CreateAdd(b->getProducedItemCount("combinedBytes"), b->CreateAdd(b->CreateAdd(byteOffset, anyDictEntry), toCopyCmp));
+    b->setProducedItemCount("combinedBytes", producedBytesThisStride);
+    Value * producedMaskThisStride = b->CreateAdd(b->getProducedItemCount("combinedMask"), b->CreateAdd(b->CreateAdd(maskBitOffset, anyDictEntry), toCopyCmp));
+    b->setProducedItemCount("combinedMask", producedMaskThisStride);
+    // b->CallPrintInt("combinedBytes", b->getProducedItemCount("combinedBytes"));
+    // b->CallPrintInt("dictData", b->getProcessedItemCount("dictData"));
+    // b->CallPrintInt("codedBytes", b->getProcessedItemCount("codedBytes"));
+    // b->CallPrintInt("combinedMask-procudedFin", b->getProducedItemCount("combinedMask"));
+    Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
+    strideNo->addIncoming(nextStrideNo, writeBlock);
+    Value * const updateDictAvail = b->CreateSub(dictAvail, toCopyDict);
+    curDictAvailable->addIncoming(updateDictAvail, writeBlock);
+    Value * const updateCmpAvail = b->CreateSub(cmpAvail, toCopyDict);
+    curCmpAvailable->addIncoming(updateCmpAvail, writeBlock);
+    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, writeDoneBlock);
+
+    b->SetInsertPoint(writeDoneBlock);
+}
+
 
 SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                                                    EncodingInfo encodingScheme,

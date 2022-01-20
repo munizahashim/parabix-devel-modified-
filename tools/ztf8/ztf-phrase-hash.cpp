@@ -112,8 +112,9 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const phraseOverflow = P->CreateStreamSet(1);
     //write 4,3,2,1-symbol phrase lengths at (n-3),(n-2),(n-1) and n-th byte of the phrase
     P->CreateKernelCall<AccumRunIndexNew>(SymCount, phraseRuns, runIndex, overflow, phraseRunIndex, phraseOverflow);
-    //P->CreateKernelCall<DebugDisplayKernel>("phraseRunIndex", phraseRunIndex);
-
+    StreamSet * const phraseLenBytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(phraseRunIndex, phraseLenBytes);
+    StreamSet * const allLenHashValues = P->CreateStreamSet(1, 16); // unused
     phraseLenBixnum[0] = runIndex;
     phraseLenOverflow[0] = overflow;
 
@@ -139,14 +140,17 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         //P->CreateKernelCall<DebugDisplayKernel>("bixHashes"+std::to_string(i), bixHashes[i]);
         basisStart = bixHash;
         // only 1-symbol hashes have cumulative runLength appened to every byte of hash value
-        // for 2-symbol phrase onwards, final cumulative runLength is appended only to the last byte of the symbol
+        // for 2-symbol phrase onwards, total runLength is written at the last byte of the symbol
         std::vector<StreamSet *> combinedHashData = {bixHashes[i], phraseLenBixnum[i]};
         StreamSet * const hashValues = P->CreateStreamSet(1, 16);
         P->CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
         allHashValues[i] = hashValues;
     }
+    // unused
+    std::vector<StreamSet *> combinedData = {bixHashes[0], phraseRunIndex};
+    P->CreateKernelCall<P2S16Kernel>(combinedData, allLenHashValues);
 
-    // Mark all the repeated hashCodes 
+    // Mark all the repeated hashCodes
     std::vector<StreamSet *> allHashMarks;
     for (unsigned sym = 0; sym < SymCount; sym++) {
         unsigned startLgIdx = 0;
@@ -250,16 +254,27 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
+    //P->CreateKernelCall<DebugDisplayKernel>("combinedMask", combinedMask);
+
+    StreamSet * const dict_bytes = P->CreateStreamSet(1, 8);
+    StreamSet * const dict_mask = P->CreateStreamSet(1);
+    P->CreateKernelCall<WriteDictionary>(encodingScheme1, SymCount, codeUnitStream, u8bytes, combinedMask, combinedPhraseMask, phraseLenBytes, dict_bytes, dict_mask);
+    //P->CreateKernelCall<StdOutKernel>(dict_bytes);
+    //P->CreateKernelCall<DebugDisplayKernel>("u8bytes", u8bytes);
+    //P->CreateKernelCall<DebugDisplayKernel>("dict_bytes", dict_bytes);
+    //P->CreateKernelCall<DebugDisplayKernel>("dict_mask", dict_mask);
 
     StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
     StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
-    //P->CreateKernelCall<InterleaveCompressionSegment>(u8bytes, codeUnitStream, combinedMask, combinedPhraseMask, nonfinal_filter_mask, nonfinal_output_bytes);
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, u8bytes, combinedMask, dict_mask, nonfinal_output_bytes, nonfinal_filter_mask);
+    //P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
+    //P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
 
     StreamSet * const encoded = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
+    P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, encoded);
 
     StreamSet * const ZTF_basis = P->CreateStreamSet(8);
-    FilterByMask(P, combinedMask, encoded, ZTF_basis);
+    FilterByMask(P, nonfinal_filter_mask, encoded, ZTF_basis);
 
     StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);

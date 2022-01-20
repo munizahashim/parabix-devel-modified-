@@ -51,6 +51,38 @@ private:
     const unsigned mNumSym;
 };
 
+class WriteDictionary final : public MultiBlockKernel {
+public:
+    WriteDictionary(BuilderRef b,
+                    EncodingInfo encodingScheme,
+                    unsigned numSyms,
+                    StreamSet * byteData,
+                    StreamSet * codedBytes,
+                    StreamSet * extractionMask,
+                    StreamSet * phraseMask,
+                    StreamSet * allLenHashValues,
+                    StreamSet * dictBytes,
+                    StreamSet * dictMask,
+                    unsigned strideBlocks = 8);
+private:
+    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    const unsigned mNumSym;
+};
+
+class InterleaveCompressionSegment final : public MultiBlockKernel {
+public:
+    InterleaveCompressionSegment(BuilderRef b,
+                           StreamSet * byteData,
+                           StreamSet * codedBytes,
+                           StreamSet * extractionMask,
+                           StreamSet * dictionaryMask,
+                           StreamSet * combinedBytes,
+                           StreamSet * combinedMask,
+                           unsigned strideBlocks = 8);
+private:
+    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    unsigned mStrideBlocks;
+};
 
 class SymbolGroupDecompression final : public MultiBlockKernel {
 public:
