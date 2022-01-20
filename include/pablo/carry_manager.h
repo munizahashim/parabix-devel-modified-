@@ -97,6 +97,8 @@ public:
 
     virtual llvm::Value * generateSummaryTest(BuilderRef b, llvm::Value * condition);
 
+    virtual llvm::Type * getSummaryTypeFromCurrentFrame(BuilderRef b) const;
+
     /* Clear carry state for conditional regions */
 
     virtual void clearCarryData(BuilderRef idb);
@@ -105,15 +107,17 @@ protected:
 
     static unsigned getScopeCount(const PabloBlock * const scope, unsigned index = 0);
 
+
     virtual llvm::StructType * analyse(BuilderRef b, const PabloBlock * const scope, const unsigned ifDepth = 0, const unsigned whileDepth = 0, const bool isNestedWithinNonCarryCollapsingLoop = false);
 
     /* Entering and leaving scopes. */
-    virtual void enterScope(BuilderRef b);
-    virtual void leaveScope();
+    void enterScope(BuilderRef b);
+    void leaveScope();
 
     /* Methods for processing individual carry-generating operations. */
     virtual llvm::Value * getNextCarryIn(BuilderRef b);
     virtual void setNextCarryOut(BuilderRef b, llvm::Value * const carryOut);
+    virtual llvm::Value * shortIndexedAdvanceCarryInCarryOut(BuilderRef b, const unsigned shiftAmount, llvm::Value * const strm, llvm::Value * const index_strm);
     virtual llvm::Value * longAdvanceCarryInCarryOut(BuilderRef b, llvm::Value * const value, const unsigned shiftAmount);
     virtual llvm::Value * readCarryInSummary(BuilderRef b) const;
     virtual void writeCarryOutSummary(BuilderRef b, llvm::Value * const summary) const;

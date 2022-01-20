@@ -27,7 +27,9 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     std::vector<unsigned> mapping(n, -1U);
 
-    //unsigned numOfKernels = 2;
+    #ifndef NDEBUG
+    unsigned numOfKernels = 2;
+    #endif
 
     BEGIN_SCOPED_REGION
 
