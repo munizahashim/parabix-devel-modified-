@@ -67,6 +67,7 @@ public:
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
     const unsigned mNumSym;
+    const unsigned mSubStride;
 };
 
 class InterleaveCompressionSegment final : public MultiBlockKernel {

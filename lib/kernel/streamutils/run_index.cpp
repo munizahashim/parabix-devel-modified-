@@ -42,6 +42,7 @@ void RunIndex::generatePabloMethod() {
     Var * runMarksVar = pb.createExtract(getInputStreamVar("runMarks"), pb.getInteger(0));
     PabloAST * runMarks = mRunKind == Kind::RunOf0 ? pb.createInFile(pb.createNot(runMarksVar)) : runMarksVar;
     PabloAST * runStart = nullptr;
+    PabloAST * overflowInit = runMarks;
     if (mNumbering == Numbering::RunPlus1) {
         runStart = pb.createNot(runMarks);
         runMarks = pb.createLookahead(runMarks, 1);
@@ -67,7 +68,7 @@ void RunIndex::generatePabloMethod() {
     PabloAST * overflow = nullptr;
     if (mOverflow) {
         // marks overflowLen + 2 positions
-        overflow = selectZero; //pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
+        overflow = overflowInit; //pb.createAnd(pb.createAdvance(runMarks, 1), runMarks);
         //pb.createDebugPrint(overflow, "overflow-RI");
     }
     for (unsigned i = 0; i < mIndexCount; i++) {
@@ -170,7 +171,7 @@ void AccumRunIndex::generatePabloMethod() {
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     //pb.createDebugPrint(notFirstSymSum, "notFirstSymSum");
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
-    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 1);
+    BixNum sum = bnc.AddModular(prevSymLen, runIndex); //bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 1);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     //pb.createDebugPrint(curOverflow, "curOverflow");
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
@@ -240,7 +241,7 @@ void AccumRunIndexNew::generatePabloMethod() {
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     PabloAST * inRangeFinal = notFirstSymSum;
 
-    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, runIndex), 1);
+    BixNum sum = bnc.AddModular(prevSymLen, runIndex);//bnc.AddModular(bnc.AddModular(prevSymLen, runIndex), 1);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
     for (unsigned i = 0; i < mIndexCount; i++) {

@@ -111,7 +111,7 @@ void LengthSelector::generatePabloMethod() {
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     Var * selectedHashMarksPosStreamVar = getOutputStreamVar("selectedHashMarksPos");
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
-    unsigned offset = 2;
+    unsigned offset = 1;
     unsigned lo = mEncodingScheme.minSymbolLength()+6; // min k-sym phrase length = 9 bytes
     unsigned hi = mEncodingScheme.maxSymbolLength();
     unsigned groupSize = hi - lo + 1;
