@@ -35,7 +35,6 @@
 #include <util/aligned_allocator.h>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-// #define REPORT_PAPI_TESTS
 #endif
 
 // #define USE_MULTI_EDITD_MERGE_GROUPS
@@ -358,6 +357,10 @@ multiEditdFunctionType multiEditdPipeline(CPUDriver & pxDriver) {
     P->CreateKernelCall<PreprocessKernel>(BasisBits, ChStream);
 
     const auto n = pattGroups.size();
+    if (n == 0) {
+        report_fatal_error("no patterns found");
+        exit(-2);
+    }
     std::vector<StreamSet *> MatchResults(n);
     for(unsigned i = 0; i < n; ++i){
         MatchResults[i] = P->CreateStreamSet(editDistance + 1);
@@ -421,7 +424,6 @@ editdIndexFunctionType editdIndexPatternPipeline(CPUDriver & pxDriver, unsigned 
     return reinterpret_cast<editdIndexFunctionType>(P->compile());
 }
 
-
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv);
     int pattern_segs = 0;
@@ -432,9 +434,7 @@ int main(int argc, char *argv[]) {
 
     CPUDriver pxDriver("editd");
     if (MultiEditdKernels) {
-
         auto editd = multiEditdPipeline(pxDriver);
-
         const auto & fileName = inputFiles[0];
         const int fd = open(inputFiles[0].c_str(), O_RDONLY);
         if (LLVM_UNLIKELY(fd == -1)) {
@@ -449,9 +449,12 @@ int main(int argc, char *argv[]) {
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);
+        std::cerr << std::flush;
         #endif
         close(fd);
+        #ifndef REPORT_PAPI_TESTS
         run_second_filter(pattern_segs, total_len, 0.15);
+        #endif
         return 0;
     }
 

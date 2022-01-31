@@ -22,11 +22,14 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/dominator_tree.hpp>
 
+
+
 namespace kernel {
 
 struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
 public:
+
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
@@ -59,7 +62,7 @@ public:
 
         P.identifyOutputNodeIds();
 
-        P.computeMaximumExpectedDataflow();
+        P.computeMaximumDataflow(false);
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
@@ -76,13 +79,13 @@ public:
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyLinearBuffers();
-        P.identifyPortsThatModifySegmentLength();
         P.identifyZeroExtendedStreamSets();
 
         P.determineBufferSize(b);
         P.determineBufferLayout(b, rng);
 
         P.identifyCrossHybridThreadStreamSets();
+        P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
 
@@ -297,7 +300,6 @@ public:
     BitVector                       PartitionOnHybridThread;
 
     std::vector<unsigned>           mPartitionJumpIndex;
-    PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;

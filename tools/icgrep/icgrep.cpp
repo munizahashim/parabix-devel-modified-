@@ -33,7 +33,6 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-#define REPORT_PAPI_TESTS
 #endif
 
 using namespace llvm;
@@ -170,7 +169,7 @@ int main(int argc, char *argv[]) {
     if ((argv::ColorFlag == argv::alwaysColor) ||
         ((argv::ColorFlag == argv::autoColor) && isatty(STDOUT_FILENO))) {
         grep->setColoring();
-    }
+    }    
     grep->initFileResult(allFiles); // unnecessary copy!
     grep->initREs(REs);
     grep->grepCodeGen();

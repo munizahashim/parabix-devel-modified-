@@ -479,7 +479,7 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const unconsumedBytes = b->CreateTrunc(b->CreateSub(readEndInt, readStartInt), b->getSizeTy());
     Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, BLOCK_WIDTH), segmentSize);
     Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
-    PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = codeUnitTy->getPointerTo();
     b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
     b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
     b->CreateMemZero(b->CreateGEP(b->getInt8Ty(), buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
@@ -488,7 +488,7 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const base = b->getBaseAddress("sourceBuffer");
     Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
     Value * const diff = b->CreateSub(baseInt, readStartInt);
-    Value * const offsettedBuffer = b->CreateGEP(codeUnitTy, buffer, diff);
+    Value * const offsettedBuffer = b->CreateGEP(b->getInt8Ty(), buffer, diff);
     // set the temporary buffer as the new source buffer
     b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
     b->setTerminationSignal();

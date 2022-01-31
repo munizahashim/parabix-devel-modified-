@@ -35,14 +35,13 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
     Value * const beforeKernelCall = startCycleCounter(b);
+
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
         BasicBlock * const invokeOk = b->CreateBasicBlock(prefix + "_invokeOk", mKernelCompletionCheck);        
         #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
-        auto *calleePtrType = llvm::cast<llvm::PointerType>(doSegment->getType());
-        auto *calleeType = llvm::cast<llvm::FunctionType>(calleePtrType->getElementType());
-        doSegmentRetVal = b->CreateInvoke(calleeType, doSegment, invokeOk, mRethrowException, args);
+        doSegmentRetVal = b->CreateInvoke(doSegFuncType, doSegment, invokeOk, mRethrowException, args);
         #else
         doSegmentRetVal = b->CreateInvoke(doSegment, invokeOk, mRethrowException, args);
         #endif
@@ -122,7 +121,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             throw std::runtime_error(out.str().str());
         }
         #endif
-
         args.push_back(arg);
     };
 
@@ -250,6 +248,12 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             } else {
                 addr = mInputVirtualBaseAddressPhi[rt.Port];
             }
+            assert (addr);
+
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, rt.Port);
+            debugPrint(b, "* " + prefix + "_addr = 0x%" PRIx64, addr);
+            #endif
 
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
 
@@ -282,6 +286,8 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             }
         }
     }
+
+
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto port = getOutput(mKernelId, StreamSetPort(PortType::Output, i));
@@ -334,7 +340,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
     }
 
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
-
     return args;
 }
 

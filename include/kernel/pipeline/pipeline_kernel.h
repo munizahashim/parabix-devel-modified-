@@ -106,7 +106,7 @@ protected:
 
     void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
 
-    void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params) const final;
+    void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const final;
 
     void linkExternalMethods(BuilderRef b) final;
 

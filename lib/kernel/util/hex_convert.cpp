@@ -74,7 +74,6 @@ void BinaryToHex::generateDoBlockMethod(BuilderRef b) {
     }
 }
 
-#if 0
 void BinaryToHex::generateFinalBlockMethod(BuilderRef b, Value * const remainingBits) {
     Value * priorProduced = b->getProducedItemCount("hexdata");
     RepeatDoBlockLogic(b);
@@ -82,4 +81,3 @@ void BinaryToHex::generateFinalBlockMethod(BuilderRef b, Value * const remaining
     Value * toZero = b->CreateSub(b->getSize(b->getBitBlockWidth()), remainingHexDigits);
     b->CreateMemZero(b->getRawOutputPointer("hexdata", b->CreateAdd(priorProduced, remainingHexDigits)), toZero);
 }
-#endif

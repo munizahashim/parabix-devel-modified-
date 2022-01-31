@@ -1398,6 +1398,7 @@ inline bool CBuilder::hasAddressSanitizer() const {
 }
 
 LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const char * Name) {
+    assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1411,6 +1412,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const 
 }
 
 LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const Twine Name) {
+    assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1424,6 +1426,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, const 
 }
 
 LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, bool isVolatile, const Twine Name) {
+    assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1437,6 +1440,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Value * Ptr, const unsigned Align, bool i
 }
 
 StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigned Align, bool isVolatile) {
+    assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -1881,10 +1885,14 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                 Instruction & inst = *i;
                 if (LLVM_UNLIKELY(isa<CallInst>(inst))) {
                     CallInst & ci = cast<CallInst>(inst);
+                    assert ("null pointer for function call?" && ci.getCalledFunction() || ci.isIndirectCall());
                     // if we're using address sanitizer, try to determine whether we're
                     // rechecking the same address
+                    if (ci.isIndirectCall()) {
+                        /* do nothing */
+                    }
                     #ifdef HAS_ADDRESS_SANITIZER
-                    if (ci.getCalledFunction() == isPoisoned) { assert (isPoisoned);
+                    else if (ci.getCalledFunction() == isPoisoned) {
                         bool alreadyProven = false;
                         // To support non-constant lengths, we'd need a way of proving whether one
                         // length is (symbolically) always less than or equal to another or v.v..
@@ -1913,9 +1921,9 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                 isPoisonedCalls.insert(&ci);
                             }
                         }
-                    } else
+                    }
                     #endif
-                    if (ci.getCalledFunction() == assertFunc) {
+                    else if (ci.getCalledFunction() == assertFunc) {
                         assert (ci.getNumArgOperands() >= 5);
                         bool remove = false;
                         Value * const check = ci.getOperand(0);

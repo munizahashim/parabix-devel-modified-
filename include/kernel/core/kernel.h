@@ -57,6 +57,8 @@ public:
 
     using InitArgs = llvm::SmallVector<llvm::Value *, 32>;
 
+    using NestedStateObjs = llvm::SmallVector<llvm::Value *, 16>;
+
     using InitArgTypes = llvm::SmallVector<llvm::Type *, 32>;
 
     using ParamMap = llvm::DenseMap<const Scalar *, llvm::Value *>;
@@ -312,7 +314,7 @@ public:
 
     virtual void setOutputScalarAt(const unsigned i, Scalar * value);
 
-    void addInternalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 1) {
+    void addInternalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
         mInternalScalars.emplace_back(ScalarType::Internal, type, name, group);
     }
@@ -322,7 +324,7 @@ public:
         mInternalScalars.emplace_back(ScalarType::NonPersistent, type, name, 0);
     }
 
-    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 1) {
+    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
         mInternalScalars.emplace_back(ScalarType::ThreadLocal, type, name, group);
     }
@@ -412,11 +414,11 @@ public:
 
 protected:
 
-    llvm::Value * constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params) const;
+    llvm::Value * constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params, NestedStateObjs & toFree) const;
 
     virtual void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
 
-    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params) const;
+    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const;
 
 protected:
 

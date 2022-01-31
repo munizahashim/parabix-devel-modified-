@@ -14,6 +14,8 @@
 // a "family", the pipeline kernel will be compiled once for the lifetime of a program. Thus we can avoid even
 // constructing any data structures for the pipeline in normal usage.
 
+using IDISA::FixedVectorType;
+
 namespace kernel {
 
 #define COMPILER (static_cast<PipelineCompiler *>(b->getCompiler()))
@@ -112,6 +114,9 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
+    if (codegen::AnyDebugOptionIsSet()) {
+        PipelineCompiler::linkInstrumentationFunctions(b);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -166,10 +171,10 @@ void PipelineKernel::addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params) const {
+void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const {
     for (const Kernel * const kernel : mKernels) {
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
-            kernel->constructFamilyKernels(b, args, params);
+            kernel->constructFamilyKernels(b, args, params, toFree);
         }
     }
 

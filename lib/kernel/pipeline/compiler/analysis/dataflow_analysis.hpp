@@ -492,7 +492,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             bs.set(KernelPartitionId[kernel]);
             const auto k = m + streamSet - FirstStreamSet;
             assert (k < portRateSet.size());
-            const BitSet & src = portRateSet[m + streamSet - FirstStreamSet];
+            const BitSet & src = portRateSet[k];
             assert (src.size() == bs.size());
             bs |= src;
             accum |= bs;
@@ -505,7 +505,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             bs.resize(nextRateId);
             const auto k = m + streamSet - FirstStreamSet;
             assert (k < portRateSet.size());
-            BitSet & dst = portRateSet[m + streamSet - FirstStreamSet];
+            BitSet & dst = portRateSet[k];
             dst.resize(nextRateId);
             bs |= accum;
             dst |= bs;
@@ -625,9 +625,9 @@ void PipelineAnalysis::calculatePartialSumStepFactors() {
                     maxStepFactor = std::max(maxStepFactor, G[e]);
                 }
                 assert (maxStepFactor > 0);
-                if (maxStepFactor > 1) {
+               // if (maxStepFactor > 1) {
                     add_edge(kernel, streamSet, maxStepFactor, G);
-                }
+               // }
             }
         }
     }
@@ -643,7 +643,7 @@ void PipelineAnalysis::identifyKernelsOnHybridThread() {
     KernelOnHybridThread.reset();
     PartitionOnHybridThread.resize(PartitionCount);
     PartitionOnHybridThread.reset();
-    if (mPipelineKernel->getNumOfThreads() > 1) {
+    if (mPipelineKernel->getNumOfThreads() > 1 && codegen::EnableHybridThreadModel) {
         for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
             if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread))) {
                 KernelOnHybridThread.set(i);

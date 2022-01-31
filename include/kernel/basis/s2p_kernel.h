@@ -38,6 +38,20 @@ void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
                 bool completionFromQuads = false);
 
 
+class S2P_i21_3xi8 final : public MultiBlockKernel {
+public:
+    S2P_i21_3xi8(BuilderRef b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2);
+protected:
+    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+};
+
+class S2P_3xi8_21xi1 final : public MultiBlockKernel {
+public:
+    S2P_3xi8_21xi1(BuilderRef b, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits);
+protected:
+    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+};
+
 class S2P_21Kernel final : public MultiBlockKernel {
 public:
     S2P_21Kernel(BuilderRef b, StreamSet * const codeUnitStream, StreamSet * const BasisBits);

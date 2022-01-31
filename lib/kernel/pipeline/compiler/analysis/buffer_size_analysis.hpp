@@ -46,7 +46,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
             std::iota(C.begin(), C.end(), 0);
             std::shuffle(C.begin(), C.end(), rng);
 
-            if (insertCandidate(std::move(C), initialPopulation)) {
+            if (insertCandidate(std::move(C), initialPopulation, false)) {
                 if (initialPopulation.size() >= BUFFER_LAYOUT_INITIAL_CANDIDATES) {
                     return false;
                 }

@@ -308,6 +308,9 @@ ScanMatchKernel::ScanMatchKernel(BuilderRef b, StreamSet * const Matches, Stream
 {InternalScalar{b->getSizeTy(), "LineNum"}}) {
     addAttribute(SideEffecting());
     setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    if (codegen::EnableHybridThreadModel) {
+        addAttribute(IsolateOnHybridThread());
+    }
 }
 
 void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
@@ -1617,6 +1620,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     BasicBlock * const processMatchCoordinates = b->CreateBasicBlock("processMatchCoordinates");
     BasicBlock * const dispatch = b->CreateBasicBlock("dispatch");
     BasicBlock * const coordinatesDone = b->CreateBasicBlock("coordinatesDone");
+    BasicBlock * const checkFinal = b->CreateBasicBlock("checkFinal");
     BasicBlock * const callFinalizeScan = b->CreateBasicBlock("callFinalizeScan");
     BasicBlock * const scanReturn = b->CreateBasicBlock("scanReturn");
 
@@ -1627,7 +1631,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Constant * const sz_ONE = b->getSize(1);
 
-    b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, coordinatesDone);
+    b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, checkFinal);
 
     b->SetInsertPoint(processMatchCoordinates);
     PHINode * phiMatchNum = b->CreatePHI(b->getSizeTy(), 2, "matchNum");
@@ -1637,9 +1641,9 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Value * matchRecordStart = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
     Value * matchRecordEnd = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
-#ifdef WRITE_FILE_NUMBERS
+    #ifdef WRITE_FILE_NUMBERS
     Value * matchFileNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(BATCH_FILE_NUMBERS), phiMatchNum), "matchFileNumLoad");
-#endif
+    #endif
     Value * matchRecordNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(mColorizedLineNumberIndex), phiMatchNum), "matchNumLoad");
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
@@ -1659,11 +1663,15 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     Value * const matchRecNum = b->CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
     b->CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b->CreateICmpNE(nextMatchNum, matchesAvail);
-    phiMatchNum->addIncoming(nextMatchNum, b->GetInsertBlock());
+    BasicBlock * const dispatchEnd = b->GetInsertBlock();
+    phiMatchNum->addIncoming(nextMatchNum, dispatchEnd);
     b->CreateCondBr(haveMoreMatches, processMatchCoordinates, coordinatesDone);
 
     b->SetInsertPoint(coordinatesDone);
-    //b->setProcessedItemCount("InputStream", matchRecordEnd);
+    b->setProcessedItemCount("InputStream", matchRecordEnd);
+    b->CreateBr(checkFinal);
+
+    b->SetInsertPoint(checkFinal);
     b->CreateCondBr(b->isFinal(), callFinalizeScan, scanReturn);
 
     b->SetInsertPoint(callFinalizeScan);

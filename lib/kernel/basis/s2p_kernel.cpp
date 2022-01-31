@@ -408,12 +408,12 @@ void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
     P->AssertEqualLength(BasisBits, ByteStream);
 }
 
-S2P_21Kernel::S2P_21Kernel(BuilderRef b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
-: MultiBlockKernel(b, "s2p_21",
-{Binding{"codeUnitStream", codeUnitStream, FixedRate(), Principal()}},
-    {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
+S2P_i21_3xi8::S2P_i21_3xi8(BuilderRef b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
+: MultiBlockKernel(b, "s2p_i21_3xi8",
+{Binding{"i32Stream", i32Stream, FixedRate(), Principal()}},
+                   {Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}}, {}, {}, {})  {}
 
-void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
+void S2P_i21_3xi8::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
     BasicBlock * entry = kb->GetInsertBlock();
     BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
     BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
@@ -426,9 +426,138 @@ void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStr
     kb->CreateBr(processBlock);
 
     kb->SetInsertPoint(processBlock);
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
+    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 3); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
+    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
+    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * UTF32units[4];
+    for (unsigned i = 0; i < 8; i++) {
+        for (unsigned j = 0; j < 4; j++) {
+            UTF32units[j] = kb->loadInputStreamPack("i32Stream", ZERO, kb->getInt32(4 * i + j), blockOffsetPhi);
+        }
+        Value * u32lo16_0 = kb->hsimd_packl(32, UTF32units[0], UTF32units[1]);
+        Value * u32lo16_1 = kb->hsimd_packl(32, UTF32units[2], UTF32units[3]);
+        Value * u32hi16_0 = kb->hsimd_packh(32, UTF32units[0], UTF32units[1]);
+        Value * u32hi16_1 = kb->hsimd_packh(32, UTF32units[2], UTF32units[3]);
+        Value * u32byte0 = kb->bitCast(kb->hsimd_packl(16, u32lo16_0, u32lo16_1));
+        Value * u32byte1 = kb->bitCast(kb->hsimd_packh(16, u32lo16_0, u32lo16_1));
+        Value * u32byte2 = kb->bitCast(kb->hsimd_packl(16, u32hi16_0, u32hi16_1));
+        Value * idx = kb->getInt32(i);
+        kb->storeOutputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi, u32byte0);
+        kb->storeOutputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi, u32byte1);
+        kb->storeOutputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi, u32byte2);
+    }
+    BasicBlock * const processBlockExit = kb->GetInsertBlock();
+    blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(s2pDone);
+}
 
+S2P_3xi8_21xi1::S2P_3xi8_21xi1(BuilderRef b, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits)
+: MultiBlockKernel(b, "s2p_3xi8_21xi1",
+{Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}},
+{Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
+
+void S2P_3xi8_21xi1::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
+    BasicBlock * entry = kb->GetInsertBlock();
+    BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
+    BasicBlock * write13_zeroes = kb->CreateBasicBlock("write13_zeroes");
+    BasicBlock * continue_s2p = kb->CreateBasicBlock("continue_s2p");
+    BasicBlock * write5_zeroes = kb->CreateBasicBlock("write5_zeroes");
+    BasicBlock * finish_s2p = kb->CreateBasicBlock("finish_s2p");
+    BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
+    Constant * const ZERO = kb->getSize(0);
+    Constant * ZERO_BLOCK = kb->allZeroes();
+
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
+    kb->CreateBr(processBlock);
+
+    kb->SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
+    blockOffsetPhi->addIncoming(ZERO, entry);
+    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
+    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * u32byte0[8];
+    Value * u32byte1[8];
+    Value * u32byte2[8];
+    for (unsigned i = 0; i < 8; i++) {
+        Value * idx = kb->getInt32(i);
+        u32byte0[i] = kb->loadInputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi);
+        u32byte1[i] = kb->loadInputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi);
+        u32byte2[i] = kb->loadInputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi);
+    }
+    Value * basisbits[24];
+    Value * anybyte1 = u32byte1[0];
+    Value * anybyte2 = u32byte2[0];
+    for (unsigned i = 1; i < 8; i++) {
+        anybyte1 = kb->simd_or(anybyte1, u32byte1[i]);
+        anybyte2 = kb->simd_or(anybyte2, u32byte2[i]);
+    }
+    Value * anybyte1or2 = kb->simd_or(anybyte1, anybyte2, "anybyte1or2");
+    s2p(kb, u32byte0, basisbits);
+    for (unsigned i = 0; i < 8; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+    }
+    kb->CreateCondBr(kb->bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
+    kb->SetInsertPoint(write13_zeroes);
+    for (unsigned i = 8; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+    }
+    blockOffsetPhi->addIncoming(nextBlk, write13_zeroes);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(continue_s2p);
+    s2p(kb, u32byte1, &basisbits[8]);
+    for (unsigned i = 8; i < 16; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+    }
+    kb->CreateCondBr(kb->bitblock_any(anybyte2), finish_s2p, write5_zeroes);
+    kb->SetInsertPoint(write5_zeroes);
+    for (unsigned i = 16; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+    }
+    blockOffsetPhi->addIncoming(nextBlk, write5_zeroes);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(finish_s2p);
+    s2p(kb, u32byte2, &basisbits[16]);
+    for (unsigned i = 16; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+    }
+    BasicBlock * const processBlockExit = kb->GetInsertBlock();
+    blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(s2pDone);
+}
+
+S2P_21Kernel::S2P_21Kernel(BuilderRef b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
+: MultiBlockKernel(b, "s2p_21",
+{Binding{"codeUnitStream", codeUnitStream, FixedRate(), Principal()}},
+    {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
+
+void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
+    BasicBlock * entry = kb->GetInsertBlock();
+    BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
+    BasicBlock * write13_zeroes = kb->CreateBasicBlock("write13_zeroes");
+    BasicBlock * continue_s2p = kb->CreateBasicBlock("continue_s2p");
+    BasicBlock * write5_zeroes = kb->CreateBasicBlock("write5_zeroes");
+    BasicBlock * finish_s2p = kb->CreateBasicBlock("finish_s2p");
+    BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
+    Constant * const ZERO = kb->getSize(0);
+    Constant * ZERO_BLOCK = kb->allZeroes();
+
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != kb->getBitBlockWidth()) {
+        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    }
+    kb->CreateBr(processBlock);
+
+    kb->SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
+    blockOffsetPhi->addIncoming(ZERO, entry);
+    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
+    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
     Value * u32byte0[8];
     Value * u32byte1[8];
     Value * u32byte2[8];
@@ -453,16 +582,43 @@ void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStr
     #endif
     }
     Value * basisbits[24];
+    Value * anybyte1 = u32byte1[0];
+    Value * anybyte2 = u32byte2[0];
+    for (unsigned i = 1; i < 8; i++) {
+        anybyte1 = kb->simd_or(anybyte1, u32byte1[i]);
+        anybyte2 = kb->simd_or(anybyte2, u32byte2[i]);
+    }
+    Value * anybyte1or2 = kb->simd_or(anybyte1, anybyte2, "anybyte1or2");
     s2p(kb, u32byte0, basisbits);
-    s2p(kb, u32byte1, &basisbits[8]);
-    s2p(kb, u32byte2, &basisbits[16]);
-    for (unsigned i = 0; i < 21; ++i) {
+    for (unsigned i = 0; i < 8; ++i) {
         kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
+    kb->CreateCondBr(kb->bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
+    kb->SetInsertPoint(write13_zeroes);
+    for (unsigned i = 8; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+    }
+    blockOffsetPhi->addIncoming(nextBlk, write13_zeroes);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(continue_s2p);
+    s2p(kb, u32byte1, &basisbits[8]);
+    for (unsigned i = 8; i < 16; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+    }
+    kb->CreateCondBr(kb->bitblock_any(anybyte2), finish_s2p, write5_zeroes);
+    kb->SetInsertPoint(write5_zeroes);
+    for (unsigned i = 16; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+    }
+    blockOffsetPhi->addIncoming(nextBlk, write5_zeroes);
+    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
+    kb->SetInsertPoint(finish_s2p);
+    s2p(kb, u32byte2, &basisbits[16]);
+    for (unsigned i = 16; i < 21; ++i) {
+        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+    }
     BasicBlock * const processBlockExit = kb->GetInsertBlock();
     blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
     kb->CreateCondBr(moreToDo, processBlock, s2pDone);
     kb->SetInsertPoint(s2pDone);
 }
@@ -498,7 +654,6 @@ S2P_PabloKernel::S2P_PabloKernel(BuilderRef b, StreamSet * const codeUnitStream,
 mCodeUnitWidth(codeUnitStream->getFieldWidth()) {
     assert (codeUnitStream->getFieldWidth() == BasisBits->getNumElements());
 }
-
 
 }
 

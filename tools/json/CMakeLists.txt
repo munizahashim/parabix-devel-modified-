@@ -10,8 +10,10 @@ NAME
     json
 SRC
     json.cpp
-    post_process.cpp
-    json2csv_process.cpp
+    postprocess/json-simple.cpp
+    postprocess/json-detail.cpp
+    postprocess/json-parens.cpp
+    postprocess/json2csv.cpp
     json-kernel.cpp
 DEPS
     grep

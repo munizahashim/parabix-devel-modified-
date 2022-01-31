@@ -35,10 +35,6 @@
 #include <iostream>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-// #define REPORT_PAPI_TESTS
-#endif
-#ifdef REPORT_PAPI_TESTS
-#define COMPARISION_STUDY
 #endif
 
 using namespace pablo;
@@ -64,7 +60,7 @@ inline bool useAVX2() {
 
 class U8U16Kernel final: public pablo::PabloKernel {
 public:
-    #ifdef COMPARISION_STUDY
+    #ifdef USE_2017_U8U16_ALGORITHM
     U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *delMask, StreamSet *errMask);
     #else
     U8U16Kernel(BuilderRef b, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
@@ -73,7 +69,7 @@ protected:
     void generatePabloMethod() override;
 };
 
-#ifdef COMPARISION_STUDY
+#ifdef USE_2017_U8U16_ALGORITHM
 U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *delMask, StreamSet *errMask)
 : PabloKernel(b, "u8u16",
 // input
@@ -95,10 +91,7 @@ U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, 
 ,Binding{"selectors", selectors}}) {
 
 }
-
 #endif
-
-
 
 // {Binding{b->getStreamSetTy(16, 1), "u16bit"}, Binding{b->getStreamSetTy(1, 1), "delMask"}, Binding{b->getStreamSetTy(1, 1), "errMask"}}) {
 
@@ -290,7 +283,7 @@ void U8U16Kernel::generatePabloMethod() {
     for (unsigned i = 0; i < 8; i++) {
         main.createAssign(main.createExtract(output, i), u16_lo[i]);
     }
-    #ifdef COMPARISION_STUDY
+    #ifdef USE_2017_U8U16_ALGORITHM
     Var * delmask_out = getOutputStreamVar("delMask");
     Var * error_mask_out = getOutputStreamVar("errMask");
     main.createAssign(main.createExtract(delmask_out, main.getInteger(0)), delmask);
@@ -325,7 +318,7 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
     StreamSet * u8bits = P->CreateStreamSet(16);
 
-    #ifdef COMPARISION_STUDY
+    #ifdef USE_2017_U8U16_ALGORITHM
     StreamSet * DelMask = P->CreateStreamSet();
     StreamSet * ErrorMask = P->CreateStreamSet();
     P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, DelMask, ErrorMask);
@@ -336,7 +329,7 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
     #endif
     StreamSet * u16bytes = P->CreateStreamSet(1, 16);
     if (useAVX2()) {
-        #ifdef COMPARISION_STUDY
+        #ifdef USE_2017_U8U16_ALGORITHM
         report_fatal_error("Not supported in comparison study");
         #else
         // Allocate space for fully compressed swizzled UTF-16 bit streams
@@ -353,14 +346,10 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
         P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
         #endif
     } else {
-
-        #ifdef COMPARISION_STUDY
-
+        #ifdef USE_2017_U8U16_ALGORITHM
         StreamSet * U16Bits = P->CreateStreamSet(16);
         StreamSet * DeletionCounts = P->CreateStreamSet();
-
         P->CreateKernelCall<DeletionKernel>(u8bits, DelMask, U16Bits, DeletionCounts);
-
         P->CreateKernelCall<P2S16KernelWithCompressedOutputOld>(U16Bits, DeletionCounts, u16bytes);
         #else
 
@@ -384,7 +373,7 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
 void makeNonAsciiBranch(Kernel::BuilderRef b,
                         const std::unique_ptr<PipelineBuilder> & P,
                         StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
-    #ifndef COMPARISION_STUDY
+    #ifndef USE_2017_U8U16_ALGORITHM
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -485,20 +474,20 @@ int main(int argc, char *argv[]) {
         u8u16Function = generatePipeline(pxDriver, byteNumbering);
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
-    #ifdef REPORT_PAPI_TESTS
-    papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
-    jitExecution.start();
-    #endif
     if (LLVM_UNLIKELY(fd == -1)) {
         std::cerr << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
+        #ifdef REPORT_PAPI_TESTS
+        papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
+        jitExecution.start();
+        #endif
         u8u16Function(fd, outputFile.c_str());
+        #ifdef REPORT_PAPI_TESTS
+        jitExecution.stop();
+        jitExecution.write(std::cerr);
+        #endif
         close(fd);
     }
-    #ifdef REPORT_PAPI_TESTS
-    jitExecution.stop();
-    jitExecution.write(std::cerr);
-    #endif
     return 0;
 }
 

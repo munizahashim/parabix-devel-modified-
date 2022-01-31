@@ -13,8 +13,6 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
-// #define COMPARISON_STUDY
-
 using namespace llvm;
 
 inline size_t ceil_udiv(const size_t n, const size_t m) {
@@ -67,8 +65,7 @@ inline Value * apply_parallel_prefix_deletion(BuilderRef kb, const unsigned fw, 
 // Outputs: the deleted streams, plus a partial sum popcount
 
 
-#ifdef COMPARISON_STUDY
-
+#ifdef USE_2017_U8U16_ALGORITHM
 
 inline Value * partial_sum_popcount(const std::unique_ptr<KernelBuilder> & iBuilder, const unsigned fw, Value * mask) {
     Value * field = iBuilder->simd_popcount(fw, mask);
@@ -105,6 +102,7 @@ void DeletionKernel::generateFinalBlockMethod(const std::unique_ptr<KernelBuilde
     Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
     iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
 }
+
 #else
 
 void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
@@ -158,13 +156,15 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
     if (getStride() != kb->getBitBlockWidth()) {
         numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
     }
-
     kb->CreateBr(processBlock);
+
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
+
     std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(kb, {mMaskOp}, blockOffsetPhi);
     std::vector<Value *> input = streamutils::loadInputSelectionsBlock(kb, mInputOps, blockOffsetPhi);
+
     if (BMI2_available()) {
         Type * fieldTy = kb->getIntNTy(mFW);
         Type * fieldPtrTy = PointerType::get(fieldTy, 0);
@@ -181,6 +181,8 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
                 Value * compressed = kb->CreatePextract(field, mask[i]);
+                // Pextract is returning 32-bit integers but fieldTy is 16 bit?
+                compressed = kb->CreateZExtOrTrunc(compressed, fieldTy);
                 kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
             }
         }
@@ -219,7 +221,10 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
-    //setStride(4 * b->getBitBlockWidth());
+    // setStride(4 * b->getBitBlockWidth());
+    if (codegen::EnableHybridThreadModel) {
+        addAttribute(IsolateOnHybridThread());
+    }
 }
 
 void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {
@@ -235,6 +240,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     }
     const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mPEXTWidth;
     kb->CreateBr(processBlock);
+
     kb->SetInsertPoint(processBlock);
     PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);

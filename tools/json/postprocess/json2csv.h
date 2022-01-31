@@ -27,7 +27,7 @@ extern "C" {
  *  ooh,foo
  */
 void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position);
-
+void json2csv_simpleValidateObjectsAndArrays(const uint8_t * ptr);
 void json2csv_doneCallback();
 
 } // extern "C"

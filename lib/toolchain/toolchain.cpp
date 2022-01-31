@@ -50,9 +50,15 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "executions due to insufficient data/space of a "
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
+                        clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
+
+                        #ifdef ENABLE_PAPI
+                        clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
+                        #endif
+
+                        clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr.")
                         CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
-
 
 
 std::string ShowIROption = OmittedOption;
@@ -116,6 +122,26 @@ static cl::opt<unsigned, true> SegmentSizeOption("segment-size", cl::location(Se
 
 static cl::opt<unsigned, true> BufferSegmentsOption("buffer-segments", cl::location(BufferSegments), cl::init(1),
                                                cl::desc("Buffer Segments"), cl::value_desc("positive integer"));
+
+
+bool EnableHybridThreadModel = false;
+static cl::opt<bool, true> EnableHybridThreadModelOption("enable-hybrid-thread-model", cl::location(EnableHybridThreadModel), cl::init(false),
+                                               cl::desc("Enable pipeline to construct hybrid fixed data/code model."), cl::cat(CodeGenOptions));
+
+
+//unsigned NumOfKernels = 0;
+//unsigned NumOfStreamSets = 0;
+//unsigned NumOfPartitions = 0;
+
+//static cl::opt<unsigned, true> NumOfKernelsOption("num-kernels", cl::location(NumOfKernels), cl::init(1),
+//                                               cl::desc("NumOfKernels"), cl::value_desc("positive integer"));
+
+//static cl::opt<unsigned, true> NumOfStreamSetsOption("num-streamsets", cl::location(NumOfStreamSets), cl::init(1),
+//                                               cl::desc("NumOfStreamSets"), cl::value_desc("positive integer"));
+
+//static cl::opt<unsigned, true> NumOfPartitionsOption("num-partitions", cl::location(NumOfPartitions), cl::init(1),
+//                                               cl::desc("NumOfPartitions"), cl::value_desc("positive integer"));
+
 
 static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
@@ -192,6 +218,12 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag) {
     return DebugOptions.isSet(flag);
 }
 
+bool LLVM_READONLY AnyDebugOptionIsSet() {
+    #ifdef FORCE_ASSERTIONS
+    return true;
+    #endif
+    return DebugOptions.getBits() != 0;
+}
 
 std::string ProgramName;
 
@@ -200,6 +232,7 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     return true;
     #else
     if (!TraceOption.empty()) return true;
+    if (DebugOptions.isSet(PrintKernelSizes)) return true;
     if (DebugOptions.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;

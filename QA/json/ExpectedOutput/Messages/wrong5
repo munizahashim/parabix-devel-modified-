@@ -1,40 +1,4 @@
-illegal keyword at line 0 column 19 starting in:
+Error parsing array at line 0 column 24 starting in:
 
-wrong, {"right": wrong}]
-
-illegal keyword at line 0 column 20 starting in:
-
-rong, {"right": wrong}]
-
-illegal keyword at line 0 column 21 starting in:
-
-ong, {"right": wrong}]
-
-illegal keyword at line 0 column 22 starting in:
-
-ng, {"right": wrong}]
-
-illegal keyword at line 0 column 23 starting in:
-
-g, {"right": wrong}]
-
-illegal keyword at line 0 column 36 starting in:
-
-wrong}]
-
-illegal keyword at line 0 column 37 starting in:
-
-rong}]
-
-illegal keyword at line 0 column 38 starting in:
-
-ong}]
-
-illegal keyword at line 0 column 39 starting in:
-
-ng}]
-
-illegal keyword at line 0 column 40 starting in:
-
-g}]
+, {"right": wrong}]
 

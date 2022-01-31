@@ -1,6 +1,7 @@
 #include "popcount_kernel.h"
 
 #include <kernel/core/kernel_builder.h>
+#include <boost/intrusive/detail/math.hpp>
 
 // This option is mostly for testing lookbehind of an input streamset but
 // creates a cross-thread memory dependency that is otherwise unnecessary.
@@ -27,10 +28,7 @@ bool isNotConstantOne(Value * const value) {
     return !isa<Constant>(value) || !cast<Constant>(value)->isOneValue();
 }
 
-inline static unsigned floor_log2(const unsigned v) {
-    assert ("log2(0) is undefined!" && v != 0);
-    return ((sizeof(unsigned) * CHAR_BIT) - 1U) - __builtin_clz(v);
-}
+using boost::intrusive::detail::floor_log2;
 
 // #define PRINT_POP_COUNTS_TO_STDERR
 

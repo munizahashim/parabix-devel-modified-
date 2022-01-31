@@ -39,6 +39,7 @@ void PipelineCompiler::start(BuilderRef b) {
     debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
     #endif
 
+    readFirstSegmentNumber(b);
     #ifdef ENABLE_PAPI
     createEventSetAndStartPAPI(b);
     #endif
@@ -48,12 +49,10 @@ void PipelineCompiler::start(BuilderRef b) {
         mThreadLocalStreamSetBaseAddress = b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
     }
 
-    loadExternalStreamSetHandles(b);
+    readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
-    readExternalConsumerItemCounts(b);
     initializePipelineInputTerminationSignal(b);
-    identifyAllInternallySynchronizedKernels();
 
     mKernel = nullptr;
     mKernelId = 0;
@@ -64,7 +63,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mNumOfTruncatedInputBuffers = 0;
     mTruncatedInputBuffer.clear();
 
-    readFirstSegmentNumber(b);
     BasicBlock * const entryBlock = b->GetInsertBlock();
     b->CreateBr(mPipelineLoop);
 
@@ -76,9 +74,7 @@ void PipelineCompiler::start(BuilderRef b) {
     mPipelineProgress = i1_FALSE;
     mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
-    branchToInitialPartition(b);
 }
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief executeKernel
@@ -86,6 +82,7 @@ void PipelineCompiler::start(BuilderRef b) {
 inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), mKernelId) != ActiveKernels.end());
+    assert (KernelOnHybridThread.test(mKernelId) == mCompilingHybridThread);
 
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
@@ -99,15 +96,18 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     identifyPipelineInputs(mKernelId);
 
+    bool mayHaveInsufficientIO = false;
+
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        mHasExplicitFinalPartialStride = false;
         mIsBounded = false;
+        mHasExplicitFinalPartialStride = false;
         mCheckInputChannels = false;
         mMayLoopToEntry = false;
     } else {
         mIsBounded = isBounded();
         mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
         mCheckInputChannels = false;
+        mMayLoopToEntry = false;
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
             if (port.CanModifySegmentLength) {
@@ -116,26 +116,30 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
             }
         }
 
-        mMayLoopToEntry = false;
+        mayHaveInsufficientIO = mCheckInputChannels;
 
-        if (in_degree(mKernelId, mBufferGraph) > 0) {
-            if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
-                mMayLoopToEntry = true;
-            } else {
-                for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-                    const BufferPort & port = mBufferGraph[output];
-                    if (port.CanModifySegmentLength) {
-                        mMayLoopToEntry = true;
-                        break;
-                    }
-                }
+        for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & port = mBufferGraph[output];
+            if (port.CanModifySegmentLength) {
+                mayHaveInsufficientIO = true;
+                break;
             }
         }
+
+        if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
+            mMayLoopToEntry = true;
+        }
+
     }
 
+#ifndef NDEBUG
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
-    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];    
-    const auto canJumpToAnotherPartition = mIsPartitionRoot && (mIsBounded || nextPartitionId == jumpId);
+    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
+//    const auto mIsPartitionRoot = mIsPartitionRoot && (nextPartitionId != jumpId);
+
+    assert (nextPartitionId > mCurrentPartitionId);
+    assert (jumpId >= nextPartitionId);
+#endif
 
     const auto prefix = makeKernelName(mKernelId);
 
@@ -157,20 +161,19 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     }
     mKernelLoopCall = b->CreateBasicBlock(prefix + "_executeKernel", mNextPartitionEntryPoint);
     mKernelCompletionCheck = b->CreateBasicBlock(prefix + "_normalCompletionCheck", mNextPartitionEntryPoint);
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         mKernelInsufficientInput = b->CreateBasicBlock(prefix + "_insufficientInput", mNextPartitionEntryPoint);
     }
     if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-    }
-    if (canJumpToAnotherPartition) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream nm(tmp);
         nm << prefix << "_jumpFromPartition_" << mCurrentPartitionId
            << "_to_" << PartitionJumpTargetId[mCurrentPartitionId];
         mKernelJumpToNextUsefulPartition = b->CreateBasicBlock(nm.str(), mNextPartitionEntryPoint);
     } else {
-        mKernelJumpToNextUsefulPartition = mKernelInitiallyTerminated;
+        mKernelInitiallyTerminated = nullptr;
+        mKernelJumpToNextUsefulPartition = nullptr;
     }
 
     mKernelTerminated = b->CreateBasicBlock(prefix + "_terminated", mNextPartitionEntryPoint);
@@ -186,6 +189,8 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     verifyCurrentSynchronizationLock(b);
     checkIfKernelIsAlreadyTerminated(b);
+
+    readAvailableItemCounts(b);
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readConsumedItemCounts(b);
@@ -195,10 +200,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     incrementNumberOfSegmentsCounter(b);
     recordUnconsumedItemCounts(b);
 
-    mFinalPartialStrideFixedRateRemainderPhi = nullptr;
-
     detemineMaximumNumberOfStrides(b);
 
+    mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {
@@ -215,10 +219,10 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (!mKernelIsInternallySynchronized) {
         initializeKernelCheckOutputSpacePhis(b);
     }
-    if (canJumpToAnotherPartition) {
+    if (mIsPartitionRoot) {
         initializeJumpToNextUsefulPartitionPhis(b);
     }
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         initializeKernelInsufficientIOExitPhis(b);
     }
     initializeKernelTerminatedPhis(b);
@@ -240,7 +244,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
-    if (mCheckInputChannels && TraceIO) {
+    if (mayHaveInsufficientIO && TraceIO) {
         b->CreateUnlikelyCondBr(mBranchToLoopExit, mKernelInsufficientInput, mKernelLoopCall);
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mExhaustedPipelineInputPhi->addIncoming(mExhaustedInput, exitBlock);
@@ -309,7 +313,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL INSUFFICIENT IO EXIT
     /// -------------------------------------------------------------------------------------
 
-    if (mCheckInputChannels) {
+    if (mayHaveInsufficientIO) {
         writeInsufficientIOExit(b);
     }
 
@@ -344,7 +348,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL PREPARE FOR PARTITION JUMP
     /// -------------------------------------------------------------------------------------
 
-    if (canJumpToAnotherPartition) {
+    if (mIsPartitionRoot) {
         writeJumpToNextPartition(b);
     }
 
@@ -355,7 +359,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     b->SetInsertPoint(mKernelExit);
     writeConsumedItemCounts(b);
     recordFinalProducedItemCounts(b);
-    recordStridesPerSegment(b);
+    if (mIsPartitionRoot) {
+        recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
+    }
     recordProducedItemCountDeltas(b);
     setCurrentTerminationSignal(b, mTerminatedAtExitPhi);
 
@@ -591,7 +597,6 @@ inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef
     Type * const boolTy = b->getInt1Ty();
     mExhaustedInputAtJumpPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInputAtJumpPhi");
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
         const auto port = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b->CreatePHI(b->getSizeTy(), 2, prefix + "_producedAtJumpPhi");
@@ -706,19 +711,18 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         assert (mInitialTerminationSignal);
         if (mExhaustedInputAtJumpPhi) {
             mExhaustedInputAtJumpPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
-        }
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
-            const auto & br = mBufferGraph[e];
-            const auto port = br.Port;
-            Value * produced = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
-                produced = mAlreadyProducedDeferredPhi[port];
-            } else {
-                produced = mAlreadyProducedPhi[port];
+            for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+                const auto & br = mBufferGraph[e];
+                const auto port = br.Port;
+                Value * produced = nullptr;
+                if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    produced = mAlreadyProducedDeferredPhi[port];
+                } else {
+                    produced = mAlreadyProducedPhi[port];
+                }
+                assert (isFromCurrentFunction(b, produced, false));
+                mProducedAtJumpPhi[port]->addIncoming(produced, exitBlock);
             }
-            assert (isFromCurrentFunction(b, produced, false));
-            mProducedAtJumpPhi[port]->addIncoming(produced, exitBlock);
         }
         if (mMayLoopToEntry) {
             mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
@@ -895,12 +899,12 @@ void PipelineCompiler::end(BuilderRef b) {
         terminated = hasPipelineTerminated(b);
 
         Value * const done = b->CreateIsNotNull(terminated);
-
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions && !mCompilingHybridThread)) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
             Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
         }
+        releaseHybridThreadSynchronizationLock(b);
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
         updateLocallyAvailableItemCounts(b, exitBlock);
@@ -908,7 +912,7 @@ void PipelineCompiler::end(BuilderRef b) {
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
     b->SetInsertPoint(mPipelineEnd);
-
+    writeFinalHybridThreadSynchronizationNumber(b);
     writeExternalConsumedItemCounts(b);
     writeExternalProducedItemCounts(b);
     if (mCurrentThreadTerminationSignalPtr) {
