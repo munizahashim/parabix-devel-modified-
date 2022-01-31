@@ -155,39 +155,42 @@ bool containsDynamicallyAllocatedType(const Type * const ty) {
 }
 
 void freeDynamicallyAllocatedMemory(BuilderRef b, Value * const frame) {
-//    StructType * const ty = cast<StructType>(frame->getType()->getPointerElementType());
-//    FixedArray<Value *, 3> indices;
-//    indices[0] = b->getInt32(0);
-//    for (unsigned i = 0; i < ty->getStructNumElements(); ++i) {
-//        if (isDynamicallyAllocatedType(ty->getStructElementType(i))) {
-//            indices[1] = b->getInt32(i);
-//            indices[2] = b->getInt32(NestedCarryState);
-//            Value * const innerFrame = b->CreateLoad(b->CreateGEP(frame, indices));
-//            if (containsDynamicallyAllocatedType(innerFrame->getType())) {
-//                indices[2] = indices[0];
-//                Value *  const count = b->CreateLoad(b->CreateGEP(frame, indices));
-//                BasicBlock * const entry = b->GetInsertBlock();
-//                BasicBlock * const cond = b->CreateBasicBlock("freeCarryDataCond");
-//                BasicBlock * const body = b->CreateBasicBlock("freeCarryDataLoop");
-//                BasicBlock * const exit = b->CreateBasicBlock("freeCarryDataExit");
-//                b->CreateBr(cond);
-//                b->SetInsertPoint(cond);
-//                PHINode * const index = b->CreatePHI(count->getType(), 2);
-//                index->addIncoming(ConstantInt::getNullValue(count->getType()), entry);
-//                Value * test = b->CreateICmpNE(index, count);
-//                b->CreateCondBr(test, body, exit);
-//                b->SetInsertPoint(body);
-//                freeDynamicallyAllocatedMemory(b, b->CreateGEP(innerFrame, index));
-//                index->addIncoming(b->CreateAdd(index, ConstantInt::get(count->getType(), 1)), body);
-//                b->CreateBr(cond);
-//                b->SetInsertPoint(exit);
-//            }
-//            b->CreateFree(innerFrame);
-//            indices[2] = b->getInt32(NestedCarryState);
-//            Value *  const summary = b->CreateLoad(b->CreateGEP(frame, indices));
-//            b->CreateFree(summary);
-//        }
-//    }
+    StructType * const ty = cast<StructType>(frame->getType()->getPointerElementType());
+
+    FixedArray<Value *, 3> indices;
+    indices[0] = b->getInt32(0);
+    ConstantInt * const intNestedCarryState = b->getInt32(NestedCarryState);
+    ConstantInt * const intNestedCapacity = b->getInt32(NestedCapacity);
+    for (unsigned i = 0; i < ty->getStructNumElements(); ++i) {
+        if (isDynamicallyAllocatedType(ty->getStructElementType(i))) {
+            indices[1] = b->getInt32(i);
+            indices[2] = intNestedCarryState;
+
+            Value * const innerFrame = b->CreateLoad(b->CreateGEP(frame, indices));
+            if (containsDynamicallyAllocatedType(innerFrame->getType())) {
+                indices[2] = intNestedCapacity;
+                Value *  const count = b->CreateLoad(b->CreateGEP(frame, indices));
+                BasicBlock * const entry = b->GetInsertBlock();
+                BasicBlock * const cond = b->CreateBasicBlock("freeCarryDataCond");
+                BasicBlock * const body = b->CreateBasicBlock("freeCarryDataLoop");
+                BasicBlock * const exit = b->CreateBasicBlock("freeCarryDataExit");
+                b->CreateBr(cond);
+
+                b->SetInsertPoint(cond);
+                PHINode * const index = b->CreatePHI(count->getType(), 2);
+                index->addIncoming(ConstantInt::getNullValue(count->getType()), entry);
+                b->CreateCondBr(b->CreateICmpNE(index, count), body, exit);
+
+                b->SetInsertPoint(body);
+                freeDynamicallyAllocatedMemory(b, b->CreateGEP(innerFrame, index));
+                index->addIncoming(b->CreateAdd(index, ConstantInt::get(count->getType(), 1)), body);
+                b->CreateBr(cond);
+
+                b->SetInsertPoint(exit);
+            }
+            b->CreateFree(innerFrame);
+        }
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1182,10 +1185,6 @@ StructType * CarryManager::analyse(BuilderRef b, const PabloBlock * const scope,
         fields[NestedCarryState] = carryState->getPointerTo();
         carryState = StructType::get(b->getContext(), fields);
         assert (isDynamicallyAllocatedType(carryState));
-//        FixedArray<Type *, 2> outer;
-//        outer[0] = carryPackType;
-//        outer[1] = carryState;
-//        carryState = StructType::get(b->getContext(), outer);
     }
     cd.setSummaryType(summaryType);
     assert (carryState);
