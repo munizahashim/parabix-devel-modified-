@@ -65,17 +65,17 @@ public:
 
     /* Entering and leaving loops. */
 
-    virtual void enterLoopScope(BuilderRef b, const PabloBlock * const scope);
+    virtual void enterLoopScope(BuilderRef b);
 
     virtual void enterLoopBody(BuilderRef b, llvm::BasicBlock * const entryBlock);
 
-    virtual void leaveLoopBody(BuilderRef b, llvm::BasicBlock * const exitBlock);
+    virtual void leaveLoopBody(BuilderRef b);
 
     virtual void leaveLoopScope(BuilderRef b, llvm::BasicBlock * const entryBlock, llvm::BasicBlock * const exitBlock);
 
     /* Entering and leaving ifs. */
 
-    virtual void enterIfScope(BuilderRef b, const PabloBlock * const scope);
+    virtual void enterIfScope(BuilderRef b);
 
     virtual void enterIfBody(BuilderRef b, llvm::BasicBlock * const entryBlock);
 
@@ -95,9 +95,11 @@ public:
 
     /* Methods for getting and setting carry summary values for If statements */
 
-    virtual llvm::Value * generateSummaryTest(BuilderRef b, llvm::Value * condition);
+    virtual llvm::Value * generateEntrySummaryTest(BuilderRef b, llvm::Value * condition);
 
     virtual llvm::Type * getSummaryTypeFromCurrentFrame(BuilderRef b) const;
+
+    virtual llvm::Value * generateExitSummaryTest(BuilderRef b, llvm::Value * condition);
 
     /* Clear carry state for conditional regions */
 
@@ -157,7 +159,7 @@ protected:
     llvm::Value *                                   mLoopSelector;
     llvm::Value *                                   mNextLoopSelector;
     llvm::Value *                                   mCarryPackPtr;
-    Vec<llvm::PHINode *>                            mLoopIndicies;
+    Vec<llvm::Value *>                              mNonCarryCollapsingModeStack;
 
     Vec<CarryData>                                  mCarryMetadata;
 

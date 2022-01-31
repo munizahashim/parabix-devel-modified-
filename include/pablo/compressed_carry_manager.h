@@ -21,7 +21,7 @@ public:
 
     /* Entering and leaving ifs. */
 
-    void enterIfScope(BuilderRef b, const PabloBlock * const scope) override;
+    void enterIfScope(BuilderRef b) override;
 
 protected:
 

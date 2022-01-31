@@ -176,6 +176,10 @@ void PabloKernel::addInternalProperties(BuilderRef b) {
     mStreamTy = nullptr;
 }
 
+void PabloKernel::generateInitializeMethod(BuilderRef b) {
+
+}
+
 void PabloKernel::generateDoBlockMethod(BuilderRef b) {
     mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
     mSizeTy = b->getSizeTy();

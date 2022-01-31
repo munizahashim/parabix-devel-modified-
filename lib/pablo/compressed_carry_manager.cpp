@@ -139,7 +139,7 @@ void CompressedCarryManager::initializeCodeGen(BuilderRef b) {
     }
 }
 
-void CompressedCarryManager::enterIfScope(BuilderRef b, const PabloBlock * const /*scope*/) {
+void CompressedCarryManager::enterIfScope(BuilderRef b) {
     ++mIfDepth;
     enterScope(b);
     // We zero-initialized the nested summary value and later OR in the current summary into the escaping summary
@@ -204,13 +204,20 @@ Value * CompressedCarryManager::readCarryInSummary(BuilderRef b) const {
         return convertFrameToImplicitSummary(b);
     } else {
         assert (mCarryInfo->hasExplicitSummary());
+        Value * ptr = nullptr;
         Constant * const ZERO = b->getInt32(0);
-        FixedArray<Value *, 3> indices;
-        indices[0] = ZERO;
-        indices[1] = ZERO;
-        indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
-
-        Value * const ptr = b->CreateGEP(mCurrentFrame, indices);
+        if (mCarryInfo->nonCarryCollapsingMode()) {
+            FixedArray<Value *, 2> indices;
+            indices[0] = ZERO;
+            indices[1] = mLoopDepth == 0 ? ZERO : mLoopSelector;
+            ptr = b->CreateGEP(mCurrentFrame, indices);
+        } else {
+            FixedArray<Value *, 3> indices;
+            indices[0] = ZERO;
+            indices[1] = ZERO;
+            indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
+            ptr = b->CreateGEP(mCurrentFrame, indices);
+        }
         Value * summary = b->CreateLoad(ptr);
         if (mNestedLoopCarryInMaskPhi) {
             summary = b->CreateAnd(summary, mNestedLoopCarryInMaskPhi);
@@ -360,9 +367,10 @@ StructType * CompressedCarryManager::analyse(BuilderRef b,
         // carry state pointer, and summary pointer struct.
         if (LLVM_UNLIKELY(nonCarryCollapsingMode)) {
             mHasNonCarryCollapsingLoops = true;
+            summaryType = (CarryData::SummaryType)(summaryType | CarryData::NonCarryCollapsingMode);
             carryStruct = StructType::get(b->getContext(), {b->getSizeTy(), carryStruct->getPointerTo(), summaryTy->getPointerTo()});
         }
-        cd.setNonCollapsingCarryMode(nonCarryCollapsingMode);
+        // cd.setNonCollapsingCarryMode(nonCarryCollapsingMode);
     }
 
     cd.setSummaryType(summaryType);

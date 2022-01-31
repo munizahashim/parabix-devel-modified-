@@ -12,7 +12,7 @@ namespace pablo {
 class CarryData {
 public:
 
-    enum SummaryType : unsigned {
+    enum SummaryType {
         NoSummary = 0
         , ImplicitSummary = 1
         , BorrowedSummary = 2
@@ -49,13 +49,13 @@ public:
         mSummaryType = value;
     }
 
-    void setNonCollapsingCarryMode(const bool value = true) {
-        if (value) {
-            mSummaryType = (SummaryType)(mSummaryType | NonCarryCollapsingMode);
-        } else {
-            mSummaryType = (SummaryType)(mSummaryType & ~NonCarryCollapsingMode);
-        }
-    }
+//    void setNonCollapsingCarryMode(const bool value = true) {
+//        if (value) {
+//            mSummaryType = (SummaryType)(mSummaryType | NonCarryCollapsingMode);
+//        } else {
+//            mSummaryType = (SummaryType)(mSummaryType & ~NonCarryCollapsingMode);
+//        }
+//    }
     
 private:
 
