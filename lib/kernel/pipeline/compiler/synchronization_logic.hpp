@@ -102,14 +102,14 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
         } else {
         #endif
             assert (mSegNo);
-            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2);
+            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
             segNo->addIncoming(mSegNo, entryBlock);
             mSegNo = segNo;
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         }
         #endif
     }
-    mNextSegNo = b->CreateAdd(mSegNo, ONE);
+    mNextSegNo = b->CreateAdd(mSegNo, ONE, "nextSegNo");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
