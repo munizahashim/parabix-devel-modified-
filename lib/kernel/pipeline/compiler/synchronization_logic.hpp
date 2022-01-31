@@ -255,7 +255,11 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
-    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
+    if (RequiresSynchronization.test(kernelId)) {
+        return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
+    } else {
+        return nullptr;
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
