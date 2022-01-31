@@ -1562,7 +1562,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
     b->SetInsertPoint(expand);
     Type * const logTy = currentLog->getType()->getPointerElementType();
     Value * const newLog = b->CreatePageAlignedMalloc(logTy);
-    PointerType * const voidPtrTy = b->getVoidPtrTy();   
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
     b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(newLog, { ZERO, ONE}));
     b->CreateStore(newLog, trace);
     BasicBlock * const expandExit = b->GetInsertBlock();

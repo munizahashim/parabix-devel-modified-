@@ -344,7 +344,7 @@ public:
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
-    void setConsumedItemCount(BuilderRef b, const size_t bufferVertex, not_null<Value *> consumed, const unsigned slot) const;
+    void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
     unsigned getLastConsumerOfStreamSet(const size_t streamSet) const;

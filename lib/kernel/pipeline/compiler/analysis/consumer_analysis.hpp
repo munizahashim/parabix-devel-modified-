@@ -96,6 +96,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         // consumed item count until the very last consumer reads the data.
 
         for (unsigned type = 0; type < 2; ++type) {
+            // const auto lastConsumer = LastKernel;
             const auto lastConsumer = lastThreadConsumer[type];
             if (lastConsumer) {
                 ConsumerGraph::edge_descriptor e;
@@ -136,20 +137,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     out << "digraph \"ConsumerGraph\" {\n";
     for (auto v : make_iterator_range(vertices(mConsumerGraph))) {
-        out << "v" << v << " [label=\"";
-        if (v == PipelineInput) {
-            out << "P_in";
-        } else if (v < PipelineOutput) {
-            const Kernel * const kernel = getKernel(v); assert (kernel);
-            auto name = kernel->getName();
-            boost::replace_all(name, "\"", "\\\"");
-            out << v << ": " << name;
-        } else if (v == PipelineOutput) {
-            out << "P_out";
-        } else {
-            out << "";
-        }
-        out << "\"];\n";
+        out << "v" << v << " [label=\"" << v << "\"];\n";
     }
     for (auto e : make_iterator_range(edges(mConsumerGraph))) {
         const auto s = source(e, mConsumerGraph);

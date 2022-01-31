@@ -106,15 +106,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         mTarget->addThreadLocalScalar(sizeTy, ZERO_EXTENDED_SPACE);
     }
 
-    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-        unsigned maxCounter = 0;
-        for (auto e : make_iterator_range(edges(mConsumerGraph))) {
-            const ConsumerEdge & cn = mConsumerGraph[e];
-            maxCounter = std::max(maxCounter, cn.Index);
-        }
-        mTarget->addNonPersistentScalar(ArrayType::get(sizeTy, maxCounter + 1), STATISTICS_BUFFER_EXPANSION_TEMP_STACK);
-    }
-
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput);
     addConsumerKernelProperties(b, PipelineInput);
@@ -134,8 +125,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
     }
-
-    addConsumerKernelProperties(b, PipelineOutput);
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif

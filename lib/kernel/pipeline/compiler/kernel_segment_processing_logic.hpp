@@ -74,6 +74,8 @@ void PipelineCompiler::start(BuilderRef b) {
     mPipelineProgress = i1_FALSE;
     mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
+   // readAllConsumerItemCounts(b);
+    branchToInitialPartition(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

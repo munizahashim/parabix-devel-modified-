@@ -1019,8 +1019,15 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             retValPhi->addIncoming(b->getFalse(), copyBackExit);
             retValPhi->addIncoming(b->getTrue(), expandAndCopyBackExit);
 
-            Value * const newBaseAddress = b->CreateGEP(newBaseBuffer, b->CreateNeg(consumedChunks));
+//            Function * fSleep = m->getFunction("usleep");
+//            if (fSleep == nullptr) {
+//                FunctionType * fty = FunctionType::get(b->getInt32Ty(), {b->getInt32Ty()}, false);
+//                fSleep = Function::Create(fty, Function::ExternalLinkage, "usleep", m);
+//                fSleep->setCallingConv(CallingConv::C);
+//            }
+//            b->CreateCall(fSleep, b->getInt32(10));
 
+            Value * const effectiveCapacity = b->CreateAdd(consumedChunks, internalCapacityPhi);
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
@@ -1370,6 +1377,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             b->CreateStore(newCapacity, intCapacityField);
             b->CreateStore(virtualBase, priorBufferField);
             b->CreateStore(newBuffer, virtualBaseField);
+            b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth)->setOrdering(AtomicOrdering::Release);
             b->CreateFree(b->CreateInBoundsGEP(priorBuffer, { b->CreateNeg(underflow) }));
 
             b->CreateRet(b->getTrue());
