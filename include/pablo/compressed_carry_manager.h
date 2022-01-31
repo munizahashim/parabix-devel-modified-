@@ -37,7 +37,6 @@ protected:
 
     void combineCarryOutSummary(BuilderRef b, const unsigned offset) override;
 
-    llvm::Value * convertFrameToImplicitSummary(BuilderRef b) const;
     llvm::Value * convertFrameToImplicitSummaryPtr(BuilderRef b) const;
     llvm::Type * getSummaryTypeFromCurrentFrame(BuilderRef b) const override;
 

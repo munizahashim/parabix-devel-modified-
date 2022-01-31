@@ -417,7 +417,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         updatedCarryStateArrayPhi->addIncoming(initialArray, createNew);
         updatedCarryStateArrayPhi->addIncoming(newCarryStateArray, reallocExisting);
 
-        // NOTE: the 2 here is only to pass the assertion later. It refers to the number of elements in the carry data struct.
+        // NOTE: the 3 here is only to pass the assertion later. It refers to the number of elements in the carry data struct.
         mCarryFrameStack.emplace_back(mCurrentFrame, 3);
         mCurrentFrame = b->CreateGEP(updatedCarryStateArrayPhi, indexPhi);
         mCurrentFrameIndex = 0;
