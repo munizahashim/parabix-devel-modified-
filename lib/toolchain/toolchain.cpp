@@ -76,12 +76,6 @@ static cl::opt<std::string, true> clPapiCounterOptions("PapiCounters", cl::locat
                                                        cl::value_desc("comma delimited list"), cl::cat(CodeGenOptions));
 #endif
 
-std::string ForceStreamSetConsumerWriteToLastKernel = OmittedOption;
-static cl::opt<std::string, true> ForceStreamSetConsumerWriteToLastKernelOption("wtl", cl::location(ForceStreamSetConsumerWriteToLastKernel), cl::ValueOptional,
-                                                         cl::desc("Force streamset consumed item count to be written after last kernel in pipeline"),
-                                                         cl::value_desc("comma delimited list"), cl::cat(CodeGenOptions));
-
-
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
 std::string ShowASMOption = OmittedOption;
 static cl::opt<std::string, true> ASMOutputFilenameOption("ShowASM", cl::location(ShowASMOption), cl::ValueOptional,

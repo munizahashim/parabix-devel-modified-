@@ -340,9 +340,6 @@ Kernel * PipelineBuilder::makeKernel() {
         }
     }
     #endif
-    if (LLVM_UNLIKELY(codegen::ForceStreamSetConsumerWriteToLastKernel != codegen::OmittedOption)) {
-        out << "+WTL:" << codegen::ForceStreamSetConsumerWriteToLastKernel;
-    }
     for (unsigned i = 0; i < numOfKernels; ++i) {
         out << "_K" << mKernels[i]->getFamilyName();
     }

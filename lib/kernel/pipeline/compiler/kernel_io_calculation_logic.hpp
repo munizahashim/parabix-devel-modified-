@@ -898,13 +898,9 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 
-    Value * syncLock = nullptr;
-    if (mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U)) {
-        syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
-    }
+    Value * const syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
 
-    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
-
+    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mNumOfThreads);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
@@ -930,6 +926,9 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
+
+        Value * const hasEnoughSpace = b->CreateICmpULE(required, afterExpansion[WITH_OVERFLOW]);
+
         const Binding & output = getOutputBinding(outputPort);
         Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
         b->CreateAssert(sanityCheck,
@@ -953,6 +952,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion[WITH_OVERFLOW]);
+    debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
 
     BasicBlock * const expandBufferExit = b->GetInsertBlock();

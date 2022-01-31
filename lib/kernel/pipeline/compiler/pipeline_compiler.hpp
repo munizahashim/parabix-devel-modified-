@@ -348,7 +348,6 @@ public:
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
     unsigned getLastConsumerOfStreamSet(const size_t streamSet) const;
-    void resetConsumerGraphState();
 
 // buffer management codegen functions
 
@@ -433,6 +432,7 @@ public:
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId);
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId);
     void verifyCurrentSynchronizationLock(BuilderRef b) const;
+    Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const;
 
     void acquireHybridThreadSynchronizationLock(BuilderRef b);
     void releaseHybridThreadSynchronizationLock(BuilderRef b);

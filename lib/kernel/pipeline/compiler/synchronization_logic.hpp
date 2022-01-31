@@ -155,11 +155,6 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx);
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
-        #endif
-        const auto waitingOn = makeKernelName(waitingOnIdx);
-        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), waitingOn + LOGICAL_SEGMENT_SUFFIX);
 //        #ifdef PRINT_DEBUG_MESSAGES
 //        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
 //        #endif
@@ -200,7 +195,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     if (LLVM_LIKELY(required || mCompilingHybridThread || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId);
-        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
+        Value * currentSegNo = nullptr;
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const currentSegNo = b->CreateLoad(waitingOnPtr);
             currentSegNo = b->CreateLoad(waitingOnPtr);
@@ -256,25 +251,10 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
 }
 
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief releaseHybridThreadSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief releaseHybridThreadSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeFinalHybridThreadSynchronizationNumber(BuilderRef b) {
-
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
+Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
     return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
 }
 

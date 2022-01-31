@@ -39,8 +39,6 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     mConsumerGraph = ConsumerGraph(LastStreamSet + 1);
 
-    flat_set<unsigned> observedGlobalPortIds;
-
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         // copy the producing edge
         const auto pe = in_edge(streamSet, mBufferGraph);
@@ -97,7 +95,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         for (unsigned type = 0; type < 2; ++type) {
             // const auto lastConsumer = LastKernel;
-            const auto lastConsumer = lastThreadConsumer[type];
+            auto lastConsumer = lastThreadConsumer[type];
             if (lastConsumer) {
                 ConsumerGraph::edge_descriptor e;
                 bool exists;
@@ -111,8 +109,6 @@ void PipelineAnalysis::makeConsumerGraph() {
                 }
             }
         }
-
-
     }
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
