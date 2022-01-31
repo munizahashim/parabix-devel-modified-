@@ -128,10 +128,6 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         FilterByMask(P, toKeep, translatedBasis, filteredBasis);
         FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
     }
-    StreamSet * filteredRecordSeparators = P->CreateStreamSet(1);
-    FilterByMask(P, toKeep, recordSeparators, filteredRecordSeparators);
-    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
 
     //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
     //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);

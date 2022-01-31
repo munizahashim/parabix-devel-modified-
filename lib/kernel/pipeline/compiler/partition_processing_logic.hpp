@@ -351,6 +351,46 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 assert (nextPartitionId <= jumpId);
 
             Value * const consumed = readConsumedItemCount(b, streamSet);
+        } else { // if (kernel > mKernelId) {
+            const auto prefix = makeBufferName(kernel, br.Port);
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            } else {
+                produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+            }
+        }
+
+        assert (isFromCurrentFunction(b, produced, false));
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << makeKernelName(mKernelId) << " -> " <<
+               makeBufferName(kernel, br.Port) << "_avail = %" PRIu64;
+        debugPrint(b, out.str(), produced);
+        #endif
+
+        producedSet.emplace_back(streamSet, produced);
+
+        bool prepareConsumedPhi = false;
+        for (const auto f : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+            const auto consumer = target(f, mConsumerGraph);
+            const auto p = KernelPartitionId[consumer];
+            if (p >= targetPartitionId) {
+                prepareConsumedPhi = true;
+                break;
+            }
+        }
+
+        if (prepareConsumedPhi) {
+            Value * consumed = nullptr;
+            // TODO: this could be optimized further; if we know we had to load the consumed item count
+            // along all paths to this kernel, the initial consumed count will be up to date.
+            if (kernel >= mKernelId) { // || hasJumpedOverConsumer(streamSet, targetPartitionId)) {
+                consumed = readConsumedItemCount(b, streamSet);
+            } else {
+                consumed = mInitialConsumedItemCount[streamSet];
+            }
             assert (isFromCurrentFunction(b, consumed, false));
 
             #ifdef PRINT_DEBUG_MESSAGES
@@ -390,6 +430,30 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
 
     phiOut(producedSet, mPartitionProducedItemCountPhi, "partitionProduced");
     phiOut(consumedSet, mPartitionConsumedItemCountPhi, "partitionConsumed");
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasJumpedOverConsumer
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const {
+//    if (mNumOfThreads > 1) {
+//        bool hasPreTargetUsage = false;
+//        bool hasPostTargetUsage = false;
+//        for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+//            const auto consumer = target(e, mConsumerGraph);
+//            const auto partitionId = KernelPartitionId[consumer];
+//            //if (partitionId >= mCurrentPartitionId) {
+//                if (partitionId < targetPartitionId) {
+//                    hasPreTargetUsage = true;
+//                } else {
+//                    hasPostTargetUsage = true;
+//                }
+//            //}
+//        }
+//        return hasPostTargetUsage;
+//    }
+//    return false;
+    return true;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
