@@ -1221,7 +1221,7 @@ void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value *
     Value * maskBitOffset = b->CreateSub(maskCopyOffset, maskBase);
     // b->CallPrintInt("maskBitOffset", maskBitOffset);
     Value * nextAlignedOffset = b->CreateSub(b->getSize(8), maskBitOffset);
-    Value * byteOffset = b->CreateSelect(b->CreateICmpULT(maskBitOffset, nextAlignedOffset), maskBitOffset, nextAlignedOffset);
+    Value * byteOffset = b->CreateSelect(b->CreateICmpEQ(maskBitOffset, sz_ZERO), maskBitOffset, nextAlignedOffset);
     // b->CallPrintInt("byteOffset", byteOffset);
     // Interleave dictionary bytes followed by compressed bytes
     b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", b->getProducedItemCount("combinedBytes")),
