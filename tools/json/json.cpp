@@ -146,28 +146,24 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // We also take the opportunity to create the keyword marker
     StreamSet * const firstLexers = P->CreateStreamSet(7);
     StreamSet * const extraErr = P->CreateStreamSet(1);
-    StreamSet * const keywordMarker = P->CreateStreamSet(1);
-    StreamSet * const combinedBrackets = P->CreateStreamSet(1);
-    StreamSet * const syntaxErr = P->CreateStreamSet(1);
+    StreamSet * const combinedValues = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
         lexStream,
         stringSpan,
         numberSpan,
         keywordEndMarkers,
-        keywordMarker,
         firstLexers,
-        combinedBrackets,
-        extraErr,
-        syntaxErr
+        combinedValues,
+        extraErr
     );
 
     // 9.1 Prepare StreamSets for validation
     StreamSet * collapsedLex;
     StreamSet * Errors;
     if (ToCSVFlag) {
-        StreamSet * const allLex = P->CreateStreamSet(10, 1);
+        StreamSet * const allLex = P->CreateStreamSet(12, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex, stringSpan},
+            std::vector<StreamSet *>{firstLexers, stringMarker, keywordEndMarkers, numberLex, stringSpan},
             allLex
         );
         collapsedLex = su::Collapse(P, allLex);
@@ -178,50 +174,19 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         );
     } else {
         if (ShowLinesFlag) {
-            StreamSet * allLex = P->CreateStreamSet(9, 1);
+            StreamSet * allLex = P->CreateStreamSet(11, 1);
             P->CreateKernelCall<StreamsMerge>(
-                std::vector<StreamSet *>{firstLexers, stringMarker, keywordMarker, numberLex},
+                std::vector<StreamSet *>{firstLexers, stringMarker, keywordEndMarkers, numberLex},
                 allLex
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            if (ParallelBracketMatch) {
-                StreamSet * const multiplexedBrackets = P->CreateStreamSet(2);
-                P->CreateKernelCall<PabloSourceKernel>(
-                    parser,
-                    jsonPabloSrc,
-                    "MultiplexBrackets",
-                    Bindings {
-                        Binding {"brackets", firstLexers}
-                    },
-                    Bindings {
-                        Binding {"mpx", multiplexedBrackets}
-                    }
-                );
-                StreamSet * const selectedBrackets = P->CreateStreamSet(2);
-                FilterByMask(P, combinedBrackets, multiplexedBrackets, selectedBrackets);
-                StreamSet * const toPostProcess = P->CreateStreamSet(1);
-                P->CreateKernelCall<PabloSourceKernel>(
-                    parser,
-                    jsonPabloSrc,
-                    "DeleteInlineBraces",
-                    Bindings {
-                        Binding {"mpx", selectedBrackets, FixedRate(1), LookAhead(1)}
-                    },
-                    Bindings {
-                        Binding {"toPostProcess", toPostProcess}
-                    }
-                );
-                StreamSet * const spreadFinal = P->CreateStreamSet(1);
-                SpreadByMask(P, combinedBrackets, toPostProcess, spreadFinal);
-                collapsedLex = su::Collapse(P, spreadFinal);
-            } else {
-                collapsedLex = combinedBrackets;
-            }
+             StreamSet * const brackets = su::Select(P, firstLexers, su::Range(0, 4));
+             collapsedLex = su::Collapse(P, brackets);
         }
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, syntaxErr},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
             Errors
         );
     }
