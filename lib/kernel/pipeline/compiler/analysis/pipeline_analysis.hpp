@@ -91,7 +91,6 @@ public:
 
         P.calculatePartialSumStepFactors();
 
-        P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
 
         // Finish the buffer graph
@@ -115,7 +114,10 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mNumOfThreads(pipelineKernel->getNumOfThreads())
-    , mLengthAssertions(pipelineKernel->getLengthAssertions()) {
+    , mLengthAssertions(pipelineKernel->getLengthAssertions())
+    , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
+    , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+    , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers) {
 
     }
 
@@ -217,7 +219,7 @@ private:
 
     void recomputeMinimumExpectedDataflow();
 
-    void computeMaximumExpectedDataflow();
+    void computeMaximumDataflow(const bool expected);
 
     void identifyInterPartitionSymbolicRates();
 
@@ -265,6 +267,10 @@ private:
 
 public:
 
+    const bool                      mTraceProcessedProducedItemCounts;
+    const bool                      mTraceDynamicBuffers;
+    const bool                      mTraceIndividualConsumedItemCounts;
+
     static const unsigned           PipelineInput = 0U;
     static const unsigned           FirstKernel = 1U;
     unsigned                        LastKernel = 0;
@@ -291,6 +297,7 @@ public:
     KernelIdVector                  KernelPartitionId;
 
     std::vector<unsigned>           MinimumNumOfStrides;
+    std::vector<unsigned>           ExpectedNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
 

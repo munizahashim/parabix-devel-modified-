@@ -373,29 +373,6 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeLocallyAvailableItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeLocallyAvailableItemCounts(BuilderRef b, BasicBlock * const entryBlock) {
-    IntegerType * const sizeTy = b->getSizeTy();
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        PHINode * const phi = b->CreatePHI(sizeTy, 2);
-        phi->addIncoming(mLocallyAvailableItems[streamSet], entryBlock);
-        mInitiallyAvailableItemsPhi[streamSet] = phi;
-        mLocallyAvailableItems[streamSet] = phi;
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateLocallyAvailableItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateLocallyAvailableItemCounts(BuilderRef b, BasicBlock * const entryBlock) {
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        PHINode * const phi = mInitiallyAvailableItemsPhi[streamSet];
-        phi->addIncoming(mLocallyAvailableItems[streamSet], entryBlock);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getTotalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getLocallyAvailableItemCount(BuilderRef /* b */, const StreamSetPort inputPort) const {

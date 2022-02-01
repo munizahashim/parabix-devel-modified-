@@ -270,6 +270,7 @@ struct BufferNode {
     unsigned MaxAdd = 0;
 
     unsigned BufferStart = 0;
+    unsigned BufferEnd = 0;
 
     unsigned RequiredCapacity = 0;
     unsigned OverflowCapacity = 0;
@@ -479,8 +480,6 @@ struct SchedulingNode {
 };
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
-
-using PartitionJumpTree = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property, no_property>;
 
 }
 

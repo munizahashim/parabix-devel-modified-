@@ -1,6 +1,7 @@
 
 #include "common.h"
 #include <boost/intrusive/detail/math.hpp>
+#include <llvm/Support/CommandLine.h>
 
 using namespace kernel;
 using namespace llvm;

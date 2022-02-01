@@ -155,9 +155,9 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx);
-//        #ifdef PRINT_DEBUG_MESSAGES
-//        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
-//        #endif
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
+        #endif
         BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
         BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
         BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_LSN_acquired", nextNode);
@@ -179,9 +179,9 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
 
         b->SetInsertPoint(acquired);
 
-//        #ifdef PRINT_DEBUG_MESSAGES
-//        debugPrint(b, "# " + prefix + " acquired SegNo %" PRIu64, mSegNo);
-//        #endif
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "# " + prefix + " acquired SegNo %" PRIu64, mSegNo);
+        #endif
     }
 }
 
@@ -195,16 +195,9 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     if (LLVM_LIKELY(required || mCompilingHybridThread || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId);
-        Value * currentSegNo = nullptr;
+        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const currentSegNo = b->CreateLoad(waitingOnPtr);
-            currentSegNo = b->CreateLoad(waitingOnPtr);
-        }
-        b->CreateAtomicStoreRelease(mNextSegNo, waitingOnPtr);
-//        #ifdef PRINT_DEBUG_MESSAGES
-//        debugPrint(b, prefix + ": released %" PRIu64, mSegNo);
-//        #endif
-        if (LLVM_UNLIKELY(CheckAssertions && required)) {
             Value * const unchanged = b->CreateICmpEQ(mSegNo, currentSegNo);
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -251,15 +244,26 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
 }
 
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseHybridThreadSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseHybridThreadSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::writeFinalHybridThreadSynchronizationNumber(BuilderRef b) {
+
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
-    if (RequiresSynchronization.test(kernelId)) {
-        return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
-    } else {
-        return nullptr;
-    }
+inline Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
+    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

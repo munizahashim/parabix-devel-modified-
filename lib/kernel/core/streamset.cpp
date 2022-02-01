@@ -751,18 +751,18 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
-    indices[1] = b->getInt32(EffectiveCapacity);
-    Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
-    b->CreateStore(capacity, effCapacityField);
+    indices[1] = b->getInt32(InternalCapacity);
+    Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
+    b->CreateStore(capacity, capacityField);
 
     if (mLinear) {
         indices[1] = b->getInt32(MallocedAddress);
         Value * const initialField = b->CreateInBoundsGEP(handle, indices);
         b->CreateStore(adjBaseAddress, initialField);
 
-        indices[1] = b->getInt32(InternalCapacity);
-        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
-        b->CreateStore(capacity, capacityField);
+        indices[1] = b->getInt32(EffectiveCapacity);
+        Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
+        b->CreateStore(capacity, effCapacityField);
 
         indices[1] = b->getInt32(AlternateAddress);
         Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
@@ -779,10 +779,6 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         b->CreateStore(b->getSize(0), delayField);
 
     } else {
-
-        indices[1] = b->getInt32(InternalCapacity);
-        Value * const capacityField = b->CreateInBoundsGEP(handle, indices);
-        b->CreateStore(capacity, capacityField);
 
         indices[1] = b->getInt32(AlternateAddress);
         Value * const priorAddressField = b->CreateInBoundsGEP(handle, indices);
@@ -1014,8 +1010,8 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
 
             b->SetInsertPoint(expandAndCopyBack);
             // newInternalCapacity tends to be 2x internalCapacity
-            Value * const two_x_Capacity = b->CreateShl(internalCapacity, 1);
-            Value * const newInternalCapacity = b->CreateRoundUp(chunksToReserve, two_x_Capacity);
+            Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
+            Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
@@ -1029,7 +1025,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             b->CreateStore(mallocAddress, priorBufferField);
             // b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
             b->CreateStore(expandedBuffer, mallocAddrField);
-            b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
             BasicBlock * const expandAndCopyBackExit = b->GetInsertBlock();
             b->CreateBr(updateBaseAddress);
 
@@ -1192,7 +1187,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
         name << '_' << syncStep;
     }
 
-
     Value * const myHandle = getHandle();
 
     Module * const m = b->getModule();
@@ -1300,8 +1294,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             Value * const alternateCapacity = b->CreateAlignedLoad(altCapacityField, sizeTyWidth);
             b->CreateAlignedStore(internalCapacity, altCapacityField, sizeTyWidth);
 
-            Value * extraCapacity = nullptr;
-
             if (hasSyncLock) {
 
                 BasicBlock * const checkForPendingConsumer = BasicBlock::Create(C, "checkForPendingConsumer", func);
@@ -1365,7 +1357,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
-            b->CreateAlignedStore(newBaseAddress, virtualBaseField, sizeTyWidth);
 
             b->CreateAlignedStore(newBaseBuffer, primaryAddressField, sizeTyWidth);
 
@@ -1439,8 +1430,6 @@ Value * DynamicBuffer::reserveCapacity(BuilderPtr b, Value * const produced, Val
             indices[1] = b->getInt32(AlternateAddress);
             Value * const priorBufferField = b->CreateInBoundsGEP(handle, indices);
             Value * const priorBuffer = b->CreateLoad(priorBufferField);
-            b->CreateStore(newCapacity, intCapacityField);
-            b->CreateStore(virtualBase, priorBufferField);
             b->CreateStore(newBuffer, virtualBaseField);
             b->CreateAlignedStore(newCapacity, intCapacityField, sizeTyWidth);
             b->CreateAlignedStore(virtualBase, priorBufferField, sizeTyWidth);

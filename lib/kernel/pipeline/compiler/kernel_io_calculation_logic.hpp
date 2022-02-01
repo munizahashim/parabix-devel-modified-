@@ -151,19 +151,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     }
     assert (numOfLinearStrides);
 
-    Value * numOfLinearStrides = nullptr;
-
-    const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
-
-    if (isSourceKernel || !mIsPartitionRoot) {
-        if (mMayLoopToEntry) {
-            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-        } else {
-            numOfLinearStrides = mMaximumNumOfStrides;
-        }
-        assert (numOfLinearStrides);
-    }
-
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
@@ -174,7 +161,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
         assert ("no non-greedy input?" && numOfLinearStrides);
     } else if (!isSourceKernel) {
-        assert (!mMayLoopToEntry);
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
@@ -201,14 +187,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
     } else {
         mUpdatedNumOfStrides = numOfLinearStrides;
-    }
-
-    if (LLVM_UNLIKELY(CheckAssertions && mIsPartitionRoot)) {
-        Value * const check = b->CreateICmpULE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
-        b->CreateAssert(check,
-                        "%s: number of strides (%" PRIu64 ") exceeds maximum bound (%" PRIu64 ")",
-                        mCurrentKernelName,
-                        mUpdatedNumOfStrides, mMaximumNumOfStrides);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -772,6 +750,19 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     Value * const processed = mAlreadyProcessedPhi[inputPort];
 
+//    if (LLVM_UNLIKELY(CheckAssertions)) {
+//        if (out_degree(streamSet, mConsumerGraph) != 0) {
+//            Value * const consumed = readConsumedItemCount(b, streamSet);
+//            Value * const valid = b->CreateICmpULE(consumed, processed);
+//            const Binding & inputBinding = port.Binding;
+//            b->CreateAssert(valid,
+//                            "%s.%s: consumed count (%" PRIu64 ") exceeds processed count (%" PRIu64 ")",
+//                            mCurrentKernelName,
+//                            b->GetString(inputBinding.getName()),
+//                            consumed, processed);
+//        }
+//    }
+
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);
@@ -854,7 +845,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.Locality == BufferLocality::ThreadLocal || bn.isUnowned()) {
+    if (bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
         return;
     }
 
@@ -873,13 +864,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion[WITH_OVERFLOW]);
 
-#ifdef PRINT_DEBUG_MESSAGES
-debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
-//    debugPrint(b, prefix + "_addr [%" PRIx64 ",%" PRIx64 ")",
-//               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
-debugPrint(b, prefix + "_capacity = %" PRIu64, buffer->getCapacity(b));
-debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
-#endif
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
+    debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
+    #endif
 
     BasicBlock * const noExpansionExit = b->GetInsertBlock();
     b->CreateLikelyCondBr(hasEnoughSpace, expanded, expandBuffer);
@@ -901,9 +889,13 @@ debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 
-    Value * const syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
+    Value * syncLock = nullptr;
+    if (mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U)) {
+        syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
+    }
 
     Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
+
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
@@ -929,9 +921,6 @@ debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
-
-        Value * const hasEnoughSpace = b->CreateICmpULE(required, afterExpansion[WITH_OVERFLOW]);
-
         const Binding & output = getOutputBinding(outputPort);
         Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
         b->CreateAssert(sanityCheck,
@@ -948,10 +937,10 @@ debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     assert ((beforeExpansion[WITHOUT_OVERFLOW] == nullptr) ^ (afterExpansion[WITHOUT_OVERFLOW] != nullptr));
     assert ((beforeExpansion[WITH_OVERFLOW] != beforeExpansion[WITHOUT_OVERFLOW]) ^ (afterExpansion[WITH_OVERFLOW] == afterExpansion[WITHOUT_OVERFLOW]));
 
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + "_addr' [%" PRIx64 ",%" PRIx64 ")",
-               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
-    #endif
+//    #ifdef PRINT_DEBUG_MESSAGES
+//    debugPrint(b, prefix + "_addr' [%" PRIx64 ",%" PRIx64 ")",
+//               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
+//    #endif
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion[WITH_OVERFLOW]);
@@ -1452,6 +1441,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
         current = b->CreateSelect(mBranchToLoopExit, previouslyTransferred, current);
     }
     if (LLVM_UNLIKELY(CheckAssertions)) {
+
         const Binding & binding = partialSumPort.Binding;
         b->CreateAssert(b->CreateICmpULE(previouslyTransferred, current),
                         "%s.%s: partial sum is not non-decreasing at %" PRIu64
@@ -1459,6 +1449,8 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                         mCurrentKernelName,
                         b->GetString(binding.getName()),
                         position, previouslyTransferred, current);
+
+
     }
     return b->CreateSub(current, previouslyTransferred);
 }
@@ -1651,8 +1643,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
     // responsible for splat-ing this value to the appropriate slots.
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
-        const auto maxStepFactor = mPartialSumStepFactorGraph[e];
-        assert (maxStepFactor > 1);
+
         const auto streamSet = target(e, mPartialSumStepFactorGraph);
         const auto output = in_edge(streamSet, mBufferGraph);
         const BufferPort & outputPort = mBufferGraph[output];
@@ -1702,17 +1693,12 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
 
-        Value * const newProducedCount = b->CreateRoundUp(produced, sz_maxStepFactor);
-
-        const auto spanLength = ceil_udiv(fw * maxStepFactor, bw);
-
-        assert (spanLength > 0);
         if (spanLength > 1) {
             VectorType * const bbTy = b->getBitBlockType();
             PointerType * const bbPtrTy = bbTy->getPointerTo();
 
             const auto prefix = makeBufferName(mKernelId, outputPort.Port);
-            BasicBlock * const splatLoopEntry = b->GetInsertBlock(); assert (splatLoopEntry);
+            BasicBlock * const splatLoopEntry = b->GetInsertBlock();
             BasicBlock * const nextNode = splatLoopEntry->getNextNode();
             BasicBlock * const splatLoopBody = b->CreateBasicBlock(prefix + "_popCountSplatLoop", nextNode);
             BasicBlock * const splatLoopExit = b->CreateBasicBlock(prefix + "_popCountSplatExit", nextNode);
