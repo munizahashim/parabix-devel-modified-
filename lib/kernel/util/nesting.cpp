@@ -9,6 +9,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/branch.h>
 #include <vector>
+#include <llvm/Support/CommandLine.h>
 
 using namespace llvm;
 using namespace pablo;

@@ -1885,10 +1885,18 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                 Instruction & inst = *i;
                 if (LLVM_UNLIKELY(isa<CallInst>(inst))) {
                     CallInst & ci = cast<CallInst>(inst);
-                    assert ("null pointer for function call?" && ci.getCalledFunction() || ci.isIndirectCall());
+                    auto isIndirectCall = [&]() {
+                        #if LLVM_VERSION_INTEGER > LLVM_VERSION_CODE(6, 0, 0)
+                        return ci.isIndirectCall();
+                        #else
+                        const Value * V = ci.getCalledOperand();
+                        return !(isa<Function>(V) || isa<Constant>(V));
+                        #endif
+                    };
+                    assert ("null pointer for function call?" && ci.getCalledFunction() || isIndirectCall());
                     // if we're using address sanitizer, try to determine whether we're
                     // rechecking the same address
-                    if (ci.isIndirectCall()) {
+                    if (isIndirectCall()) {
                         /* do nothing */
                     }
                     #ifdef HAS_ADDRESS_SANITIZER
