@@ -15,7 +15,22 @@ using namespace pablo;
 
 namespace kernel {
 
-    
+static cl::OptionCategory NestingOptions("Nesting Kernel Flags", "These options control printing for the nesting kernel");
+static cl::opt<bool> PrintStreams("print-nesting-streams", cl::desc("Print stream values"), cl::init(false), cl::cat(NestingOptions));
+
+NestingDepth::NestingDepth(BuilderRef b,
+		           StreamSet * brackets,
+                           StreamSet * depth, StreamSet * errs,
+                           unsigned maxDepth)
+    : PabloKernel(b, "NestingDepth" +
+                     std::to_string(maxDepth) +
+                     (PrintStreams ? "_pk" : ""),
+                  {Binding{"brackets", brackets}},
+                  {Binding{"nestingDepth", depth},
+                   Binding{"errs", errs, FixedRate(), Add1()}}),
+    mMaxDepth(maxDepth),
+    mNestingDepthBits(ceil_log2(maxDepth + 1)) {}
+
 void NestingDepth::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> brackets = getInputStreamSet("brackets");
@@ -62,11 +77,14 @@ void NestingDepth::generatePabloMethod() {
     PabloAST * unmatchedR_err = pb.createAnd(RBrak, pb.createNot(closed), "unmatchedR_err");
     Var * ND = getOutputStreamVar("nestingDepth");
     for (unsigned i = 0; i < mNestingDepthBits; i++) {
-        pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {nestingDepthVar[i]});
+        if (PrintStreams) {
+           pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {nestingDepthVar[i]});
+        }
         pb.createAssign(pb.createExtract(ND, pb.getInteger(i)), nestingDepthVar[i]);
     }
     Var * errout = getOutputStreamVar("errs");
     pb.createAssign(pb.createExtract(errout, pb.getInteger(0)),
                     pb.createOr(errs, unmatchedR_err));
 }
+
 }

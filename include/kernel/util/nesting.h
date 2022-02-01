@@ -45,12 +45,7 @@ public:
     NestingDepth(BuilderRef b,
                  StreamSet * brackets,
                  StreamSet * depth, StreamSet * errs,
-                 unsigned maxDepth = 15)
-    : PabloKernel(b, "NestingDepth" + std::to_string(maxDepth),
-                  {Binding{"brackets", brackets}},
-                  {Binding{"nestingDepth", depth},
-                   Binding{"errs", errs, FixedRate(), Add1()}}),
-    mMaxDepth(maxDepth), mNestingDepthBits(ceil_log2(maxDepth + 1)) {}
+                 unsigned maxDepth = 15);
 protected:
     void generatePabloMethod() override;
 private:
