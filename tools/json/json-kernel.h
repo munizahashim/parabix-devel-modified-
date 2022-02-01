@@ -141,11 +141,9 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                         StreamSet * const stringSpan,
                         StreamSet * const numberSpan,
                         StreamSet * const kwEndMarkers,
-                        StreamSet * const kwMarker,
                         StreamSet * const firstLexs,
-                        StreamSet * const combinedBrackets,
-                        StreamSet * const extraErr,
-                        StreamSet * const syntaxErr
+                        StreamSet * const combinedValues,
+                        StreamSet * const extraErr
     )
     : pablo::PabloKernel(b,
                          "jsonFindKwAndExtraneousChars",
@@ -156,11 +154,9 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                             Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
                          },
                          {
-                            Binding{"kwMarker", kwMarker},
                             Binding{"firstLexs", firstLexs},
-                            Binding{"combinedBrackets", combinedBrackets},
+                            Binding{"combinedValues", combinedValues},
                             Binding{"extraErr", extraErr},
-                            Binding{"syntaxErr", syntaxErr},
                          }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
