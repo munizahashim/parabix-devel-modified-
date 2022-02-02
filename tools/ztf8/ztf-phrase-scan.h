@@ -31,6 +31,7 @@ private:
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
     const unsigned mNumSym;
+    const unsigned mSubStride;
 };
 
 class SymbolGroupCompression final : public MultiBlockKernel {
@@ -53,6 +54,7 @@ private:
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
     const unsigned mNumSym;
+    const unsigned mSubStride;
 };
 
 class WriteDictionary final : public MultiBlockKernel {
