@@ -325,9 +325,19 @@ Kernel * PipelineBuilder::makeKernel() {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         out << "+SS";
     }
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
+        out << "-TL";
+    }
+    if (LLVM_UNLIKELY(codegen::EnableHybridThreadModel)) {
+        out << "+HT";
+    }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
-        out << "+PAPI:" << codegen::PapiCounterOptions;
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+            out << "+PPO:" << codegen::PapiCounterOptions;
+        } else {
+            out << "+PPA:" << codegen::PapiCounterOptions;
+        }
     }
     #endif
     for (unsigned i = 0; i < numOfKernels; ++i) {

@@ -27,14 +27,17 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     std::vector<unsigned> mapping(n, -1U);
 
+#ifndef NDEBUG
     unsigned numOfKernels = 2;
+#endif
 
     BEGIN_SCOPED_REGION
 
     std::vector<unsigned> ordering;
     ordering.reserve(n);
     if (LLVM_UNLIKELY(!lexical_ordering(Relationships, ordering))) {
-        report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
+        throw new std::exception();
+        // report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
     }
 
     // Convert the relationship graph into a simpler graph G that we can annotate.
@@ -233,8 +236,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                 // for now we simply prevent this case.
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
-                        case AttrId::InternallySynchronized:
                         case AttrId::IsolateOnHybridThread:
+                            if (mPipelineKernel->getNumOfThreads() == 1 || !codegen::EnableHybridThreadModel) {
+                                break;
+                            }
+                        case AttrId::InternallySynchronized:                        
                             V.set(nextRateId++);
                         case AttrId::CanTerminateEarly:
                         case AttrId::MayFatallyTerminate:
@@ -472,13 +478,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         const RelationshipNode & node = Relationships[u];
         if (node.Type == RelationshipNode::IsRelationship) {
             const auto j = parent(i, G);
-            const auto producer = sequence[j];
-            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = componentId[j];
             for (const auto e : make_iterator_range(out_edges(i, G))) {
                 const auto k = target(e, G);
-                const auto consumer = sequence[k];
-                assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
                 const auto consPartId = componentId[k];
                 if (prodPartId != consPartId) {
                     assert (consPartId > 0);
@@ -498,7 +502,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     renumberingSeq.reserve(partitionCount);
 
     if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
-        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        //report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        throw new std::exception();
     }
 
     assert (renumberingSeq[0] == 0);
@@ -610,6 +615,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     using PartitionGraph = adjacency_list<hash_setS, vecS, bidirectionalS, no_property, no_property, no_property>;
 
+
     std::vector<BitSet> rateDomSet(PartitionCount);
 
     unsigned nextRateId = 0;
@@ -639,19 +645,22 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         const auto producer = source(output, mBufferGraph);
         const auto pid = KernelPartitionId[producer];
 
+        const auto threadType = PartitionOnHybridThread.test(pid);
+
         auto rateId = nextRateId;
         nextRateId += hasVarOutput ? 1 : 0;
-
         for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(input, mBufferGraph);
             const auto cid = KernelPartitionId[consumer];
-            if (cid != pid) {
+            if (cid != pid && PartitionOnHybridThread.test(cid) == threadType) {
                 add_edge(pid, cid, J);
                 if (hasVarOutput) {
                     addRateId(cid, rateId);
                 }
             }
         }
+
+
     }
 
     // Now compute the transitive reduction of the partition relationships
@@ -677,10 +686,15 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     BitSet intersection;
     expandCapacity(intersection);
 
+    auto priorThreadType = PartitionOnHybridThread.test(1);
+
     for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
         auto & ds = rateDomSet[i];
-        if (out_degree(i, J) == 0) {
+
+        const auto currentThreadType = PartitionOnHybridThread.test(i);
+        if (out_degree(i, J) == 0 || priorThreadType != currentThreadType) {
             ds.reset();
+            priorThreadType = currentThreadType;
         } else {
             if (in_degree(i, J) > 0) {
                 intersection.set();
@@ -691,112 +705,46 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
                 }
                 ds |= intersection;
             }
-            if (ds.none()) {
-                const auto rateId = nextRateId++;
-                for (unsigned i = 0; i < PartitionCount; ++i) {
-                    expandCapacity(rateDomSet[i]);
-                }
-                expandCapacity(intersection);
-                ds.set(rateId);
-            }
         }
 
-    }
-
-
-
-    BitVector onHybridThread(PartitionCount);
-
-    if (mPipelineKernel->getNumOfThreads() > 1) {
-        for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-            if (getKernel(i)->hasAttribute(AttrId::IsolateOnHybridThread)) {
-                assert ("more than one kernel in a hybrid partition?" && !onHybridThread.test(KernelPartitionId[i]));
-                onHybridThread.set(KernelPartitionId[i]);
+        if (ds.none()) {
+            const auto rateId = nextRateId++;
+            for (unsigned i = 0; i < PartitionCount; ++i) {
+                expandCapacity(rateDomSet[i]);
             }
+            expandCapacity(intersection);
+            ds.set(rateId);
         }
     }
 
-    std::vector<unsigned> partList;
-    partList.reserve(PartitionCount);
-    partList.push_back(0);
+    mPartitionJumpIndex[0] = 0;
+
     for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
-        if (LLVM_LIKELY(!onHybridThread.test(i))) {
-            partList.push_back(i);
-        }
-    }
-    partList.push_back(PartitionCount - 1);
-    assert (partList.size() > 2);
-
-    const auto m = partList.size();
-
-    mPartitionJumpIndex[0] = 1;
-    for (unsigned i = 1; i < (m - 1); ++i) {
-        const BitSet & prior =  rateDomSet[partList[i - 1]];
-        const auto b = partList[i];
-        const BitSet & current =  rateDomSet[b];
-        auto jumpIndex = partList[i + 1];
+        const BitSet & prior =  rateDomSet[i - 1];
+        const BitSet & current =  rateDomSet[i];
+        auto j = i + 1U;
+        const auto threadType = PartitionOnHybridThread.test(i);
         if (prior != current && in_degree(i, J) > 0) {
             assert (current.any());
-            jumpIndex = -1U;
-            for (unsigned j = (i + 1); j < m; ++j) {
-                const auto k = partList[j];
-                const BitSet & next =  rateDomSet[k];
+            for (; j < (PartitionCount - 1); ++j) {
+                const BitSet & next =  rateDomSet[j];
                 if (!current.is_subset_of(next)) {
-                    jumpIndex = k;
                     break;
                 }
             }
-            assert (jumpIndex < -1U);
-        }
-        assert (jumpIndex > b);
-        mPartitionJumpIndex[b] = jumpIndex;
-    }
-    mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
-
-    if (onHybridThread.any()) {
-        partList.clear();
-        for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
-            if (LLVM_LIKELY(onHybridThread.test(i))) {
-                partList.push_back(i);
+        } else {
+            for (; j < (PartitionCount - 1); ++j) {
+                if (PartitionOnHybridThread.test(j) == threadType) {
+                    break;
+                }
             }
         }
-        const auto m = partList.size();
-        assert (m > 0);
-        partList.push_back(PartitionCount - 1);
-        for (unsigned i = 0; i < m; ++i) {
-            mPartitionJumpIndex[partList[i]] = mPartitionJumpIndex[partList[i + 1]];
-        }
+        assert (j > i);
+        assert (PartitionOnHybridThread.test(j) == threadType || j == (PartitionCount - 1));
+        mPartitionJumpIndex[i] = j;
     }
 
-#endif
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makePartitionJumpGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::makePartitionJumpTree() {
-    mPartitionJumpTree = PartitionJumpTree(PartitionCount);
-    for (auto i = 0U; i < (PartitionCount - 1); ++i) {
-        assert (mPartitionJumpIndex[i] >= i && mPartitionJumpIndex[i] < PartitionCount);
-        add_edge(i, mPartitionJumpIndex[i], mPartitionJumpTree);
-    }
-
-#if 0
-
-    auto & out = errs();
-
-    out << "digraph \"" << "J2" << "\" {\n";
-    for (auto v : make_iterator_range(vertices(mPartitionJumpTree))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
-    }
-    for (auto e : make_iterator_range(edges(mPartitionJumpTree))) {
-        const auto s = source(e, mPartitionJumpTree);
-        const auto t = target(e, mPartitionJumpTree);
-        out << "v" << s << " -> v" << t << ";\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
+    mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif
 }

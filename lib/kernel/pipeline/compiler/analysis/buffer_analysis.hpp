@@ -35,6 +35,8 @@ void PipelineAnalysis::generateInitialBufferGraph() {
     using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, RelationshipGraph::edge_descriptor>;
     using Vertex = graph_traits<Graph>::vertex_descriptor;
 
+    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
         const RelationshipNode & node = mStreamGraph[kernel];
@@ -79,7 +81,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
             BufferPort bp(port, binding, lb, ub);
 
-            bool cannotBePlacedIntoThreadLocalMemory = false;
+            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory;
 
             if (LLVM_UNLIKELY(rate.getKind() == RateId::Unknown)) {
                 bp.IsManaged = true;
@@ -195,8 +197,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             prior_out = port;
             #endif
             const auto binding = target(e, mStreamGraph);
-            const RelationshipNode & rn = mStreamGraph[binding];
-            assert (rn.Type == RelationshipNode::IsBinding);
+            assert (mStreamGraph[binding].Type == RelationshipNode::IsBinding);
             const auto portNum = port.Number + numOfInputs;
             E[portNum] = e;
             if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {
@@ -298,7 +299,22 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
     }
 
+//    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
+//        const RelationshipNode & node = mStreamGraph[kernel];
+//        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
+//        if (isa<PopCountKernel>(kernelObj)) {
+//            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//                const auto streamSet = target(output, mBufferGraph);
+//                BufferNode & bn = mBufferGraph[streamSet];
+//                if (bn.Locality == BufferLocality::ThreadLocal) {
+//                    bn.Locality = BufferLocality::GloballyShared;
+//                }
+//            }
+//        }
+
+
+//    }
 
 }
 
@@ -519,19 +535,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
         }
     }
 
-    auto mustBeLinear = [](const Binding & binding) {
-        for (const Attribute & attr : binding.getAttributes()) {
-            switch(attr.getKind()) {
-                case AttrId::Linear:
-                case AttrId::Deferred:
-                    return true;
-                default: break;
-            }
-        }
-        const ProcessingRate & rate = binding.getRate();
-        return !rate.isFixed();
-    };
-
     // If the binding attributes of the producer/consumer(s) of a streamSet indicate
     // that the kernel requires linear input, mark it accordingly.
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
@@ -540,6 +543,8 @@ void PipelineAnalysis::identifyLinearBuffers() {
         #if defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR) && defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR)
         N.IsLinear = true;
         #else
+
+        N.IsLinear |= (N.Locality == BufferLocality::ThreadLocal);
 
         if (N.IsLinear) {
             continue;
@@ -553,6 +558,19 @@ void PipelineAnalysis::identifyLinearBuffers() {
         const auto producer = source(binding, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
         #endif
+
+        auto mustBeLinear = [](const Binding & binding) {
+            for (const Attribute & attr : binding.getAttributes()) {
+                switch(attr.getKind()) {
+                    case AttrId::Linear:
+                    case AttrId::Deferred:
+                        return true;
+                    default: break;
+                }
+            }
+            const ProcessingRate & rate = binding.getRate();
+            return !rate.isFixed();
+        };
 
         if (LLVM_UNLIKELY(mustBeLinear(output))) { // || streamSet == 99
              N.IsLinear = true;
@@ -649,7 +667,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
-            outputRate.CanModifySegmentLength = (!N.IsLinear);
+            if (LLVM_LIKELY(N.isOwned() && N.Locality != BufferLocality::ThreadLocal)) {
+                outputRate.CanModifySegmentLength = (!N.IsLinear); // || N.CrossesHybridThreadBarrier;
+            }
         }
     }
 }
@@ -678,6 +698,27 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto producer = source(producerOutput, mBufferGraph);
 
+//        const RelationshipNode & node = mStreamGraph[producer];
+//        const Kernel * const kernelObj = node.Kernel;
+//        const auto isPopCountStreamSet = isa<PopCountKernel>(kernelObj);
+
+        //    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
+
+        //        const RelationshipNode & node = mStreamGraph[kernel];
+        //        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
+        //        if (isa<PopCountKernel>(kernelObj)) {
+        //            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+        //                const auto streamSet = target(output, mBufferGraph);
+        //                BufferNode & bn = mBufferGraph[streamSet];
+        //                if (bn.Locality == BufferLocality::ThreadLocal) {
+        //                    bn.Locality = BufferLocality::GloballyShared;
+        //                }
+        //            }
+        //        }
+
+
+        //    }
+
         #ifndef NDEBUG
         const auto & processingRate = producerRate.Binding.get().getRate();
         assert (!processingRate.isGreedy() || producerRate.Minimum <= producerRate.Maximum);
@@ -685,7 +726,9 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         #endif
 
         auto bMin = floor(producerRate.Minimum * MinimumNumOfStrides[producer]);
-        auto bMax = ceiling(producerRate.Maximum * MaximumNumOfStrides[producer]);
+        // const auto & maxStrides = bn.isNonThreadLocal() ? ExpectedNumOfStrides : MaximumNumOfStrides;
+        const auto & maxStrides = MaximumNumOfStrides;
+        auto bMax = ceiling(producerRate.Maximum * maxStrides[producer]);
 
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
 
@@ -700,7 +743,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
             #endif
 
             const auto cMin = floor(consumerRate.Minimum * MinimumNumOfStrides[consumer]);
-            const auto cMax = ceiling(consumerRate.Maximum * MaximumNumOfStrides[consumer]);
+            const auto cMax = ceiling(consumerRate.Maximum * maxStrides[consumer]);
 
             assert (cMax >= cMin);
 
@@ -764,13 +807,14 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto reqSize1 = round_up_to((bMax * 2) - bMin, blockWidth) / blockWidth;
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
-        auto requiredSize = std::max(reqSize1, reqSize2);
-
-        assert (requiredSize > 0);
+        auto reqSize3 = std::max(reqSize1, reqSize2);
+//        if (maxLookAhead || maxDelay) {
+//            reqSize3 *= 2;
+//        }
 
         bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
         bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
-        bn.RequiredCapacity = requiredSize;
+        bn.RequiredCapacity = reqSize3;
 
     }
 
@@ -784,9 +828,9 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
-    auto id = out_degree(PipelineInput, mBufferGraph) + in_degree(PipelineOutput, mBufferGraph);
-
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
+
+    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
@@ -799,7 +843,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         const Binding & output = producerRate.Binding;
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isUnowned())) {
-            buffer = new ExternalBuffer(id++, b, output.getType(), true, 0);
+            buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
         } else { // is internal buffer
 
             // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
@@ -807,19 +851,20 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
             // analyze any consumption rates.
 
-            if (bn.Locality == BufferLocality::GloballyShared) {
+            if (bn.Locality == BufferLocality::GloballyShared || bn.CrossesHybridThreadBarrier) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
-                const auto bufferSize = bn.RequiredCapacity * mNumOfThreads;
+                auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
+                auto bufferSize = bn.RequiredCapacity * mult;
                 assert (bufferSize > 0);
-                buffer = new DynamicBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
-                if (bn.Locality == BufferLocality::PartitionLocal) {
-                    bufferSize *= mNumOfThreads;
+                if (bn.Locality == BufferLocality::PartitionLocal || bn.CrossesHybridThreadBarrier) {
+                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
                 }
-                buffer = new StaticBuffer(id++, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
         }
         assert ("missing buffer?" && buffer);

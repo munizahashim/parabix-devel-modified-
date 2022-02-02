@@ -1,4 +1,4 @@
-#include "json2csv_process.h"
+#include "json2csv.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -49,6 +49,11 @@ static std::map<std::string, std::map<int, std::string>> info;
 static uint64_t currentIndex = 0;
 static llvm::SmallVector<u_int8_t, 32> keyVector{};
 static llvm::SmallVector<u_int8_t, 32> valueVector{};
+
+static void json2csv_reportError(const std::string str) {
+    fprintf(stderr, "%s\n", str.c_str());
+    exit(-1);
+}
 
 static void json2csv_resetVector() {
     if (currentState == JKStrBegin) {
@@ -103,6 +108,9 @@ static void json2csv_saveKeyValuePair() {
 }
 
 static ptrdiff_t json2csv_getColumn(const uint8_t * ptr, const uint8_t * lineBegin) {
+    if (lineBegin == nullptr) {
+        return 0;
+    }
     ptrdiff_t column = ptr - lineBegin;
     assert (column >= 0);
     return column;
@@ -128,7 +136,7 @@ static void json2csv_popAndFindNewState() {
     if (last == '[') {
         currentState = JNextComma;
     } else {
-        llvm_unreachable("The stack has an unknown char");
+        json2csv_reportError("The stack has an unknown char");
     }
 }
 
@@ -136,7 +144,7 @@ static void json2csv_parseArr(const uint8_t * ptr, const uint8_t * lineBegin, ui
     if (*ptr == '[') {
         currentState = JArrInit;
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
     }
     stack.push_back(ptr);
 }
@@ -145,7 +153,7 @@ static bool json2csv_parseObj(const uint8_t * ptr, const uint8_t * lineBegin, ui
     if (*ptr == '{') {
         currentState = JObjInit;
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
         return false;
     }
     stack.push_back(ptr);
@@ -158,7 +166,7 @@ static void json2csv_parseStrOrPop(bool popAllowed, const uint8_t * ptr, const u
     } else if (*ptr == '}' && popAllowed) {
         json2csv_popAndFindNewState();
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
@@ -167,7 +175,7 @@ static bool json2csv_parseStrValue(const uint8_t * ptr, const uint8_t * lineBegi
         currentState = JVStrBegin;
         return true;
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing string value", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing string value", ptr, lineBegin, lineNum));
     }
     return false;
 }
@@ -177,7 +185,7 @@ static void json2csv_parseObjOrPop(bool popAllowed, const uint8_t * ptr, const u
         if (*ptr == ']' && popAllowed) {
             currentState = JDone;
         } else {
-            llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
+            json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing array", ptr, lineBegin, lineNum));
         }
     }
 }
@@ -195,7 +203,7 @@ static void json2csv_parseStr(const uint8_t * ptr, const uint8_t * lineBegin, ui
         currentState = JVStrEnd;
         json2csv_saveKeyValuePair();
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing string", ptr, lineBegin, lineNum));
     }
 }
 
@@ -203,13 +211,13 @@ static void json2csv_parseColon(const uint8_t * ptr, const uint8_t * lineBegin, 
     if (*ptr == ':') {
         currentState = JObjColon;
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
 static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBegin, uint64_t lineNum, uint64_t position) {
     if (stack.empty()) {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Stack is empty", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Stack is empty", ptr, lineBegin, lineNum));
         return;
     }
 
@@ -222,7 +230,7 @@ static void json2csv_parseCommaOrPop(const uint8_t * ptr, const uint8_t * lineBe
     } else if (*ptr == '}' || *ptr == ']') {
         json2csv_popAndFindNewState();
     } else {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("Error parsing object", ptr, lineBegin, lineNum));
     }
 }
 
@@ -232,7 +240,7 @@ void json2csv_doneCallback() {
         currentState = JDone;
         return;
     }
-    llvm::report_fatal_error("Found EOF but the JSON is missing elements");
+    json2csv_reportError("Found EOF but the JSON is missing elements");
 }
 
 void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint64_t position) {
@@ -255,6 +263,10 @@ void json2csv_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
     } else if (currentState == JVStrEnd || currentState == JNextComma) {
         json2csv_parseCommaOrPop(ptr, lineBegin, lineNum, position);
     } else if (currentState == JDone && *ptr != ']') {
-        llvm::report_fatal_error(json2csv_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
+        json2csv_reportError(json2csv_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
+}
+
+void json2csv_simpleValidateObjectsAndArrays(const uint8_t * ptr) {
+    json2csv_validateObjectsAndArrays(ptr, nullptr, nullptr, 0, 0);
 }

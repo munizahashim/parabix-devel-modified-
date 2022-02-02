@@ -783,12 +783,14 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b,
     SmallVector<Value *, 64> args;
     args.reserve(doSegment->arg_size());
 
-    FunctionType * const funcType = cast<FunctionType>(doSegment->getType()->getPointerElementType());
-
     auto addNextArg = [&](Value * arg) {
+#ifndef NDEBUG
+        FunctionType * const funcType = cast<FunctionType>(doSegment->getType()->getPointerElementType());
+
         assert ("null argument" && arg);
         assert ("too many arguments?" && args.size() < funcType->getNumParams());
         assert ("invalid argument type" && (funcType->getParamType(args.size()) == arg->getType()));
+#endif
         args.push_back(arg);
     };
 
@@ -1259,7 +1261,6 @@ template <typename ... Args>
 BOOST_NOINLINE void OptimizationBranchCompiler::debugPrint(BuilderRef b, Twine format, Args ...args) const {
     SmallVector<char, 512> tmp;
     raw_svector_ostream out(tmp);
-    Value * threadId = nullptr;
     if (mThreadId) {
         out << "%016" PRIx64 "  ";
     }

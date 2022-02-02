@@ -18,7 +18,6 @@
 
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
-// #define REPORT_PAPI_TESTS
 #endif
 
 

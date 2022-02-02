@@ -448,6 +448,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             maskOffset = b->CreateAnd(position, BLOCK_MASK);
         }
         Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
+
         BasicBlock * const maskLoop = b->CreateBasicBlock(prefix + "_zeroUnwrittenLoop", mKernelLoopExit);
         BasicBlock * const maskExit = b->CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
         Value * const numOfStreams = buffer->getStreamSetCount(b);
@@ -467,10 +468,13 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         } else {
             ptr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
         }
+        #ifdef PRINT_DEBUG_MESSAGES
+        // debugPrint(b, prefix + "_zeroUnwritten_packStart = %" PRIu64, b->CreateSub(startInt, epochInt));
+        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptr);
+        #endif
         Value * const value = b->CreateBlockAlignedLoad(ptr);
         Value * const maskedValue = b->CreateAnd(value, mask);
         b->CreateBlockAlignedStore(maskedValue, ptr);
-
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(ptr->getType());
         #ifdef PRINT_DEBUG_MESSAGES
@@ -486,7 +490,8 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const endInt = b->CreatePtrToInt(end, intPtrTy);
             Value * const remainingPackBytes = b->CreateSub(endInt, startInt);
             #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_packStart = %" PRIu64, b->CreateSub(startInt, epochInt));
+            // debugPrint(b, prefix + "_zeroUnwritten_packStart = %" PRIu64, b->CreateSub(startInt, epochInt));
+            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
             debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
             #endif
             b->CreateMemZero(start, remainingPackBytes, blockWidth / 8);

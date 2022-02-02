@@ -13,9 +13,9 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
-        Value * handle = b->getScalarField(makeKernelName(kernelId));
+        Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId));
         if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
-            handle = b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo());
+            handle = b->CreateLoad(b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo()->getPointerTo()));
         }
         mKernelSharedHandle = handle;
     }
@@ -44,9 +44,9 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         mFullyProcessedItemCount[port] = fullyProcessed;
         if (CheckAssertions) {
             const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-
-            if (bn.Locality == BufferLocality::ThreadLocal) {
+            const auto producer = parent(streamSet, mBufferGraph);
+            if (mCurrentPartitionId == KernelPartitionId[producer]) {
+            // if (bn.Locality == BufferLocality::ThreadLocal) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
                 // NOTE: static linear buffers are assumed to be threadlocal.
                 Value * const fullyConsumed = b->CreateICmpEQ(produced, processed);
@@ -444,7 +444,8 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mExhaustedPipelineInputPhi = nullptr;
     mExhaustedInputAtJumpPhi = nullptr;
 
-    mAnyClosed = nullptr;
+    mAnyClosed[0] = nullptr;
+    mAnyClosed[1] = nullptr;
 
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;

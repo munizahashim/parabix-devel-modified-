@@ -41,16 +41,38 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
     if (mNumOfThreads > 1 || ExternallySynchronized) {
-        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-            if (KernelOnHybridThread.test(kernel)) {
-                continue;
-            }
-            const Kernel * const kernelObj = getKernel(kernel);
-            if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
-                continue;
-            }
+        if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
 
-            RequiresSynchronization.set(kernel);
+            const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+            assert (firstOnHybridThread != -1);
+            HybridSyncLock = static_cast<unsigned>(firstOnHybridThread);
+
+            auto maxProducer = PipelineInput;
+            for (const auto kernel : KernelOnHybridThread.set_bits()) {
+                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    const auto producer = parent(source(e, mBufferGraph), mBufferGraph);
+                    assert (producer < kernel);
+                    maxProducer = std::max<unsigned>(maxProducer, producer);
+                }
+            }
+            assert (maxProducer < firstOnHybridThread);
+            FixedDataSyncLock = maxProducer;
+
+            RequiresSynchronization.set(HybridSyncLock);
+            RequiresSynchronization.set(FixedDataSyncLock);
+        }
+
+        if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
+            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+                const Kernel * const kernelObj = getKernel(kernel);
+                if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
+                    continue;
+                }
+                if (KernelOnHybridThread.test(kernel)) {
+                    continue;
+                }
+                RequiresSynchronization.set(kernel);
+            }
         }
     }
 }
@@ -80,14 +102,14 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
         } else {
         #endif
             assert (mSegNo);
-            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2);
+            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
             segNo->addIncoming(mSegNo, entryBlock);
             mSegNo = segNo;
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         }
         #endif
     }
-    mNextSegNo = b->CreateAdd(mSegNo, ONE);
+    mNextSegNo = b->CreateAdd(mSegNo, ONE, "nextSegNo");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -99,7 +121,17 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
         return;
     }
     assert (mNumOfThreads > 0);
-    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(mNumOfThreads));
+    unsigned step = 0;
+    if (mCompilingHybridThread) {
+        step = 1;
+    } else {
+        step = mNumOfThreads;
+        if (PartitionOnHybridThread.any()) {
+            step -= 1;
+        }
+    }
+    assert (step > 0);
+    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(step));
     cast<PHINode>(mSegNo)->addIncoming(nextSegNo, exitBlock);
     #else
     if (LLVM_LIKELY(ExternallySynchronized || mNumOfThreads > 1)) {
@@ -117,17 +149,18 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId) {
     if (LLVM_LIKELY(RequiresSynchronization.test(kernelId))) {
+
+        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
-        const auto waitingOn = makeKernelName(waitingOnIdx);
-        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), waitingOn + LOGICAL_SEGMENT_SUFFIX);
+        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
         #endif
         BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
-        BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_acquire" + LOGICAL_SEGMENT_SUFFIX, nextNode);
-        BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_acquired" + LOGICAL_SEGMENT_SUFFIX, nextNode);
+        BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
+        BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_LSN_acquired", nextNode);
 
         b->CreateBr(acquire);
 
@@ -159,18 +192,12 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId) {
     const auto required = RequiresSynchronization.test(kernelId);
-    if (LLVM_LIKELY(required || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
+    if (LLVM_LIKELY(required || mCompilingHybridThread || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
-        Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
-        Value * currentSegNo = nullptr;
+        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId);
+        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         if (LLVM_UNLIKELY(CheckAssertions)) {
-            currentSegNo = b->CreateLoad(waitingOnPtr);
-        }
-        b->CreateAtomicStoreRelease(mNextSegNo, waitingOnPtr);
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + ": released %" PRIu64, mSegNo);
-        #endif
-        if (LLVM_UNLIKELY(CheckAssertions && required)) {
+            Value * const currentSegNo = b->CreateLoad(waitingOnPtr);
             Value * const unchanged = b->CreateICmpEQ(mSegNo, currentSegNo);
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -178,7 +205,65 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
                    " but was expected to be %" PRIu64;
             b->CreateAssert(unchanged, out.str(), mKernelName[kernelId], currentSegNo, mSegNo);
         }
+        b->CreateAtomicStoreRelease(mNextSegNo, waitingOnPtr);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + ": released %" PRIu64, mSegNo);
+        #endif
     }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief acquireCurrentSegment
+ *
+ * Before the segment is processed, this loads the segment number of the kernel state and ensures the previous
+ * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
+    if (KernelOnHybridThread.any()) {
+        assert (mNumOfThreads > 1);
+
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
+        BasicBlock * const waiting = b->CreateBasicBlock("hybrid_sync_waiting" , nextNode);
+        BasicBlock * const waited = b->CreateBasicBlock("hybrid_sync_waited", nextNode);
+
+        const auto syncLock = mCompilingHybridThread ? FixedDataSyncLock : HybridSyncLock;
+        assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
+
+        assert (FirstKernel <= syncLock && syncLock <= LastKernel);
+        Value * const otherThread = getSynchronizationLockPtrForKernel(b, syncLock);
+        b->CreateBr(waiting);
+
+        b->SetInsertPoint(waiting);
+        Value * const thisSegNo = b->CreateAtomicLoadAcquire(otherThread);
+        Value * const ready = b->CreateICmpULE(mSegNo, thisSegNo);
+        Value * const done = b->CreateIsNotNull(readTerminationSignal(b, KernelPartitionId[syncLock]));
+        b->CreateLikelyCondBr(b->CreateOr(ready, done), waited, waiting);
+
+        b->SetInsertPoint(waited);
+    }
+}
+
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseHybridThreadSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseHybridThreadSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::writeFinalHybridThreadSynchronizationNumber(BuilderRef b) {
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getSynchronizationLockPtrForKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const {
+    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -10,7 +10,12 @@
 #include <util/extended_boost_graph_containers.h>
 #include <toolchain/toolchain.h>
 #include <boost/range/adaptor/reversed.hpp>
+#if (BOOST_VERSION < 106500)
 #include <boost/math/common_factor_rt.hpp>
+using namespace boost::math;
+#else
+#include <boost/integer/common_factor_rt.hpp>
+#endif
 #include <boost/dynamic_bitset.hpp>
 #include <llvm/IR/ValueMap.h>
 #include <llvm/ADT/BitVector.h>
@@ -265,6 +270,7 @@ struct BufferNode {
     unsigned MaxAdd = 0;
 
     unsigned BufferStart = 0;
+    unsigned BufferEnd = 0;
 
     unsigned RequiredCapacity = 0;
     unsigned OverflowCapacity = 0;
@@ -474,8 +480,6 @@ struct SchedulingNode {
 };
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
-
-using PartitionJumpTree = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property, no_property>;
 
 }
 

@@ -28,6 +28,14 @@ protected:
     unsigned mShiftAmount;
 };
 
+class IndexedAdvance final : public pablo::PabloKernel {
+public:
+    IndexedAdvance(BuilderRef b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount = 1);
+protected:
+    void generatePabloMethod() override;
+    unsigned mShiftAmount;
+};
+
 }
 
 #endif

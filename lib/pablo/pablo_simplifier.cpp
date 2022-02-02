@@ -299,7 +299,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
                 }
             } else if (isa<Advance>(stmt)) {
                 const Advance * const adv = cast<Advance>(stmt);
-                if (LLVM_LIKELY(adv->getAmount() < (adv->getType()->getPrimitiveSizeInBits() / 2))) {
+                if (LLVM_LIKELY(static_cast<unsigned>(adv->getAmount()) < (adv->getType()->getPrimitiveSizeInBits() / 2))) {
                     if (LLVM_UNLIKELY(isNonZero(adv->getExpression()))) {
                         mNonZero.push_back(adv);
                     }

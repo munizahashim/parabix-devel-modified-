@@ -50,13 +50,13 @@ stateVector_t ccSequenceSearchObject::search_from_state(RE * re, stateVector_t v
         const auto ub = rep->getUB();
         const auto rpt = rep->getRE();
         stateVector_t rslt = v;
-        for (unsigned i = 0; i < lb; i++) {
+        for (auto i = 0; i < lb; i++) {
             stateVector_t next = search_from_state(rpt, rslt);
             if (next == rslt) return next;  // Further repetitions won't change state.
             rslt = next;
             if (rslt & mFinalState) return rslt;  // match found
-      }
-        for (unsigned i = lb; i != ub; i++) {
+        }
+        for (auto i = lb; i != ub; i++) {
             stateVector_t next = search_from_state(rpt, rslt) | rslt;
             if (next == rslt) return next; // Further repetitions won't change state.
             rslt |= next;

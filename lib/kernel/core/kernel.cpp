@@ -10,6 +10,7 @@
 #include <boost/container/flat_set.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Format.h>
+#include <llvm/Analysis/ConstantFolding.h>
 #if BOOST_VERSION < 106600
 #include <boost/uuid/sha1.hpp>
 #else
@@ -18,6 +19,7 @@
 using namespace llvm;
 using namespace boost;
 using boost::container::flat_set;
+using IDISA::FixedVectorType;
 
 namespace kernel {
 
@@ -317,55 +319,39 @@ void Kernel::constructStateTypes(BuilderRef b) {
             #endif
         };
 
-        const auto cacheAlignment = b->getCacheAlignment();
+        const size_t cacheAlignment = b->getCacheAlignment();
 
-        auto makeGroupedStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
-                                         StringRef name, const bool addGroupCacheLinePadding) {
+        auto makeStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
+                                  StringRef name, const bool addGroupCacheLinePadding) {
 
             const auto n = structTypeVec.size();
-            if (n == 0) {
-                return StructType::create(b->getContext(), name);
-            }
 
             std::vector<Type *> structTypes(n * 2);
 
-            if (addGroupCacheLinePadding) {
-                // TODO: review LLVM code; I'm worried that I cannot rely on struct size to
-                // always account for internal struct alignments.
+            const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
 
-                unsigned offset = 0;
-                for (unsigned i = 0; i < n; ++i) {
-                    const auto & vec = structTypeVec[i];
-                    StructType * const sty = StructType::create(b->getContext(), vec);
-                    assert (sty->isSized());
-                    const auto typeSize = getTypeSize(sty);
-                    const auto paddingOffset = (typeSize % cacheAlignment);
-                    unsigned padding = 0;
-                    if (paddingOffset != 0) {
-                        padding = (cacheAlignment - paddingOffset);
-                    }
-                    structTypes[(i * 2)] = sty;
-                    structTypes[(i * 2) + 1] = ArrayType::get(int8Ty, padding);
-                    offset += typeSize + padding;
-                }
-            } else {
-                Type * const emptyTy = ArrayType::get(int8Ty, 0);
-                assert (emptyTy->isSized());
-                assert (getTypeSize(emptyTy) == 0);
-                for (unsigned i = 0; i != n; ++i) {
-                    const auto & vec = structTypeVec[i];
-                    StructType * sty = StructType::create(b->getContext(), vec);
-                    assert (sty->isSized());
-                    structTypes[(i * 2)] = sty;
-                    structTypes[(i * 2) + 1] = emptyTy;
-                }
+            size_t byteOffset = 0;
+            for (unsigned i = 0; i < n; ++i) {
+                StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
+                assert (sty->isSized());
+                const auto typeSize = getTypeSize(sty);
+                byteOffset += typeSize;
+                const auto offset = (byteOffset % align);
+                const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
+                structTypes[i * 2] = sty;
+                ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
+                assert (paddingTy->isSized());
+                structTypes[i * 2 + 1] = paddingTy;
+                byteOffset += padding;
             }
 
             StructType * const st = StructType::create(b->getContext(), structTypes, name);
+            assert (st->isSized());
 
             #ifndef NDEBUG
+            const StructLayout * const sl = dl.getStructLayout(st);
+            assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
             if (addGroupCacheLinePadding) {
-                const StructLayout * const sl = dl.getStructLayout(st);
                 for (unsigned i = 0; i < n; ++i) {
                     const auto offset = sl->getElementOffset(i * 2);
                     assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
@@ -377,13 +363,19 @@ void Kernel::constructStateTypes(BuilderRef b) {
         };
 
         // NOTE: StructType::create always creates a new type even if an identical one exists.
-        StructType * const sharedTy = makeGroupedStructType(shared, strShared, sharedGroupCount > 1);
+        StructType * const sharedTy = makeStructType(shared, strShared, sharedGroupCount > 1);
         assert (mSharedStateType == nullptr || mSharedStateType == nullIfEmpty(sharedTy));
         mSharedStateType = sharedTy;
 
-        StructType * const threadLocalTy = makeGroupedStructType(threadLocal, strThreadLocal, false);
+        StructType * const threadLocalTy = makeStructType(threadLocal, strThreadLocal, false);
         assert (mThreadLocalStateType == nullptr || mThreadLocalStateType == nullIfEmpty(threadLocalTy));
         mThreadLocalStateType = threadLocalTy;
+
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
+            errs() << "KERNEL: " << mKernelName
+                   << " SHARED STATE: " << getTypeSize(sharedTy) << " bytes"
+                      ", THREAD LOCAL STATE: "  << getTypeSize(threadLocalTy) << " bytes\n";
+        }
 
     }
     mSharedStateType = nullIfEmpty(mSharedStateType);
@@ -1016,7 +1008,6 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     }
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        assert (false);
         report_fatal_error(doSegment->getName() + " cannot be externally synchronized");
     }
 
@@ -1037,6 +1028,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     }
 
     Value * sharedHandle = nullptr;
+    NestedStateObjs toFree;
     BEGIN_SCOPED_REGION
     ParamMap paramMap;
     for (const auto & input : getInputScalarBindings()) {
@@ -1045,7 +1037,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         paramMap.insert(std::make_pair(scalar, value));
     }
     InitArgs args;
-    sharedHandle = constructFamilyKernels(b, args, paramMap);
+    sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
     END_SCOPED_REGION
     assert (isStateful() || sharedHandle == nullptr);
 
@@ -1141,13 +1133,12 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         b->CreateBr(resumeProgram);
         b->SetInsertPoint(resumeProgram);
     }
-    if (isStateful()) {
-        // call and return the final output value(s)
-        Value * const retVal = finalizeInstance(b, sharedHandle);
-        b->CreateRet(retVal);
-    } else {
-        b->CreateRetVoid();
+
+    Value * const result = finalizeInstance(b, sharedHandle);
+    for (Value * stateObj : toFree) {
+        b->CreateFree(stateObj);
     }
+    b->CreateRet(result);
     return main;
 }
 
@@ -1221,7 +1212,7 @@ Value * Kernel::finalizeInstance(BuilderRef b, Value * const handle) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params) const {
+Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params, NestedStateObjs & toFree) const {
 
     // TODO: need to test for termination on init call
 
@@ -1239,6 +1230,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
     if (LLVM_LIKELY(isStateful())) {
         handle = createInstance(b);
         initArgs.push_back(handle);
+        toFree.push_back(handle);
         addHostArg(handle);
     }
     for (const Binding & input : mInputScalars) {
@@ -1252,7 +1244,8 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         }
         initArgs.push_back(f->second); assert (initArgs.back());
     }
-    recursivelyConstructFamilyKernels(b, initArgs, params);
+    NestedStateObjs toFree;
+    recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
     Function * init = getInitializeFunction(b);
     b->CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
@@ -1281,7 +1274,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */) const {
+void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */, NestedStateObjs & /* toFree */) const {
 
 }
 

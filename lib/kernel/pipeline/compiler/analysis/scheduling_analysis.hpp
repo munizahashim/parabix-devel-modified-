@@ -30,7 +30,7 @@ constexpr static unsigned JUMP_SCHEDULING_GA_ROUNDS = 200;
 constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
 
-constexpr static unsigned PROGRAM_SCHEDULING_GA_ROUNDS = 50;
+constexpr static unsigned PROGRAM_SCHEDULING_GA_ROUNDS = 4; // 50;
 
 constexpr static unsigned PROGRAM_SCHEDULING_GA_STALLS = 10;
 
@@ -46,7 +46,7 @@ constexpr static double MAX_CUT_HS_AVERAGE_STALL_THRESHOLD = 3.0;
 
 constexpr static unsigned MAX_CUT_HS_MAX_AVERAGE_STALLS = 20;
 
-constexpr static unsigned INITIAL_SCHEDULING_POPULATION_ATTEMPTS = 100;
+constexpr static unsigned INITIAL_SCHEDULING_POPULATION_ATTEMPTS = 1000;
 
 constexpr static unsigned INITIAL_SCHEDULING_POPULATION_SIZE = 20;
 
@@ -57,25 +57,22 @@ static_assert(INITIAL_SCHEDULING_POPULATION_SIZE <= MAX_PROGRAM_POPULATION_SIZE,
     "cannot have a larger initial population size than generational population size");
 
 
-constexpr static unsigned SCHEDULING_FITNESS_COST_ACO_ROUNDS = 200;
 
 constexpr static unsigned MAX_CUT_MAX_NUM_OF_CONNECTED_COMPONENTS = 7;
 
-constexpr static double HAMILTONIAN_PATH_INVERSE_K = 1.0 / 50.0;
 
-constexpr static unsigned HAMILTONIAN_PATH_NUM_OF_ANTS = 5;
 
-static_assert((SCHEDULING_FITNESS_COST_ACO_ROUNDS % HAMILTONIAN_PATH_NUM_OF_ANTS) == 0, "rounds must be divisible by # of ants");
+constexpr static unsigned SCHEDULING_FITNESS_COST_ACO_ROUNDS = 100;
 
-constexpr static double HAMILTONIAN_PATH_EPSILON_WEIGHT = 0.1;
+constexpr static double HAMILTONIAN_PATH_ACO_TAU_MIN = 0.1;
 
-constexpr static double HAMILTONIAN_PATH_DELTA_WEIGHT = 100.0;
+constexpr static double HAMILTONIAN_PATH_ACO_TAU_MAX = 10000.0;
+
+constexpr static double HAMILTONIAN_PATH_INVERSE_K = 0.01;
 
 constexpr static double HAMILTONIAN_PATH_ACO_TAU_INITIAL_VALUE = 5.0;
 
-constexpr static double HAMILTONIAN_PATH_ACO_TAU_MIN = HAMILTONIAN_PATH_EPSILON_WEIGHT;
-
-constexpr static double HAMILTONIAN_PATH_ACO_TAU_MAX = HAMILTONIAN_PATH_DELTA_WEIGHT;
+constexpr static unsigned HAMILTONIAN_PATH_ACO_ALPHA = 6;
 
 #if 1
 
@@ -108,22 +105,10 @@ void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, random_eng
     // orderings for the kernels within each partition.
 
     analyzeDataflowWithinPartitions(P, rng);
-
     const auto partial = scheduleProgramGraph(P, rng);
-
     const auto full = assembleFullSchedule(P, partial);
-
     const auto schedule = selectScheduleFromDAWG(full);
-
-
-
-//    errs() << "addSchedulingConstraints\n";
-
     addSchedulingConstraints(schedule);
-
-//    printRelationshipGraph(Relationships, errs(), "Final");
-
-//    exit(-1);
 
 
 }
@@ -499,7 +484,7 @@ public:
                 }
                 live[i] = out_degree(streamSet, S);
                 // initialize the streamset weight in the graph
-                const auto W = ceiling(S[streamSet].Size);
+                const auto W = ceiling(node.Size);
                 // assert (W > 0);
                 weight[firstStreamSet + i] = W;
             }
@@ -534,11 +519,13 @@ private:
 
         for (const auto kernel : candidate) {
             for (const auto output : make_iterator_range(out_edges(kernel, S))) {
+#ifndef NDEBUG
                 const auto streamSet = target(output, S);
                 const SchedulingNode & node = S[streamSet];
                 assert (node.Type != SchedulingNode::IsKernel);
                 assert (node.Type == SchedulingNode::IsStreamSet);
                 assert (streamSetId < numOfStreamSets);
+#endif
                 const auto i = streamSetId++;
 
                 // Each node value in I marks the schedule position.
@@ -982,7 +969,9 @@ struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker
         assert (replacement.size() == numOfKernels);
 
         for (unsigned i = 0; i < numOfKernels; ) {
+#ifndef NDEBUG
             bool progress = false;
+#endif
             for (unsigned j = 0; j != numOfKernels; ++j) {
                 const auto k = L[j];
                 if (remaining[k] == 1) {
@@ -994,7 +983,9 @@ struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker
                         assert (remaining[v] > 1);
                         --remaining[v];
                     }
+#ifndef NDEBUG
                     progress = true;
+#endif
                 }
             }
             assert (progress);
@@ -1044,7 +1035,7 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
         // solution space.
 
         return enumerateUpToNTopologicalOrderings(D, INITIAL_TOPOLOGICAL_POPULATION_SIZE, [&](const Candidate & L) {
-            insertCandidate(Candidate{L}, initialPopulation);
+            insertCandidate(Candidate{L}, initialPopulation, false);
         });
 
     }
@@ -1114,13 +1105,17 @@ void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, rando
 
         const auto S = makeIntraPartitionSchedulingGraph(P, currentPartitionId);
 
+#ifndef NDEBUG
         constexpr auto fakeInput = 0U;
+#endif
         constexpr auto firstKernel = 1U;
 
         const auto & kernels = currentPartition.Kernels;
         const auto numOfKernels = kernels.size();
         assert (numOfKernels > 0);
+#ifndef NDEBUG
         const auto fakeOutput = numOfKernels + 1U;
+#endif
 
         // We want to generate a subgraph of S consisting of only the kernel nodes
         // but whose edges initially represent the transitive closure of S. Once we
@@ -1211,8 +1206,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
 
     for (const auto u : kernels) {
 
-        const RelationshipNode & node = Relationships[u];
-        assert (node.Type == RelationshipNode::IsKernel);
+        assert (Relationships[u].Type == RelationshipNode::IsKernel);
         assert (PartitionIds.at(u) == currentPartitionId);
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
             const auto binding = source(e, Relationships);
@@ -1530,7 +1524,9 @@ struct ProgramSchedulingJumpAnalysisWorker final {
         assert (replacement.size() == candidateLength);
 
         for (unsigned i = 0; i < candidateLength; ) {
+#ifndef NDEBUG
             bool progress = false;
+#endif
             for (unsigned j = 0; j != candidateLength; ++j) {
                 const auto k = L[j];
                 if (remaining[k] == 1) {
@@ -1542,7 +1538,9 @@ struct ProgramSchedulingJumpAnalysisWorker final {
                         assert (remaining[v] > 1);
                         --remaining[v];
                     }
+#ifndef NDEBUG
                     progress = true;
+#endif
                 }
             }
             assert (progress);
@@ -1720,7 +1718,7 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
      ** ------------------------------------------------------------------------------------------------------------- */
     bool initGA(Population & initialPopulation) override {
         for (unsigned i = 0; i < INITIAL_SCHEDULING_POPULATION_ATTEMPTS; ++i) {
-            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation)) {
+            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation, false)) {
                 if (initialPopulation.size() >= INITIAL_SCHEDULING_POPULATION_SIZE) {
                     return false;
                 }
@@ -1781,6 +1779,8 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
         assert (candidate.size() == numOfKernels);
         assert (index.size() == numOfKernels);
 
+        std::vector<std::pair<unsigned, double>> history;
+
         // record the index position of each kernel in the candidate
         for (unsigned i = 0; i < numOfKernels; ++i) {
             const auto j = candidate[i];
@@ -1837,8 +1837,6 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
        double bestInversionCost = 1.0;
 
-       std::array<double, HAMILTONIAN_PATH_NUM_OF_ANTS> pathCost;
-
        for (auto & e : trail) {
            e.second = HAMILTONIAN_PATH_ACO_TAU_INITIAL_VALUE;
        }
@@ -1851,15 +1849,11 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
            Vertex u = 0;
 
-           const auto pathIdx = (r % HAMILTONIAN_PATH_NUM_OF_ANTS);
-
-           auto & P = path[pathIdx];
-
-           P.clear();
+           path.clear();
 
            for (;;) {
 
-               P.push_back(u);
+               path.push_back(u);
 
                if (out_degree(u, I) == 0) {
                    break;
@@ -1876,7 +1870,7 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
                    const auto f = trail.find(std::make_pair(u, v));
                    assert (f != trail.end());
                    const auto a = f->second;
-                   const auto value = a * a * a;
+                   const auto value = std::pow(a, HAMILTONIAN_PATH_ACO_ALPHA);
                    sum += value;
                    targets.emplace_back(sum);
                }
@@ -1894,13 +1888,13 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
                targets.clear();
            }
 
-           assert (P.size() == (numOfKernels + 1));
+           assert (path.size() == (numOfKernels + 1));
 
            // extract the sequence of kernel ids from the path
            toEval.clear();
            for (unsigned i = 1; i <= numOfKernels; ++i) {
-                const auto a = P[i - 1];
-                const auto b = P[i];
+                const auto a = path[i - 1];
+                const auto b = path[i];
                 const auto e = edge(a, b, I);
                 assert (e.second);
                 toEval.push_back(I[e.first]);
@@ -1908,84 +1902,78 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
            assert (toEval.size() == numOfKernels);
 
-           pathCost[pathIdx] = inversion_cost();
+           const auto inversionCost = inversion_cost();
 
-           if (pathIdx == (HAMILTONIAN_PATH_NUM_OF_ANTS - 1)) {
+           auto updatePath = [&](const Candidate & path, const double inversionCost) {
 
-               auto updatePath = [&](const Candidate & path, const double inversionCost) {
+               const auto numOfKernels = path.size();
 
-                   const auto l = path.size();
+               if (inversionCost > bestInversionCost) {
 
-                   if (inversionCost > bestInversionCost) {
+                   const auto d = inversionCost - bestInversionCost;
+                   const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
 
-                       const auto d = inversionCost - bestInversionCost;
-                       const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
-
-                       for (unsigned i = 1; i < l; ++i) {
-                           const auto e = std::make_pair(path[i - 1], path[i]);
-                           const auto f = trail.find(e);
-                           assert (f != trail.end());
-                           double & t = f->second;
-                           t = std::max(t - deposit, HAMILTONIAN_PATH_ACO_TAU_MIN);
-                       }
-
-                   } else if (inversionCost < bestInversionCost) {
-                       const auto d = bestInversionCost - inversionCost;
-                       const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
-
-                       for (unsigned i = 1; i < l; ++i) {
-                           const auto e = std::make_pair(path[i - 1], path[i]);
-                           const auto f = trail.find(e);
-                           assert (f != trail.end());
-                           double & t = f->second;
-                           t = std::min(t + deposit, HAMILTONIAN_PATH_ACO_TAU_MAX);
-                       }
-
+                   for (unsigned i = 1; i < numOfKernels; ++i) {
+                       const auto e = std::make_pair(path[i - 1], path[i]);
+                       const auto f = trail.find(e);
+                       assert (f != trail.end());
+                       double & t = f->second;
+                       t = std::max(t - deposit, HAMILTONIAN_PATH_ACO_TAU_MIN);
                    }
 
-               };
+               } else if (inversionCost < bestInversionCost) {
+                   const auto d = bestInversionCost - inversionCost;
+                   const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
 
-               auto highestInversionCost = std::numeric_limits<double>::min();
-               auto highestInversion = 0U;
-               auto lowestInversionCost = std::numeric_limits<double>::max();
-               auto lowestInversion = 0U;
+                   for (unsigned i = 1; i < numOfKernels; ++i) {
+                       const auto e = std::make_pair(path[i - 1], path[i]);
+                       const auto f = trail.find(e);
+                       assert (f != trail.end());
+                       double & t = f->second;
+                       t = std::min(t + deposit, HAMILTONIAN_PATH_ACO_TAU_MAX);
+                   }
 
-               for (unsigned i = 0; i < HAMILTONIAN_PATH_NUM_OF_ANTS; ++i) {
-                   if (highestInversionCost < pathCost[i]) {
-                       highestInversionCost = pathCost[i];
-                       highestInversion = i;
-                   }
-                   if (lowestInversionCost > pathCost[i]) {
-                       lowestInversionCost = pathCost[i];
-                       lowestInversion = i;
-                   }
                }
 
-               updatePath(path[highestInversion], highestInversionCost);
-               updatePath(path[lowestInversion], lowestInversionCost);
+           };
 
-               if (bestInversionCost > lowestInversionCost) {
-                   bestInversionCost = lowestInversionCost;
+           if (inversionCost > bestInversionCost) {
 
-                   // reconstruct the repaired ordering
-                   toEval.clear();
-                   const auto & P = path[lowestInversion];
-                   for (unsigned i = 1; i <= numOfKernels; ++i) {
-                        const auto a = P[i - 1];
-                        const auto b = P[i];
-                        const auto e = edge(a, b, I);
-                        assert (e.second);
-                        toEval.push_back(I[e.first]);
-                   }
-                   assert (toEval.size() == numOfKernels);
-                   replacement.swap(toEval);
+               const auto d = inversionCost - bestInversionCost;
+               const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
+
+               for (unsigned i = 1; i < numOfKernels; ++i) {
+                   const auto e = std::make_pair(path[i - 1], path[i]);
+                   const auto f = trail.find(e);
+                   assert (f != trail.end());
+                   double & t = f->second;
+                   t = std::max(t - deposit, HAMILTONIAN_PATH_ACO_TAU_MIN);
                }
+
+           } else if (inversionCost < bestInversionCost) {
+               const auto d = bestInversionCost - inversionCost;
+               const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
+
+               for (unsigned i = 1; i < numOfKernels; ++i) {
+                   const auto e = std::make_pair(path[i - 1], path[i]);
+                   const auto f = trail.find(e);
+                   assert (f != trail.end());
+                   double & t = f->second;
+                   t = std::min(t + deposit, HAMILTONIAN_PATH_ACO_TAU_MAX);
+               }
+
            }
+
+
+           if (bestInversionCost > inversionCost) {
+               bestInversionCost = inversionCost;
+               assert (toEval.size() == numOfKernels);
+               replacement.swap(toEval);
+           }
+
        }
 
-       assert (bestInversionCost < 1.0);
-       assert (replacement.size() == numOfKernels);
-
+       assert (candidate.size() == numOfKernels);
        candidate.swap(replacement);
 
    }
@@ -2032,9 +2020,7 @@ public:
     , tau_aux(numOfKernels)
     , tau_offset(numOfKernels) {
 
-        for (unsigned i = 0; i < HAMILTONIAN_PATH_NUM_OF_ANTS; ++i) {
-            path[i].reserve(numOfKernels);
-        }
+        path.reserve(numOfKernels);
 
         replacement.reserve(numOfKernels);
         toEval.reserve(numOfKernels);
@@ -2054,15 +2040,15 @@ private:
 
     flat_map<std::pair<Vertex, Vertex>, double> trail;
     std::vector<unsigned> index;
-    std::array<Candidate, HAMILTONIAN_PATH_NUM_OF_ANTS> path;
+
 
     TargetVector targets;
 
-    Candidate toEval;
     std::vector<unsigned> tau_aux;
     std::vector<unsigned> tau_offset;
 
-
+    Candidate path;
+    Candidate toEval;
     Candidate replacement;
 
 };
@@ -2077,7 +2063,7 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
      ** ------------------------------------------------------------------------------------------------------------- */
     bool initGA(Population & initialPopulation) override {
         for (unsigned i = 0; i < INITIAL_SCHEDULING_POPULATION_ATTEMPTS; ++i) {
-            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation)) {
+            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation, false)) {
                 if (initialPopulation.size() >= INITIAL_SCHEDULING_POPULATION_SIZE) {
                     return false;
                 }
@@ -2552,7 +2538,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
             const auto sum = rate.getLowerBound() + rate.getUpperBound();
 
             const auto expectedItemsPerStride = sum * strideSize * Rational{1, 2};
-            const PartitionData & Pi = P[producerPartitionId];
+
             const auto expectedItemsPerSegment = N.Repetitions[index] * expectedItemsPerStride;
             const Rational bytesPerItem{outputBinding.getFieldWidth() * outputBinding.getNumElements(), 8};
             node.Size = expectedItemsPerSegment * bytesPerItem; // bytes per segment
@@ -2577,7 +2563,6 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
             }
         }
     }
-
 
     ProgramSchedulingAnalysis SA(S, I, numOfFrontierKernels, rng);
 

@@ -30,33 +30,30 @@ enum Lex {
 };
 
 enum KwMarker {
-    kwNull = 0,
-    kwTrue,
-    kwFalse,
-};
-
-enum KwLex {
-    nMarker = 0,
-    tMarker,
-    fMarker,
-    nextLexMarker
+    kwNullEnd = 0,
+    kwTrueEnd,
+    kwFalseEnd,
 };
 
 /*
     Given the JSON lex for characters backslash and double quotes,
     this kernel returns the marker of a JSON string, based on paper
     Parsing Gigabytes of JSON per Second (Daniel Lemire and Geoff Langdale)
-    E.g.: "a string \\\", oops"
-    In:   1............1......1
-    Out:  1...................1
+
+             json: { "key1\"": value1, "key2"  : null }
+    input example: ..1.....11..........1....1..........
+    output marker: ..1......1..........1....1..........
+      output span: ...111111............1111...........
 */
 class JSONStringMarker : public pablo::PabloKernel {
 public:
-    JSONStringMarker(const std::unique_ptr<KernelBuilder> & b, StreamSet * const lex, StreamSet * strMarker)
+    JSONStringMarker(const std::unique_ptr<KernelBuilder> & b,
+                     StreamSet * const lexIn,
+                     StreamSet * strMarker, StreamSet * strSpan)
     : pablo::PabloKernel(b,
                          "jsonStrMarker",
-                         {Binding{"lex", lex}},
-                         {Binding{"marker", strMarker}}) {}
+                         {Binding{"lexIn", lexIn}},
+                         {Binding{"marker", strMarker}, Binding{"span", strSpan}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -66,31 +63,30 @@ protected:
 /*
    Marks keywords letters such as l', 'a', 's', 'r', 'u', 'e',
    joining it at the end with 'n', 't' and 'f'
+
+            json: { "keynull": false, "keyt": true }
+   input example: ......1......1..........1...1.....
+          output:..................1.............1..
+
+    Note: we do not return the beginning of the marker here because lookahead
+    only works on input streams, so this will be done in a further step.
 */
-class JSONKeywordMarker : public pablo::PabloKernel {
+class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
-    JSONKeywordMarker(const std::unique_ptr<KernelBuilder> & b,
-                      StreamSet * const basis, StreamSet * const lex, StreamSet * const strSpan,
-                      StreamSet * kwMarker, StreamSet * kwLex)
+    JSONKeywordEndMarker(const std::unique_ptr<KernelBuilder> & b,
+                      StreamSet * const basis,
+                      StreamSet * const lexIn, StreamSet * const strSpan,
+                      StreamSet * kwMarker)
     : pablo::PabloKernel(b,
                          "jsonKeywordMarker",
-                         {Binding{"basis", basis}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
-                         {Binding{"kwMarker", kwMarker}, Binding{"kwLex", kwLex}}) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
-class JSONKeywordSpan : public pablo::PabloKernel {
-public:
-    JSONKeywordSpan(const std::unique_ptr<KernelBuilder> & b,
-                    StreamSet * const kwMarker, StreamSet * const kwLex,
-                    StreamSet * kwSpan, StreamSet * kwErr)
-    : pablo::PabloKernel(b,
-                         "jsonKeywordSpan",
-                         {Binding{"kwLex", kwLex}, Binding{"kwMarker", kwMarker, FixedRate(1), LookAhead(4)}},
-                         {Binding{"kwSpan", kwSpan}, Binding{"kwErr", kwErr}}) {}
+                         {
+                            Binding{"basis", basis},
+                            Binding{"lexIn", lexIn},
+                            Binding{"strSpan", strSpan}
+                         },
+                         {
+                            Binding{"kwEndMarker", kwMarker},
+                         }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -105,11 +101,17 @@ protected:
 class JSONNumberSpan : public pablo::PabloKernel {
 public:
     JSONNumberSpan(const std::unique_ptr<KernelBuilder> & b,
-                   StreamSet * const basis, StreamSet * const lex, StreamSet * const strSpan,
+                   StreamSet * const basis,
+                   StreamSet * const lexIn,
+                   StreamSet * const strSpan,
                    StreamSet * nbrLex, StreamSet * nbrSpan, StreamSet * nbrErr)
     : pablo::PabloKernel(b,
                          "jsonNumberMarker",
-                         {Binding{"basis", basis, FixedRate(1), LookAhead(1)}, Binding{"lex", lex}, Binding{"strSpan", strSpan}},
+                         {
+                            Binding{"basis", basis, FixedRate(1), LookAhead(1)},
+                            Binding{"lexIn", lexIn},
+                            Binding{"strSpan", strSpan}
+                         },
                          {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
@@ -117,52 +119,49 @@ protected:
     void generatePabloMethod() override;
 };
 
-class JSONExtraneousChars : public pablo::PabloKernel {
-    public:
-    JSONExtraneousChars(const std::unique_ptr<KernelBuilder> & b,
-                        StreamSet * const combinedSpans,
-                        StreamSet * extraErr)
-    : pablo::PabloKernel(b,
-                         "jsonExtraneousChars",
-                         {Binding{"combinedSpans", combinedSpans}},
-                         {Binding{"extraErr", extraErr}}) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
-
 /*
- * Clean lexer in case there are still 'dirty' chars in the string span
- *        json: { "ke{1": value1, "ke}2"  : null }
- *         span: ...1111............1111...........
- *  lexIn.lCurly 1....1............................
- *  lexIn.rCurly .....................1...........1
- *  lexIn.lCurly 1.................................
- *  lexIn.rCurly .................................1
-*/
-class JSONLexSanitizer : public pablo::PabloKernel {
-public:
-    JSONLexSanitizer(const std::unique_ptr<KernelBuilder> & b,
-                     StreamSet * const stringSpan, StreamSet * const validDQuotes, StreamSet * const lexIn,
-                     StreamSet * lexOut)
-    : pablo::PabloKernel(b,
-                         "jsonLexSanitizer",
-                         {Binding{"strSpan", stringSpan}, Binding{"validDQuotes", validDQuotes}, Binding{"lexIn", lexIn}},
-                         {Binding{"lexOut", lexOut}}) {}
-    bool isCachable() const override { return true; }
-    bool hasSignature() const override { return false; }
-protected:
-    void generatePabloMethod() override;
-};
+   Marks keywords and find if there are other extra chars
+   where they should not be
 
-class JSONErrsSanitizer : public pablo::PabloKernel {
-public:
-    JSONErrsSanitizer(const std::unique_ptr<KernelBuilder> & b, StreamSet * const ws, StreamSet * const errsIn, StreamSet * errsOut)
+            json: { "keynull": false, "key{": truenull2 }
+ firstLexsClning: 1..........1......1.....1.1...........1
+      stringSpan: ..111111111.........111111.............
+      numberSpan: ....................................1..
+    kwEndMarkers: .................1.............1...1...
+ output kwMarker: .............1..............1..........
+ output firstLex: 1..........1......1.......1...........1
+ output extraErr: ................................1......
+
+*/
+class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
+    public:
+    JSONFindKwAndExtraneousChars(
+                        const std::unique_ptr<KernelBuilder> & b,
+                        StreamSet * const lexIn,
+                        StreamSet * const stringSpan,
+                        StreamSet * const numberSpan,
+                        StreamSet * const kwEndMarkers,
+                        StreamSet * const kwMarker,
+                        StreamSet * const firstLexs,
+                        StreamSet * const combinedBrackets,
+                        StreamSet * const extraErr,
+                        StreamSet * const syntaxErr
+    )
     : pablo::PabloKernel(b,
-                         "jsonErrsSanitizer",
-                         {Binding{"ws", ws}, Binding{"errsIn", errsIn}},
-                         {Binding{"errsOut", errsOut}}) {}
+                         "jsonFindKwAndExtraneousChars",
+                         {
+                            Binding{"lexIn", lexIn},
+                            Binding{"strSpan", stringSpan},
+                            Binding{"numSpan", numberSpan},
+                            Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
+                         },
+                         {
+                            Binding{"kwMarker", kwMarker},
+                            Binding{"firstLexs", firstLexs},
+                            Binding{"combinedBrackets", combinedBrackets},
+                            Binding{"extraErr", extraErr},
+                            Binding{"syntaxErr", syntaxErr},
+                         }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:

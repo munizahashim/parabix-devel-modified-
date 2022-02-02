@@ -23,6 +23,9 @@ enable_testing()
 option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
+option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
+option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
+option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
 option(LLVM_PATH "LLVM root directory")
 option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
 
@@ -105,6 +108,11 @@ find_package(PAPI REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_PAPI -lpapi")
 include_directories(${PAPI_INCLUDE_DIRS})
 message(STATUS "Found PAPI_INCLUDE_DIRS: ${PAPI_INCLUDE_DIRS}")
+if (REPORT_PAPI_TESTS)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DREPORT_PAPI_TESTS")
+else()
+message(STATUS "Report PAPI tests was not enabled")
+endif()
 endif()
 
 
@@ -184,6 +192,14 @@ if (USE_ADDRESS_SANITIZER)
     #if (HAS_ADDRESS_SANITIZER)
         set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DHAS_ADDRESS_SANITIZER -fsanitize=address")
     #endif()
+endif()
+
+if (USE_2020_PIPELINE_COMPILER)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2020_PIPELINE_COMPILER")
+endif()
+
+if (USE_2017_U8U16_ALGORITHM)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2017_U8U16_ALGORITHM")
 endif()
 
 ###   Functions   ###

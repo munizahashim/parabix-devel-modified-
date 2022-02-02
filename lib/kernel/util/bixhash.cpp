@@ -26,7 +26,7 @@ void BixHash::generatePabloMethod() {
     std::vector<int> bitmix(mHashBits);
     std::iota(bitmix.begin(), bitmix.end(), 0);
     std::mt19937 random_shuffle_engine(mSeed);
-    shuffle (bitmix.begin(), bitmix.end(), random_shuffle_engine);
+    std::shuffle (bitmix.begin(), bitmix.end(), random_shuffle_engine);
     // could be used to increase randomness in the subsequent hashes
     if (mWordNum == 0) {
         for (unsigned i = 0; i < mHashBits; i++) {

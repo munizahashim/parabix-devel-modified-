@@ -43,12 +43,19 @@ enum DebugFlags {
     EnableMProtect,
     EnableCycleCounter,
     EnableBlockingIOCounter,
+    #ifdef ENABLE_PAPI
+    DisplayPAPICounterThreadTotalsOnly,
+    #endif
     DisableIndirectBranch,
+    DisableThreadLocalStreamSets,
     PrintPipelineGraph,
+    PrintKernelSizes,
     DebugFlagSentinel
 };
 
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
+
+bool LLVM_READONLY AnyDebugOptionIsSet();
 
 // Options for generating IR or ASM to files
 const std::string OmittedOption = ".";
@@ -80,6 +87,11 @@ extern unsigned GroupNum;
 extern std::string ProgramName;
 extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
+extern bool EnableHybridThreadModel;
+
+//extern unsigned NumOfKernels;
+//extern unsigned NumOfStreamSets;
+//extern unsigned NumOfPartitions;
 
 void ParseCommandLineOptions(int argc, const char *const *argv, std::initializer_list<const llvm::cl::OptionCategory *> hiding = {});
 

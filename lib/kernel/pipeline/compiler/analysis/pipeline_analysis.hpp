@@ -22,11 +22,14 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/dominator_tree.hpp>
 
+
+
 namespace kernel {
 
 struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
 public:
+
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
@@ -59,7 +62,7 @@ public:
 
         P.identifyOutputNodeIds();
 
-        P.computeMaximumExpectedDataflow();
+        P.computeMaximumDataflow(false);
 
         P.computeMinimumStrideLengthForConsistentDataflow();
 
@@ -76,19 +79,18 @@ public:
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyLinearBuffers();
-        P.identifyPortsThatModifySegmentLength();
         P.identifyZeroExtendedStreamSets();
 
         P.determineBufferSize(b);
         P.determineBufferLayout(b, rng);
 
         P.identifyCrossHybridThreadStreamSets();
+        P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
 
         P.calculatePartialSumStepFactors();
 
-        P.makePartitionJumpTree();
         P.makeTerminationPropagationGraph();
 
         // Finish the buffer graph
@@ -112,7 +114,10 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mNumOfThreads(pipelineKernel->getNumOfThreads())
-    , mLengthAssertions(pipelineKernel->getLengthAssertions()) {
+    , mLengthAssertions(pipelineKernel->getLengthAssertions())
+    , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
+    , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+    , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers) {
 
     }
 
@@ -214,7 +219,7 @@ private:
 
     void recomputeMinimumExpectedDataflow();
 
-    void computeMaximumExpectedDataflow();
+    void computeMaximumDataflow(const bool expected);
 
     void identifyInterPartitionSymbolicRates();
 
@@ -262,6 +267,10 @@ private:
 
 public:
 
+    const bool                      mTraceProcessedProducedItemCounts;
+    const bool                      mTraceDynamicBuffers;
+    const bool                      mTraceIndividualConsumedItemCounts;
+
     static const unsigned           PipelineInput = 0U;
     static const unsigned           FirstKernel = 1U;
     unsigned                        LastKernel = 0;
@@ -288,6 +297,7 @@ public:
     KernelIdVector                  KernelPartitionId;
 
     std::vector<unsigned>           MinimumNumOfStrides;
+    std::vector<unsigned>           ExpectedNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
 
@@ -297,7 +307,6 @@ public:
     BitVector                       PartitionOnHybridThread;
 
     std::vector<unsigned>           mPartitionJumpIndex;
-    PartitionJumpTree               mPartitionJumpTree;
 
     ConsumerGraph                   mConsumerGraph;
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;

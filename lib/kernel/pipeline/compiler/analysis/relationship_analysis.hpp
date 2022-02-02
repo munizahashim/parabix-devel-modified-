@@ -264,10 +264,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     assert (kernels[0] == PipelineInput);
     assert (kernels[numOfKernels - 1] == PipelineOutput);
 
-    const auto origPartitionCount = num_vertices(partitionGraph);
 
     auto calculateExpectedNumOfStrides = [&](const unsigned kernelId, const unsigned partitionId) -> unsigned {
-        assert (partitionId < origPartitionCount);
+        assert (partitionId < num_vertices(partitionGraph));
         const PartitionData & P = partitionGraph[partitionId];
         const auto & R = P.Repetitions;
         const KernelIdVector & K = P.Kernels;
@@ -1032,7 +1031,11 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 
     for (auto i = numOfKernels; i < n; ++i) {
 
+
         size_t strideLength = 0;
+        #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
+        strideLength = b->getBitBlockWidth();
+        #endif
         CountingType type = CountingType::Unknown;
         for (const auto e : make_iterator_range(out_edges(i, H))) {
             const Edge & ed = H[e];
@@ -2202,8 +2205,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
         const RelationshipType & port = G[e];
         if (port.Type == PortType::Input) {
             const auto binding = source(e, G);
-            const RelationshipNode & rn = G[binding];
-            assert(rn.Type == RelationshipNode::IsBinding);
+            assert(G[binding].Type == RelationshipNode::IsBinding);
             const auto f = first_in_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = source(f, G);
@@ -2212,8 +2214,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
             insertionFunction(PortType::Input, binding, streamSet);
         } else {
             const auto binding = target(e, G);
-            const RelationshipNode & rn = G[binding];
-            assert(rn.Type == RelationshipNode::IsBinding);
+            assert(G[binding].Type == RelationshipNode::IsBinding);
             const auto f = first_out_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = target(f, G);

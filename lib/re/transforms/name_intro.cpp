@@ -20,7 +20,7 @@ class VariableLengthCCNamer final : public RE_Transformer {
 public:
     VariableLengthCCNamer(int UTF_bits) : RE_Transformer("VariableLengthCCNamer"), mUTF_bits(UTF_bits) {}
     RE * transformCC (CC * cc) override {
-        bool variable_length;
+        bool variable_length = false;
         if (mUTF_bits == 8) {
             variable_length = UTF<8>::encoded_length(lo_codepoint(cc->front())) < UTF<8>::encoded_length(hi_codepoint(cc->back()));
         } else if (mUTF_bits == 16) {

@@ -2,6 +2,8 @@
 #define CONSUMER_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
+#include <boost/tokenizer.hpp>
+#include <boost/format.hpp>
 
 namespace kernel {
 
@@ -39,8 +41,6 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     mConsumerGraph = ConsumerGraph(LastStreamSet + 1);
 
-    flat_set<unsigned> observedGlobalPortIds;
-
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         // copy the producing edge
         const auto pe = in_edge(streamSet, mBufferGraph);
@@ -73,12 +73,13 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
-            const auto consPartId = KernelPartitionId[consumer];
+
+            const auto onHybrid = KernelOnHybridThread.test(consumer);
+            const auto type = onHybrid ? 1 : 0;
+            auto & lastConsumer = lastThreadConsumer[type];
+            lastConsumer = std::max<unsigned>(lastConsumer, consumer);
+
             if (KernelPartitionId[consumer] != partitionId) {
-                const auto onHybrid = KernelOnHybridThread.test(consumer);
-                const auto type = onHybrid ? 1 : 0;
-                auto & lastConsumer = lastThreadConsumer[type];
-                lastConsumer = std::max<unsigned>(lastConsumer, consumer);
                 const BufferPort & input = mBufferGraph[ce];
                 add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdatePhi}, mConsumerGraph);
             }
@@ -91,7 +92,8 @@ void PipelineAnalysis::makeConsumerGraph() {
         // consumed item count until the very last consumer reads the data.
 
         for (unsigned type = 0; type < 2; ++type) {
-            const auto lastConsumer = lastThreadConsumer[type];
+            // const auto lastConsumer = LastKernel;
+            auto lastConsumer = lastThreadConsumer[type];
             if (lastConsumer) {
                 ConsumerGraph::edge_descriptor e;
                 bool exists;
@@ -101,12 +103,10 @@ void PipelineAnalysis::makeConsumerGraph() {
                     ConsumerEdge & cn = mConsumerGraph[e];
                     cn.Flags |= flags;
                 } else {
-                    add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, 0, flags}, mConsumerGraph);
+                    add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, ++index, flags}, mConsumerGraph);
                 }
             }
         }
-
-
     }
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
@@ -131,7 +131,20 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     out << "digraph \"ConsumerGraph\" {\n";
     for (auto v : make_iterator_range(vertices(mConsumerGraph))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
+        out << "v" << v << " [label=\"";
+        if (v == PipelineInput) {
+            out << "P_in";
+        } else if (v < PipelineOutput) {
+            const Kernel * const kernel = getKernel(v); assert (kernel);
+            auto name = kernel->getName();
+            boost::replace_all(name, "\"", "\\\"");
+            out << v << ": " << name;
+        } else if (v == PipelineOutput) {
+            out << "P_out";
+        } else {
+            out << "";
+        }
+        out << "\"];\n";
     }
     for (auto e : make_iterator_range(edges(mConsumerGraph))) {
         const auto s = source(e, mConsumerGraph);

@@ -147,7 +147,7 @@ kernel ClassifyBytes :: [BasisBits basis] -> [Lex lex] {
 
 type UTF8Err = <i1>[1]
 
-kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
+kernel ValidateUTF8 :: [BasisBits basis, Lex lex] -> [UTF8Err utf8Err] {
     utf8Err[0] = <0>
 
     # If non-ascii, validate UTF-8
@@ -232,26 +232,40 @@ kernel ValidateUTF8 :: [BasisBits basis] -> [UTF8Err utf8Err] {
         }
         u8mismatch = u8anyscope ^ suffix
         u8_error = u8_error | u8mismatch | u8_FFFE_FFFF
-        utf8Err[0] = u8_error
+
+        # sanitize error
+        conflict = u8_error & lex.ws
+        utf8Err[0] = u8_error ^ conflict
     }
 }
 
-type StringMarker = <i1>[1]
-type StringSpan = <i1>[1]
-
-# Get the string span not sequentially (EveryNth)
-#          json: { "key1": value1, "key2"  : null }
-# input example: ..1....1..........1....1..........
-#        output: ...1111............1111...........
-#
-kernel JSONStringSpan :: [StringMarker marker] -> [StringSpan span] {
-    mStream = marker[0]
-    every2 = EveryNth(mStream, 2)
-    endStream = every2 ^ mStream
-    beginStream = endStream ^ mStream
-    inSpan = InclusiveSpan(beginStream, endStream)
-    span[0] = inSpan
+# Create a multiplexed streamiest for left/right brackets and braces
+# mpx[0] = 1 for right, 0 for left
+# mpx[1] = 1 for square bracket, 0 for brace
+type MultiplexedBrackets = <i1>[2]
+type Brackets = <i1>[7]
+kernel MultiplexBrackets :: [Brackets brackets] -> [MultiplexedBrackets mpx] {
+    rCurly = brackets[1]
+    lBracket = brackets[2]
+    rBracket = brackets[3]
+    mpx[0] = rCurly | rBracket
+    mpx[1] = rBracket | lBracket
 }
+
+
+type ToPostProcess = <i1>[1]
+kernel DeleteInlineBraces :: [MultiplexedBrackets mpx] -> [ToPostProcess toPostProcess] {
+    rightAhead = Lookahead(mpx[0], 1)
+    bracketAhead = Lookahead(mpx[1], 1)
+    leftRightMatch = rightAhead & ~mpx[0]
+    typeMatch = ~(bracketAhead ^ mpx[1])
+    matchedL = leftRightMatch & typeMatch
+    advMatchedL = Advance(matchedL)
+    matched = matchedL | advMatchedL
+    toPostProcess[0] = ~matched
+}
+
+type StringSpan = <i1>[1]
 
 kernel LexLocations :: [Lex lex] -> [BasisBits output] {
     rOrLCurly = lex.lCurly | lex.rCurly
