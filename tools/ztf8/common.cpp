@@ -1,6 +1,7 @@
 
 #include "common.h"
 #include <boost/intrusive/detail/math.hpp>
+#include <llvm/Support/CommandLine.h>
 
 using namespace kernel;
 using namespace llvm;
@@ -37,7 +38,7 @@ ScanWordParameters::ScanWordParameters(BuilderRef b, unsigned stride) :
     WORDS_PER_BLOCK(b->getSize(b->getBitBlockWidth()/width)),
     WORDS_PER_STRIDE(b->getSize(indexWidth))
     {   //  The stride must be a power of 2 and a multiple of the BitBlock width.
-        assert((((stride & (stride - 1)) == 0) && (stride >= b->getBitBlockWidth())));// && (stride <= SIZE_T_BITS * SIZE_T_BITS)));
+        //assert((((stride & (stride - 1)) == 0) && (stride >= b->getBitBlockWidth()) && (stride <= SIZE_T_BITS * SIZE_T_BITS)));
     }
 
 LengthGroupParameters::LengthGroupParameters(BuilderRef b, EncodingInfo encodingScheme, unsigned groupNo, unsigned numSym) :
