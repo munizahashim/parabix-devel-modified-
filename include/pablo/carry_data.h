@@ -7,6 +7,10 @@
 #ifndef CARRY_DATA_H
 #define CARRY_DATA_H
 
+namespace llvm {
+    class Type;
+}
+
 namespace pablo {
 
 class CarryData {
@@ -19,11 +23,6 @@ public:
         , ExplicitSummary = 3
         , NonCarryCollapsingMode = 4
     };
-
-    CarryData()
-    : mSummaryType(NoSummary) {
-
-    }
              
     bool hasSummary() const {
         return (mSummaryType & (ImplicitSummary | BorrowedSummary | ExplicitSummary)) != NoSummary;
@@ -49,18 +48,18 @@ public:
         mSummaryType = value;
     }
 
-//    void setNonCollapsingCarryMode(const bool value = true) {
-//        if (value) {
-//            mSummaryType = (SummaryType)(mSummaryType | NonCarryCollapsingMode);
-//        } else {
-//            mSummaryType = (SummaryType)(mSummaryType & ~NonCarryCollapsingMode);
-//        }
-//    }
+    llvm::Type * getSummarySizeTy() const {
+        return mSummarySize;
+    }
+
+    void setSummarySizeTy(llvm::Type * summarySize) {
+        mSummarySize = summarySize;
+    }
     
 private:
 
-    SummaryType     mSummaryType;
-
+    SummaryType     mSummaryType = NoSummary;
+    llvm::Type *    mSummarySize = nullptr;
 };
 
 

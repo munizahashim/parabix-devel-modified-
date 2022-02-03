@@ -17,8 +17,6 @@ public:
 
     CompressedCarryManager() noexcept;
 
-    void initializeCodeGen(BuilderRef b) override;
-
     /* Entering and leaving ifs. */
 
     void enterIfScope(BuilderRef b) override;
@@ -39,11 +37,6 @@ protected:
 
     llvm::Value * convertFrameToImplicitSummaryPtr(BuilderRef b) const;
     llvm::Type * getSummaryTypeFromCurrentFrame(BuilderRef b) const override;
-
-private:
-
-    llvm::Type * mBaseSummaryType = nullptr;
-
 
 };
 

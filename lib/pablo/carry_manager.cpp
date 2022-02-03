@@ -736,10 +736,10 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
         return shortIndexedAdvanceCarryInCarryOut(b, shiftAmount, strm, index_strm);
     } else if (shiftAmount <= b->getBitBlockWidth()) {
         Value * carryPtr = b->CreateGEP(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex++), b->getInt32(0)});
-        Value * carryIn = b->CreateBlockAlignedLoad(carryPtr);
+        Value * carryIn = b->CreateLoad(carryPtr);
         Value * carryOut, * result;
         std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
-        b->CreateBlockAlignedStore(carryOut, carryPtr);
+        b->CreateStore(carryOut, carryPtr);
         if (mCarryInfo->hasExplicitSummary()) {
             addToCarryOutSummary(b, strm);
         }
@@ -763,8 +763,8 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
         Constant * const CFI = b->getInt32(mCurrentFrameIndex);
         Value * lo_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryBlock});
         Value * hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
-        Value * c_lo = b->CreateBitCast(b->CreateBlockAlignedLoad(lo_GEP), iBitBlock);
-        Value * c_hi = b->CreateBitCast(b->CreateBlockAlignedLoad(hi_GEP), iBitBlock);
+        Value * c_lo = b->CreateBitCast(b->CreateLoad(lo_GEP), iBitBlock);
+        Value * c_hi = b->CreateBitCast(b->CreateLoad(hi_GEP), iBitBlock);
         Value * lo_shift = b->CreateZExt(b->CreateURem(carryPosition, blockWidth), iBitBlock);
         Value * hi_shift = b->CreateZExt(b->CreateSub(blockWidth_1, b->CreateURem(carryBlockEndPos, blockWidth)), iBitBlock);
         Value * carryIn = b->CreateOr(b->CreateLShr(c_lo, lo_shift), b->CreateShl(c_hi, hi_shift));
@@ -781,10 +781,10 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
         hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
         lo_shift = b->CreateZExt(b->CreateURem(carryOutPosition, blockWidth), iBitBlock);
         hi_shift = b->CreateZExt(b->CreateSub(blockWidth_1, b->CreateURem(carryOutEndPos, blockWidth)), iBitBlock);
-        c_lo = b->CreateOr(b->CreateBitCast(b->CreateBlockAlignedLoad(lo_GEP), iBitBlock), b->CreateShl(carryOut, lo_shift));
+        c_lo = b->CreateOr(b->CreateBitCast(b->CreateLoad(lo_GEP), iBitBlock), b->CreateShl(carryOut, lo_shift));
         c_hi = b->CreateLShr(carryOut, hi_shift);
-        b->CreateBlockAlignedStore(b->CreateBitCast(c_lo, b->getBitBlockType()), lo_GEP);
-        b->CreateBlockAlignedStore(b->CreateBitCast(c_hi, b->getBitBlockType()), hi_GEP);
+        b->CreateStore(b->CreateBitCast(c_lo, b->getBitBlockType()), lo_GEP);
+        b->CreateStore(b->CreateBitCast(c_hi, b->getBitBlockType()), hi_GEP);
         mIndexedLongAdvanceIndex++;
         mCurrentFrameIndex++;
         // Now handle the summary.
@@ -794,7 +794,7 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
             Constant * const SF = b->getInt32(summaryFrame);
             for (unsigned i = 0; i < summarySize; i++) {
                 // All ones summary for now.
-                b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP(mCurrentFrame, {ZERO, SF, b->getInt32(i)}));
+                b->CreateStore(b->allOnes(), b->CreateGEP(mCurrentFrame, {ZERO, SF, b->getInt32(i)}));
             }
         }
         return result;
@@ -853,7 +853,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                 indices[2] = b->getInt32(i - 1);
 
                 Value * const ptr = b->CreateGEP(mCurrentFrame, indices);
-                Value * const prior = b->CreateBitCast(b->CreateBlockAlignedLoad(ptr), streamTy);
+                Value * const prior = b->CreateBitCast(b->CreateLoad(ptr), streamTy);
 
                 Value * advanced = nullptr;
                 if (LLVM_LIKELY(summaryBlocks < laneWidth)) {
@@ -876,11 +876,11 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                     }
                     stream = b->CreateAnd(stream, ConstantVector::get(mask));
                     addToCarryOutSummary(b, stream);
-                    b->CreateBlockAlignedStore(stream, ptr);
+                    b->CreateStore(stream, ptr);
                     break;
                 }
                 addToCarryOutSummary(b, stream);
-                b->CreateBlockAlignedStore(stream, ptr);
+                b->CreateStore(stream, ptr);
             }
 
         } else {
@@ -897,8 +897,8 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
 
         Value * const buffer = b->CreateGEP(mCurrentFrame, indices);
         assert (buffer->getType()->getPointerElementType() == b->getBitBlockType());
-        Value * const carryIn = b->CreateBlockAlignedLoad(buffer);
-        b->CreateBlockAlignedStore(value, buffer);
+        Value * const carryIn = b->CreateLoad(buffer);
+        b->CreateStore(value, buffer);
         /* Very special case - no combine */
         if (LLVM_UNLIKELY(shiftAmount == blockWidth)) {
             return b->CreateBitCast(carryIn, b->getBitBlockType());
@@ -917,7 +917,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
         Value * const carryIndex0 = b->CreateSub(blockIndex, b->getInt32(summaryBlocks));
         indices[2] = b->CreateAnd(carryIndex0, indexMask);
         Value * const carryInPtr = b->CreateGEP(mCurrentFrame, indices);
-        Value * const carryIn = b->CreateBlockAlignedLoad(carryInPtr);
+        Value * const carryIn = b->CreateLoad(carryInPtr);
         indices[2] = b->CreateAnd(blockIndex, indexMask);
         Value * const carryOutPtr = b->CreateGEP(mCurrentFrame, indices);
         assert (carryIn->getType() == b->getBitBlockType());
@@ -925,16 +925,16 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
         // If the long advance is an exact multiple of BitBlockWidth, we simply return the oldest
         // block in the long advance carry data area.
         if (LLVM_UNLIKELY(blockShift == 0)) {
-            b->CreateBlockAlignedStore(value, carryOutPtr);
+            b->CreateStore(value, carryOutPtr);
             return carryIn;
         } else { // Otherwise we need to combine data from the two oldest blocks.
             Value * const carryIndex1 = b->CreateSub(blockIndex, b->getInt32(summaryBlocks - 1));
             indices[2] = b->CreateAnd(carryIndex1, indexMask);
 
             Value * const carryInPtr2 = b->CreateGEP(mCurrentFrame, indices);
-            Value * const carryIn2 = b->CreateBlockAlignedLoad(carryInPtr2);
+            Value * const carryIn2 = b->CreateLoad(carryInPtr2);
             assert (carryOutPtr->getType()->getPointerElementType() == value->getType());
-            b->CreateBlockAlignedStore(value, carryOutPtr);
+            b->CreateStore(value, carryOutPtr);
 
             Value * const b0 = b->CreateLShr(b->CreateBitCast(carryIn, streamTy), blockWidth - blockShift);
             Value * const b1 = b->CreateShl(b->CreateBitCast(carryIn2, streamTy), blockShift);
@@ -956,7 +956,7 @@ Value * CarryManager::getNextCarryIn(BuilderRef b) {
     mCarryPackPtr = b->CreateGEP(mCurrentFrame, indices);
     Value * const carryIn = b->CreateLoad(mCarryPackPtr);
     if (mLoopDepth > 0) {
-        b->CreateBlockAlignedStore(Constant::getNullValue(carryIn->getType()), mCarryPackPtr);
+        b->CreateStore(Constant::getNullValue(carryIn->getType()), mCarryPackPtr);
     }
     return carryIn;
 }
@@ -1009,7 +1009,7 @@ Value * CarryManager::readCarryInSummary(BuilderRef b) const {
     }
     Value * const ptr = b->CreateGEP(mCurrentFrame, indices);
     assert (ptr->getType()->getPointerElementType() == b->getBitBlockType());
-    Value * summary = b->CreateBlockAlignedLoad(ptr);
+    Value * summary = b->CreateLoad(ptr);
     if (mNestedLoopCarryInMaskPhi) {
         summary = b->CreateAnd(summary, mNestedLoopCarryInMaskPhi);
     }
