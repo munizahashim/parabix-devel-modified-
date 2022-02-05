@@ -109,8 +109,10 @@ protected:
 
     static unsigned getScopeCount(const PabloBlock * const scope, unsigned index = 0);
 
+    virtual llvm::StructType * analyse(BuilderRef b, const PabloBlock * const scope);
 
-    virtual llvm::StructType * analyse(BuilderRef b, const PabloBlock * const scope, const unsigned ifDepth = 0, const unsigned whileDepth = 0, const bool isNestedWithinNonCarryCollapsingLoop = false);
+
+    llvm::StructType * analyse(BuilderRef b, const PabloBlock * const scope, const unsigned ifDepth, const unsigned whileDepth, const bool isNestedWithinNonCarryCollapsingLoop);
 
     /* Entering and leaving scopes. */
     void enterScope(BuilderRef b);
