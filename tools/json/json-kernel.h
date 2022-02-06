@@ -35,6 +35,13 @@ enum KwMarker {
     kwFalseEnd,
 };
 
+enum Combined {
+    symbols = 0,
+    lBrak,
+    rBrak,
+    values
+};
+
 /*
     Given the JSON lex for characters backslash and double quotes,
     this kernel returns the marker of a JSON string, based on paper
@@ -141,8 +148,7 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                         StreamSet * const stringSpan,
                         StreamSet * const numberSpan,
                         StreamSet * const kwEndMarkers,
-                        StreamSet * const firstLexs,
-                        StreamSet * const combinedValues,
+                        StreamSet * const combinedLexs,
                         StreamSet * const extraErr
     )
     : pablo::PabloKernel(b,
@@ -154,8 +160,7 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                             Binding{"kwEndMarkers", kwEndMarkers, FixedRate(1), LookAhead(4)},
                          },
                          {
-                            Binding{"firstLexs", firstLexs},
-                            Binding{"combinedValues", combinedValues},
+                            Binding{"combinedLexs", combinedLexs},
                             Binding{"extraErr", extraErr},
                          }) {}
     bool isCachable() const override { return true; }

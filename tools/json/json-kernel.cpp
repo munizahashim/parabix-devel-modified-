@@ -194,8 +194,7 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
 
     Var * const nbrErr = getOutputStreamVar("extraErr");
-    Var * const lexOut = getOutputStreamVar("firstLexs");
-    Var * const combinedValues= getOutputStreamVar("combinedValues");
+    Var * const combinedOut = getOutputStreamVar("combinedLexs");
 
     PabloAST * sanitizelCurly = sanitizeLexInput(pb, strSpan, getInputStreamSet("lexIn")[Lex::lCurly]);
     PabloAST * sanitizerCurly = sanitizeLexInput(pb, strSpan, getInputStreamSet("lexIn")[Lex::rCurly]);
@@ -235,15 +234,6 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * extraneousChars = pb.createNot(pb.createOr(keywordSpans, combinedSpans));
     PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, extraneousChars);
 
-    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lCurly)), sanitizelCurly);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::rCurly)), sanitizerCurly);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lBracket)), sanitizelBracket);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::rBracket)), sanitizerBracket);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::colon)), sanitizeColon);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::comma)), sanitizeComma);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::hyphen)), sanitizeHyphen);
-
     // ------------------- Validate values and terminals
 
     PabloAST * beforeKwMarker = pb.createOr3(
@@ -262,5 +252,14 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * strMarker = pb.createAnd(pb.createAdvance(strSpan, 1), notStrSpan);
 
     PabloAST * allValues = pb.createOr3(kwMarker, numMarker, strMarker);
-    pb.createAssign(pb.createExtract(combinedValues, pb.getInteger(0)), allValues);
+    PabloAST * lBrak = pb.createOr(sanitizelCurly, sanitizelBracket);
+    PabloAST * rBrak = pb.createOr(sanitizerCurly, sanitizerBracket);
+    PabloAST * specialSymbols = pb.createOr3(sanitizeColon, sanitizeComma, sanitizeHyphen);
+    PabloAST * allSymbols = pb.createOr3(lBrak, rBrak, specialSymbols);
+
+    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::symbols)), allSymbols);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::lBrak)), lBrak);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::rBrak)), rBrak);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::values)), allValues);
 }
