@@ -27,11 +27,7 @@
 #include <pablo/pe_var.h>
 #include <pablo/ps_assign.h>
 #include <pablo/ps_terminate.h>
-#ifdef USE_CARRYPACK_MANAGER
-#include <pablo/carrypack_manager.h>
-#else
 #include <pablo/carry_manager.h>
-#endif
 #include <pablo/compressed_carry_manager.h>
 #include <toolchain/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
