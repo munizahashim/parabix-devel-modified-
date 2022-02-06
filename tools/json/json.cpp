@@ -1,4 +1,4 @@
-    /*
+/*
  *  Copyright (c) 2019 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  */
@@ -157,19 +157,27 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         extraErr
     );
 
-    // 9.1 Prepare StreamSets for validation
+    // 9.1 Prepare and validate StreamSets
     StreamSet * collapsedLex;
     StreamSet * Errors;
     if (!ToCSVFlag && !ShowLinesFlag) {
-        // TODO: There's another Kernel that's called from here
         StreamSet * const brackets = su::Select(P, firstLexers, su::Range(0, 4));
         collapsedLex = su::Collapse(P, brackets);
+
+        // TODO: There's another Kernel that's called from here
 
         Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
             Errors
         );
+
+        StreamSet * const Errs = su::Collapse(P, Errors);
+        StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
+
+        // 10. Output error in case JSON is not valid
+        auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
+        scan::Reader(P, driver, simpleErrFn, codeUnitStream, { ErrIndices });
     } else {
         if (ToCSVFlag) {
             StreamSet * allLex = P->CreateStreamSet(12, 1);
@@ -187,57 +195,41 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             collapsedLex = su::Collapse(P, allLex);
         }
 
-        Errors = P->CreateStreamSet(3, 1);
-        P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
-            Errors
-        );
-    }
+        // 9.1.1 Prepare StreamSets to show lines on error
+        //    If flag -c is provided, parse for CSV
+        auto normalJsonFn = SCAN_CALLBACK(postproc_validateObjectsAndArrays);
+        auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);
+        auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
+        auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
+        auto normalErrFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
 
-    StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
-
-    // 9.2 Prepare error StreamSets
-    StreamSet * const Errs = su::Collapse(P, Errors);
-    StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
-    StreamSet * const Codes = su::Multiplex(P, Errs);
-
-    // 9.3 Prepare StreamSets in case we want to show lines on error
-    //    If flag -c is provided, parse for CSV
-    auto normalJsonFn = SCAN_CALLBACK(postproc_validateObjectsAndArrays);
-    auto simpleJsonFn = SCAN_CALLBACK(postproc_parensValidate);
-    auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
-
-    auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);
-    auto simpleCsv2JsonFn = SCAN_CALLBACK(json2csv_simpleValidateObjectsAndArrays);
-    auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
-
-    auto normalErrFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
-    auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
-
-    if (ShowLinesFlag) {
         auto const LineBreaks = P->CreateStreamSet(1);
         P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
         StreamSet * const LineNumbers = scan::LineNumbers(P, collapsedLex, LineBreaks);
         StreamSet * const LineSpans = scan::LineSpans(P, LineBreaks);
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
+        StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
 
-        // 9.4 Validate objects and arrays
+        // 9.1.2 Validate objects and arrays
         auto fn = ToCSVFlag ? normalCsv2JsonFn : normalJsonFn;
         auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
         scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
-        
-        // 10. Output whether or not it is valid
-        scan::Reader(P, driver, normalErrFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
-    } else {
-        // 9.4 Validate objects and arrays
-        auto fn = ToCSVFlag ? simpleCsv2JsonFn : simpleJsonFn;
-        auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
-        scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices });
 
-        // 10. Output whether or not it is valid
-        scan::Reader(P, driver, simpleErrFn, codeUnitStream, { ErrIndices });
+        Errors = P->CreateStreamSet(3, 1);
+        P->CreateKernelCall<StreamsMerge>(
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
+            Errors
+        );
+
+        // 9.1.3 Prepare error StreamSets
+        StreamSet * const Errs = su::Collapse(P, Errors);
+        StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
+        StreamSet * const Codes = su::Multiplex(P, Errs);
+
+        // 10. Output error in case JSON is not valid
+        scan::Reader(P, driver, normalErrFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
     }
-    
+
 // for debugging
     if (ShowSpanLocations) {
         StreamSet * filteredBasis = P->CreateStreamSet(8);
