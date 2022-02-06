@@ -13,6 +13,7 @@
 #include <kernel/scan/scan.h>
 #include <kernel/scan/reader.h>
 #include <kernel/util/linebreak_kernel.h>
+#include <kernel/util/nesting.h>
 #include <llvm/IR/Function.h>                      // for Function, Function...
 #include <llvm/IR/Module.h>                        // for Module
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
@@ -23,6 +24,7 @@
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>
 #include <pablo/parse/rd_parser.h>
+#include <pablo/bixnum/bixnum.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/pe_zeroes.h>
 #include <toolchain/toolchain.h>
@@ -60,6 +62,8 @@ static cl::opt<bool, true> ShowLinesOption("s", cl::location(ShowLinesFlag), cl:
 static cl::alias ShowLinesAlias("show-lines", cl::desc("Alias for -s"), cl::aliasopt(ShowLinesOption));
 static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Apply parallel bracket matching."), cl::cat(jsonOptions));
 static cl::opt<bool> ShowSpanLocations("show-spans", cl::desc("Generate span locations debug output"), cl::cat(jsonOptions));
+unsigned MaxDepth;
+static cl::opt<unsigned, true> MaxDepthOption("d", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::init(15));
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
@@ -158,12 +162,14 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 9.1 Prepare and validate StreamSets
     if (!ToCSVFlag && !ShowLinesFlag) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
-
+        StreamSet * const depthErr = P->CreateStreamSet(1);
+        StreamSet * const encDepth = P->CreateStreamSet(std::ceil(std::log2(MaxDepth+1)));
+        P->CreateKernelCall<NestingDepth>(brackets, encDepth, depthErr, MaxDepth);
         // TODO: There's another Kernel that's called from here
 
-        StreamSet * const Errors = P->CreateStreamSet(4, 1);
+        StreamSet * const Errors = P->CreateStreamSet(5, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr},
             Errors
         );
 
