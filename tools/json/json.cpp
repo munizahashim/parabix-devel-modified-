@@ -160,31 +160,34 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 9.1 Prepare StreamSets for validation
     StreamSet * collapsedLex;
     StreamSet * Errors;
-    if (ToCSVFlag) {
-        StreamSet * const allLex = P->CreateStreamSet(12, 1);
-        P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{firstLexers, stringMarker, keywordEndMarkers, numberLex, stringSpan},
-            allLex
-        );
-        collapsedLex = su::Collapse(P, allLex);
-        Errors = P->CreateStreamSet(3, 1);
+    if (!ToCSVFlag && !ShowLinesFlag) {
+        // TODO: There's another Kernel that's called from here
+        StreamSet * const brackets = su::Select(P, firstLexers, su::Range(0, 4));
+        collapsedLex = su::Collapse(P, brackets);
+
+        Errors = P->CreateStreamSet(4, 1);
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
             Errors
         );
     } else {
-        if (ShowLinesFlag) {
+        if (ToCSVFlag) {
+            StreamSet * allLex = P->CreateStreamSet(12, 1);
+            P->CreateKernelCall<StreamsMerge>(
+                    std::vector<StreamSet *>{firstLexers, stringMarker, keywordEndMarkers, numberLex, stringSpan},
+                    allLex
+            );
+            collapsedLex = su::Collapse(P, allLex);
+        } else {
             StreamSet * allLex = P->CreateStreamSet(11, 1);
             P->CreateKernelCall<StreamsMerge>(
                 std::vector<StreamSet *>{firstLexers, stringMarker, keywordEndMarkers, numberLex},
                 allLex
             );
             collapsedLex = su::Collapse(P, allLex);
-        } else {
-             StreamSet * const brackets = su::Select(P, firstLexers, su::Range(0, 4));
-             collapsedLex = su::Collapse(P, brackets);
         }
-        Errors = P->CreateStreamSet(4, 1);
+
+        Errors = P->CreateStreamSet(3, 1);
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
             Errors
