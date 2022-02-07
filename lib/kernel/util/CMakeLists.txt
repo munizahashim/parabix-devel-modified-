@@ -12,10 +12,12 @@ SRC
     debug_display.cpp
     hex_convert.cpp
     linebreak_kernel.cpp
+    nesting.cpp
     radix64.cpp
     random_stream.cpp
 DEPS
     pablo
+    pablo.bixnum
     re.cc
     kernel.pipeline
 )

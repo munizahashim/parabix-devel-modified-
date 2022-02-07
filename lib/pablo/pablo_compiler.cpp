@@ -27,11 +27,7 @@
 #include <pablo/pe_var.h>
 #include <pablo/ps_assign.h>
 #include <pablo/ps_terminate.h>
-#ifdef USE_CARRYPACK_MANAGER
-#include <pablo/carrypack_manager.h>
-#else
 #include <pablo/carry_manager.h>
-#endif
 #include <pablo/compressed_carry_manager.h>
 #include <toolchain/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
@@ -259,16 +255,11 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
         }
     }
 
-    const PabloBlock * ifBody = ifStatement->getBody();
-
-    mCarryManager->enterIfScope(b, ifBody);
+    mCarryManager->enterIfScope(b);
 
     Value * condition = compileExpression(b, ifStatement->getCondition());
-    if (condition->getType() == b->getBitBlockType()) {
-        condition = b->bitblock_any(mCarryManager->generateSummaryTest(b, condition));
-    }
-
-    b->CreateCondBr(condition, ifBodyBlock, ifEndBlock);
+    Value * const cond = mCarryManager->generateEntrySummaryTest(b, condition);
+    b->CreateCondBr(cond, ifBodyBlock, ifEndBlock);
 
     // Entry processing is complete, now handle the body of the if.
     b->SetInsertPoint(ifBodyBlock);
@@ -277,7 +268,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
 
     addBranchCounter(b);
 
-    compileBlock(b, ifBody);
+    compileBlock(b, ifStatement->getBody());
 
     mCarryManager->leaveIfBody(b, b->GetInsertBlock());
 
@@ -338,7 +329,6 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
 
 void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatement) {
 
-    const PabloBlock * const whileBody = whileStatement->getBody();
     using IncomingVec = Vec<std::tuple<const Var *, Value *, Value *>>;
 
     BasicBlock * const whileEntryBlock = b->GetInsertBlock();
@@ -358,7 +348,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
         }
     }
 
-    mCarryManager->enterLoopScope(b, whileBody);
+    mCarryManager->enterLoopScope(b);
 
     BasicBlock * whileBodyBlock = b->CreateBasicBlock("while.body_" + std::to_string(mBranchCount));
     BasicBlock * whileEndBlock = b->CreateBasicBlock("while.end_" + std::to_string(mBranchCount));
@@ -366,11 +356,8 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
 
     const PabloAST * const cond = whileStatement->getCondition();
     Value * outerCondition = compileExpression(b, cond);
-    if (LLVM_LIKELY(outerCondition->getType() == b->getBitBlockType())) {
-        outerCondition = b->bitblock_any(mCarryManager->generateSummaryTest(b, outerCondition));
-    }
-
-    b->CreateCondBr(outerCondition, whileBodyBlock, whileEndBlock);
+    Value * const outerCond = mCarryManager->generateEntrySummaryTest(b, outerCondition);
+    b->CreateCondBr(outerCond, whileBodyBlock, whileEndBlock);
 
     b->SetInsertPoint(whileBodyBlock);
 
@@ -422,15 +409,11 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
 //    }
 
     mCarryManager->enterLoopBody(b, whileEntryBlock);
-
     addBranchCounter(b);
-
-    compileBlock(b, whileBody);
-
+    compileBlock(b, whileStatement->getBody());
+    mCarryManager->leaveLoopBody(b);
     // After the whileBody has been compiled, we may be in a different basic block.
     BasicBlock * const whileExitBlock = b->GetInsertBlock();
-    mCarryManager->leaveLoopBody(b, whileExitBlock);
-
 
 #ifdef ENABLE_BOUNDED_WHILE
     if (whileStatement->getBound()) {
@@ -476,11 +459,9 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
     }
 
     // Terminate the while loop body with a conditional branch back.
-    Value * innerCondition = compileExpression(b, cond);
-    if (LLVM_LIKELY(innerCondition->getType() == b->getBitBlockType())) {
-        innerCondition = b->bitblock_any(innerCondition);
-    }
-    b->CreateCondBr(innerCondition, whileBodyBlock, whileEndBlock);
+    Value * const innerCondition = compileExpression(b, cond);
+    Value * const exitCond = mCarryManager->generateExitSummaryTest(b, innerCondition);
+    b->CreateCondBr(exitCond, whileBodyBlock, whileEndBlock);
 
     whileEndBlock->moveAfter(whileExitBlock);
 
@@ -501,7 +482,6 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
 }
 
 void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt) {
-
     if (LLVM_UNLIKELY(isa<If>(stmt))) {
         compileIf(b, cast<If>(stmt));
     } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
