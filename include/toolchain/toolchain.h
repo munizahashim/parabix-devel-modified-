@@ -88,6 +88,7 @@ extern std::string ProgramName;
 extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
 extern bool EnableHybridThreadModel;
+extern unsigned Z3_Timeout;
 
 //extern unsigned NumOfKernels;
 //extern unsigned NumOfStreamSets;
