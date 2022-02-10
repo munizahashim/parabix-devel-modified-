@@ -61,7 +61,8 @@ bool ShowLinesFlag;
 static cl::opt<bool, true> ShowLinesOption("s", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
 static cl::alias ShowLinesAlias("show-lines", cl::desc("Alias for -s"), cl::aliasopt(ShowLinesOption));
 static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Apply parallel bracket matching."), cl::cat(jsonOptions));
-static cl::opt<bool> ShowSpanLocations("show-spans", cl::desc("Generate span locations debug output"), cl::cat(jsonOptions));
+int ShowSpanLocations;
+static cl::opt<int, true> ShowSpanLocationsOption("show-spans", cl::location(ShowSpanLocations), cl::desc("Generate locations debug output for combinedLexers stream with values 0..<4"), cl::cat(jsonOptions), cl::init(-1));
 unsigned MaxDepth;
 static cl::opt<unsigned, true> MaxDepthOption("d", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::init(15));
 
@@ -148,7 +149,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 7. Clean lexers (in case there's special chars inside string)
     // 8. Validate rest of the output (check for extraneous chars)
     // We also take the opportunity to create the keyword marker
-    StreamSet * const combinedLexers = P->CreateStreamSet(4);
+    StreamSet * /* TODO: const */ combinedLexers = P->CreateStreamSet(4);
     StreamSet * const extraErr = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
         lexStream,
@@ -163,13 +164,26 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     if (!ToCSVFlag && !ShowLinesFlag) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
         StreamSet * const depthErr = P->CreateStreamSet(1);
+        StreamSet * const syntaxErr = P->CreateStreamSet(4);
         StreamSet * const encDepth = P->CreateStreamSet(std::ceil(std::log2(MaxDepth+1)));
-        P->CreateKernelCall<NestingDepth>(brackets, encDepth, depthErr, MaxDepth);
-        // TODO: There's another Kernel that's called from here
+        P->CreateKernelCall<NestingDepth>(
+            brackets,
+            encDepth,
+            depthErr,
+            MaxDepth
+        );
+        P->CreateKernelCall<JSONParser>(
+            lexStream,
+            stringMarker,
+            combinedLexers,
+            encDepth,
+            syntaxErr
+        );
+        /*TODO: delete */ combinedLexers = syntaxErr;
 
         StreamSet * const Errors = P->CreateStreamSet(5, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr /*TODO: , syntaxErr */},
             Errors
         );
 
@@ -234,8 +248,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     }
 
 // for debugging
-    if (ShowSpanLocations) {
-        StreamSet * const symbols = su::Select(P, combinedLexers, 0);
+    if (ShowSpanLocations > -1 && ShowSpanLocations < 4) {
+        StreamSet * const symbols = su::Select(P, combinedLexers, ShowSpanLocations);
         StreamSet * filteredBasis = P->CreateStreamSet(8);
         P->CreateKernelCall<PabloSourceKernel>(
             parser,
