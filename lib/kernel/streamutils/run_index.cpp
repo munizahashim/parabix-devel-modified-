@@ -112,7 +112,7 @@ Bindings AccumRunIndexOutputBindings(StreamSet * accumRunIndex, StreamSet * accu
     return {Binding{"accumRunIndex", accumRunIndex}, Binding{"accumOverflow", accumOverflow}};
 }
 
-AccumRunIndex::AccumRunIndex(BuilderRef b,
+AccumRunIndex::AccumRunIndex(BuilderRef b, unsigned numSym,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * accumRunIndex, StreamSet * accumOverflow)
     : PabloKernel(b, "AccumRunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow"),
            // input
@@ -120,6 +120,7 @@ AccumRunIndex::AccumRunIndex(BuilderRef b,
            // output
 AccumRunIndexOutputBindings(accumRunIndex, accumOverflow)),
 mIndexCount(accumRunIndex->getNumElements()),
+mNumSym(numSym),
 mOverflow(accumOverflow != nullptr) {
     assert(mIndexCount > 0);
     assert(mIndexCount <= 5);
@@ -171,7 +172,8 @@ void AccumRunIndex::generatePabloMethod() {
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     //pb.createDebugPrint(notFirstSymSum, "notFirstSymSum");
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
-    BixNum sum = bnc.AddModular(prevSymLen, runIndex); //bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), 1);
+    // add k for k-symbol phrase length calculation
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), mNumSym); //bnc.AddModular(prevSymLen, curSymLen);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     //pb.createDebugPrint(curOverflow, "curOverflow");
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
@@ -232,7 +234,7 @@ void AccumRunIndexNew::generatePabloMethod() {
             runIndex[ii] = pb.createOr(runIndex[ii], priorBits);
         }
     }
-
+    // previous symbol length is advanced to be aligned with the next symbol last byte
     for (unsigned i = 0; i < mIndexCount; i++) {
         prevSymLen[i] = pb.createAnd(pb.createAdvance(runIndex[i], 1), symEndPos);
     }
@@ -241,7 +243,8 @@ void AccumRunIndexNew::generatePabloMethod() {
     PabloAST * notFirstSymSum = pb.createIndexedAdvance(symEndPos, symEndPos, 1);
     PabloAST * inRangeFinal = notFirstSymSum;
 
-    BixNum sum = bnc.AddModular(prevSymLen, runIndex);//bnc.AddModular(bnc.AddModular(prevSymLen, runIndex), 1);
+    // for 3-sym phrases, 2 and 3-sym phrases got to be incremented by 1 and 2 respectively
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, runIndex), (mNumSym-1)); //bnc.AddModular(prevSymLen, runIndex);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));
     for (unsigned i = 0; i < mIndexCount; i++) {

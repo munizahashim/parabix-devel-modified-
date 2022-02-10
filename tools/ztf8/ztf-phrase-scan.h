@@ -108,6 +108,7 @@ private:
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
     const unsigned mNumSym;
+    const unsigned mSubStride;
 };
 
 }

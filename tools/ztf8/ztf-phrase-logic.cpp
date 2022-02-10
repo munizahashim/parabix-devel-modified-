@@ -305,6 +305,7 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
     PabloAST * hashTableBoundaryEndFinal = pb.createAnd(hashTableBoundaryEnd, pb.createAdvance(hashTableBoundaryEnd, 1));
 
     PabloAST * hashTableSpan = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {hashTableBoundaryStartFinal, hashTableBoundaryEndFinal});
+    // Valid 4-byte UTF-8 codeunits
     PabloAST * toEliminate = pb.createAnd(pb.createLookahead(basis[7], 1), pb.createOr(hashTableBoundaryStart, hashTableBoundaryEnd));
     hashTableSpan = pb.createOr3(hashTableSpan, hashTableBoundaryEndFinal, toEliminate);
 
@@ -364,12 +365,14 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
             pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createNot(htSpan)));
             //pb.createDebugPrint(htSpan, "htSpan");
             //pb.createDebugPrint(pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)), "groupStreamVar["+std::to_string(i)+"]");
+            // Eliminate the hashtable mark that assumes boundary "fe" as a valid codeword prefix
+            PabloAST * htBounadry = pb.createOr(hashtableBoundaries, pb.createAdvance(hashtableBoundaries, 3));
+            pb.createAssign(pb.createExtract(hashTableStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createNot(htBounadry)));
         }
         else {
             pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createNot(hashTableSpan)));
+            pb.createAssign(pb.createExtract(hashTableStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createAnd(pb.createNot(hashtableBoundaries), hashTableSpan)));
         }
-        pb.createAssign(pb.createExtract(hashTableStreamVar, pb.getInteger(i)), pb.createAnd(groupStreams[i], pb.createXor(hashtableBoundaries, hashTableSpan)));
-        //pb.createDebugPrint(pb.createAnd(groupStreams[i], hashTableSpan), "hashTableBoundary["+std::to_string(i)+"]");
     }
     pb.createAssign(pb.createExtract(getOutputStreamVar("hashtableSpan"), pb.getInteger(0)), filterSpan);
 }

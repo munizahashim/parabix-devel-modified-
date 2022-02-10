@@ -125,12 +125,13 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     for(unsigned i = 1; i < SymCount; i++) {
         StreamSet * const accumRunIndex = P->CreateStreamSet(5);
         StreamSet * const accumOverflow = P->CreateStreamSet(1);
-        P->CreateKernelCall<AccumRunIndex>(phraseRuns, runIndex, phraseLenOverflow[i-1], accumRunIndex, accumOverflow);
+        P->CreateKernelCall<AccumRunIndex>(i, phraseRuns, runIndex, phraseLenOverflow[i-1], accumRunIndex, accumOverflow);
         phraseLenBixnum[i]= accumRunIndex;
         phraseLenOverflow[i] = accumOverflow;
         //P->CreateKernelCall<DebugDisplayKernel>("accumRunIndex", accumRunIndex);
     }
-
+    // P->CreateKernelCall<DebugDisplayKernel>("phraseLenBixnum[0]", phraseLenBixnum[0]);
+    // P->CreateKernelCall<DebugDisplayKernel>("phraseLenBixnum[1]", phraseLenBixnum[1]);
     // Calculate k-hashCodes for each symbol. Each hashCode is unique to the number of symbols comprised.
     std::vector<StreamSet *> bixHashes(SymCount);
     std::vector<StreamSet *> allHashValues(SymCount);
