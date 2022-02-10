@@ -2,6 +2,7 @@
 #define DATAFLOW_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
+#include <toolchain/toolchain.h>
 
 namespace kernel {
 
@@ -204,7 +205,7 @@ void PipelineAnalysis::computeMaximumDataflow(const bool expected) {
     Z3_params_inc_ref(ctx, params);
 
     Z3_symbol r = Z3_mk_string_symbol(ctx, ":timeout");
-    Z3_params_set_uint(ctx, params, r, 1000);
+    Z3_params_set_uint(ctx, params, r, codegen::Z3_Timeout);
     Z3_optimize_set_params(ctx, solver, params);
     Z3_params_dec_ref(ctx, params);
 
