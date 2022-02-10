@@ -263,3 +263,33 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::rBrak)), rBrak);
     pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::values)), allValues);
 }
+
+void JSONParser::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+
+    BixNum ND = getInputStreamSet("ND");
+
+    PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
+    PabloAST * valueToken = pb.createLookahead(allValues, 1);
+
+    PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
+    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
+
+    Var * const syntaxErr = getOutputStreamVar("syntaxErr");
+
+    PabloAST * EOFbit = pb.createAtEOF(pb.createOnes());
+
+    // parse non-nesting values
+    PabloAST * otherND = bnc.UGT(ND, 0);
+    PabloAST * mix = pb.createOr(otherND, valueToken);
+    PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * firstValue = pb.createScanTo(begin, mix);
+    PabloAST * nonNestedValue = pb.createAnd(pb.createAdvanceThenScanThru(firstValue, ws), EOFbit);
+    PabloAST * nonNestingErr = pb.createXor(EOFbit, nonNestedValue);
+
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::symbols)), nonNestingErr);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::lBrak)), nonNestedValue);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::rBrak)), firstValue);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::values)), valueToken);
+}

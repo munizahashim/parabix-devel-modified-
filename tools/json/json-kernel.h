@@ -169,6 +169,32 @@ protected:
     void generatePabloMethod() override;
 };
 
+class JSONParser: public pablo::PabloKernel {
+    public:
+    JSONParser(
+        const std::unique_ptr<KernelBuilder> & b,
+        StreamSet * const lexIn,
+        StreamSet * const strMarker,
+        StreamSet * const combinedLexs,
+        StreamSet * const nestingDepth,
+        StreamSet * const syntaxErr
+    )
+    : pablo::PabloKernel(b,
+                         "JSONParser",
+                         {
+                            Binding{"lexIn", lexIn},
+                            Binding{"strMarker", strMarker},
+                            Binding{"combinedLexs", combinedLexs, FixedRate(1), LookAhead(1)},
+                            Binding{"ND", nestingDepth}
+                         },
+                         {
+                            Binding{"syntaxErr", syntaxErr, FixedRate(1), Add1()}
+                         }) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+  protected:
+    void generatePabloMethod() override;
+  };
 }
 
 #endif
