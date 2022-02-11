@@ -280,6 +280,7 @@ void GrepEngine::initREs(std::vector<re::RE *> & REs) {
         mREs[i] = resolveModesAndExternalSymbols(mREs[i], mCaseInsensitive);
         mREs[i] = re::exclude_CC(mREs[i], mBreakCC);
         mREs[i] = resolveAnchors(mREs[i], anchorRE);
+        if (!mColoring) mREs[i] = remove_nullable_ends(mREs[i]);
         mREs[i] = regular_expression_passes(mREs[i]);
         mREs[i] = name_variable_length_CCs(mREs[i]);
     }
@@ -723,6 +724,40 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
+void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
+                                          StreamSet * InsertMarks,
+                                          StreamSet * Basis,
+                                          StreamSet * ColorizedBasis) {
+    std::string ESC = "\x1B";
+    std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
+    unsigned insertLengthBits = 4;
+    std::vector<unsigned> insertAmts;
+    for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
+
+    StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
+    E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+    //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
+    StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+    //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
+
+    // For each run of 0s marking insert positions, create a parallel
+    // bixnum sequentially numbering the string insert positions.
+    StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
+    E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+    //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+    // Baais bit streams expanded with 0 bits for each string to be inserted.
+
+    StreamSet * ExpandedBasis = E->CreateStreamSet(8);
+    SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
+    //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+
+    // Map the match start/end marks to their positions in the expanded basis.
+    StreamSet * ExpandedMarks = E->CreateStreamSet(2);
+    SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+
+    E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+}
+
 void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, StreamSet * ByteStream, bool BatchMode) {
     StreamSet * SourceStream = getBasis(E, ByteStream);
 
@@ -820,41 +855,15 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         FilterByMask(E, MatchedLineSpans, Matches, InsertMarks);
         //E->CreateKernelCall<DebugDisplayKernel>("Matches", Matches);
 
-        std::string ESC = "\x1B";
-        std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
-        unsigned insertLengthBits = 4;
-        std::vector<unsigned> insertAmts;
-        for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
-
-        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-        //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
-
-        // For each run of 0s marking insert positions, create a parallel
-        // bixnum sequentially numbering the string insert positions.
-        StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
-        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
-
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (SplitTransposition) {
             Staged_S2P(E, Filtered, FilteredBasis);
         } else {
             E->CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
         }
-        // Baais bit streams expanded with 0 bits for each string to be inserted.
-        StreamSet * ExpandedBasis = E->CreateStreamSet(8);
-        SpreadByMask(E, SpreadMask, FilteredBasis, ExpandedBasis);
-        //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
-
-        // Map the match start/end marks to their positions in the expanded basis.
-        StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        applyColorization(E, InsertMarks, FilteredBasis, ColorizedBasis);
 
         StreamSet * ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
@@ -908,6 +917,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
     }
     //E->CreateKernelCall<StdOutKernel>(ColorizedBytes);
 }
+
 
 void EmitMatchesEngine::grepCodeGen() {
     auto & idb = mGrepDriver.getBuilder();

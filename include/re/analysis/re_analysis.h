@@ -36,6 +36,8 @@ bool byteTestsWithinLimit(RE * re, unsigned limit);
     
 bool hasTriCCwithinLimit(RE * r, unsigned byteCClimit, RE * & prefixRE, RE * & suffixRE);
 
+bool hasStartAnchor(const RE * r);
+
 bool hasEndAnchor(const RE * r);
     
 bool DefiniteLengthBackReferencesOnly(const RE * re);

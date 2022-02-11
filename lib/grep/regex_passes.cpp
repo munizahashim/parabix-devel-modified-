@@ -67,11 +67,16 @@ RE * excludeUnicodeLineBreak(RE * r) {
     return r;
 }
 
-RE * regular_expression_passes(RE * re) {
-    //Optimization passes to simplify the AST.
+RE * remove_nullable_ends(RE * re) {
     RE * r = re;
     r = removeNullablePrefix(r);
     r = removeNullableSuffix(r);
+    return r;
+}
+
+RE * regular_expression_passes(RE * re) {
+    //Optimization passes to simplify the AST.
+    RE * r = re;
     r = convertToStarNormalForm(r);
     if (codegen::OptLevel > 1) {
         r = minimizeRE(r);
