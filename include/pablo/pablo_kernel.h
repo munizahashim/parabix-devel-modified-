@@ -178,6 +178,8 @@ protected:
 
 private:
 
+    void generateInitializeMethod(BuilderRef b) final;
+
     void generateDoBlockMethod(BuilderRef b) final;
 
     // The default method for Pablo final block processing sets the
