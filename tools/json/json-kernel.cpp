@@ -270,14 +270,18 @@ void JSONParser::generatePabloMethod() {
 
     BixNum ND = getInputStreamSet("ND");
 
+    PabloAST * lCurly = getInputStreamSet("lexIn")[Lex::lCurly];
+    PabloAST * lBracket = getInputStreamSet("lexIn")[Lex::lBracket];
     PabloAST * rCurly = getInputStreamSet("lexIn")[Lex::rCurly];
     PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
+    PabloAST * comma = getInputStreamSet("lexIn")[Lex::comma];
     PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
 
+    PabloAST * symbols = getInputStreamSet("combinedLexs")[Combined::symbols];
     PabloAST * validRBrak = getInputStreamSet("combinedLexs")[Combined::rBrak];
     PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
-    PabloAST * valuesLookAhead = pb.createLookahead(allValues, 1);
-    PabloAST * valueToken = pb.createOr(valuesLookAhead, validRBrak);
+    PabloAST * valueToken = pb.createLookahead(allValues, 1);
+    PabloAST * anyToken = pb.createOr(symbols, valueToken);
 
     Var * const syntaxErr = getOutputStreamVar("syntaxErr");
 
@@ -289,13 +293,51 @@ void JSONParser::generatePabloMethod() {
     PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * firstValue = pb.createScanTo(begin, mix);
     PabloAST * nonNestedValue = pb.createAnd(pb.createAdvanceThenScanThru(firstValue, ws), EOFbit);
-    PabloAST * nonNestingErr = pb.createXor(EOFbit, nonNestedValue);
+    PabloAST * errSimpleValue = pb.createXor(EOFbit, nonNestedValue);
 
     // parse arr
-    
+    Var * const errArray = pb.createVar("errArray", pb.createZeroes());
+    for (int i = mMaxDepth; i >= 0; --i) {
+        PabloAST * atDepth = bnc.EQ(ND, i);
+        PabloAST * nested = bnc.UGT(ND, i);
+        PabloAST * arrayStart = pb.createAnd(atDepth, lBracket);
+        PabloAST * atDepthSpan = pb.createAnd(atDepth, pb.createNot(validRBrak));
+        PabloAST * arrayEnd = pb.createScanThru(arrayStart, pb.createOr(nested, atDepthSpan));
+        // it must not finish in rCurly
+        PabloAST * errorAtEnd = pb.createAnd(arrayEnd, rCurly);
 
-    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::symbols)), nonNestingErr);
-    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::lBrak)), nonNestedValue);
-    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::rBrak)), firstValue);
-    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::values)), valueToken);
+        PabloAST * arraySpan = pb.createIntrinsicCall(
+            Intrinsic::ExclusiveSpan,
+            { arrayStart, arrayEnd }
+        );
+
+        // Now validate that every value or nested item is followed
+        // either by a comma or a the end rBracket.
+        PabloAST * nestedSpan = pb.createAnd(nested, arraySpan);
+        PabloAST * afterNested = pb.createAnd(pb.createAdvance(nestedSpan, 1), atDepth);
+        PabloAST * afterToken = pb.createAdvance(pb.createAnd(valueToken, arraySpan), 1);
+        PabloAST * tokenNext = pb.createScanThru(pb.createOr(afterNested, afterToken), ws);
+        PabloAST * notCommaRBracket = pb.createNot(pb.createOr(comma, rBracket));
+        PabloAST * errAfterValue = pb.createAnd(tokenNext, notCommaRBracket);
+
+        // Every comma must be followed by a value
+        PabloAST * commaInSpan = pb.createAnd(comma, arraySpan);
+        PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaInSpan, 1), anyToken);
+        PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(nestedOrVTk));
+
+        // After the lBracket we must have either a value or an rBracket.
+        PabloAST * nestedOrVTkRBracket = pb.createOr(nestedOrVTk, rBracket);
+        PabloAST * scanAnyTkAfterArrStart = pb.createScanTo(pb.createAdvance(arrayStart, 1), anyToken);
+        PabloAST * errAfterLBracket = pb.createAnd(scanAnyTkAfterArrStart, pb.createNot(nestedOrVTkRBracket));
+
+        PabloAST * errBracket = pb.createOr(errorAtEnd, errAfterLBracket);
+        PabloAST * errElement = pb.createOr(errAfterComma, errAfterValue);
+        pb.createAssign(errArray, pb.createOr3(errArray, errBracket, errElement));
+    }
+
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::symbols)), errArray);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::lBrak)), errSimpleValue);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::rBrak)), valueToken);
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::values)), anyToken);
 }
