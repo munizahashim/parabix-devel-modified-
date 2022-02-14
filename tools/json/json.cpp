@@ -164,7 +164,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     if (!ToCSVFlag && !ShowLinesFlag) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
         StreamSet * const depthErr = P->CreateStreamSet(1);
-        StreamSet * const syntaxErr = P->CreateStreamSet(4);
+        StreamSet * const syntaxErr = P->CreateStreamSet(1);
         StreamSet * const encDepth = P->CreateStreamSet(std::ceil(std::log2(MaxDepth+1)));
         P->CreateKernelCall<NestingDepth>(
             brackets,
@@ -174,7 +174,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         );
         P->CreateKernelCall<JSONParser>(
             lexStream,
-            stringMarker,
             combinedLexers,
             encDepth,
             syntaxErr,
@@ -184,7 +183,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
         StreamSet * const Errors = P->CreateStreamSet(5, 1);
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr /*TODO: , syntaxErr */},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxErr},
             Errors
         );
 
@@ -249,7 +248,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     }
 
 // for debugging
-    if (ShowSpanLocations > -1 && ShowSpanLocations < 4) {
+    if (ShowSpanLocations > -1) {
         StreamSet * const symbols = su::Select(P, combinedLexers, ShowSpanLocations);
         StreamSet * filteredBasis = P->CreateStreamSet(8);
         P->CreateKernelCall<PabloSourceKernel>(
