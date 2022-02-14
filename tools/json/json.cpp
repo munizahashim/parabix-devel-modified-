@@ -64,7 +64,7 @@ static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Ap
 int ShowSpanLocations;
 static cl::opt<int, true> ShowSpanLocationsOption("show-spans", cl::location(ShowSpanLocations), cl::desc("Generate locations debug output for combinedLexers stream with values 0..<4"), cl::cat(jsonOptions), cl::init(-1));
 unsigned MaxDepth;
-static cl::opt<unsigned, true> MaxDepthOption("d", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::init(15));
+static cl::opt<unsigned, true> MaxDepthOption("max-depth", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::cat(jsonOptions), cl::init(15));
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
