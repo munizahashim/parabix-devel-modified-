@@ -287,15 +287,12 @@ void JSONParser::generatePabloMethod() {
 
     Var * const syntaxErr = getOutputStreamVar("syntaxErr");
 
-    PabloAST * EOFbit = pb.createAtEOF(pb.createOnes());
-
     // parsing non-nesting values
     PabloAST * otherND = bnc.UGT(ND, 0);
-    PabloAST * mix = pb.createOr(otherND, valueToken);
     PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
-    PabloAST * firstValue = pb.createScanTo(begin, mix);
-    PabloAST * nonNestedValue = pb.createAnd(pb.createAdvanceThenScanThru(firstValue, ws), EOFbit);
-    PabloAST * errSimpleValue = pb.createXor(EOFbit, nonNestedValue);
+    PabloAST * firstValue = pb.createScanTo(begin, valueToken);
+    PabloAST * nonNestedValue = pb.createScanTo(pb.createAdvance(firstValue, 1), valueToken);
+    PabloAST * errSimpleValue = pb.createAnd(nonNestedValue, pb.createNot(otherND));
 
     // parsing arr
     Var * const errArray = pb.createVar("errArray", pb.createZeroes());
@@ -391,5 +388,7 @@ void JSONParser::generatePabloMethod() {
         pb.createAssign(errObj, pb.createOr3(errObj, errCurly, errElement));
     }
 
-    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(0)), errObj);
+    PabloAST * allErrs = pb.createOr3(errSimpleValue, errArray, errObj);
+
+    pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(0)), allErrs);
 }
