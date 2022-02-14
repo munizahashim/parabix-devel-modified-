@@ -365,7 +365,8 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValueMinusStr = pb.createAnd(tokenNextMinusStr, pb.createNot(commaRCurly));
 
         // process str as both key and value
-        PabloAST * afterTokenStr = pb.createAdvance(pb.createAnd(str, objSpan), 1);
+        PabloAST * strAtDepth = pb.createAnd(str, atDepth);
+        PabloAST * afterTokenStr = pb.createAdvance(pb.createAnd(strAtDepth, objSpan), 1);
         PabloAST * tokenNextStr = pb.createScanThru(pb.createOr(afterNested, afterTokenStr), ws);
         PabloAST * commaColonRCurly = pb.createOr(commaRCurly, colon);
         PabloAST * errAfterValueStr = pb.createAnd(tokenNextStr, pb.createNot(commaColonRCurly));
