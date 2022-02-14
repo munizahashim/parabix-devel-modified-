@@ -174,7 +174,6 @@ class JSONParser: public pablo::PabloKernel {
     JSONParser(
         const std::unique_ptr<KernelBuilder> & b,
         StreamSet * const lexIn,
-        StreamSet * const strMarker,
         StreamSet * const combinedLexs,
         StreamSet * const nestingDepth,
         StreamSet * const syntaxErr,
@@ -184,7 +183,6 @@ class JSONParser: public pablo::PabloKernel {
                          "JSONParser",
                          {
                             Binding{"lexIn", lexIn},
-                            Binding{"strMarker", strMarker},
                             Binding{"combinedLexs", combinedLexs, FixedRate(1), LookAhead(1)},
                             Binding{"ND", nestingDepth}
                          },
