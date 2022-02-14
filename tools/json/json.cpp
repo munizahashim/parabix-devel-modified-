@@ -177,7 +177,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             stringMarker,
             combinedLexers,
             encDepth,
-            syntaxErr
+            syntaxErr,
+            MaxDepth
         );
         /*TODO: delete */ combinedLexers = syntaxErr;
 
