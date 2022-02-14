@@ -314,7 +314,8 @@ void JSONParser::generatePabloMethod() {
         // either by a comma or a the end rBracket.
         PabloAST * nestedSpan = pb.createAnd(nested, arraySpan);
         PabloAST * afterNested = pb.createAnd(pb.createAdvance(nestedSpan, 1), atDepth);
-        PabloAST * afterToken = pb.createAdvance(pb.createAnd(valueToken, arraySpan), 1);
+        PabloAST * valueAtDepth = pb.createAnd(atDepth, valueToken);
+        PabloAST * afterToken = pb.createAdvance(pb.createAnd(valueAtDepth, arraySpan), 1);
         PabloAST * tokenNext = pb.createScanThru(pb.createOr(afterNested, afterToken), ws);
         PabloAST * notCommaRBracket = pb.createNot(pb.createOr(comma, rBracket));
         PabloAST * errAfterValue = pb.createAnd(tokenNext, notCommaRBracket);
@@ -359,7 +360,8 @@ void JSONParser::generatePabloMethod() {
         PabloAST * afterNested = pb.createAnd(pb.createAdvance(nestedSpan, 1), atDepth);
 
         // process all values that are not str
-        PabloAST * afterTokenMinusStr = pb.createAdvance(pb.createAnd(valueTokenMinusStr, objSpan), 1);
+        PabloAST * valueMinusStrAtDepth = pb.createAnd(atDepth, valueTokenMinusStr);
+        PabloAST * afterTokenMinusStr = pb.createAdvance(pb.createAnd(valueMinusStrAtDepth, objSpan), 1);
         PabloAST * tokenNextMinusStr = pb.createScanThru(pb.createOr(afterNested, afterTokenMinusStr), ws);
         PabloAST * commaRCurly = pb.createOr(comma, rCurly);
         PabloAST * errAfterValueMinusStr = pb.createAnd(tokenNextMinusStr, pb.createNot(commaRCurly));
