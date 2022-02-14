@@ -270,11 +270,14 @@ void JSONParser::generatePabloMethod() {
 
     BixNum ND = getInputStreamSet("ND");
 
-    PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
-    PabloAST * valueToken = pb.createLookahead(allValues, 1);
-
+    PabloAST * rCurly = getInputStreamSet("lexIn")[Lex::rCurly];
     PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
     PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
+
+    PabloAST * validRBrak = getInputStreamSet("combinedLexs")[Combined::rBrak];
+    PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
+    PabloAST * valuesLookAhead = pb.createLookahead(allValues, 1);
+    PabloAST * valueToken = pb.createOr(valuesLookAhead, validRBrak);
 
     Var * const syntaxErr = getOutputStreamVar("syntaxErr");
 
@@ -287,6 +290,9 @@ void JSONParser::generatePabloMethod() {
     PabloAST * firstValue = pb.createScanTo(begin, mix);
     PabloAST * nonNestedValue = pb.createAnd(pb.createAdvanceThenScanThru(firstValue, ws), EOFbit);
     PabloAST * nonNestingErr = pb.createXor(EOFbit, nonNestedValue);
+
+    // parse arr
+    
 
     pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::symbols)), nonNestingErr);
     pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(Combined::lBrak)), nonNestedValue);

@@ -177,7 +177,8 @@ class JSONParser: public pablo::PabloKernel {
         StreamSet * const strMarker,
         StreamSet * const combinedLexs,
         StreamSet * const nestingDepth,
-        StreamSet * const syntaxErr
+        StreamSet * const syntaxErr,
+        unsigned maxDepth = 15
     )
     : pablo::PabloKernel(b,
                          "JSONParser",
@@ -189,11 +190,13 @@ class JSONParser: public pablo::PabloKernel {
                          },
                          {
                             Binding{"syntaxErr", syntaxErr, FixedRate(1), Add1()}
-                         }) {}
+                         }),
+    mMaxDepth(maxDepth) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
   protected:
     void generatePabloMethod() override;
+    unsigned mMaxDepth;
   };
 }
 
