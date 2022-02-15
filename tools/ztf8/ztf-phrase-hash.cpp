@@ -71,7 +71,7 @@ static cl::opt<int> SymCount("length", cl::desc("Length of words."), cl::init(2)
 static cl::opt<int> PhraseLen("plen", cl::desc("Debug - length of phrase."), cl::init(0), cl::cat(ztfHashOptions));
 static cl::opt<int> PhraseLenOffset("offset", cl::desc("Offset to actual length of phrase"), cl::init(1), cl::cat(ztfHashOptions));
 
-typedef void (*ztfHashFunctionType)(uint32_t fd);
+typedef void (*ztfHashFunctionType)(uint32_t fd, const char *, const char *);
 typedef void (*ztfHashDecmpFunctionType)(uint32_t fd);
 
 EncodingInfo encodingScheme1(8,
