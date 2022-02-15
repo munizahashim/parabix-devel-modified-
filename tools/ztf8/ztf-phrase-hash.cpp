@@ -394,11 +394,10 @@ int main(int argc, char *argv[]) {
     } else {
         if (Decompression) {
             auto ztfHashDecompressionFunction = ztfHash_decompression_gen(pxDriver);
-            /*uint64_t count1 = */ztfHashDecompressionFunction(fd);
-            //errs() << count1 << " count2" << "\n";
+            ztfHashDecompressionFunction(fd);
         } else {
             auto ztfHashCompressionFunction = ztfHash_compression_gen(pxDriver);
-            ztfHashCompressionFunction(fd);
+            ztfHashCompressionFunction(fd, dictFile.c_str(), outputFile.c_str());
         }
         close(fd);
     }
