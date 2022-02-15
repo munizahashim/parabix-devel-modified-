@@ -321,9 +321,9 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValue = pb.createAnd(tokenNext, notCommaRBracket);
 
         // Every comma must be followed by a value
-        PabloAST * commaInSpan = pb.createAnd(comma, arraySpan);
-        PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
-        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaInSpan, 1), anyToken);
+        PabloAST * commaAtDepth = pb.createAnd(comma, atDepth);
+        PabloAST * nestedOrVTk = pb.createOr(nested, valueAtDepth);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
         PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(nestedOrVTk));
 
         // After the lBracket we must have either a value or an rBracket.
@@ -376,14 +376,14 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValue = pb.createOr(errAfterValueStr, errAfterValueMinusStr);
 
         // Every colon must be followed by a value
-        PabloAST * colonInSpan = pb.createAnd(colon, objSpan);
+        PabloAST * colonAtDepth = pb.createAnd(colon, atDepth);
         PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
-        PabloAST * scanAnyTkAfterColon = pb.createScanTo(pb.createAdvance(colonInSpan, 1), anyToken);
+        PabloAST * scanAnyTkAfterColon = pb.createScanTo(pb.createAdvance(colonAtDepth, 1), anyToken);
         PabloAST * errAfterColon = pb.createAnd(scanAnyTkAfterColon, pb.createNot(nestedOrVTk));
 
         // Every comma must be followed by a key string
-        PabloAST * commaInSpan = pb.createAnd(comma, objSpan);
-        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaInSpan, 1), anyToken);
+        PabloAST * commaAtDepth = pb.createAnd(comma, atDepth);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
         PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(strAtDepth));
 
         // After the lCurly we must have either a value or an rCurly.
