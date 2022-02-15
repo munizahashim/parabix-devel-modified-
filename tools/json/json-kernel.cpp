@@ -321,7 +321,7 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValue = pb.createAnd(tokenNext, notCommaRBracket);
 
         // Every comma must be followed by a value
-        PabloAST * commaAtDepth = pb.createAnd(comma, atDepth);
+        PabloAST * commaAtDepth = pb.createAnd3(comma, atDepth, arraySpan);
         PabloAST * nestedOrVTk = pb.createOr(nested, valueAtDepth);
         PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
         PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(nestedOrVTk));
@@ -367,7 +367,7 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValueMinusStr = pb.createAnd(tokenNextMinusStr, pb.createNot(commaRCurly));
 
         // process str as both key and value
-        PabloAST * strAtDepth = pb.createAnd(str, atDepth);
+        PabloAST * strAtDepth = pb.createAnd3(str, atDepth, objSpan);
         PabloAST * afterTokenStr = pb.createAdvance(pb.createAnd(strAtDepth, objSpan), 1);
         PabloAST * tokenNextStr = pb.createScanThru(pb.createOr(afterNested, afterTokenStr), ws);
         PabloAST * commaColonRCurly = pb.createOr(commaRCurly, colon);
@@ -376,13 +376,13 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterValue = pb.createOr(errAfterValueStr, errAfterValueMinusStr);
 
         // Every colon must be followed by a value
-        PabloAST * colonAtDepth = pb.createAnd(colon, atDepth);
+        PabloAST * colonAtDepth = pb.createAnd3(colon, atDepth, objSpan);
         PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
         PabloAST * scanAnyTkAfterColon = pb.createScanTo(pb.createAdvance(colonAtDepth, 1), anyToken);
         PabloAST * errAfterColon = pb.createAnd(scanAnyTkAfterColon, pb.createNot(nestedOrVTk));
 
         // Every comma must be followed by a key string
-        PabloAST * commaAtDepth = pb.createAnd(comma, atDepth);
+        PabloAST * commaAtDepth = pb.createAnd3(comma, atDepth, objSpan);
         PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
         PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(strAtDepth));
 
