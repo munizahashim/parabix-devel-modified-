@@ -254,7 +254,7 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * allValues = pb.createOr3(kwMarker, numMarker, strMarker);
     PabloAST * lBrak = pb.createOr(sanitizelCurly, sanitizelBracket);
     PabloAST * rBrak = pb.createOr(sanitizerCurly, sanitizerBracket);
-    PabloAST * specialSymbols = pb.createOr3(sanitizeColon, sanitizeComma, sanitizeHyphen);
+    PabloAST * specialSymbols = pb.createOr(sanitizeColon, sanitizeComma);
     PabloAST * allSymbols = pb.createOr3(lBrak, rBrak, specialSymbols);
 
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
