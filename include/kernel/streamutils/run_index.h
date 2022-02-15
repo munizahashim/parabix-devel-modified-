@@ -46,7 +46,7 @@ public:
 private:
     unsigned mIndexCount;
     bool mOverflow;
-    unsigned mNumSym;
+    unsigned mOffset;
 };
 
 class AccumRunIndexNew : public pablo::PabloKernel {

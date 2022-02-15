@@ -496,12 +496,13 @@ LengthGroupSelector::LengthGroupSelector(BuilderRef b,
                            StreamSet * symbolRun,
                            StreamSet * const lengthBixNum,
                            StreamSet * overflow,
-                           StreamSet * selected)
+                           StreamSet * selected,
+                           unsigned offset)
 : PabloKernel(b, "LengthGroupSelector" + LengthSelectorSuffix(encodingScheme, groupNo, lengthBixNum),
               {Binding{"symbolRun", symbolRun, FixedRate(), LookAhead(1)},
                   Binding{"lengthBixNum", lengthBixNum},
                   Binding{"overflow", overflow}},
-              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
+              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo), mOffset(offset) { }
 
 void LengthGroupSelector::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
@@ -513,9 +514,7 @@ void LengthGroupSelector::generatePabloMethod() {
     runFinal = pb.createAnd(runFinal, pb.createNot(overflow));
     Var * groupStreamVar = getOutputStreamVar("selected");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
-    // Run index codes count from 0 on the 1st byte of a symbol.
-    // So the length is 1 more than the bixnum.
-    unsigned offset = 1;
+    unsigned offset = mOffset;
     unsigned lo = groupInfo.lo;
     unsigned hi = groupInfo.hi;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);

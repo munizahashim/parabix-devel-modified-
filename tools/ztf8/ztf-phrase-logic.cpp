@@ -99,11 +99,12 @@ LengthSelector::LengthSelector(BuilderRef b,
                            EncodingInfo & encodingScheme,
                            StreamSet * groupLenBixnum,
                            StreamSet * hashMarks,
-                           StreamSet * selectedHashMarksPos)
+                           StreamSet * selectedHashMarksPos,
+                           unsigned offset)
 : PabloKernel(b, "LengthSelector" + encodingScheme.uniqueSuffix(),
               {Binding{"hashMarks", hashMarks, FixedRate(), LookAhead(1)},
                Binding{"groupLenBixnum", groupLenBixnum}},
-              {Binding{"selectedHashMarksPos", selectedHashMarksPos}}), mEncodingScheme(encodingScheme) { }
+              {Binding{"selectedHashMarksPos", selectedHashMarksPos}}), mEncodingScheme(encodingScheme), mOffset(offset) { }
 
 void LengthSelector::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
@@ -111,7 +112,7 @@ void LengthSelector::generatePabloMethod() {
     PabloAST * hashMarks = getInputStreamSet("hashMarks")[0];
     Var * selectedHashMarksPosStreamVar = getOutputStreamVar("selectedHashMarksPos");
     std::vector<PabloAST *> groupLenBixnum = getInputStreamSet("groupLenBixnum");
-    unsigned offset = 1;
+    unsigned offset = mOffset;
     unsigned lo = mEncodingScheme.minSymbolLength()+6; // min k-sym phrase length = 9 bytes
     unsigned hi = mEncodingScheme.maxSymbolLength();
     unsigned groupSize = hi - lo + 1;
@@ -341,11 +342,11 @@ void ZTF_PhraseDecodeLengths::generatePabloMethod() {
         }
         PabloAST * inGroup = pb.createAnd(bnc.UGE(basis, base), bnc.ULT(basis, next_base));
         /* curGroupStream =>
-        0 -> C0-C7 00-7F
-        1 -> C8-CF 00-7F
-        2 -> D0-DF 00-7F
-        3 -> E0-EF 00-7F 00-7F / EO-EF 00-7F 80-BF
-        4 -> F0-FF 00-7F 00-7F 00-7F / F0-FF 00-7F 00-7F 80-BF
+            0 -> C0-C7 00-7F
+            1 -> C8-CF 00-7F
+            2 -> D0-DF 00-7F
+            3 -> E0-EF 00-7F 00-7F / EO-EF 00-7F 80-BF
+            4 -> F0-FF 00-7F 00-7F 00-7F / F0-FF 00-7F 00-7F 80-BF
         */
         PabloAST * curGroupStream = pb.createAnd(pb.createAdvance(inGroup, 1), ASCII); // PFX 00-7F
         groupStreams[i] = curGroupStream;
@@ -432,18 +433,17 @@ void ZTF_PhraseExpansionDecoder::generatePabloMethod() {
         3-byte -> non-ASCII ASCII ASCII ASCII   > bit 7 -> 1 0 0 0   | 3-byte -> non-ASCII 80-BF 80-BF 80-BF   > bit 7 -> 1 1 1 1
         10000000 - 10111111
     */
-
     /*
-    3    |  0xC0-0xC7               (192-199) 0000 0001 0010 0011 0100 0101 0110 0111
-    4    |  0xC8-0xCF               (200-208) 1000 1001 1010 1011 1100 1101 1110 1111
-    5    |  0xD0, 0xD4, 0xD8, 0xDC  } - base = 0,4,8,12  0000 0100 1000 1100 // low 2 bits + (lo - encoding_bytes)
-    6    |  0xD1, 0xD5, 0xD9, 0xDD  } - base = 1,5,9,13  0001 0101 1001 1101
-    7    |  0xD2, 0xD6, 0xDA, 0xDE  } - base = 2,6,10,14 0010 0110 1010 1110
-    8    |  0xD3, 0xD7, 0xDB, 0xDF  } - base = 3,7,11,15 0011 0111 1011 1111
-    9-16 |  0xE0 - 0xEF (3-bytes)   } - lo - encoding_bytes = 9 - 3 = 6
-                                        length = low 3 bits + (lo - encoding_bytes)
-    17-32|  0xF0 - 0xFF (4-bytes)   } - lo - encoding_bytes = 17 - 4 = 13
-                                        length = pfx-base + (lo - encoding_bytes)
+        3    |  0xC0-0xC7               (192-199) 0000 0001 0010 0011 0100 0101 0110 0111
+        4    |  0xC8-0xCF               (200-208) 1000 1001 1010 1011 1100 1101 1110 1111
+        5    |  0xD0, 0xD4, 0xD8, 0xDC  } - base = 0,4,8,12  0000 0100 1000 1100 // low 2 bits + (lo - encoding_bytes)
+        6    |  0xD1, 0xD5, 0xD9, 0xDD  } - base = 1,5,9,13  0001 0101 1001 1101
+        7    |  0xD2, 0xD6, 0xDA, 0xDE  } - base = 2,6,10,14 0010 0110 1010 1110
+        8    |  0xD3, 0xD7, 0xDB, 0xDF  } - base = 3,7,11,15 0011 0111 1011 1111
+        9-16 |  0xE0 - 0xEF (3-bytes)   } - lo - encoding_bytes = 9 - 3 = 6
+                                            length = low 3 bits + (lo - encoding_bytes)
+        17-32|  0xF0 - 0xFF (4-bytes)   } - lo - encoding_bytes = 17 - 4 = 13
+                                            length = pfx-base + (lo - encoding_bytes)
     */
 
     BixNum insertLgth(5, pb.createZeroes());
