@@ -375,11 +375,16 @@ void JSONParser::generatePabloMethod() {
 
         PabloAST * errAfterValue = pb.createOr(errAfterValueStr, errAfterValueMinusStr);
 
-        // Every comma or colon must be followed by a value
-        PabloAST * commaColonInSpan = pb.createAnd(pb.createOr(comma, colon), objSpan);
+        // Every colon must be followed by a value
+        PabloAST * colonInSpan = pb.createAnd(colon, objSpan);
         PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
-        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaColonInSpan, 1), anyToken);
-        PabloAST * errAfterCommaColon = pb.createAnd(scanAnyTkAfterComma, pb.createNot(nestedOrVTk));
+        PabloAST * scanAnyTkAfterColon = pb.createScanTo(pb.createAdvance(colonInSpan, 1), anyToken);
+        PabloAST * errAfterColon = pb.createAnd(scanAnyTkAfterColon, pb.createNot(nestedOrVTk));
+
+        // Every comma must be followed by a key string
+        PabloAST * commaInSpan = pb.createAnd(comma, objSpan);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaInSpan, 1), anyToken);
+        PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(strAtDepth));
 
         // After the lCurly we must have either a value or an rCurly.
         PabloAST * nestedOrVTkRCurly = pb.createOr(nestedOrVTk, rCurly);
@@ -387,7 +392,7 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errAfterLCurly = pb.createAnd(scanAnyTkAfterObjStart, pb.createNot(nestedOrVTkRCurly));
 
         PabloAST * errCurly = pb.createOr(errorAtEnd, errAfterLCurly);
-        PabloAST * errElement = pb.createOr(errAfterCommaColon, errAfterValue);
+        PabloAST * errElement = pb.createOr3(errAfterColon, errAfterComma, errAfterValue);
         pb.createAssign(errObj, pb.createOr3(errObj, errCurly, errElement));
     }
 
