@@ -113,7 +113,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const overflow = P->CreateStreamSet(1);
     // Calculate the length of individual symbols as a bixnum
     if (PhraseLenOffset == 2) {
-        P->CreateKernelCall<RunIndexOld>(phraseRuns, runIndex, overflow);
+        // P->CreateKernelCall<RunIndexOld>(phraseRuns, runIndex, overflow);
     }
     else {
         P->CreateKernelCall<RunIndex>(phraseRuns, runIndex, overflow, RunIndex::Kind::RunOf1, RunIndex::Numbering::RunPlus1);
