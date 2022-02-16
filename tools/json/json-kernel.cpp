@@ -268,6 +268,7 @@ void JSONParser::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
 
+    bool genSingleBlock = mOnlyDepth > -1;
     BixNum ND = getInputStreamSet("ND");
 
     PabloAST * symbols = getInputStreamSet("combinedLexs")[Combined::symbols];
@@ -298,8 +299,8 @@ void JSONParser::generatePabloMethod() {
     // parsing arr
     Var * const errArray = pb.createVar("errArray", pb.createZeroes());
     for (int i = mMaxDepth; i >= 0; --i) {
-        PabloAST * atDepth = bnc.EQ(ND, i);
-        PabloAST * nested = bnc.UGT(ND, i);
+        PabloAST * atDepth = bnc.EQ(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * nested = bnc.UGT(ND, genSingleBlock ? mOnlyDepth : i);
         PabloAST * arrayStart = pb.createAnd(atDepth, lBracket);
         PabloAST * atDepthSpan = pb.createAnd(atDepth, pb.createNot(validRBrak));
         PabloAST * arrayEnd = pb.createScanThru(arrayStart, pb.createOr(nested, atDepthSpan));
@@ -335,13 +336,15 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errBracket = pb.createOr(errorAtEnd, errAfterLBracket);
         PabloAST * errElement = pb.createOr(errAfterComma, errAfterValue);
         pb.createAssign(errArray, pb.createOr3(errArray, errBracket, errElement));
+
+        if (genSingleBlock) { break; }
     }
 
     // parsing objects
     Var * const errObj = pb.createVar("errObj", pb.createZeroes());
     for (int i = mMaxDepth; i >= 0; --i) {
-        PabloAST * atDepth = bnc.EQ(ND, i);
-        PabloAST * nested = bnc.UGT(ND, i);
+        PabloAST * atDepth = bnc.EQ(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * nested = bnc.UGT(ND, genSingleBlock ? mOnlyDepth : i);
         PabloAST * objStart = pb.createAnd(atDepth, lCurly);
         PabloAST * atDepthSpan = pb.createAnd(atDepth, pb.createNot(validRBrak));
         PabloAST * objEnd = pb.createScanThru(objStart, pb.createOr(nested, atDepthSpan));
@@ -393,6 +396,8 @@ void JSONParser::generatePabloMethod() {
         PabloAST * errCurly = pb.createOr(errorAtEnd, errAfterLCurly);
         PabloAST * errElement = pb.createOr3(errAfterColon, errAfterComma, errAfterValue);
         pb.createAssign(errObj, pb.createOr3(errObj, errCurly, errElement));
+
+        if (genSingleBlock) { break; }
     }
 
     PabloAST * allErrs = pb.createOr3(errSimpleValue, errArray, errObj);

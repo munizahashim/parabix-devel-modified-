@@ -65,6 +65,8 @@ int ShowSpanLocations;
 static cl::opt<int, true> ShowSpanLocationsOption("show-spans", cl::location(ShowSpanLocations), cl::desc("Generate locations debug output for combinedLexers stream with values 0..<4"), cl::cat(jsonOptions), cl::init(-1));
 unsigned MaxDepth;
 static cl::opt<unsigned, true> MaxDepthOption("max-depth", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::cat(jsonOptions), cl::init(15));
+int OnlyDepth;
+static cl::opt<int, true> OnlyDepthOption("only-depth", cl::location(OnlyDepth), cl::desc("Only generate code for depth n of JSON."), cl::cat(jsonOptions), cl::init(-1));
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
@@ -177,7 +179,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             combinedLexers,
             encDepth,
             syntaxErr,
-            MaxDepth
+            MaxDepth,
+            OnlyDepth
         );
         /*TODO: delete */ combinedLexers = syntaxErr;
 
