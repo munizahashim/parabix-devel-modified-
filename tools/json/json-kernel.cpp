@@ -270,20 +270,21 @@ void JSONParser::generatePabloMethod() {
 
     BixNum ND = getInputStreamSet("ND");
 
-    PabloAST * lCurly = getInputStreamSet("lexIn")[Lex::lCurly];
-    PabloAST * lBracket = getInputStreamSet("lexIn")[Lex::lBracket];
-    PabloAST * rCurly = getInputStreamSet("lexIn")[Lex::rCurly];
-    PabloAST * rBracket = getInputStreamSet("lexIn")[Lex::rBracket];
-    PabloAST * comma = getInputStreamSet("lexIn")[Lex::comma];
-    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
-    PabloAST * dQuote = getInputStreamSet("lexIn")[Lex::dQuote];
-    PabloAST * colon = getInputStreamSet("lexIn")[Lex::colon];
-
     PabloAST * symbols = getInputStreamSet("combinedLexs")[Combined::symbols];
     PabloAST * validRBrak = getInputStreamSet("combinedLexs")[Combined::rBrak];
     PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
     PabloAST * valueToken = pb.createLookahead(allValues, 1);
     PabloAST * anyToken = pb.createOr(symbols, valueToken);
+
+    PabloAST * lCurly = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::lCurly]);
+    PabloAST * rCurly = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::rCurly]);
+    PabloAST * lBracket = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::lBracket]);
+    PabloAST * rBracket = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::rBracket]);
+    PabloAST * comma = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::comma]);
+    PabloAST * colon = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::colon]);
+    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
+    PabloAST * str = pb.createAnd(valueToken, getInputStreamSet("lexIn")[Lex::dQuote]);
+    PabloAST * valueTokenMinusStr = pb.createXor(valueToken, str);
 
     Var * const syntaxErr = getOutputStreamVar("syntaxErr");
 
@@ -338,8 +339,6 @@ void JSONParser::generatePabloMethod() {
 
     // parsing objects
     Var * const errObj = pb.createVar("errObj", pb.createZeroes());
-    PabloAST * str = pb.createAnd(valueToken, dQuote);
-    PabloAST * valueTokenMinusStr = pb.createXor(valueToken, str);
     for (int i = mMaxDepth; i >= 0; --i) {
         PabloAST * atDepth = bnc.EQ(ND, i);
         PabloAST * nested = bnc.UGT(ND, i);
