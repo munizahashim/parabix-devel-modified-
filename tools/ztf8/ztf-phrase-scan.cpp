@@ -1397,15 +1397,16 @@ void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value *
     b->CallPrintInt("anyDictEntry", anyDictEntry);
     // Interleave dictionary bytes followed by compressed bytes
     b->CallPrintInt("b->CreateMul(b->CreateMul(strideNo, sz_TWO), sz_STRIDE)", b->CreateMul(b->CreateMul(strideNo, sz_TWO), sz_STRIDE));
-    b->CallPrintInt("dictCopyPos", b->CreateAdd(initialProducedMask, b->CreateMul(b->CreateMul(strideNo, sz_ONE/*sz_TWO*/), sz_STRIDE)));
+    b->CallPrintInt("dictCopyPos", b->CreateAdd(initialProducedMask, b->CreateMul(b->CreateMul(strideNo, /*sz_ONE*/sz_TWO), sz_STRIDE)));
 #endif
     // write dictionary starting from the even-number stride-start-position (Ex: 0MB, 2MB, 4MB etc - with 1MB stride size)
     // Temp - writes dictionary only at the start position of each stride
-    Value * const dictWriteStartPos = b->CreateAdd(initialProducedMask, b->CreateMul(b->CreateMul(strideNo, sz_ONE/*sz_TWO*/), sz_STRIDE));
+    Value * const dictWriteStartPos = b->CreateAdd(initialProducedMask, b->CreateMul(b->CreateMul(strideNo, /*sz_ONE*/sz_TWO), sz_STRIDE));
+    Value * const dictMaskWriteStartPos = b->CreateUDiv(dictWriteStartPos, b->getSize(8));
     // write compressed-data where the dictionary for each 1MB stride ends
     Value * const maskCopyOffset = b->CreateAdd(dictWriteStartPos, toCopyFinalDict);
     // b->CallPrintInt("maskCopyOffset", maskCopyOffset);
-    /// TODO: Dictionary starts on the odd-stride boundary. To be optimized further.
+    /// TODO: Dictionary starts on the even-stride boundary. To be optimized further.
     // Value * const dictCopyOffset = b->getProducedItemCount("combinedBytes");
     // Value * dictBase = b->CreateSub(dictCopyOffset, b->CreateURem(dictCopyOffset, b->getSize(8)));
     // Value * dictBitOffset = b->CreateSub(dictCopyOffset, dictBase);
@@ -1418,31 +1419,45 @@ void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value *
     Value * byteOffset = b->CreateSelect(b->CreateICmpEQ(maskBitOffset, sz_ZERO), maskBitOffset, nextAlignedOffset);
     Value * const cmpWriteStartPos = b->CreateAdd(dictWriteStartPos, b->CreateAdd(toCopyFinalDict, byteOffset));
 
+    // number of bytes of mask already written
+    Value * const cmpMaskWritten = b->CreateAdd(dictMaskWriteStartPos, b->CreateUDiv(b->CreateAdd(toCopyFinalDict, byteOffset), b->getSize(8)));
+    // aligned mask write position
+    Value * cmpMaskBase = b->CreateSub(cmpMaskWritten, b->CreateURem(cmpMaskWritten, b->getSize(8)));
+    Value * cmpMaskBitOffset = b->CreateSub(cmpMaskWritten, cmpMaskBase);
+    Value * cmpNextAlignedOffset = b->CreateSub(b->getSize(8), cmpMaskBitOffset);
+    Value * maskByteOffset = b->CreateSelect(b->CreateICmpEQ(cmpMaskBitOffset, sz_ZERO), cmpMaskBitOffset, cmpNextAlignedOffset);
+    Value * const cmpMaskWriteStartPos = b->CreateAdd(cmpMaskWritten, maskByteOffset);
+
     Value * const dictReadPos = b->CreateAdd(dictMaskProcessed, b->CreateMul(strideNo, sz_STRIDE));
+    Value * const dictMaskReadPos = b->CreateUDiv(dictReadPos, b->getSize(8));
     Value * const cmpReadPos = b->CreateAdd(cmpMaskProcessed, b->CreateMul(strideNo, sz_STRIDE));
+    Value * const cmpMaskReadPos = b->CreateUDiv(cmpReadPos, b->getSize(8));
 #ifdef PRINT_INTERLEAVE_KERNEL_DEBUG_INFO
     b->CallPrintInt("byteOffset", byteOffset);
     b->CallPrintInt("dictWriteStartPos", dictWriteStartPos);
     b->CallPrintInt("cmpWriteStartPos", cmpWriteStartPos);
     b->CallPrintInt("dictReadPos", dictReadPos);
     b->CallPrintInt("cmpReadPos", cmpReadPos);
+    b->CallPrintInt("dictMaskWriteStartPos", dictMaskWriteStartPos);
+    b->CallPrintInt("dictMaskReadPos", dictMaskReadPos);
+    b->CallPrintInt("cmpMaskWriteStartPos", cmpMaskWriteStartPos);
+    b->CallPrintInt("cmpMaskReadPos", cmpMaskReadPos);
 #endif
-    // aligned memcpy?
     b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", dictWriteStartPos),
                     b->getRawInputPointer("dictData", dictReadPos),
                     toCopyFinalDict, 1);
-    // uncommenting the codedBytes and compressionMask memcpy causes memory corruption error/ segfaults sometimes
-    // b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", cmpWriteStartPos),
-    //                 b->getRawInputPointer("codedBytes", cmpReadPos),
-    //                 toCopyCmp, 1);
+    // uncommenting the codedBytes and compressionMask memcpy causes memory corruption error/ segfaults
+    b->CreateMemCpy(b->getRawOutputPointer("combinedBytes", cmpWriteStartPos),
+                    b->getRawInputPointer("codedBytes", cmpReadPos),
+                    toCopyCmp, 1);
     // b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("codedBytes", cmpReadPos), toCopyCmp);
     // // // Interleave dictionary mask followed by compression mask
-    b->CreateMemCpy(b->getRawOutputPointer("combinedMask", dictWriteStartPos),
-                    b->getRawInputPointer("dictionaryMask", dictReadPos),
-                    toCopyFinalDict, 1);
-    // b->CreateMemCpy(b->getRawOutputPointer("combinedMask", cmpWriteStartPos),
-    //                 b->getRawInputPointer("compressionMask",cmpReadPos),
-    //                 toCopyCmp, 1);
+    b->CreateMemCpy(b->getRawOutputPointer("combinedMask", dictMaskWriteStartPos),
+                    b->getRawInputPointer("dictionaryMask", dictMaskReadPos),
+                    b->CreateUDiv(toCopyFinalDict, b->getSize(8)), 1);
+    b->CreateMemCpy(b->getRawOutputPointer("combinedMask", cmpMaskWriteStartPos),
+                    b->getRawInputPointer("compressionMask",cmpMaskReadPos),
+                    b->CreateUDiv(toCopyCmp, b->getSize(8)), 1);
     // b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("compressionMask", cmpReadPos), toCopyCmp);
     // Verify: No partial phrases at the end of segment should be written in the compressed part of interleaved data.
     // The phrase shall be moved to the next segment.
@@ -1494,9 +1509,10 @@ void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value *
     b->setProcessedItemCount("codedBytes", b->CreateSelect(b->isFinal(), cmpAvail, guaranteedProcessedCmp));
 
     Value * guaranteedProduced = b->CreateAdd(initialProduced, b->CreateAdd(dictAvailCurSeg, cmpAvailCurSeg));
-    b->setProducedItemCount("combinedBytes", b->CreateSelect(b->isFinal(), /*b->CreateAdd(cmpAvail, dictAvail)*/dictAvail, /*guaranteedProduced*/ b->CreateSub(dictAvail, sz_ONE))); //dictAvailCurSeg));
+    //b->setProducedItemCount("combinedBytes", b->CreateAdd(b->getProducedItemCount("combinedBytes"), b->CreateAdd(cmpAvailCurSeg, <dictionary copied this segment>)));
+    b->setProducedItemCount("combinedBytes", b->CreateSelect(b->isFinal(), b->CreateAdd(cmpAvail, dictAvail)/*dictAvail*/, guaranteedProduced /*b->CreateSub(dictAvail, sz_ONE)*/)); //dictAvailCurSeg));
     Value * guaranteedProducedMask = b->CreateAdd(initialProducedMask, b->CreateAdd(dictMaskAvailCurSeg, cmpAvailCurSeg));
-    b->setProducedItemCount("combinedMask", b->CreateSelect(b->isFinal(), /*b->CreateAdd(cmpMaskAvail, dictMaskAvail)*/dictMaskAvail, b->CreateSub(dictMaskAvail, sz_ONE) /*guaranteedProducedMask*/)); //dictAvailCurSeg)); 
+    b->setProducedItemCount("combinedMask", b->CreateSelect(b->isFinal(), b->CreateAdd(cmpMaskAvail, dictMaskAvail), /*dictMaskAvail,*/ /*b->CreateSub(dictMaskAvail, sz_ONE)*/ guaranteedProducedMask)); //dictAvailCurSeg)); 
 #ifdef PRINT_INTERLEAVE_KERNEL_DEBUG_INFO
     // b->CallPrintInt("b->CreateAdd(cmpAvail, dictAvail)", b->CreateAdd(cmpAvail, dictAvail));
     b->CallPrintInt("b->CreateAdd(initialProduced, b->CreateAdd(dictAvailCurSeg, cmpAvailCurSeg))", b->CreateAdd(initialProduced, b->CreateAdd(dictAvailCurSeg, cmpAvailCurSeg)));
