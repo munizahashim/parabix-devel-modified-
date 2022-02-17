@@ -282,10 +282,12 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
     StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<InterleaveCompressionSegment>(codeUnitStream, u8bytes, combinedMask, combinedPhraseMask, nonfinal_output_bytes, nonfinal_filter_mask);
-    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, u8bytes, combinedMask, dict_mask, nonfinal_output_bytes, nonfinal_filter_mask);
     // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
+    // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
+    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
 
+    // Print dictionary
     StreamSet * const dictStream = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(dict_bytes, dictStream);
 
@@ -298,6 +300,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     Scalar * dictFileName = P->getInputScalar("dictFileName");
     P->CreateKernelCall<FileSink>(dictFileName, dictBytes);
 
+    // Print compressed output
     StreamSet * const encoded = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
 
@@ -309,7 +312,18 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     Scalar * outputFileName = P->getInputScalar("outputFileName");
     P->CreateKernelCall<FileSink>(outputFileName, ZTF_bytes);
-    // P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
+
+    // Print interleaved dictionary + compressed output
+    StreamSet * const interleaved = P->CreateStreamSet(8);
+    P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, interleaved);
+
+    StreamSet * const output_basis = P->CreateStreamSet(8);
+    FilterByMask(P, nonfinal_filter_mask, interleaved, output_basis);
+
+    StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(output_basis, output_bytes);
+    P->CreateKernelCall<StdOutKernel>(output_bytes);
+
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }
 
@@ -330,7 +344,7 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<ZTF_PhraseExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths, countStream);
     //P->CreateKernelCall<DebugDisplayKernel>("countStream", countStream);
     //P->CreateKernelCall<codeword_index>(ztfHashBasis, countStream);
-    //P->CreateKernelCall<PopcountKernel>(countStream, P->getOutputScalar("count1"));
+    // P->CreateKernelCall<PopcountKernel>(countStream, P->getOutputScalar("count2"));
     StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
     StreamSet * const ztfHash_u8_Basis = P->CreateStreamSet(8);
     //P->CreateKernelCall<DebugDisplayKernel>("ztfRunSpreadMask", ztfRunSpreadMask);
@@ -341,15 +355,13 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     StreamSet * hashtableSpan = P->CreateStreamSet(1);
     P->CreateKernelCall<ZTF_PhraseDecodeLengths>(encodingScheme1, SymCount, ztfHash_u8_Basis, decodedMarks, hashtableMarks, hashtableSpan);
 
-    //P->CreateKernelCall<PopcountKernel>(hashtableSpan, P->getOutputScalar("count1"));
+    // P->CreateKernelCall<PopcountKernel>(hashtableSpan, P->getOutputScalar("count2"));
     //P->CreateKernelCall<DebugDisplayKernel>("hashtableSpan", hashtableSpan);
 
     StreamSet * const ztfHash_u8bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
     //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
 
-    /// TODO: use length group decompression which builds the hashtable using the compressed data
-    // and replaces the codewords with phrases.
     StreamSet * u8bytes = ztfHash_u8bytes;
     for(unsigned sym = 0; sym < SymCount; sym++) {
         unsigned startIdx = 0;
