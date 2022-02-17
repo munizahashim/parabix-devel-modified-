@@ -456,186 +456,6 @@ void MarkRepeatedHashvalue::generateMultiBlockLogic(BuilderRef b, Value * const 
     // b->setScalarField("pendingPhraseMask", lastCWMask);
     b->CreateBr(hashMarksDone);
     b->SetInsertPoint(hashMarksDone);
-    //=========================================================================================================================
-    // ScanWordParameters sw(b, mStride);
-    // LengthGroupParameters lg(b, mEncodingScheme, mGroupNo, mNumSym);
-    // Constant * sz_STRIDE = b->getSize(mStride);
-    // Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
-    // Constant * sz_SUB_STRIDE = b->getSize(mSubStride);
-    // Constant * sz_BLOCKS_PER_SUB_STRIDE = b->getSize(mSubStride/b->getBitBlockWidth());
-    // Constant * sz_ZERO = b->getSize(0);
-    // Constant * sz_ONE = b->getSize(1);
-    // Constant * sz_TWO = b->getSize(2);
-    // Constant * sz_BITS = b->getSize(SIZE_T_BITS);
-    // Constant * sz_BLOCKWIDTH = b->getSize(b->getBitBlockWidth());
-    // Constant * sz_TABLEMASK = b->getSize((1U << 14) -1);
-    // Constant * sz_PHRASE_LEN_OFFSET = b->getSize(mOffset);
-
-    // assert ((mStride % mSubStride) == 0);
-    // Value * const totalSubStrides = b->getSize(mStride / mSubStride);
-    // Type * sizeTy = b->getSizeTy();
-    // Type * bitBlockPtrTy = b->getBitBlockType()->getPointerTo();
-
-    // BasicBlock * const entryBlock = b->GetInsertBlock();
-    // BasicBlock * const stridePrologue = b->CreateBasicBlock("stridePrologue");
-    // BasicBlock * const subStrideMaskPrep = b->CreateBasicBlock("subStrideMaskPrep");
-    // BasicBlock * const strideMasksReady = b->CreateBasicBlock("strideMasksReady");
-    // BasicBlock * const keyHashProcessingLoop = b->CreateBasicBlock("keyHashProcessingLoop");
-    // BasicBlock * const markHashEntry = b->CreateBasicBlock("markHashEntry");
-    // BasicBlock * const storeHashFlag = b->CreateBasicBlock("storeHashFlag");
-    // BasicBlock * const markHashRepeat = b->CreateBasicBlock("markHashRepeat");
-    // BasicBlock * const nextHash = b->CreateBasicBlock("nextHash");
-    // BasicBlock * const keyHashesDone = b->CreateBasicBlock("keyHashesDone");
-    // BasicBlock * const subStrideDone = b->CreateBasicBlock("subStrideDone");
-    // BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
-    // BasicBlock * const updatePending = b->CreateBasicBlock("updatePending");
-    // BasicBlock * const hashMarksDone = b->CreateBasicBlock("hashMarksDone");
-
-    // //common to all the input streams
-    // Value * initialPos = b->getProcessedItemCount("symEndMarks");
-    // Value * avail = b->getAvailableItemCount("symEndMarks");
-    // Value * initialProduced = b->getProducedItemCount("hashMarks");
-    // Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", initialProduced), bitBlockPtrTy);
-    // Value * pendingMask = b->CreateNot(b->getScalarField("pendingMaskInverted"));
-    // b->CreateStore(pendingMask, producedPtr);
-    // Value * hashMarksPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", initialPos), bitBlockPtrTy);
-    // Value * hashTableBasePtr = b->CreateBitCast(b->getScalarFieldPtr("freqTable"), b->getInt8PtrTy());
-    // // b->CallPrintInt("avail", avail);
-    // b->CreateBr(stridePrologue);
-    // b->SetInsertPoint(stridePrologue);
-    // PHINode * const strideNo = b->CreatePHI(sizeTy, 2);
-    // strideNo->addIncoming(sz_ZERO, entryBlock);
-
-    // Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
-    // Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
-    // Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
-
-    // b->CreateBr(subStrideMaskPrep);
-    // b->SetInsertPoint(subStrideMaskPrep);
-    // PHINode * const subStrideNo = b->CreatePHI(sizeTy, 2);
-    // subStrideNo->addIncoming(sz_ZERO, stridePrologue);
-    // // b->CallPrintInt("subStrideNo", subStrideNo);
-
-    // Value * subStridePos = b->CreateAdd(stridePos, b->CreateMul(subStrideNo, sz_SUB_STRIDE));
-    // Value * subSrideBlockOffset = b->CreateAdd(strideBlockOffset,
-    //                                          b->CreateMul(subStrideNo, sz_BLOCKS_PER_SUB_STRIDE));
-    // Value * nextSubStrideNo = b->CreateAdd(subStrideNo, sz_ONE);
-
-    // std::vector<Value *> hashMasks;
-    // hashMasks = initializeCompressionMasks2(b, sw, sz_BLOCKS_PER_SUB_STRIDE, 1, subSrideBlockOffset, hashMarksPtr, strideMasksReady);
-    // Value * hashMask = hashMasks[0];
-
-    // b->SetInsertPoint(strideMasksReady);
-    // Value * keywordBasePtr = b->getInputStreamBlockPtr("symEndMarks", sz_ZERO, subSrideBlockOffset);
-    // keywordBasePtr = b->CreateBitCast(keywordBasePtr, sw.pointerTy);
-
-    // b->CreateUnlikelyCondBr(b->CreateICmpEQ(hashMask, sz_ZERO), subStrideDone, keyHashProcessingLoop);
-    // b->SetInsertPoint(keyHashProcessingLoop);
-
-    // PHINode * hashMaskPhi = b->CreatePHI(sizeTy, 2);
-    // hashMaskPhi->addIncoming(hashMask, strideMasksReady);
-    // PHINode * hashWordPhi = b->CreatePHI(sizeTy, 2);
-    // hashWordPhi->addIncoming(sz_ZERO, strideMasksReady);
-
-    // Value * hashWordIdx = b->CreateCountForwardZeroes(hashMaskPhi, "hashWordIdx");
-    // Value * nextHashWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keywordBasePtr, hashWordIdx)), sizeTy);
-    // Value * theHashWord = b->CreateSelect(b->CreateICmpEQ(hashWordPhi, sz_ZERO), nextHashWord, hashWordPhi);
-    // Value * hashWordPos = b->CreateAdd(subStridePos, b->CreateMul(hashWordIdx, sw.WIDTH));
-    // Value * hashMarkPosInWord = b->CreateCountForwardZeroes(theHashWord);
-    // Value * hashMarkPos = b->CreateAdd(hashWordPos, hashMarkPosInWord, "keyEndPos");
-
-    // // get the hashVal bytes corresponding to the length of the keyword/phrase
-    // Value * hashValue = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", hashMarkPos)), sizeTy);
-    // // calculate keyLength from hashValue's bixnum part
-    // // Value * keyLength = b->CreateAdd(b->CreateLShr(hashValue, lg.MAX_HASH_BITS), sz_PHRASE_LEN_OFFSET, "keyLength");
-    // // get start position of the keyword/phrase
-
-    // Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK_NEW, "keyHash");
-    // //b->CallPrintInt("keyHash", keyHash);
-    // Value * tableIdxHash = b->CreateAnd(b->CreateLShr(keyHash, 8), sz_TABLEMASK, "tableIdx");
-    // //b->CallPrintInt("hashValue", hashValue);
-    // //b->CallPrintInt("tableIdxHash", tableIdxHash);
-
-    // Value * tableEntryPtr = b->CreateInBoundsGEP(hashTableBasePtr, tableIdxHash);
-    // Value * tblPtr1 = b->CreateBitCast(tableEntryPtr, b->getInt8PtrTy());
-    // Value * entry = b->CreateMonitoredScalarFieldLoad("freqTable", tblPtr1);
-
-    // Value * entryVal = b->CreateTrunc(entry, b->getInt8Ty());
-    // Value * entryExists = b->CreateICmpEQ(entryVal, b->getInt8(0x1));
-    // b->CreateCondBr(entryExists, markHashRepeat, markHashEntry);
-
-    // b->SetInsertPoint(markHashRepeat);
-
-    // Value * markBase = b->CreateSub(hashMarkPos, b->CreateURem(hashMarkPos, sz_BITS));
-    // Value * markOffset = b->CreateSub(hashMarkPos, markBase);
-    // Value * const hashMarkBasePtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", markBase), sizeTy->getPointerTo());
-    // Value * initialMark = b->CreateAlignedLoad(hashMarkBasePtr, 1);
-    // //b->CallPrintInt("initialMark", initialMark);
-    // Value * updated = b->CreateOr(initialMark, b->CreateShl(sz_ONE, markOffset));
-    // //b->CallPrintInt("updated", updated);
-    // b->CreateAlignedStore(updated, hashMarkBasePtr, 1);
-    // b->CreateBr(nextHash);
-
-    // b->SetInsertPoint(markHashEntry);
-    // Value * isEmptyEntry = b->CreateICmpEQ(entryVal, Constant::getNullValue(b->getInt8Ty()));
-    // b->CreateCondBr(isEmptyEntry, storeHashFlag, nextHash);
-    // b->SetInsertPoint(storeHashFlag);
-    // b->CreateMonitoredScalarFieldStore("freqTable", b->getInt8(0x1), tblPtr1);
-
-    // // Mark the first symbol with any unique hashcode (used to make hash table entry) while marking repeated hashcodes
-    // // ==> avoids collision with another codeword
-    // // Even if the phrase is not repeated, it will be registered as the first phrase with codeword C
-    // Value * markBase1 = b->CreateSub(hashMarkPos, b->CreateURem(hashMarkPos, sz_BITS));
-    // Value * markOffset1 = b->CreateSub(hashMarkPos, markBase1);
-    // Value * const hashMarkBasePtr1 = b->CreateBitCast(b->getRawOutputPointer("hashMarks", markBase1), sizeTy->getPointerTo());
-    // Value * initialMark1 = b->CreateAlignedLoad(hashMarkBasePtr1, 1);
-    // Value * updated1 = b->CreateOr(initialMark1, b->CreateShl(sz_ONE, markOffset1));
-    // b->CreateAlignedStore(updated1, hashMarkBasePtr1, 1);
-
-    // b->CreateBr(nextHash);
-
-    // b->SetInsertPoint(nextHash);
-    // Value * dropHash = b->CreateResetLowestBit(theHashWord);
-    // Value * thisWordDone = b->CreateICmpEQ(dropHash, sz_ZERO);
-    // // There may be more hashes in the key mask.
-    // Value * nextHashMask = b->CreateSelect(thisWordDone, b->CreateResetLowestBit(hashMaskPhi), hashMaskPhi);
-    // BasicBlock * currentBB = b->GetInsertBlock();
-    // hashMaskPhi->addIncoming(nextHashMask, currentBB);
-    // hashWordPhi->addIncoming(dropHash, currentBB);
-
-    // b->CreateCondBr(b->CreateICmpNE(nextHashMask, sz_ZERO), keyHashProcessingLoop, subStrideDone);
-
-    // b->SetInsertPoint(keyHashesDone);
-    // strideNo->addIncoming(nextStrideNo, keyHashesDone);
-    // b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
-
-    // b->SetInsertPoint(subStrideDone);
-    // subStrideNo->addIncoming(nextSubStrideNo, subStrideDone);
-    // b->CreateCondBr(b->CreateICmpNE(nextSubStrideNo, totalSubStrides), subStrideMaskPrep, keyHashesDone);
-
-    // b->SetInsertPoint(stridesDone);
-    // // In the next segment, we may need to access hash codes in the last
-    // // length group's hi bytes of this segment.
-    // if (DeferredAttributeIsSet()) {
-    //     Value * processed = b->CreateSub(avail, lg.HI);
-    //     b->setProcessedItemCount("hashValues", processed);
-    // }
-    // // Although we have written the last block mask, we do not include it as
-    // // produced, because we may need to update it in the event that there is
-    // // a compressible symbol starting in this segment and finishing in the next.
-    // Value * produced = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, sz_BLOCKWIDTH));
-    // b->setProducedItemCount("hashMarks", produced);
-    // Value * processed = b->CreateSelect(b->isFinal(), avail, b->CreateSub(avail, lg.HI));
-    // b->setProcessedItemCount("byteData", processed);
-
-    // b->CreateCondBr(b->isFinal(), hashMarksDone, updatePending);
-    // b->SetInsertPoint(updatePending);
-    // Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("hashMarks", produced), bitBlockPtrTy);
-    // Value * lastMask = b->CreateBlockAlignedLoad(pendingPtr);
-    // b->setScalarField("pendingMaskInverted", b->CreateNot(lastMask));
-    // b->CreateBr(hashMarksDone);
-    // b->SetInsertPoint(hashMarksDone);
-
 }
 
 SymbolGroupCompression::SymbolGroupCompression(BuilderRef b,
@@ -1697,16 +1517,15 @@ SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
 : MultiBlockKernel(b, "SymbolGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"keyMarks0", codeWordMarks},
                        Binding{"hashMarks0", hashMarks},
-                       Binding{"byteData", byteData, BoundedRate(0,1)} //, {LookBehind(32+1)} }//, Deferred()} //FixedRate(), LookBehind(32+1)}//, Deferred()}
+                       Binding{"byteData", byteData, BoundedRate(0,1)}
                    },
                    {}, {}, {},
                    {InternalScalar{ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
                     // Hash table 8 length-based tables with 256 16-byte entries each.
                     InternalScalar{ArrayType::get(ArrayType::get(b->getInt8Ty(), encodingScheme.byLength[groupNo].hi), phraseHashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo), mNumSym(numSym), mSubStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS)) {
-    //setStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     if (DelayedAttributeIsSet()) {
-        mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1), Delayed(encodingScheme.maxSymbolLength())); //FixedRate(), Delayed(encodingScheme.maxSymbolLength()));
+        mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1), Delayed(encodingScheme.maxSymbolLength()));
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
     }
@@ -1745,12 +1564,17 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     BasicBlock * const subStridePhrasesDone = b->CreateBasicBlock("subStridePhrasesDone");
     BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
 
+    BasicBlock * const printProduced = b->CreateBasicBlock("printProduced");
+    // BasicBlock * const dontPrintInitProduced = b->CreateBasicBlock("dontPrintInitProduced");
+    // BasicBlock * const printInitProduced = b->CreateBasicBlock("printInitProduced");
+    BasicBlock * const dontPrintProduced = b->CreateBasicBlock("dontPrintProduced");
+
     Value * const initialPos = b->getProcessedItemCount("keyMarks0");
     Value * const avail = b->getAvailableItemCount("keyMarks0");
 
     Value * const initialProduced = b->getProducedItemCount("result");
     b->CreateMemCpy(b->getRawOutputPointer("result", initialProduced), b->getScalarFieldPtr("pendingOutput"), lg.HI, 1);
-    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getScalarFieldPtr("pendingOutput"), b->CreateAdd(lg.HI, sz_ZERO));
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getScalarFieldPtr("pendingOutput"), b->CreateAdd(lg.HI, sz_ZERO));
 
     // Copy all new input to the output buffer; this will be then
     // overwritten when and as necessary for decompression of ZTF codes.
@@ -1835,11 +1659,11 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * thePfxHashBits = b->CreateUDiv(theMultiplier, lg.RANGE);
     /// CHECK: Assertion for CreateUDiv(multiplier, lg.RANGE)
     codewordVal = b->CreateOr(b->CreateShl(codewordVal, lg.MAX_HASH_BITS), b->CreateAnd(thePfxHashBits, lg.PREFIX_LENGTH_MASK));
-#if 0
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", keyStartPos), keyLength);
+#ifdef PRINT_DECOMPRESSION_DICT_INFO
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", keyStartPos), keyLength);
     Value * hashLen = b->CreateAdd(lg.ENC_BYTES, sz_ZERO);
     Value * hashStart = b->CreateSub(keyMarkPos, hashLen);
-    b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", hashStart), hashLen);
+    // b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawInputPointer("byteData", hashStart), hashLen);
     Value * codewordVal_debug = codewordVal;
 #endif
 
@@ -1870,15 +1694,16 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     // We have a new symbols that allows future occurrences of the symbol to
     // be compressed using the hash code.
 
-#if 0
-    Value * pfxLgthMask = pfxByteBits;
+#ifdef PRINT_DECOMPRESSION_DICT_INFO
+    Value * pfxLgthMask = thePfx;
     pfxLgthMask = b->CreateTrunc(b->CreateAnd(pfxLgthMask, lg.PREFIX_LENGTH_MASK), b->getInt64Ty());
     Value * lgthBase = b->CreateSub(keyLength, lg.LO);
     Value * pfxOffset1 = b->CreateAdd(lg.PREFIX_BASE, lgthBase);
     Value * multiplier1 = b->CreateMul(lg.RANGE, pfxLgthMask);
     Value * ZTF_prefix = b->CreateAdd(pfxOffset1, multiplier1, "ZTF_prefix");
-    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
-    //b->CallPrintInt("hashCode", b->CreateOr(b->CreateShl(codewordVal_debug, lg.MAX_HASH_BITS), ZTF_prefix));
+    b->CreateWriteCall(b->getInt32(STDERR_FILENO), symPtr1, keyLength);
+    b->CallPrintInt("hashCode", b->CreateOr(codewordVal_debug, thePfx));
+    b->CallPrintInt("keyLength", keyLength);
 #endif
 #ifdef CHECK_COMPRESSION_DECOMPRESSION_STORE
     b->CallPrintInt("hashCode", keyHash);
@@ -1887,7 +1712,6 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
 #endif
     b->CreateMonitoredScalarFieldStore("hashTable", sym1, tblPtr1);
     b->CreateMonitoredScalarFieldStore("hashTable", sym2, tblPtr2);
-
     b->CreateBr(nextKey);
 
     b->SetInsertPoint(nextKey);
@@ -2012,7 +1836,6 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
 
     b->SetInsertPoint(stridesDone);
-
     // If the segment ends in the middle of a 2-byte codeword, we need to
     // make sure that we still have access to the codeword in the next block.
     Value * processed = b->CreateSub(avail, lg.HI);
@@ -2021,8 +1844,13 @@ void SymbolGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     Value * guaranteedProduced = b->CreateSub(avail, lg.HI);
     b->CreateMemCpy(b->getScalarFieldPtr("pendingOutput"), b->getRawOutputPointer("result", guaranteedProduced), lg.HI, 1);
     b->setProducedItemCount("result", b->CreateSelect(b->isFinal(), avail, guaranteedProduced));
-    //b->CreateWriteCall(b->getInt32(STDERR_FILENO), b->getRawOutputPointer("result", b->CreateSub(guaranteedProduced, lg.HI)), b->CreateAdd(lg.HI, sz_ZERO));
-    //b->CallPrintInt("processed", processed);
+    b->CreateCondBr(b->CreateAnd(b->CreateICmpEQ(b->getSize(mNumSym), sz_ZERO), b->CreateICmpEQ(b->getSize(mGroupNo), b->getSize(0))), printProduced, dontPrintProduced);
+    b->SetInsertPoint(printProduced);
+    // b->CallPrintInt("avail", avail);
+    // b->CallPrintInt("initialProduced", initialProduced);
+    // b->CallPrintInt("guaranteedProduced", guaranteedProduced);
+    b->CreateBr(dontPrintProduced);
+    b->SetInsertPoint(dontPrintProduced);
     //CHECK: Although we have written the full input stream to output, there may
     // be an incomplete symbol at the end of this block.   Store the
     // data that may be overwritten as pending and set the produced item
