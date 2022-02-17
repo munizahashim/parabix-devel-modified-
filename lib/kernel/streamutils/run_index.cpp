@@ -112,7 +112,7 @@ Bindings AccumRunIndexOutputBindings(StreamSet * accumRunIndex, StreamSet * accu
     return {Binding{"accumRunIndex", accumRunIndex}, Binding{"accumOverflow", accumOverflow}};
 }
 
-AccumRunIndex::AccumRunIndex(BuilderRef b, unsigned numSym,
+AccumRunIndex::AccumRunIndex(BuilderRef b, unsigned offset,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * accumRunIndex, StreamSet * accumOverflow)
     : PabloKernel(b, "AccumRunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow"),
            // input
@@ -120,7 +120,7 @@ AccumRunIndex::AccumRunIndex(BuilderRef b, unsigned numSym,
            // output
 AccumRunIndexOutputBindings(accumRunIndex, accumOverflow)),
 mIndexCount(accumRunIndex->getNumElements()),
-mNumSym(numSym),
+mOffset(offset),
 mOverflow(accumOverflow != nullptr) {
     assert(mIndexCount > 0);
     assert(mIndexCount <= 5);
@@ -173,7 +173,7 @@ void AccumRunIndex::generatePabloMethod() {
     //pb.createDebugPrint(notFirstSymSum, "notFirstSymSum");
     PabloAST * inRangeFinal = pb.createAnd(pb.createNot(byteLenSym), notFirstSymSum);
     // add k for k-symbol phrase length calculation
-    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), mNumSym); //bnc.AddModular(prevSymLen, curSymLen);
+    BixNum sum = bnc.AddModular(bnc.AddModular(prevSymLen, curSymLen), mOffset); //bnc.AddModular(prevSymLen, curSymLen);
     curOverflow = pb.createOr(curOverflow, bnc.ULT(sum, curSymLen));
     //pb.createDebugPrint(curOverflow, "curOverflow");
     inRangeFinal = pb.createAnd(inRangeFinal, pb.createXor(inRangeFinal, curOverflow));

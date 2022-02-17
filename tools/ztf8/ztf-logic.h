@@ -178,11 +178,13 @@ public:
                     unsigned groupNo,
                  StreamSet * symbolRun, StreamSet * const lengthBixNum,
                  StreamSet * overflow,
-                 StreamSet * selected);
+                 StreamSet * selected,
+                 unsigned offset = 2);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;
     unsigned mGroupNo;
+    unsigned mOffset;
 };
 
 class LengthSorter final: public pablo::PabloKernel {

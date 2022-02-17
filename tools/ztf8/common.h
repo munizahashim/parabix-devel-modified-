@@ -88,6 +88,13 @@ std::vector<llvm::Value *> initializeCompressionMasks1(Kernel::BuilderRef b,
                                                     llvm::Value * strideBlockOffset,
                                                     llvm::Value * dictMaskPtr,
                                                     llvm::BasicBlock * strideMasksReady);
+std::vector<llvm::Value *> initializeCompressionMasks2(Kernel::BuilderRef b,
+                                                    struct ScanWordParameters & sw,
+                                                    llvm::Constant * sz_BLOCKS_PER_STRIDE,
+                                                    unsigned maskCount,
+                                                    llvm::Value * strideBlockOffset,
+                                                    llvm::Value * dictMaskPtr,
+                                                    llvm::BasicBlock * strideMasksReady);
 void initializeDecompressionMasks(Kernel::BuilderRef b,
                                                     struct ScanWordParameters & sw,
                                                     llvm::Constant * sz_BLOCKS_PER_STRIDE,

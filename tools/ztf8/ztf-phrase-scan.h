@@ -18,12 +18,13 @@ public:
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
                            unsigned numSyms,
-                           StreamSet * symbolMarks,
+                           unsigned offset,
+                           StreamSet * symEndMarks,
                            StreamSet * const hashValues,
                            StreamSet * const byteData,
-                           StreamSet * hashMarks,
+                           StreamSet * hashMarks,/*
                            StreamSet * dictMask,
-                           StreamSet * dictPhraseMask,
+                           StreamSet * dictPhraseMask,*/
                            unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
@@ -32,14 +33,17 @@ private:
     const unsigned mGroupNo;
     const unsigned mNumSym;
     const unsigned mSubStride;
+    const unsigned mOffset;
 };
 
 class SymbolGroupCompression final : public MultiBlockKernel {
 public:
     SymbolGroupCompression(BuilderRef b,
+                           unsigned pLen,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
                            unsigned numSyms,
+                           unsigned offset,
                            StreamSet * symbolMarks,
                            StreamSet * hashValues,
                            StreamSet * const byteData,
@@ -55,16 +59,19 @@ private:
     const unsigned mGroupNo;
     const unsigned mNumSym;
     const unsigned mSubStride;
+    const unsigned mPlen;
+    const unsigned mOffset;
 };
 
 class WriteDictionary final : public MultiBlockKernel {
 public:
     WriteDictionary(BuilderRef b,
+    unsigned plen,
                     EncodingInfo encodingScheme,
                     unsigned numSyms,
+                    unsigned offset,
                     StreamSet * byteData,
                     StreamSet * codedBytes,
-                    StreamSet * extractionMask,
                     StreamSet * phraseMask,
                     StreamSet * allLenHashValues,
                     StreamSet * dictBytes,
@@ -74,6 +81,8 @@ private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
     const unsigned mNumSym;
     const unsigned mSubStride;
+    const unsigned mPlen;
+    const unsigned mOffset;
 };
 
 class InterleaveCompressionSegment final : public MultiBlockKernel {
