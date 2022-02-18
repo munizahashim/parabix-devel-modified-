@@ -5,6 +5,166 @@
 
 namespace kernel {
 
+#ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief computeIntraPartitionRepetitionVectors
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P) {
+
+    const auto cfg = Z3_mk_config();
+    Z3_set_param_value(cfg, "model", "true");
+    Z3_set_param_value(cfg, "proof", "false");
+
+    const auto ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    const auto solver = Z3_mk_solver(ctx);
+    Z3_solver_inc_ref(ctx, solver);
+
+    auto hard_assert = [&](Z3_ast c) {
+        Z3_solver_assert(ctx, solver, c);
+    };
+
+    const auto intType = Z3_mk_int_sort(ctx);
+
+    auto constant_real = [&](const Rational value) {
+        assert (value.numerator() > 0);
+        return Z3_mk_real(ctx, value.numerator(), value.denominator());
+    };
+
+    auto multiply =[&](Z3_ast X, Z3_ast Y) {
+        assert (X && Y);
+        Z3_ast args[2] = { X, Y };
+        return Z3_mk_mul(ctx, 2, args);
+    };
+
+    const auto ONE = Z3_mk_int(ctx, 1, intType);
+
+    const auto numOfPartitions = num_vertices(P);
+
+    const auto m = num_vertices(Relationships);
+
+    std::vector<Z3_ast> VarList(m);
+
+    for (unsigned producerPartitionId = 1; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        PartitionData & N = P[producerPartitionId];
+        const auto & K = N.Kernels;
+
+        Z3_solver_push(ctx, solver);
+
+        for (const auto u : K) {
+            auto repVar = Z3_mk_fresh_const(ctx, nullptr, intType);
+            hard_assert(Z3_mk_ge(ctx, repVar, ONE));
+            VarList[u] = repVar; // multiply(rootVar, repVar);
+        }
+
+        for (const auto producer : K) {
+            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+            for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
+                const auto binding = target(e, Relationships);
+                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
+                    const auto f = first_out_edge(binding, Relationships);
+                    assert (Relationships[f].Reason != ReasonType::Reference);
+                    const auto streamSet = target(f, Relationships);
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+
+                    const RelationshipNode & output = Relationships[binding];
+                    assert (output.Type == RelationshipNode::IsBinding);
+
+                    const Binding & outputBinding = output.Binding;
+                    const ProcessingRate & outputRate = outputBinding.getRate();
+                    // ignore unknown output rates; we cannot reason about them here.
+                    if (LLVM_LIKELY(outputRate.isFixed())) {
+
+                        assert (VarList[producer]);
+                        Z3_ast expOutRate = nullptr;
+
+                        for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
+                            const auto binding = target(e, Relationships);
+                            const RelationshipNode & input = Relationships[binding];
+                            if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
+
+                                const Binding & inputBinding = input.Binding;
+                                const ProcessingRate & inputRate = inputBinding.getRate();
+
+                                if (LLVM_LIKELY(inputRate.isFixed())) {
+
+                                    const auto f = first_out_edge(binding, Relationships);
+                                    assert (Relationships[f].Reason != ReasonType::Reference);
+                                    const unsigned consumer = target(f, Relationships);
+
+                                    const auto c = PartitionIds.find(consumer);
+                                    assert (c != PartitionIds.end());
+                                    const auto consumerPartitionId = c->second;
+                                    assert (producerPartitionId <= consumerPartitionId);
+
+                                    if (producerPartitionId == consumerPartitionId) {
+
+                                        if (expOutRate == nullptr) {
+                                            const RelationshipNode & producerNode = Relationships[producer];
+                                            assert (producerNode.Type == RelationshipNode::IsKernel);
+                                            const auto expectedOutput = outputRate.getRate() * producerNode.Kernel->getStride();
+                                            expOutRate = multiply(VarList[producer], constant_real(expectedOutput));
+                                        }
+
+                                        const RelationshipNode & consumerNode = Relationships[consumer];
+                                        assert (consumerNode.Type == RelationshipNode::IsKernel);
+                                        const auto expectedInput = inputRate.getRate() * consumerNode.Kernel->getStride();
+                                        assert (VarList[consumer]);
+                                        const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
+
+                                        hard_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
+                                    }
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (LLVM_UNLIKELY(Z3_solver_check(ctx, solver) == Z3_L_FALSE)) {
+          //  errs() << Z3_solver_to_string(ctx, solver) << "\n\n";
+            report_fatal_error("Z3 failed to find a solution to minimum expected dataflow problem");
+        }
+
+        const auto model = Z3_solver_get_model(ctx, solver);
+        Z3_model_inc_ref(ctx, model);
+
+        const auto n = K.size();
+        N.Repetitions.resize(n);
+        for (unsigned i = 0; i < n; ++i) {
+            Z3_ast value;
+            if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, VarList[K[i]], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
+                report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
+            }
+
+            Z3_int64 num, denom;
+            if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &num, &denom) != Z3_L_TRUE)) {
+                report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
+            }
+            assert (num > 0 && denom == 1);
+            N.Repetitions[i] = num;
+        }
+        Z3_model_dec_ref(ctx, model);
+
+        Z3_solver_pop(ctx, solver, 1);
+        #ifndef NDEBUG
+        for (const auto u : K) {
+            VarList[u] = nullptr;
+        }
+        #endif
+    }
+
+    Z3_solver_dec_ref(ctx, solver);
+    Z3_del_context(ctx);
+
+}
+
+#endif
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeMinimumExpectedDataflow
  ** ------------------------------------------------------------------------------------------------------------- */

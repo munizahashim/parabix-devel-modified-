@@ -269,7 +269,6 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
             assert (k < REQ_INTEGERS);
             const auto v = values[k++];
             knownOverheads += v;
-            const long double cycles = v;
             const double cycPerc = (((long double)v) * 100.0L) / fSubTotal;
             out << (boost::format("%5.1f") % cycPerc).str() << ' ';
         }
@@ -292,12 +291,8 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         assert (k < REQ_INTEGERS);
         const uint64_t n = values[k++];
         const long double N = n;
-        const auto x = (fSqrTotalCycles / N);
-        const auto y = (fSubTotal / N);
-        const auto yy = (y * y);
-        assert (nx >= yy);
-        const auto z = (x > yy) ? (x - yy) : 0.0L;
-        const auto avgStddev = (std::sqrt(z) * 100.0L) / fTotalCycleCount;
+        const auto x = std::max((fSqrTotalCycles * N) - (fSubTotal * fSubTotal), 0.0L);
+        const auto avgStddev = (std::sqrt(x) * 100.0L) / (N * fTotalCycleCount);
         out << (boost::format(" +- %4.1f\n") % avgStddev).str();
 
     }

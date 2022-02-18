@@ -240,8 +240,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, random_engine & rng) 
 
         for (auto kernel = firstKernel, m = 0U; kernel <= lastKernel; ++kernel) {
 
-
-
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
                 const auto i = streamSet - FirstStreamSet;

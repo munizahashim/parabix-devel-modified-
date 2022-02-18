@@ -528,7 +528,7 @@ public:
 
 protected:
 
-    Allocator									mAllocator;
+    SimulationAllocator									mAllocator;
 
     const bool                       			CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;

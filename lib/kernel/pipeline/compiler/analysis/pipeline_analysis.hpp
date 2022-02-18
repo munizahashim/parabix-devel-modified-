@@ -28,8 +28,7 @@ namespace kernel {
 
 struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
-public:
-
+    using KernelPartitionIds = flat_map<ProgramGraph::vertex_descriptor, unsigned>;
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
@@ -51,6 +50,11 @@ public:
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
         auto partitionGraph = P.identifyKernelPartitions();
+
+        #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+        P.computeIntraPartitionRepetitionVectors(partitionGraph);
+        P.estimateInterPartitionDataflow(partitionGraph, rng);
+        #endif
         P.computeMinimumExpectedDataflow(partitionGraph);
         P.schedulePartitionedProgram(partitionGraph, rng);
         // Construct the Stream and Scalar graphs
@@ -122,8 +126,6 @@ private:
     }
 
     // pipeline analysis functions
-
-    using KernelPartitionIds = flat_map<ProgramGraph::vertex_descriptor, unsigned>;
 
     void generateInitialPipelineGraph(BuilderRef b);
 
@@ -214,6 +216,11 @@ private:
     void makeConsumerGraph();
 
     // dataflow analysis functions
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    void computeIntraPartitionRepetitionVectors(PartitionGraph & P);
+
+    void estimateInterPartitionDataflow(PartitionGraph & P, random_engine & rng);
+    #endif
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
 
@@ -329,6 +336,9 @@ public:
 #include "buffer_size_analysis.hpp"
 #include "consumer_analysis.hpp"
 #include "dataflow_analysis.hpp"
+#ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+#include "variable_rate_analysis.hpp"
+#endif
 #include "partitioning_analysis.hpp"
 #include "scheduling_analysis.hpp"
 #include "termination_analysis.hpp"
