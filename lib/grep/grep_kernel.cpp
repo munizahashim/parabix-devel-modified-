@@ -426,10 +426,24 @@ void FixedMatchPairsKernel::generatePabloMethod() {
     Var * matchResults = getInputStreamVar("MatchResults");
     PabloAST * matchFollows = pb.createExtract(matchResults, pb.getInteger(0));
     Var * matchPairsVar = getOutputStreamVar("MatchPairs");
+    // starts of all the matches
     PabloAST * starts = pb.createLookahead(matchFollows, mMatchLength);
-    PabloAST * disjoint = pb.createXor(starts, matchFollows);
-    starts = pb.createAnd(starts, disjoint);
-    matchFollows = pb.createAnd(matchFollows, disjoint);
+    // now find all consecutive positions within mMatchLength of any start.
+    unsigned consecutiveCount = 1;
+    PabloAST * consecutive = starts;
+    for (unsigned i = 1; i <= mMatchLength/2; i *= 2) {
+        consecutiveCount += i;
+        consecutive = pb.createOr(consecutive,
+                                  pb.createAdvance(consecutive, i),
+                                  "consecutive" + std::to_string(consecutiveCount));
+    }
+    if (consecutiveCount < mMatchLength) {
+        consecutive = pb.createOr(consecutive,
+                                  pb.createAdvance(consecutive, mMatchLength - consecutiveCount),
+                                  "consecutive" + std::to_string(mMatchLength));
+    }
+    starts = pb.createAnd(consecutive, pb.createNot(pb.createAdvance(consecutive, 1)));
+    matchFollows = pb.createAnd(pb.createAdvance(consecutive, 1), pb.createNot(consecutive));
     pb.createAssign(pb.createExtract(matchPairsVar, 0), starts);
     pb.createAssign(pb.createExtract(matchPairsVar, 1), matchFollows);
 }
