@@ -416,16 +416,16 @@ InvertMatchesKernel::InvertMatchesKernel(BuilderRef b, StreamSet * Matches, Stre
 
 }
 
-FixedMatchPairsKernel::FixedMatchPairsKernel(BuilderRef b, unsigned length, StreamSet * MatchResults, StreamSet * MatchPairs)
-: PabloKernel(b, "FixedMatchPairsKernel" + std::to_string(MatchResults->getNumElements()) + "x1_by" + std::to_string(length),
-{Binding{"MatchResults", MatchResults, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchPairs", MatchPairs}}),
+FixedMatchSpansKernel::FixedMatchSpansKernel(BuilderRef b, unsigned length, StreamSet * MatchResults, StreamSet * MatchSpans)
+: PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchResults->getNumElements()) + "x1_by" + std::to_string(length),
+{Binding{"MatchResults", MatchResults, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
 mMatchLength(length) {}
 
-void FixedMatchPairsKernel::generatePabloMethod() {
+void FixedMatchSpansKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     Var * matchResults = getInputStreamVar("MatchResults");
     PabloAST * matchFollows = pb.createExtract(matchResults, pb.getInteger(0));
-    Var * matchPairsVar = getOutputStreamVar("MatchPairs");
+    Var * matchSpansVar = getOutputStreamVar("MatchSpans");
     // starts of all the matches
     PabloAST * starts = pb.createLookahead(matchFollows, mMatchLength);
     // now find all consecutive positions within mMatchLength of any start.
@@ -442,10 +442,34 @@ void FixedMatchPairsKernel::generatePabloMethod() {
                                   pb.createAdvance(consecutive, mMatchLength - consecutiveCount),
                                   "consecutive" + std::to_string(mMatchLength));
     }
-    starts = pb.createAnd(consecutive, pb.createNot(pb.createAdvance(consecutive, 1)));
-    matchFollows = pb.createAnd(pb.createAdvance(consecutive, 1), pb.createNot(consecutive));
-    pb.createAssign(pb.createExtract(matchPairsVar, 0), starts);
-    pb.createAssign(pb.createExtract(matchPairsVar, 1), matchFollows);
+    pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
+}
+
+SpansToMarksKernel::SpansToMarksKernel(BuilderRef b, StreamSet * Spans, StreamSet * Marks)
+: PabloKernel(b, "SpansToMarksKernel",
+{Binding{"Spans", Spans}}, {Binding{"Marks", Marks}}) {}
+
+void SpansToMarksKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * spans = getInputStreamSet("Spans")[0];
+    Var * matchEndsVar = getOutputStreamVar("Marks");
+    PabloAST * starts = pb.createAnd(spans, pb.createNot(pb.createAdvance(spans, 1)), "starts");
+    PabloAST * follows = pb.createAnd(pb.createAdvance(spans, 1), pb.createNot(spans), "follows");
+    pb.createAssign(pb.createExtract(matchEndsVar, 0), starts);
+    pb.createAssign(pb.createExtract(matchEndsVar, 1), follows);
+}
+
+U8Spans::U8Spans(BuilderRef b, StreamSet * marks, StreamSet * u8index, StreamSet * spans)
+: PabloKernel(b, "U8Spans",
+{Binding{"marks", marks}, Binding{"u8index", u8index}}, {Binding{"spans", spans}}) {}
+
+void U8Spans::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * marks = getInputStreamSet("marks")[0];
+    PabloAST * u8index = getInputStreamSet("u8index")[0];
+    PabloAST * spans = pb.createMatchStar(marks, pb.createNot(u8index));
+    Var * spansVar = getOutputStreamVar("spans");
+    pb.createAssign(pb.createExtract(spansVar, 0), spans);
 }
 
 void PopcountKernel::generatePabloMethod() {

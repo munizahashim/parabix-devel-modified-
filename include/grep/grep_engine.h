@@ -119,7 +119,7 @@ protected:
         S2P = 1,
         UTF8index = 2,
         MoveMatchesToEOL = 4,
-        MatchStarts = 8,
+        MatchSpans = 8,
         GraphemeClusterBoundary = 16,
         WordBoundary = 32
     };
