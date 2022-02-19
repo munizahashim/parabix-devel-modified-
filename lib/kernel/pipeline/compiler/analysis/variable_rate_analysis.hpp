@@ -41,7 +41,6 @@ struct FixedPort final : public SimulationPort {
     bool consume(uint32_t & pending, random_engine & /* rng */) override {
         pending = mAmount;
         if (QueueLength < mAmount) {
-            // errs() << "  -> F: cannot pull " << mAmount << " from " << QueueLength << "\n";
             return false;
         }
         // pending = mAmount;
@@ -1061,16 +1060,26 @@ fuse_existing_streamset:
 // now calculate the expected dataflow from the simulation
 
     for (unsigned i = 0; i < numOfPartitions; ++i) {
-        const SimulationActor * const sn = reinterpret_cast<SimulationActor *>(partitionNodes[i]);
-        const long double SQS = sn->SumOfStrides;
-        const long double SSQ = sn->SumOfStridesSquared;
         PartitionData & D = P[i];
-        D.ExpectedStridesPerSegment = (SQS / fITERATIONS);
-        const auto r = (fITERATIONS * SSQ) - (SQS * SQS);
-        D.StdDevStridesPerSegment = std::sqrt(std::max(r, 0.0l)) / fITERATIONS;
+        if (partitionNodes[i]) {
+            const SimulationActor * const sn = reinterpret_cast<SimulationActor *>(partitionNodes[i]);
+            const uint64_t SQS = sn->SumOfStrides;
+            const uint64_t SSQ = sn->SumOfStridesSquared;
+            D.ExpectedStridesPerSegment = Rational{SQS, ITERATIONS};
+            const auto a = (ITERATIONS * SSQ);
+            const auto b = (SQS * SQS);
+            assert (a >= b);
+            D.StdDevStridesPerSegment = std::sqrt((long double)(a - b)) / fITERATIONS;
+        } else {
+            D.ExpectedStridesPerSegment = Rational{0, 1};
+            D.StdDevStridesPerSegment = 0.0;
+        }
 
-//            errs() << "P_" << u << ".ExpectedStridesPerSegment=" << D.ExpectedStridesPerSegment << "\n";
-//            errs() << "P_" << u << ".StdDevStridesPerSegment=" << D.StdDevStridesPerSegment << "\n";
+
+            errs() << "P_" << i << ".ExpectedStridesPerSegment="
+                    << D.ExpectedStridesPerSegment.numerator() << "/"
+                    << D.ExpectedStridesPerSegment.denominator() << "\n";
+            errs() << "P_" << i << ".StdDevStridesPerSegment=" << D.StdDevStridesPerSegment << "\n";
     }
 
 }

@@ -54,8 +54,9 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
         #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         P.computeIntraPartitionRepetitionVectors(partitionGraph);
         P.estimateInterPartitionDataflow(partitionGraph, rng);
-        #endif
+        #else
         P.computeMinimumExpectedDataflow(partitionGraph);
+        #endif
         P.schedulePartitionedProgram(partitionGraph, rng);
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);

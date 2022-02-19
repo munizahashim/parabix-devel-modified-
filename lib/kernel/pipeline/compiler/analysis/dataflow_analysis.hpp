@@ -46,7 +46,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
     std::vector<Z3_ast> VarList(m);
 
-    for (unsigned producerPartitionId = 1; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];
         const auto & K = N.Kernels;
 
@@ -335,8 +335,6 @@ void PipelineAnalysis::computeMinimumExpectedDataflow(PartitionGraph & P) {
             assert (num > 0 && denom == 1);
             N.Repetitions[i] = num;
         }
-
-
     }
     Z3_model_dec_ref(ctx, model);
 
