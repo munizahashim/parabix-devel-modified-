@@ -280,13 +280,6 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     // P->CreateKernelCall<DebugDisplayKernel>("dict_bytes", dict_bytes);
     // P->CreateKernelCall<DebugDisplayKernel>("dict_mask", dict_mask);
 
-    StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
-    StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, u8bytes, combinedMask, dict_mask, nonfinal_output_bytes, nonfinal_filter_mask);
-    // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
-    // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
-    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
-
     // Print dictionary
     StreamSet * const dictStream = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(dict_bytes, dictStream);
@@ -313,16 +306,23 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     Scalar * outputFileName = P->getInputScalar("outputFileName");
     P->CreateKernelCall<FileSink>(outputFileName, ZTF_bytes);
 
+    StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
+    StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, ZTF_bytes, combinedMask, dict_mask, nonfinal_output_bytes);
+    // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
+    // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
+    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
+
     // Print interleaved dictionary + compressed output
-    StreamSet * const interleaved = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, interleaved);
+    // StreamSet * const interleaved = P->CreateStreamSet(8);
+    // P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, interleaved);
 
-    StreamSet * const output_basis = P->CreateStreamSet(8);
-    FilterByMask(P, nonfinal_filter_mask, interleaved, output_basis);
+    // StreamSet * const output_basis = P->CreateStreamSet(8);
+    // FilterByMask(P, nonfinal_filter_mask, interleaved, output_basis);
 
-    StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(output_basis, output_bytes);
-    P->CreateKernelCall<StdOutKernel>(output_bytes);
+    // StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
+    // P->CreateKernelCall<P2SKernel>(output_basis, output_bytes);
+    // P->CreateKernelCall<StdOutKernel>(output_bytes);
 
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }
