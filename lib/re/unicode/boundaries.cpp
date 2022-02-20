@@ -66,6 +66,40 @@ bool hasWordBoundary(const RE * re) {
     return !(v.validateRE(re));
 }
 
+class NonUnicodeValidator : public RE_Validator {
+public:
+    NonUnicodeValidator() : RE_Validator("NonUnicodeValidator") {}
+
+    bool validateCC(const CC * cc) override {return cc->getAlphabet() != &cc::Unicode;}
+
+    bool validatePropertyExpression(const PropertyExpression * pe) override {return false;}
+};
+
+struct UnicodeLookaheadAbsentValidator final : public RE_Validator {
+    UnicodeLookaheadAbsentValidator() : RE_Validator() {}
+
+    bool validateAssertion(const Assertion * a) override {
+        if (a->getKind() == Assertion::Kind::LookBehind) return true;
+        return NonUnicodeValidator().validateRE(a->getAsserted());
+    }
+
+    bool validatePropertyExpression(const PropertyExpression * e) override {
+        return e->getKind() != PropertyExpression::Kind::Boundary;
+    }
+
+    bool validateName(const Name * n) override {
+        RE * defn = n->getDefinition();
+        if (defn) {
+            return validateRE(defn);
+        }
+        return true;
+    }
+};
+
+bool hasUnicodeLookahead(const RE * re) {
+    UnicodeLookaheadAbsentValidator v;
+    return !(v.validateRE(re));
+}
 
 class GraphemeModeTransformer : public RE_Transformer {
 public:
