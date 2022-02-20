@@ -135,10 +135,6 @@ void JSONNumberSpan::generatePabloMethod() {
     cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
     PabloAST * hyphenIn = getInputStreamSet("lexIn")[Lex::hyphen];
     PabloAST * digitIn = getInputStreamSet("lexIn")[Lex::digit];
-    PabloAST * rCurlyIn = getInputStreamSet("lexIn")[Lex::rCurly];
-    PabloAST * rBracketIn = getInputStreamSet("lexIn")[Lex::rBracket];
-    PabloAST * commaIn = getInputStreamSet("lexIn")[Lex::comma];
-    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
 
     PabloAST * strSpan = getInputStreamSet("strSpan")[0];
     Var * const nbrLex = getOutputStreamVar("nbrLex");
@@ -152,9 +148,12 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * notStrSpan = pb.createNot(strSpan);
     PabloAST * hyphen = pb.createAnd(notStrSpan, hyphenIn);
     PabloAST * digit = pb.createAnd(notStrSpan, digitIn);
-    PabloAST * eE = pb.createAnd(notStrSpan, alleE);
-    PabloAST * dot = pb.createAnd(notStrSpan, allDot);
-    PabloAST * plusMinus = pb.createAnd(notStrSpan, allPlusMinus);
+    PabloAST * alleEAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), alleE);
+    PabloAST * eE = pb.createAnd(notStrSpan, alleEAfterDigit);
+    PabloAST * allDotAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), allDot);
+    PabloAST * dot = pb.createAnd(notStrSpan, allDotAfterDigit);
+    PabloAST * allPlusMinusAftereE = pb.createAnd(pb.createAdvance(eE, 1), allPlusMinus);
+    PabloAST * plusMinus = pb.createAnd(notStrSpan, allPlusMinusAftereE);
 
     PabloAST * nondigit = pb.createNot(digit);
     PabloAST * nonDigitNorEe = pb.createAnd(nondigit, pb.createNot(eE));
@@ -170,17 +169,11 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * errPlusMinus = pb.createAnd(pb.createAdvance(plusMinus, 1), nondigit);
     PabloAST * eENotPlusMinus = pb.createAnd(pb.createAdvance(eE, 1), pb.createNot(plusMinus));
     PabloAST * erreENotPlusMinus = pb.createAnd(eENotPlusMinus, nondigit);
-    PabloAST * potentialErr = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
-
-    PabloAST * validToken = pb.createOr3(rCurlyIn, rBracketIn, commaIn);
-    PabloAST * nextValidToken = pb.createOr(ws, validToken);
-    PabloAST * err = sanitizeLexInput(pb, nextValidToken, potentialErr);
+    PabloAST * err = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 
-    PabloAST * fstPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {beginNbr, digit});
-    PabloAST * sndPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {eE, digit});
-    PabloAST * trdPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {dot, digit});
-    PabloAST * finalNbr = pb.createOr3(fstPartNbr, sndPartNbr, trdPartNbr);
+    PabloAST * endNbr = pb.createAnd(digit, pb.createAdvance(nondigit, 1));
+    PabloAST * finalNbr = pb.createIntrinsicCall(Intrinsic::SpanUpTo, {beginNbr, endNbr});
     pb.createAssign(pb.createExtract(nbrSpan, pb.getInteger(0)), finalNbr);
 }
 
