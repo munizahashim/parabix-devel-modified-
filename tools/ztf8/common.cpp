@@ -207,8 +207,7 @@ std::vector<Value *> initializeCompressionMasks1(BuilderRef b,
                                                 ScanWordParameters & sw,
                                                 Constant * sz_BLOCKS_PER_STRIDE,
                                                 unsigned maskCount,
-                                                Value * strideBlockOffset,
-                                                Value * dictMaskPtr,
+                                                Value * readSubStrideBlockOffset,
                                                 BasicBlock * strideMasksReady) {
     Constant * sz_ZERO = b->getSize(0);
     Constant * sz_ONE = b->getSize(1);
@@ -225,16 +224,15 @@ std::vector<Value *> initializeCompressionMasks1(BuilderRef b,
     }
     PHINode * const blockNo = b->CreatePHI(sizeTy, 2);
     blockNo->addIncoming(sz_ZERO, entryBlock);
-    Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
+    Value * readStrideBlockIndex = b->CreateAdd(readSubStrideBlockOffset, blockNo);
     for (unsigned i = 0; i < maskCount; i++) {
-        Value * keyBitBlock = b->loadInputStreamBlock("phraseMask" + (i > 0 ? std::to_string(i) : ""), sz_ZERO, strideBlockIndex);
+        Value * keyBitBlock = b->loadInputStreamBlock("phraseMask" + (i > 0 ? std::to_string(i) : ""), sz_ZERO, readStrideBlockIndex);
         Value * const anyKey = b->simd_any(sw.width, keyBitBlock);
         Value * keyWordMask = b->CreateZExtOrTrunc(b->hsimd_signmask(sw.width, anyKey), sizeTy);
         // number of symbols in a block at 64 bit boundaries
         keyMasks[i] = b->CreateOr(keyMaskAccum[i], b->CreateShl(keyWordMask, b->CreateMul(blockNo, sw.WORDS_PER_BLOCK)));
         keyMaskAccum[i]->addIncoming(keyMasks[i], maskInitialization);
     }
-    b->CreateBlockAlignedStore(b->allZeroes(), b->CreateGEP(dictMaskPtr, strideBlockIndex));
     Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
     blockNo->addIncoming(nextBlockNo, maskInitialization);
     b->CreateCondBr(b->CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), maskInitialization, strideMasksReady);

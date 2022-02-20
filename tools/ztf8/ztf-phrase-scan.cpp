@@ -860,7 +860,6 @@ WriteDictionary::WriteDictionary(BuilderRef b,
                                 StreamSet * phraseMask,
                                 StreamSet * allLenHashValues,
                                 StreamSet * dictionaryBytes,
-                                StreamSet * dictionaryMask,
                                 unsigned strideBlocks)
 : MultiBlockKernel(b, "WriteDictionary" +  std::to_string(strideBlocks) + "_" + std::to_string(numSyms) + std::to_string(plen),
                    {Binding{"phraseMask", phraseMask},
@@ -873,10 +872,8 @@ WriteDictionary::WriteDictionary(BuilderRef b,
                     mPlen(plen),
 mNumSym(numSyms), mOffset(offset), mSubStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS)) {
     if (DelayedAttributeIsSet()) {
-        mOutputStreamSets.emplace_back("dictionaryMask", dictionaryMask, BoundedRate(0, 1) /*FixedRate(), Delayed(encodingScheme.maxSymbolLength()) */);
         mOutputStreamSets.emplace_back("dictionaryBytes", dictionaryBytes, BoundedRate(0, 1) /*FixedRate(), Delayed(encodingScheme.maxSymbolLength()) */);
     } else {
-        mOutputStreamSets.emplace_back("dictionaryMask", dictionaryMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("dictionaryBytes", dictionaryBytes, BoundedRate(0,1));
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
     }
@@ -888,6 +885,7 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     ScanWordParameters sw(b, mStride);
     Constant * sz_STRIDE = b->getSize(mStride);
     Constant * sz_SUB_STRIDE = b->getSize(mSubStride);
+    Constant * sz_BLOCK_SIZE = b->getSize(b->getBitBlockWidth());
     Constant * sz_BLOCKS_PER_STRIDE = b->getSize(mStride/b->getBitBlockWidth());
     Constant * sz_BLOCKS_PER_SUB_STRIDE = b->getSize(mSubStride/b->getBitBlockWidth());
     Constant * sz_ZERO = b->getSize(0);
@@ -945,8 +943,8 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 #endif
     Value * const initialPos = b->getProcessedItemCount("phraseMask");
     Value * const avail = b->getAvailableItemCount("phraseMask");
-    Value * const initialProduced = b->getProducedItemCount("dictionaryMask");
-    Value * producedPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", initialProduced), bitBlockPtrTy);
+    Value * const initialProducedBytes = b->getProducedItemCount("dictionaryBytes");
+    // b->CallPrintInt("initialProducedBytes", initialProducedBytes);
     b->CreateBr(stridePrologue);
 
     b->SetInsertPoint(stridePrologue);
@@ -954,7 +952,7 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     PHINode * const strideNo = b->CreatePHI(sizeTy, 2);
     strideNo->addIncoming(sz_ZERO, entryBlock);
     PHINode * const segWritePosPhi = b->CreatePHI(sizeTy, 2);
-    segWritePosPhi->addIncoming(initialProduced, entryBlock);
+    segWritePosPhi->addIncoming(initialProducedBytes, entryBlock);
     // b->CallPrintInt("segWritePosPhi", segWritePosPhi);
     Value * nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
@@ -965,22 +963,23 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->SetInsertPoint(subStrideMaskPrep);
     PHINode * const subStrideNo = b->CreatePHI(sizeTy, 2);
     subStrideNo->addIncoming(sz_ZERO, stridePrologue);
-    // starts from 1MB boundary for every 1MB stride
+    // starts from 1MB boundary for every 1MB stride - starts where the prev segment dictionary ended
     PHINode * const writePosPhi = b->CreatePHI(sizeTy, 2);
-    writePosPhi->addIncoming(stridePos, stridePrologue);
+    writePosPhi->addIncoming(segWritePosPhi, stridePrologue); // segWritePosPhi
     // b->CallPrintInt("writePosPhi", writePosPhi);
     // b->CallPrintInt("subStrideNo", subStrideNo);
     Value * nextSubStrideNo = b->CreateAdd(subStrideNo, sz_ONE);
     Value * subStridePos = b->CreateAdd(stridePos, b->CreateMul(subStrideNo, sz_SUB_STRIDE));
     // b->CallPrintInt("subStridePos", subStridePos);
-    Value * subStrideBlockOffset = b->CreateAdd(strideBlockOffset,
+    Value * readSubStrideBlockOffset = b->CreateAdd(strideBlockOffset,
                                                 b->CreateMul(subStrideNo, sz_BLOCKS_PER_SUB_STRIDE));
-    // b->CallPrintInt("subStrideBlockOffset", subStrideBlockOffset);
-    std::vector<Value *> phraseMasks = initializeCompressionMasks1(b, sw, sz_BLOCKS_PER_SUB_STRIDE, 1, subStrideBlockOffset, producedPtr, strideMasksReady);
+    // b->CallPrintInt("readSubStrideBlockOffset", readSubStrideBlockOffset);
+    Value * writeSubStrideBlockOffset = b->CreateAdd(strideBlockOffset, b->CreateMul(subStrideNo, sz_BLOCKS_PER_SUB_STRIDE));
+    std::vector<Value *> phraseMasks = initializeCompressionMasks1(b, sw, sz_BLOCKS_PER_SUB_STRIDE, 1, readSubStrideBlockOffset, strideMasksReady);
     Value * phraseMask = phraseMasks[0];
 
     b->SetInsertPoint(strideMasksReady);
-    Value * phraseWordBasePtr = b->getInputStreamBlockPtr("phraseMask", sz_ZERO, subStrideBlockOffset);
+    Value * phraseWordBasePtr = b->getInputStreamBlockPtr("phraseMask", sz_ZERO, readSubStrideBlockOffset);
     phraseWordBasePtr = b->CreateBitCast(phraseWordBasePtr, sw.pointerTy);
     // b->CallPrintInt("phraseWordBasePtr", phraseWordBasePtr);
     b->CreateUnlikelyCondBr(b->CreateICmpEQ(phraseMask, sz_ZERO), subStridePhrasesDone, dictProcessingLoop);
@@ -1043,9 +1042,9 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const codeWordLen = b->CreateSelect(b->CreateICmpUGT(phraseLengthFinal, b->getSize(16)), b->CreateAdd(cwLenInit, sz_ONE), cwLenInit, "codeWordLen");
     // Write phrase followed by codeword
     Value * codeWordStartPos =  b->CreateSub(phraseMarkPosFinal, b->CreateSub(codeWordLen, sz_ONE));
-    Value * const checkStartBoundary = b->CreateICmpEQ(subStrideWritePos, stridePos); // beginning of each 1MB stride
+    Value * const checkStartBoundary = b->CreateICmpEQ(subStrideWritePos, segWritePosPhi); // beginning of each 1MB stride
 
-    // Write initial hashtable boundary "fefe" and update dictionaryMask
+    // Write initial hashtable boundary "fefe"
     b->CreateBr(writeHTStart);
     b->SetInsertPoint(writeHTStart);
     PHINode * const curWritePos = b->CreatePHI(sizeTy, 2);
@@ -1125,12 +1124,15 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // Update dictionaryMask
     b->CreateCondBr(checkStartBoundary, writeMask, writeSegPhrase);
     b->SetInsertPoint(writeMask);
-    Value * const maskLength = b->CreateZExt(b->CreateAdd(sz_TWO, b->CreateAdd(phraseLengthFinal, codeWordLen)), sizeTy);
-    Value * mask = b->CreateSub(b->CreateShl(sz_ONE, maskLength), sz_ONE);
-    Value * const maskBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", subStrideWritePos), sizeTy->getPointerTo());
-    Value * initialBoundaryMask = b->CreateAlignedLoad(maskBasePtr, 1);
-    Value * updatedBoundaryMask = b->CreateOr(initialBoundaryMask, mask);
-    b->CreateAlignedStore(updatedBoundaryMask, maskBasePtr, 1);
+    // Value * const maskLength = b->CreateZExt(b->CreateAdd(sz_TWO, b->CreateAdd(phraseLengthFinal, codeWordLen)), sizeTy);
+    // Value * mask = b->CreateSub(b->CreateShl(sz_ONE, maskLength), sz_ONE);
+    // Value * startMaskBase = b->CreateSub(subStrideWritePos, b->CreateURem(subStrideWritePos, sz_EIGHT));
+    // Value * startMaskbitOffset = b->CreateSub(subStrideWritePos, startMaskBase);
+    // mask = b->CreateShl(mask, startMaskbitOffset);
+    // Value * const maskBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", startMaskBase), sizeTy->getPointerTo());
+    // Value * initialBoundaryMask = b->CreateAlignedLoad(maskBasePtr, 1);
+    // Value * updatedBoundaryMask = b->CreateOr(initialBoundaryMask, mask);
+    // b->CreateAlignedStore(updatedBoundaryMask, maskBasePtr, 1);
     b->CreateBr(writeSegPhrase);
 
     b->SetInsertPoint(writeSegPhrase);
@@ -1201,15 +1203,15 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->SetInsertPoint(tryUpdateMask);
     b->CreateCondBr(checkStartBoundary, nextPhrase, updateMask);
     b->SetInsertPoint(updateMask);
-    Value * phraseMaskLength = b->CreateZExt(b->CreateAdd(phraseLengthFinal, codeWordLen), sizeTy);
-    Value * lastMask = b->CreateSub(b->CreateShl(sz_ONE, phraseMaskLength), sz_ONE);
-    Value * dictBase = b->CreateSub(subStrideWritePos, b->CreateURem(subStrideWritePos, sz_EIGHT));
-    Value * bitOffset1 = b->CreateSub(subStrideWritePos, dictBase);
-    lastMask = b->CreateShl(lastMask, bitOffset1);
-    Value * const dictPhraseBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", dictBase), sizeTy->getPointerTo());
-    Value * initialdictPhraseMask = b->CreateAlignedLoad(dictPhraseBasePtr, 1);
-    Value * updatedDictPhraseMask = b->CreateOr(initialdictPhraseMask, lastMask);
-    b->CreateAlignedStore(updatedDictPhraseMask, dictPhraseBasePtr, 1);
+    // Value * phraseMaskLength = b->CreateZExt(b->CreateAdd(phraseLengthFinal, codeWordLen), sizeTy);
+    // Value * lastMask = b->CreateSub(b->CreateShl(sz_ONE, phraseMaskLength), sz_ONE);
+    // Value * dictBase = b->CreateSub(subStrideWritePos, b->CreateURem(subStrideWritePos, sz_EIGHT));
+    // Value * bitOffset1 = b->CreateSub(subStrideWritePos, dictBase);
+    // lastMask = b->CreateShl(lastMask, bitOffset1);
+    // Value * const dictPhraseBasePtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", dictBase), sizeTy->getPointerTo());
+    // Value * initialdictPhraseMask = b->CreateAlignedLoad(dictPhraseBasePtr, 1);
+    // Value * updatedDictPhraseMask = b->CreateOr(initialdictPhraseMask, lastMask);
+    // b->CreateAlignedStore(updatedDictPhraseMask, dictPhraseBasePtr, 1);
     b->CreateBr(nextPhrase);
 
     b->SetInsertPoint(nextPhrase);
@@ -1239,7 +1241,7 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     b->SetInsertPoint(checkWriteHTEnd);
     // Note to self: check again!!!! Assumes that the stride contains no dict, only write start and end boundary
-    b->CreateCondBr(b->CreateICmpEQ(nextSubStrideWritePos, b->CreateAdd(stridePos, sz_TWO)), checkFinalLoopCond, writeHTEnd);
+    b->CreateCondBr(b->CreateICmpEQ(nextSubStrideWritePos, segWritePosPhi /*b->CreateAdd(stridePos, sz_TWO)*/), checkFinalLoopCond, writeHTEnd); //>>>>>>>> check again!!!! for wiki-all file
     b->SetInsertPoint(writeHTEnd);
     // Write hashtable end boundary FFFF
     // b->CallPrintInt("curWritePos-writeFFFF", nextSubStrideWritePos);
@@ -1247,32 +1249,39 @@ void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * boundaryCodeword = b->CreateAlloca(b->getInt64Ty(), copyLen);
     b->CreateAlignedStore(sz_HASH_TABLE_END, boundaryCodeword, 1);
     b->CreateMemCpy(b->getRawOutputPointer("dictionaryBytes", nextSubStrideWritePos), boundaryCodeword, copyLen, 1);
-    Value * lastBoundaryBase = b->CreateSub(nextSubStrideWritePos, b->CreateURem(nextSubStrideWritePos, sz_EIGHT));
-    Value * lastBoundaryBitOffset = b->CreateSub(nextSubStrideWritePos, lastBoundaryBase);
-    Value * boundaryBits = b->getSize(0x3);
-    boundaryBits = b->CreateShl(boundaryBits, lastBoundaryBitOffset);
-    Value * const dictPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", lastBoundaryBase), sizeTy->getPointerTo());
-    Value * initMask = b->CreateAlignedLoad(dictPtr, 1);
-    Value * update = b->CreateOr(initMask, boundaryBits);
-    b->CreateAlignedStore(update, dictPtr, 1);
+    // Value * lastBoundaryBase = b->CreateSub(nextSubStrideWritePos, b->CreateURem(nextSubStrideWritePos, sz_EIGHT));
+    // Value * lastBoundaryBitOffset = b->CreateSub(nextSubStrideWritePos, lastBoundaryBase);
+    // Value * boundaryBits = b->getSize(0x3);
+    // boundaryBits = b->CreateShl(boundaryBits, lastBoundaryBitOffset);
+    // Value * const dictPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", lastBoundaryBase), sizeTy->getPointerTo());
+    // Value * initMask = b->CreateAlignedLoad(dictPtr, 1);
+    // Value * update = b->CreateOr(initMask, boundaryBits);
+    // b->CreateAlignedStore(update, dictPtr, 1);
     b->CreateBr(checkFinalLoopCond);
 
     b->SetInsertPoint(checkFinalLoopCond);
     strideNo->addIncoming(nextStrideNo, checkFinalLoopCond);
-    segWritePosPhi->addIncoming(nextSubStrideWritePos, checkFinalLoopCond);
+    Value * segWritePosUpdate = b->CreateAdd(nextSubStrideWritePos, sz_TWO);
+
+    Value * producedBase = b->CreateSub(segWritePosUpdate, b->CreateURem(segWritePosUpdate, sz_BLOCK_SIZE));
+    Value * producedBitOffset = b->CreateSub(segWritePosUpdate, producedBase);
+    Value * nextAlignedOffset = b->CreateSub(sz_BLOCK_SIZE, producedBitOffset);
+    Value * producedByteOffset = b->CreateSelect(b->CreateICmpEQ(producedBitOffset, sz_ZERO), producedBitOffset, nextAlignedOffset);
+    Value * const producedCurSegment = b->CreateAdd(segWritePosUpdate, producedByteOffset);
+
+    segWritePosPhi->addIncoming(segWritePosUpdate, checkFinalLoopCond);
     // b->CallPrintInt("nextSubStrideWritePos", nextSubStrideWritePos);
+    // b->CallPrintInt("segWritePosUpdate", segWritePosUpdate);
+    // b->CallPrintInt("producedByteOffset", producedByteOffset);
+
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
     b->SetInsertPoint(stridesDone);
 
-    b->setProducedItemCount("dictionaryBytes", avail); //b->CreateAdd(b->getProducedItemCount("dictionaryBytes"), b->CreateAdd(segWritePosPhi, nextSubStrideWritePos)));
-    b->setProducedItemCount("dictionaryMask", avail); //b->CreateAdd(b->getProducedItemCount("dictionaryMask"), b->CreateAdd(segWritePosPhi, nextSubStrideWritePos)));
+    b->setProducedItemCount("dictionaryBytes", segWritePosUpdate);
+    // b->setProducedItemCount("dictionaryMask", b->CreateAdd(b->getProducedItemCount("dictionaryMask"), producedCurSegment)); //avail);
     b->CreateCondBr(b->isFinal(), compressionMaskDone, updatePending);
     b->SetInsertPoint(updatePending);
     // No partial phrases in the segment are written in the dicitonary. The phrase shall be moved to the next segment.
-
-    // Value * pendingPtr = b->CreateBitCast(b->getRawOutputPointer("dictionaryMask", produced), bitBlockPtrTy);
-    // Value * lastMask = b->CreateBlockAlignedLoad(pendingPtr);
-    // b->setScalarField("pendingMaskInverted", b->CreateNot(lastMask));
 
     b->CreateBr(compressionMaskDone);
     b->SetInsertPoint(compressionMaskDone);
