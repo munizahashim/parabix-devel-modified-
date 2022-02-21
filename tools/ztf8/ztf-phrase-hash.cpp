@@ -271,27 +271,13 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
+    P->CreateKernelCall<PopcountKernel>(combinedMask, P->getOutputScalar("count1"));
 
     StreamSet * const dict_bytes = P->CreateStreamSet(1, 8);
-    StreamSet * const dict_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes, dict_mask);
-    // P->CreateKernelCall<PopcountKernel>(dict_mask, P->getOutputScalar("count1"));
-    // P->CreateKernelCall<DebugDisplayKernel>("u8bytes", u8bytes);
-    // P->CreateKernelCall<DebugDisplayKernel>("dict_bytes", dict_bytes);
-    // P->CreateKernelCall<DebugDisplayKernel>("dict_mask", dict_mask);
-
-    // Print dictionary
-    StreamSet * const dictStream = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(dict_bytes, dictStream);
-
-    StreamSet * const dict_basis = P->CreateStreamSet(8);
-    FilterByMask(P, dict_mask, dictStream, dict_basis);
-
-    StreamSet * const dictBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(dict_basis, dictBytes);
+    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes);
 
     Scalar * dictFileName = P->getInputScalar("dictFileName");
-    P->CreateKernelCall<FileSink>(dictFileName, dictBytes);
+    P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
 
     // Print compressed output
     StreamSet * const encoded = P->CreateStreamSet(8);
