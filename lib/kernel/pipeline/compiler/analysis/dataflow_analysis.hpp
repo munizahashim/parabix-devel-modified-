@@ -165,6 +165,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
 #endif
 
+#ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeMinimumExpectedDataflow
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -607,6 +609,7 @@ retry:
 
 }
 
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyInterPartitionSymbolicRates
@@ -726,6 +729,8 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
 
 }
 
+#ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeMinimumStrideLengthForConsistentDataflow
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -765,6 +770,8 @@ void PipelineAnalysis::computeMinimumStrideLengthForConsistentDataflow() {
     }
 
 }
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief calculatePartialSumStepFactors

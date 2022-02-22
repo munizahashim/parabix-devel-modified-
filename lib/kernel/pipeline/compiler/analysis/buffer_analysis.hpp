@@ -729,7 +729,8 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         auto bMin = floor(producerRate.Minimum * MinimumNumOfStrides[producer]);
         // const auto & maxStrides = bn.isNonThreadLocal() ? ExpectedNumOfStrides : MaximumNumOfStrides;
         const auto & maxStrides = MaximumNumOfStrides;
-        auto bMax = ceiling(producerRate.Maximum * maxStrides[producer]);
+        const auto max = std::max(maxStrides[producer], 1U);
+        auto bMax = ceiling(producerRate.Maximum * max);
 
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
 
@@ -743,8 +744,11 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
             assert (!processingRate.isFixed() || consumerRate.Minimum == consumerRate.Maximum);
             #endif
 
-            const auto cMin = floor(consumerRate.Minimum * MinimumNumOfStrides[consumer]);
-            const auto cMax = ceiling(consumerRate.Maximum * maxStrides[consumer]);
+            const auto min = std::max(MinimumNumOfStrides[consumer], 1U);
+
+            const auto cMin = floor(consumerRate.Minimum * min);
+            const auto max = std::max(maxStrides[consumer], 1U);
+            const auto cMax = ceiling(consumerRate.Maximum * max);
 
             assert (cMax >= cMin);
 

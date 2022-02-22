@@ -114,9 +114,11 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
+    #ifndef USE_2020_PIPELINE_COMPILER
     if (codegen::AnyDebugOptionIsSet()) {
         PipelineCompiler::linkInstrumentationFunctions(b);
     }
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

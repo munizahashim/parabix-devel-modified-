@@ -8,12 +8,17 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/ADT/STLExtras.h>
-#include "analysis/pipeline_analysis.hpp"
 #include <boost/multi_array.hpp>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/utility/value_init.hpp>
 #include <boost/format.hpp>
+
 #include "config.h"
+#include "common/common.hpp"
+#include "common/graphs.h"
+
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/dominator_tree.hpp>
 
 using namespace boost;
 using namespace boost::adaptors;
@@ -25,6 +30,8 @@ using boost::intrusive::detail::ceil_pow2;
 using boost::intrusive::detail::is_pow2;
 using namespace llvm;
 using IDISA::FixedVectorType;
+
+#include "analysis/pipeline_analysis.hpp"
 
 // TODO: merge Cycle counter and PAPI?
 

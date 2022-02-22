@@ -237,11 +237,11 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     // Transcribe the pipeline graph based on the lexical ordering, accounting for any auxillary
     // kernels and subsituted kernels/relationships.
 
-    const unsigned numOfKernels = kernels.size();
-    const unsigned numOfStreamSets = streamSets.size();
-    const unsigned numOfBindings = bindings.size();
-    const unsigned numOfCallees = callees.size();
-    const unsigned numOfScalars = scalars.size();
+    const auto numOfKernels = kernels.size();
+    const auto numOfStreamSets = streamSets.size();
+    const auto numOfBindings = bindings.size();
+    const auto numOfCallees = callees.size();
+    const auto numOfScalars = scalars.size();
 
     SmallVector<unsigned, 256> subsitution(num_vertices(Relationships), -1U);
 
@@ -251,6 +251,10 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     KernelPartitionId.resize(numOfKernels);
 
     MinimumNumOfStrides.resize(numOfKernels);
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    MaximumNumOfStrides.resize(numOfKernels);
+    StrideStepLength.resize(numOfKernels);
+    #endif
 
     KernelPartitionId[PipelineInput] = 0;
 
@@ -266,6 +270,28 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     const auto origPartitionCount = num_vertices(partitionGraph);
 
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    auto calculateSegmentLengthBounds = [&](const unsigned kernelId, const unsigned partitionId, const unsigned newKernelId) {
+        assert (partitionId < origPartitionCount);
+        const PartitionData & P = partitionGraph[partitionId];
+        const KernelIdVector & K = P.Kernels;
+        assert (P.Repetitions.size() == K.size());
+        const auto k = std::find(K.begin(), K.end(), kernelId);
+        assert (k != K.end());
+        const auto j = std::distance(K.begin(), k);
+        const Rational stepLength = P.Repetitions[j];
+        assert (stepLength.denominator() == 1);
+        const auto sl = stepLength.numerator();
+        StrideStepLength[newKernelId] = sl;
+        const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
+        Rational ONE{1};
+        const auto min = (cov3 > ONE) ? 0 : floor(P.ExpectedStridesPerSegment * (ONE - cov3));
+        const auto max = ceiling(P.ExpectedStridesPerSegment * (ONE + cov3));
+        assert (min <= max);
+        MinimumNumOfStrides[newKernelId] = sl * min;
+        MaximumNumOfStrides[newKernelId] = sl * max;
+    };
+    #else
     auto calculateExpectedNumOfStrides = [&](const unsigned kernelId, const unsigned partitionId) -> unsigned {
         assert (partitionId < origPartitionCount);
         const PartitionData & P = partitionGraph[partitionId];
@@ -282,6 +308,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         assert (expected.numerator() > 0 && expected.denominator() == 1);
         return expected.numerator();
     };
+    #endif
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
@@ -293,7 +320,11 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         assert (f != PartitionIds.end());
         const auto origPartitionId = f->second;
 
+        #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+        calculateSegmentLengthBounds(in, origPartitionId, out);
+        #else
         MinimumNumOfStrides[i] = calculateExpectedNumOfStrides(in, origPartitionId);
+        #endif
 
         // renumber the partitions to reflect the selected ordering
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
@@ -325,11 +356,43 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     const auto f = PartitionIds.find(PipelineOutput);
     assert (f != PartitionIds.end());
     const auto origPartitionId = f->second;
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    calculateSegmentLengthBounds(PipelineOutput, origPartitionId, newPipelineOutput);
+    #else
     MinimumNumOfStrides[newPipelineOutput] = calculateExpectedNumOfStrides(PipelineOutput, origPartitionId);
-
+    #endif
     END_SCOPED_REGION
 
     PartitionCount = outputPartitionId + 1U;
+
+
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    auto fixStrideStepLength = [&](const unsigned first, const unsigned last) {
+        auto gcd = StrideStepLength[first];
+        for (auto i = first + 1; i <= last; ++i) {
+            gcd = boost::gcd(gcd, StrideStepLength[i]);
+        }
+        for (auto i = first; i <= last; ++i) {
+            assert ((StrideStepLength[i] % gcd) == 0); // sanity test
+            StrideStepLength[i] = (StrideStepLength[i] / gcd);
+        }
+    };
+
+    auto currentPartitionId = KernelPartitionId[FirstKernel];
+    auto firstKernelInPartition = FirstKernel;
+    for (auto kernel = (FirstKernel + 1U); kernel <= LastKernel; ++kernel) {
+        const auto partitionId = KernelPartitionId[kernel];
+        if (partitionId != currentPartitionId) {
+            fixStrideStepLength(firstKernelInPartition, kernel - 1U);
+            // set the first kernel for the next partition
+            firstKernelInPartition = kernel;
+            currentPartitionId = partitionId;
+        }
+    }
+    if (firstKernelInPartition <= LastKernel) {
+        fixStrideStepLength(firstKernelInPartition, LastKernel);
+    }
+    #endif
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.

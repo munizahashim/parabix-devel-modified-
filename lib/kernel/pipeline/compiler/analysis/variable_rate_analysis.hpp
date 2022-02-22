@@ -1,18 +1,9 @@
-#ifndef VARIABLE_RATE_ANALYSIS_HPP
+﻿#ifndef VARIABLE_RATE_ANALYSIS_HPP
 #define VARIABLE_RATE_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
 
 #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
-
-#define USE_DEMAND_DRIVEN_SIMULATOR
-
-#define USE_GREEDY_DEMAND_DRIVEN_SIMULATOR
-
-#if defined(USE_GREEDY_DEMAND_DRIVEN_SIMULATOR) && !defined(USE_DEMAND_DRIVEN_SIMULATOR)
-#define USE_DEMAND_DRIVEN_SIMULATOR
-#endif
-
 
 #include <util/slab_allocator.h>
 
@@ -20,29 +11,21 @@ namespace kernel {
 
 namespace {
 
-
+#define USE_GREEDY_DEMAND_BASED_SIMULATION
 
 using SimulationAllocator = SlabAllocator<uint8_t>;
 
-#ifdef USE_DEMAND_DRIVEN_SIMULATOR
 using length_t = int64_t;
-#else
-using length_t = uint32_t;
-#endif
-
 
 struct SimulationPort {
 
-    length_t QueueLength = 0; // use negative to indicate an unsatisfied demand?
+    length_t QueueLength = 0;
 
     virtual bool consume(length_t & pending, random_engine & rng) = 0;
 
     virtual void produce(random_engine & rng) = 0;
 
     virtual void commit(const length_t pending) {
-        #ifndef USE_DEMAND_DRIVEN_SIMULATOR
-        assert (pending <= QueueLength);
-        #endif
         QueueLength -= pending;
     }
 
@@ -267,12 +250,11 @@ struct PartialSumPort final : public SimulationPort {
     }
 
     void commit(const length_t pending) override {
-        #ifndef USE_DEMAND_DRIVEN_SIMULATOR
-        assert (pending <= QueueLength);
-        #endif
         QueueLength -= pending;
         Index += Step;
+        #ifndef NDEBUG
         PreviousValue = -1U;
+        #endif
         Generator.updateReadPosition(UserId, Index);
     }
 
@@ -404,8 +386,7 @@ struct SimulationFork final : public SimulationNode {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
-        assert (I->QueueLength >= 0);
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
+        assert (ql >= 0);
         length_t demand = 0;
         for (unsigned i = 0; i < Outputs; ++i) {
             SimulationPort * const O = Output[i];
@@ -419,12 +400,6 @@ struct SimulationFork final : public SimulationNode {
             O->QueueLength -= demand;
             assert (O->QueueLength >= 0);
         }
-        #else
-        I->QueueLength = 0;
-        for (unsigned i = 0; i < Outputs; ++i) {
-            Output[i]->QueueLength += ql;
-        }
-        #endif
     }
 };
 
@@ -439,7 +414,6 @@ struct SimulationActor : public SimulationNode {
 
     void fire(length_t * const pendingArray, random_engine & rng) override {
         uint64_t strides = 0;
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
         assert (Inputs > 0 && Outputs > 0);
         // First we satisfy any demands on the output channels
         for (unsigned i = 0; i < Outputs; ++i) {
@@ -465,20 +439,17 @@ struct SimulationActor : public SimulationNode {
             assert (Output[i]->QueueLength >= 0);
         }
         #endif
+#ifdef USE_GREEDY_DEMAND_BASED_SIMULATION
         // To transform this demand-driven simulation into a greedy one, after we satisfy
         // our output demands, we switch to a data-driven mode and consume any unprocessed
         // data from the inputs. This has a compound effect of forcing the descendent nodes
         // to consume more data in subsequent iterations of the simulation.
-        #endif
-        #if defined(USE_GREEDY_DEMAND_DRIVEN_SIMULATOR) || !defined(USE_DEMAND_DRIVEN_SIMULATOR)
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
             for (unsigned i = 0; i < Inputs; ++i) {
                 SimulationPort * const I = Input[i];
                 if (!I->consume(pendingArray[i], rng)) {
-                    SumOfStrides += strides;
-                    SumOfStridesSquared += (strides * strides);
-                    return;
+                    goto no_more_pending_input;
                 }
             }
             for (unsigned i = 0; i < Inputs; ++i) {
@@ -489,21 +460,15 @@ struct SimulationActor : public SimulationNode {
             }
             ++strides;
         }
-        #else
+no_more_pending_input:
+#endif
         SumOfStrides += strides;
         SumOfStridesSquared += (strides * strides);
-        #endif
     }
 
     uint64_t SumOfStrides;
     uint64_t SumOfStridesSquared;
 };
-
-// TODO: how can we correctly handle programs with multiple source kernels where they
-// need to execute a different number of strides? We could first try running a
-// demand-driven simulation but in cases where the output is rare, this could result
-// in a huge segment lengths. We could scale the smallest source segment length is
-// one but what if they have a large standard deviation?
 
 struct SimulationSourceActor final : public SimulationActor {
 
@@ -513,7 +478,6 @@ struct SimulationSourceActor final : public SimulationActor {
     }
 
     void fire(length_t * const pendingArray, random_engine & rng) override {
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
         uint64_t strides = 0;
         // First we satisfy any demands on the output channels
         for (unsigned i = 0; i < Outputs; ++i) {
@@ -526,13 +490,6 @@ struct SimulationSourceActor final : public SimulationActor {
         }
         SumOfStrides += strides;
         SumOfStridesSquared += (strides * strides);
-        #else
-        for (unsigned i = 0; i < Outputs; ++i) {
-            Output[i]->produce(rng);
-        }
-        SumOfStrides += 1;
-        SumOfStridesSquared += 1;
-        #endif
         #ifndef NDEBUG
         for (unsigned i = 0; i < Outputs; ++i) {
             assert (Output[i]->QueueLength >= 0);
@@ -540,8 +497,6 @@ struct SimulationSourceActor final : public SimulationActor {
         #endif
     }
 };
-
-#ifdef USE_DEMAND_DRIVEN_SIMULATOR
 
 struct SimulationSinkActor final : public SimulationActor {
 
@@ -575,9 +530,7 @@ struct SimulationSinkActor final : public SimulationActor {
     }
 };
 
-#endif
-
-}
+} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeExpectedVariableRateDataflow
@@ -925,6 +878,10 @@ fuse_existing_streamset:
         }
     }
 
+    // TODO: we could apply post-order minimization-like pass to fixed rates to further
+    // simplify the graph but we would have to mark the set of partitions each node
+    // represents. Normalize purely fixed-rate streamset I/O rates by their GCD?
+
     assert (ordering.empty());
     const auto nodeCount = num_vertices(G);
     ordering.reserve(nodeCount);
@@ -939,7 +896,7 @@ fuse_existing_streamset:
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
-#if 0
+#if 1
 
     BEGIN_SCOPED_REGION
 
@@ -1046,11 +1003,8 @@ fuse_existing_streamset:
     #endif
     unsigned simulationNodes = 0;
 
-#ifdef USE_DEMAND_DRIVEN_SIMULATOR
     for (unsigned i = 0; i < nodeCount; ++i) { // reverse topological odering
-#else
-    for (unsigned i = nodeCount; i-- > 0; ) { // forward topological odering
-#endif
+
         const auto u = ordering[i];
 
         const auto inputs = in_degree(u, G);
@@ -1062,7 +1016,6 @@ fuse_existing_streamset:
 
         SimulationNode * sn = nullptr;
         if (u < numOfPartitions) {
-            #ifdef USE_DEMAND_DRIVEN_SIMULATOR
             if (inputs == 0) {
                 sn = new (allocator) SimulationSourceActor(outputs, allocator);
             } else if (outputs == 0) {
@@ -1070,13 +1023,6 @@ fuse_existing_streamset:
             } else {
                 sn = new (allocator) SimulationActor(inputs, outputs, allocator);
             }
-            #else
-            if (inputs == 0) {
-                sn = new (allocator) SimulationSourceActor(outputs, allocator);
-            } else {
-                sn = new (allocator) SimulationActor(inputs, outputs, allocator);
-            }
-            #endif
             #ifndef NDEBUG
             partitionNodes.push_back(sn);
             #endif
@@ -1087,7 +1033,7 @@ fuse_existing_streamset:
         assert (simulationNodes < nodeCount);
         nodes[simulationNodes] = sn;
         ++simulationNodes;
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
+        BEGIN_SCOPED_REGION
         unsigned outputIdx = 0;
         for (const auto e : make_iterator_range(out_edges(u, G))) {
             assert (outputIdx < outputs);
@@ -1096,23 +1042,11 @@ fuse_existing_streamset:
             sn->Output[outputIdx++] = f->second;
         }
         assert (outputIdx == outputs);
-        #else
+        END_SCOPED_REGION
+
+        BEGIN_SCOPED_REGION
         unsigned inputIdx = 0;
         for (const auto e : make_iterator_range(in_edges(u, G))) {
-            assert (inputIdx < inputs);
-            const auto f = portMap.find(e);
-            assert (f != portMap.end());
-            sn->Input[inputIdx++] = f->second;
-        }
-        assert (inputIdx == inputs);
-        #endif
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
-        unsigned inputIdx = 0;
-        for (const auto e : make_iterator_range(in_edges(u, G))) {
-        #else
-        unsigned outputIdx = 0;
-        for (const auto e : make_iterator_range(out_edges(u, G))) {
-        #endif
             const PartitionPort & p = G[e];
             const Binding & binding = p.Binding;
             // TODO: block size ports aren't correct. ignored for now. Use a node instead?
@@ -1186,22 +1120,16 @@ fuse_existing_streamset:
 //            }
             assert (portMap.count(e) == 0);
             portMap.emplace(std::make_pair(e, port));
-        #ifdef USE_DEMAND_DRIVEN_SIMULATOR
             assert (inputIdx < inputs);
             sn->Input[inputIdx++] = port;
         }
         assert (inputIdx == inputs);
-        #else
-            assert (outputIdx < outputs);
-            sn->Output[outputIdx++] = port;
-        }
-        assert (outputIdx == outputs);
-        #endif
+        END_SCOPED_REGION
     }
 
-// run the simulation
+    // run the simulation
 
-// TODO: run this for K seconds instead of a fixed number of iterations
+    // TODO: run this for K seconds instead of a fixed number of iterations
 
     const uint64_t ITERATIONS = 10000;
 
@@ -1212,10 +1140,12 @@ fuse_existing_streamset:
         }
     }
 
-// now calculate the expected dataflow from the simulation
+    // Now calculate the expected dataflow from the simulation. since it is up
+    // to the user/programmer to decide what the base segment length is, we
+    // normalize the number of strides based on the (smallest) segment length
+    // of the program's source kernel(s)
 
-    #ifdef USE_DEMAND_DRIVEN_SIMULATOR
-    uint64_t minInputStrides = std::numeric_limits<uint64_t>::max();
+    auto minInputStrides = std::numeric_limits<uint64_t>::max();
     for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
         const auto u = ordering[i];
         const auto inputs = in_degree(u, G);
@@ -1223,66 +1153,81 @@ fuse_existing_streamset:
             if (u < numOfPartitions) {
                 assert (j < simulationNodes);
                 if (inputs == 0) {
-                    const SimulationActor * const sn = reinterpret_cast<SimulationActor *>(nodes[j]);
-                    assert (std::find(partitionNodes.begin(), partitionNodes.end(), sn) != partitionNodes.end());
-                    minInputStrides = std::min(sn->SumOfStrides, minInputStrides);
+                    const SimulationSourceActor * const A =
+                        reinterpret_cast<SimulationSourceActor *>(nodes[j]);
+                    assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
+                    minInputStrides = std::min(A->SumOfStrides, minInputStrides);
                 }
             }
             ++j;
         }
     }
     assert (minInputStrides < std::numeric_limits<uint64_t>::max());
+
+    // TODO: do we need to rerun this process in a pure data-driven mode once
+    // we are confident we know what the segment length of the source kernel(s)
+    // is? Right now, if we have more than one source kernel we may end up
+    // having a non-integer number or a non-trivial standard deviation.
+
+    // At run-time, we execute using a "data-driven" process since estimating
+    // demands of future kernels is imprecise and costly at best and impossible
+    // at worst so the source kernels will always execute a fixed number of
+    // strides.
+
+    // Right now, we silently drop the stddev from the inputs but we could
+    // instead use what we've learned from the initial run as segment length
+    // bounds to limit the exploration space of a GA and deduce what might
+    // lead to the most thread-balanced program.
+
     for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
         const auto u = ordering[i];
-        if (LLVM_LIKELY(in_degree(u, G) != 0 || out_degree(u, G) != 0)) {
+        const auto inputs = in_degree(u, G);
+        if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
             assert (j < simulationNodes);
             if (u < numOfPartitions) {
                 PartitionData & D = P[u];
-                const SimulationActor * const sn = reinterpret_cast<SimulationActor *>(nodes[j]);
-                assert (std::find(partitionNodes.begin(), partitionNodes.end(), sn) != partitionNodes.end());
-                const uint64_t SQS = sn->SumOfStrides;
-                const uint64_t SSQ = sn->SumOfStridesSquared;
-                D.ExpectedStridesPerSegment = Rational{SQS, minInputStrides};
-                const auto a = (ITERATIONS * SSQ);
-                const auto b = (SQS * SQS);
-                assert (a >= b);
-                D.StdDevStridesPerSegment = std::sqrt(a - b) / minInputStrides;
-            }
-            ++j;
-        }
-    }
-    #else
-    for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
-        const auto u = ordering[i];
-        SimulationNode * sn = nullptr;
-        if (u < numOfPartitions) {
-            PartitionData & D = P[u];
-            if (LLVM_UNLIKELY(in_degree(u, G) != 0 || in_degree(u, G) != 0)) {
-                const SimulationActor * const sn = reinterpret_cast<SimulationActor *>(nodes[j]);
-                const uint64_t SQS = sn->SumOfStrides;
-                const uint64_t SSQ = sn->SumOfStridesSquared;
-                D.ExpectedStridesPerSegment = Rational{SQS, ITERATIONS};
-                const auto a = (ITERATIONS * SSQ);
-                const auto b = (SQS * SQS);
-                assert (a >= b);
-                D.StdDevStridesPerSegment = std::sqrt(a - b) / ITERATIONS;
-            } else {
-                D.ExpectedStridesPerSegment = Rational{0, 1};
-                D.StdDevStridesPerSegment = 0.0;
-            }
-            ++j;
-        }
-    }
-    #endif
+                const SimulationActor * const A =
+                    reinterpret_cast<SimulationActor *>(nodes[j]);
+                assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
+                const uint64_t SQS = A->SumOfStrides;
+                const uint64_t SSQ = A->SumOfStridesSquared;
 
-    for (unsigned i = 0; i < numOfPartitions; ++i) {
-        PartitionData & D = P[i];
-        errs() << "P_" << i << ".ExpectedStridesPerSegment="
-                << D.ExpectedStridesPerSegment.numerator() << "/"
-                << D.ExpectedStridesPerSegment.denominator() << "\n";
-        errs() << "P_" << i << ".StdDevStridesPerSegment=" << D.StdDevStridesPerSegment << "\n";
+
+                errs() << u << ":\tSQS=" << SQS << ",SSQ=" << SSQ << "\n";
+
+                // The mean calculation is (SQS/ITERATIONS) but since we're normalizing
+                // by (minInputStrides/ITERATIONS), we can ignore the ITERATIONS denominator.
+                D.ExpectedStridesPerSegment = Rational{SQS, minInputStrides};
+                if (LLVM_UNLIKELY(inputs == 0 || SQS == 0)) {
+                    D.StridesPerSegmentCoV = Rational{0};
+                } else {
+                    const uint64_t a = (ITERATIONS * SSQ);
+                    const uint64_t b = (SQS * SQS);
+                    assert (a >= b);
+                    // We don't need the stddev to be too precise but do want a rational number
+                    // to simplify the rest of the system. We use Newton's method but initially
+                    // scale the value by 100^2 to get 2 digits of precision.
+                    uint64_t val = (a - b) * 10000UL;
+                    if (LLVM_LIKELY(val > 1)) {
+                        auto a = 1UL << (floor_log2(val) / 2UL); // <- approximates sqrt(val)
+                        auto b = val;
+                        // while (std::max(a, b) - std::min(a, b)) > 1
+                        while (((a < b) ? (b - a) : (a - b)) > 1) {
+                            b = val / a;
+                            a = (a + b) / 2;
+                        }
+                        val = a; // a ought to equal ceil(sqrt(val) * 100)
+                    }
+                    // Like above, we normalize and ignore the ITERATIONS denominator.
+
+                    // (val / (Iterations * 100L)) / (SQS / Iterations)
+                    D.StridesPerSegmentCoV = Rational{val, SQS * 100UL};
+                }
+            }
+            ++j;
+        }
     }
-    exit(-1);
+
 }
 
 }

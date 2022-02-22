@@ -56,11 +56,7 @@ static_assert(INITIAL_SCHEDULING_POPULATION_ATTEMPTS >= INITIAL_SCHEDULING_POPUL
 static_assert(INITIAL_SCHEDULING_POPULATION_SIZE <= MAX_PROGRAM_POPULATION_SIZE,
     "cannot have a larger initial population size than generational population size");
 
-
-
 constexpr static unsigned MAX_CUT_MAX_NUM_OF_CONNECTED_COMPONENTS = 7;
-
-
 
 constexpr static unsigned SCHEDULING_FITNESS_COST_ACO_ROUNDS = 100;
 
@@ -74,7 +70,7 @@ constexpr static double HAMILTONIAN_PATH_ACO_TAU_INITIAL_VALUE = 5.0;
 
 constexpr static unsigned HAMILTONIAN_PATH_ACO_ALPHA = 6;
 
-#if 1
+#if 0
 
 void printDAWG(const OrderingDAWG & G, raw_ostream & out, const StringRef name = "G") {
 
@@ -1258,9 +1254,12 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         assert (node.Type == RelationshipNode::IsKernel);
         assert (i <= currentPartition.Repetitions.size());
 
-        const auto strideSize = std::max(Rational{1},
-            currentPartition.ExpectedStridesPerSegment
-            * currentPartition.Repetitions[i - 1U] * node.Kernel->getStride());
+        const auto strideSize =
+            currentPartition.Repetitions[i - 1U]
+            #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+            * std::max(currentPartition.ExpectedStridesPerSegment, Rational{1})
+            #endif
+            * node.Kernel->getStride();
         assert (strideSize > Rational{0});
 
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
@@ -1376,7 +1375,12 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         const auto u = kernels[i - 1U];
         const RelationshipNode & node = Relationships[u];
         assert (node.Type == RelationshipNode::IsKernel);
-        const auto strideSize = currentPartition.Repetitions[i - 1U] * node.Kernel->getStride();
+        const auto strideSize =
+            currentPartition.Repetitions[i - 1U]
+            #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+            * std::max(currentPartition.ExpectedStridesPerSegment, Rational{1})
+            #endif
+            * node.Kernel->getStride();
         assert (strideSize > 0);
 
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
@@ -2527,10 +2531,15 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, ra
 
             const auto strideSize = rn.Kernel->getStride();
             const auto sum = rate.getLowerBound() + rate.getUpperBound();
-
+            // TODO: after adding in expected mean values, this ought to utilize them.
             const auto expectedItemsPerStride = sum * strideSize * Rational{1, 2};
-
+            #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+            const auto expectedItemsPerSegment =
+                N.ExpectedStridesPerSegment *
+                N.Repetitions[index] * expectedItemsPerStride;
+            #else
             const auto expectedItemsPerSegment = N.Repetitions[index] * expectedItemsPerStride;
+            #endif
             const Rational bytesPerItem{outputBinding.getFieldWidth() * outputBinding.getNumElements(), 8};
             node.Size = expectedItemsPerSegment * bytesPerItem; // bytes per segment
         }

@@ -1,10 +1,6 @@
 #ifndef PIPELINE_KERNEL_ANALYSIS_HPP
 #define PIPELINE_KERNEL_ANALYSIS_HPP
 
-#include "../config.h"
-#include "../common/common.hpp"
-#include "../common/graphs.h"
-
 #include <algorithm>
 #include <queue>
 #include <z3.h>
@@ -16,13 +12,10 @@
 #include <kernel/core/kernel_builder.h>
 
 #include <llvm/Support/Format.h>
+#include "../pipeline_compiler.hpp"
+
 
 // #define PRINT_STAGES
-
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/dominator_tree.hpp>
-
-
 
 namespace kernel {
 
@@ -50,7 +43,6 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
         auto partitionGraph = P.identifyKernelPartitions();
-
         #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         P.computeIntraPartitionRepetitionVectors(partitionGraph);
         P.estimateInterPartitionDataflow(partitionGraph, rng);
@@ -67,9 +59,10 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         P.identifyOutputNodeIds();
 
+        #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         P.computeMaximumDataflow(false);
-
         P.computeMinimumStrideLengthForConsistentDataflow();
+        #endif
 
         P.identifyInterPartitionSymbolicRates();
 
@@ -219,19 +212,17 @@ private:
     // dataflow analysis functions
     #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     void computeIntraPartitionRepetitionVectors(PartitionGraph & P);
-
     void estimateInterPartitionDataflow(PartitionGraph & P, random_engine & rng);
     #endif
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
 
-    void recomputeMinimumExpectedDataflow();
-
+    #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     void computeMaximumDataflow(const bool expected);
+    void computeMinimumStrideLengthForConsistentDataflow();
+    #endif
 
     void identifyInterPartitionSymbolicRates();
-
-    void computeMinimumStrideLengthForConsistentDataflow();
 
     void calculatePartialSumStepFactors();
 
@@ -305,7 +296,7 @@ public:
     KernelIdVector                  KernelPartitionId;
 
     std::vector<unsigned>           MinimumNumOfStrides;
-    std::vector<unsigned>           ExpectedNumOfStrides;
+//    std::vector<unsigned>           ExpectedNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
 

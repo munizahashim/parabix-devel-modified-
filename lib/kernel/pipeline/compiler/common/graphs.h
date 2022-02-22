@@ -418,7 +418,7 @@ struct PartitionData {
     std::vector<Rational>   Repetitions;
     OrderingDAWG            Orderings;
     Rational                ExpectedStridesPerSegment{0};
-    double                  StdDevStridesPerSegment{0};
+    Rational                StridesPerSegmentCoV{0};
     unsigned                LinkedGroupId = 0;
 
 
