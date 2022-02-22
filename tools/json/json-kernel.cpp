@@ -153,11 +153,14 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * allDotAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), allDot);
     PabloAST * dot = pb.createAnd(notStrSpan, allDotAfterDigit);
     PabloAST * allPlusMinusAftereE = pb.createAnd(pb.createAdvance(eE, 1), allPlusMinus);
-    PabloAST * plusMinus = pb.createAnd(notStrSpan, allPlusMinusAftereE);
+    PabloAST * plusMinus = pb.createAnd(notStrSpan, pb.createOr(hyphen, allPlusMinusAftereE));
 
     PabloAST * nondigit = pb.createNot(digit);
     PabloAST * nonDigitNorEe = pb.createAnd(nondigit, pb.createNot(eE));
-    PabloAST * advHyphen = pb.createAnd(hyphen, pb.createAdvance(nonDigitNorEe, 1));
+    PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * beginIsHyphen = pb.createAnd(hyphen, begin);
+    PabloAST * otherIsHyphen = pb.createAnd(hyphen, pb.createAdvance(nonDigitNorEe, 1));
+    PabloAST * advHyphen = pb.createOr(beginIsHyphen, otherIsHyphen);
 
     PabloAST * nonDigitEePlusMinus = pb.createAnd(nonDigitNorEe, pb.createNot(plusMinus));
     PabloAST * nonDigitEePlusMinusDot = pb.createAnd(nonDigitEePlusMinus, pb.createNot(dot));
