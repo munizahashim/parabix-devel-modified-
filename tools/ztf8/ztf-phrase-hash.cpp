@@ -293,8 +293,9 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<FileSink>(outputFileName, ZTF_bytes);
 
     StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
-    StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, ZTF_bytes, combinedMask, dict_mask, nonfinal_output_bytes);
+    // StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1); // not needed
+    //do not use bitstream masks for interleave kernel
+    // P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, ZTF_bytes, nonfinal_output_bytes);
     // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
     // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
     // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));

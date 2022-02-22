@@ -878,6 +878,7 @@ mNumSym(numSyms), mOffset(offset), mSubStride(std::min(b->getBitBlockWidth() * s
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
     }
     setStride(1024000);
+    addAttribute(HasStrideBound());
 }
 
 void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {

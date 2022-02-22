@@ -88,6 +88,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    mHasStrideBound = mKernel->canSetStrideBoundSignal();
     mNextPartitionEntryPoint = getPartitionExitPoint(b);
     assert (mNextPartitionEntryPoint);
 
