@@ -108,6 +108,9 @@ public:
         return mTarget->canSetTerminateSignal();
     }
 
+    LLVM_READNONE bool canSetStrideBoundSignal() const {
+        return mTarget->canSetStrideBoundSignal();
+    }
     LLVM_READNONE llvm::Value * getTerminationSignalPtr() const {
         return mTerminationSignalPtr;
     }
