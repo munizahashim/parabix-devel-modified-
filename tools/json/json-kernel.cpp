@@ -172,7 +172,7 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * err = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 
-    PabloAST * endNbr = pb.createAnd(digit, pb.createAdvance(nondigit, 1));
+    PabloAST * endNbr = pb.createAnd(pb.createAdvance(digit, 1), nonDigitEePlusMinusDot);
     PabloAST * finalNbr = pb.createIntrinsicCall(Intrinsic::SpanUpTo, {beginNbr, endNbr});
     pb.createAssign(pb.createExtract(nbrSpan, pb.getInteger(0)), finalNbr);
 }
