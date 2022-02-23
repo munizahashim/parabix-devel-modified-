@@ -63,6 +63,21 @@ private:
     const unsigned mOffset;
 };
 
+class FilterCompressedData final : public MultiBlockKernel {
+public:
+    FilterCompressedData(BuilderRef b,
+                    EncodingInfo encodingScheme,
+                    unsigned numSyms,
+                    StreamSet * byteData,
+                    StreamSet * combinedMask,
+                    StreamSet * cmpBytes,
+                    unsigned strideBlocks = 8);
+private:
+    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    const unsigned mNumSym;
+    const unsigned mSubStride;
+};
+
 class WriteDictionary final : public MultiBlockKernel {
 public:
     WriteDictionary(BuilderRef b,
