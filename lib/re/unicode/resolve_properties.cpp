@@ -315,6 +315,19 @@ RE * externalizeProperties(RE * r) {
     return PropertyExternalizer().transformRE(r);
 }
 
+struct AnyExternalizer : public RE_Transformer {
+    AnyExternalizer() : RE_Transformer("AnyExternalizer") {}
+    RE * transformAny(Any * a) override {
+        Name * externName = makeName("Any", Name::Type::UnicodeProperty);
+        externName->setDefinition(a);
+        return externName;
+    }
+};
+
+RE * externalizeAnyNodes(RE * r) {
+    return AnyExternalizer().transformRE(r);
+}
+
 RE * linkAndResolve(RE * r, GrepLinesFunctionType grep) {
     RE * linked = linkProperties(r);
     RE * std = standardizeProperties(linked);

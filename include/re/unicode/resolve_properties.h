@@ -37,6 +37,9 @@ re::RE * inlineSimpleProperties(re::RE * r);
 /*  Create named externals for all property expressions.  */
 re::RE * externalizeProperties(re::RE * r);
 
+/*  Create named external for Any nodes.  */
+re::RE * externalizeAnyNodes(re::RE * r);
+
 }
 
 #endif // RESOLVE_PROPERTIES_H
