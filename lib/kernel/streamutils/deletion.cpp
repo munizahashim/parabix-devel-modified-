@@ -7,6 +7,8 @@
 
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/raw_ostream.h>
+#include <kernel/basis/s2p_kernel.h>
+#include <kernel/basis/p2s_kernel.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/idisa_target.h>
 #include <kernel/pipeline/pipeline_builder.h>
@@ -26,11 +28,24 @@ using BuilderRef = Kernel::BuilderRef;
 void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
-                  unsigned extractionFieldWidth) {
-    StreamSet * const compressed = P->CreateStreamSet(outputs->getNumElements());
-    std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
-    P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
-    P->CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
+                  unsigned extractionFieldWidth,
+                  bool byteDeletion) {
+    if (byteDeletion) {
+        StreamSet * const input_streams = P->CreateStreamSet(8);
+        P->CreateKernelCall<S2PKernel>(inputs, input_streams);
+        StreamSet * const output_streams = P->CreateStreamSet(8);
+        StreamSet * const compressed = P->CreateStreamSet(output_streams->getNumElements());
+        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
+        P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
+        P->CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
+        P->CreateKernelCall<P2SKernel>(output_streams, outputs);
+    }
+    else {
+        StreamSet * const compressed = P->CreateStreamSet(outputs->getNumElements());
+        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
+        P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
+        P->CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
+    }
 }
 
 inline std::vector<Value *> parallel_prefix_deletion_masks(BuilderRef kb, const unsigned fw, Value * del_mask) {

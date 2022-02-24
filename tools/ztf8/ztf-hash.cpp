@@ -62,6 +62,7 @@ static cl::OptionCategory ztfHashOptions("ztfHash Options", "ZTF-Hash options.")
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(ztfHashOptions));
 static cl::opt<bool> Decompression("d", cl::desc("Decompress from ZTF-Runs to UTF-8."), cl::cat(ztfHashOptions), cl::init(false));
 static cl::alias DecompressionAlias("decompress", cl::desc("Alias for -d"), cl::aliasopt(Decompression));
+static cl::opt<bool> UseByteFilterByMask("byte-filter-by-mask", cl::desc("Use byte deletion FilterByMask"), cl::init(false), cl::cat(ztfHashOptions));
 
 typedef void (*ztfHashFunctionType)(uint32_t fd);
 
@@ -121,14 +122,17 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
-    StreamSet * const encoded = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
-
-    StreamSet * const ZTF_basis = P->CreateStreamSet(8);
-    FilterByMask(P, combinedMask, encoded, ZTF_basis);
-
     StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);
+    if(UseByteFilterByMask) {
+        FilterByMask(P, combinedMask, u8bytes, ZTF_bytes, /*streamOffset*/0, /*extractionFieldWidth*/64, true);
+    }
+    else {
+        StreamSet * const encoded = P->CreateStreamSet(8);
+        P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
+        StreamSet * const ZTF_basis = P->CreateStreamSet(8);
+        FilterByMask(P, combinedMask, encoded, ZTF_basis);
+        P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);
+    }
     P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }
