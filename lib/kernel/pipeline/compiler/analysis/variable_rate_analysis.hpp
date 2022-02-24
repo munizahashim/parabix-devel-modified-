@@ -367,6 +367,8 @@ struct SimulationNode {
 
     }
 
+    virtual void demand(length_t * const pendingArray, random_engine & rng) = 0;
+
     virtual void fire(length_t * const pendingArray, random_engine & rng) = 0;
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
@@ -382,7 +384,7 @@ struct SimulationFork final : public SimulationNode {
 
     }
 
-    void fire(length_t * const /* endingArray */, random_engine & /* rng */) override {
+    void demand(length_t * const /* endingArray */, random_engine & /* rng */) override {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -401,6 +403,18 @@ struct SimulationFork final : public SimulationNode {
             assert (O->QueueLength >= 0);
         }
     }
+
+    void fire(length_t * const /* endingArray */, random_engine & /* rng */) override {
+        assert (Inputs == 1);
+        SimulationPort * const I = Input[0];
+        const auto ql = I->QueueLength;
+        assert (ql >= 0);
+        I->QueueLength = 0;
+        for (unsigned i = 0; i < Outputs; ++i) {
+            Output[i]->QueueLength += ql;
+        }
+    }
+
 };
 
 struct SimulationActor : public SimulationNode {
@@ -412,7 +426,7 @@ struct SimulationActor : public SimulationNode {
 
     }
 
-    void fire(length_t * const pendingArray, random_engine & rng) override {
+    void demand(length_t * const pendingArray, random_engine & rng) override {
         uint64_t strides = 0;
         assert (Inputs > 0 && Outputs > 0);
         // First we satisfy any demands on the output channels
@@ -439,7 +453,7 @@ struct SimulationActor : public SimulationNode {
             assert (Output[i]->QueueLength >= 0);
         }
         #endif
-#ifdef USE_GREEDY_DEMAND_BASED_SIMULATION
+        #ifdef USE_GREEDY_DEMAND_BASED_SIMULATION
         // To transform this demand-driven simulation into a greedy one, after we satisfy
         // our output demands, we switch to a data-driven mode and consume any unprocessed
         // data from the inputs. This has a compound effect of forcing the descendent nodes
@@ -461,9 +475,31 @@ struct SimulationActor : public SimulationNode {
             ++strides;
         }
 no_more_pending_input:
-#endif
+        #endif
         SumOfStrides += strides;
         SumOfStridesSquared += (strides * strides);
+    }
+
+    void fire(length_t * const pendingArray, random_engine & rng) override {
+        uint64_t strides = 0;
+        for (;;) {
+            // can't remove any items until we determine we can execute a full stride
+            for (unsigned i = 0; i < Inputs; ++i) {
+                SimulationPort * const I = Input[i];
+                if (!I->consume(pendingArray[i], rng)) {
+                    SumOfStrides += strides;
+                    SumOfStridesSquared += (strides * strides);
+                    return;
+                }
+            }
+            for (unsigned i = 0; i < Inputs; ++i) {
+                Input[i]->commit(pendingArray[i]);
+            }
+            for (unsigned i = 0; i < Outputs; ++i) {
+                Output[i]->produce(rng);
+            }
+            ++strides;
+        }
     }
 
     uint64_t SumOfStrides;
@@ -472,16 +508,24 @@ no_more_pending_input:
 
 struct SimulationSourceActor final : public SimulationActor {
 
-    SimulationSourceActor(const unsigned outputs, SimulationAllocator & allocator)
-    : SimulationActor(0, outputs, allocator) {
+    SimulationSourceActor(const unsigned outputs,
+                          const unsigned iterations,
+                          SimulationAllocator & allocator)
+    : SimulationActor(0, outputs, allocator)
+    , RequiredIterations(iterations) {
 
     }
 
-    void fire(length_t * const pendingArray, random_engine & rng) override {
-        uint64_t strides = 0;
+    void demand(length_t * const /* pendingArray */, random_engine & rng) override {
+        for (auto r = RequiredIterations; r--; ){
+            for (unsigned i = 0; i < Outputs; ++i) {
+                Output[i]->produce(rng);
+            }
+        }
+        uint64_t strides = RequiredIterations;
         // First we satisfy any demands on the output channels
         for (unsigned i = 0; i < Outputs; ++i) {
-            while (Output[i]->QueueLength <= 0L) {
+            while (Output[i]->QueueLength < 0L) {
                 for (unsigned j = 0; j < Outputs; ++j) {
                     Output[j]->produce(rng);
                 }
@@ -496,6 +540,19 @@ struct SimulationSourceActor final : public SimulationActor {
         }
         #endif
     }
+
+    void fire(length_t * const /* pendingArray */, random_engine & rng) override {
+        for (auto r = RequiredIterations; r--; ){
+            for (unsigned i = 0; i < Outputs; ++i) {
+                Output[i]->produce(rng);
+            }
+        }
+        const uint64_t strides = RequiredIterations;
+        SumOfStrides += strides;
+        SumOfStridesSquared += (strides * strides);
+    }
+private:
+    const unsigned RequiredIterations;
 };
 
 struct SimulationSinkActor final : public SimulationActor {
@@ -505,7 +562,7 @@ struct SimulationSinkActor final : public SimulationActor {
 
     }
 
-    void fire(length_t * const pendingArray, random_engine & rng) override {
+    void demand(length_t * const pendingArray, random_engine & rng) override {
         // In a demand-driven system, a sink actor must always require at least
         // one iteration to enforce the demands on the preceding network.
         for (unsigned i = 0; i < Inputs; ++i) {
@@ -542,8 +599,6 @@ struct SimulationSinkActor final : public SimulationActor {
  * such as Add, Delay, LookAhead, and ZeroExtend but do consider BlockSize.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random_engine & rng) {
-
-    SimulationAllocator allocator;
 
     struct PortNode {
         unsigned Binding;
@@ -878,6 +933,9 @@ fuse_existing_streamset:
         }
     }
 
+
+
+
     // TODO: we could apply post-order minimization-like pass to fixed rates to further
     // simplify the graph but we would have to mark the set of partitions each node
     // represents. Normalize purely fixed-rate streamset I/O rates by their GCD?
@@ -896,7 +954,7 @@ fuse_existing_streamset:
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
-#if 1
+#if 0
 
     BEGIN_SCOPED_REGION
 
@@ -987,7 +1045,99 @@ fuse_existing_streamset:
 
     END_SCOPED_REGION
 #endif
+    #ifndef NDEBUG
+    std::vector<SimulationNode *> partitionNodes;
+    #endif
 
+    std::vector<uint64_t> initialSumOfStrides(nodeCount);
+
+
+    constexpr uint64_t DEMAND_ITERATIONS = 1000;
+
+    constexpr uint64_t DATA_ITERATIONS = 1000000;
+
+
+    auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) {
+        const PartitionPort & p = G[e];
+        const Binding & binding = p.Binding;
+        // TODO: block size ports aren't correct. ignored for now. Use a node instead?
+
+//            BlockSizedPort * blockSize = nullptr;
+//            if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::BlockSize))) {
+//                const Attribute & attr = binding.findAttribute(AttrId::BlockSize);
+//                blockSize = new (allocator) BlockSizedPort(attr.amount());
+//            }
+        const ProcessingRate & rate = binding.getRate();
+        SimulationPort * port = nullptr;
+        switch (rate.getKind()) {
+            case RateId::Fixed:
+                BEGIN_SCOPED_REGION
+                const auto r = rate.getRate() * p.Repetitions;
+                assert (r.denominator() == 1);
+                port = new (allocator) FixedPort(r.numerator());
+                END_SCOPED_REGION
+                break;
+            case RateId::Bounded:
+                BEGIN_SCOPED_REGION
+                const auto l = rate.getLowerBound() * p.Repetitions;
+                const auto u = rate.getUpperBound() * p.Repetitions;
+                assert (l.denominator() == 1);
+                assert (u.denominator() == 1);
+                port = new (allocator) UniformBoundedPort(l.numerator(), u.numerator());
+                END_SCOPED_REGION
+                break;
+            case RateId::PartialSum:
+                BEGIN_SCOPED_REGION
+                const auto f = partialSumMap.find(p.Reference);
+                assert (f != partialSumMap.end());
+                PartialSumData & data = f->second;
+                const auto g = partialSumGeneratorMap.find(p.Reference);
+                PartialSumGenerator * gen = nullptr;
+                if (LLVM_LIKELY(g == partialSumGeneratorMap.end())) {
+                    assert (Relationships[p.Reference].Type == RelationshipNode::IsRelationship);
+                    assert ((data.RequiredCapacity % data.GCD) == 0);
+                    gen = new (allocator) UniformDistributionPartialSumGenerator(
+                                data.Count, data.StepSize * data.GCD, data.RequiredCapacity / data.GCD, allocator);
+                    gen->initializeGenerator(rng);
+                    partialSumGeneratorMap.emplace(p.Reference, gen);
+                } else {
+                    gen = g->second;
+                }
+                assert (data.Count > 0);
+                const auto userId = data.Index++;
+                assert (userId < data.Count);
+                assert (p.PartialSumStepLength <= data.RequiredCapacity);
+                assert ((p.PartialSumStepLength % data.GCD) == 0);
+                port = new (allocator) PartialSumPort(*gen, userId, p.PartialSumStepLength / data.GCD);
+                END_SCOPED_REGION
+                break;
+            case kernel::ProcessingRate::Relative:
+                BEGIN_SCOPED_REGION
+                port = new (allocator) RelativePort(pendingArray[p.Reference]);
+                END_SCOPED_REGION
+                break;
+            case kernel::ProcessingRate::Greedy:
+                BEGIN_SCOPED_REGION
+                assert (rate.getRate().denominator() == 1);
+                port = new (allocator) GreedyPort(rate.getRate().numerator());
+                END_SCOPED_REGION
+                break;
+            default:
+                llvm_unreachable("unhandled processing rate");
+        }
+//            if (blockSize) {
+//                blockSize->BaseRate = port;
+//                port = blockSize;
+//            }
+        assert (portMap.count(e) == 0);
+        portMap.emplace(std::make_pair(e, port));
+        return port;
+    };
+
+    unsigned inputNodes = 0;
+
+    BEGIN_SCOPED_REGION
+    SimulationAllocator allocator;
 
     SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(nodeCount);
 
@@ -998,10 +1148,6 @@ fuse_existing_streamset:
         nodes[i] = nullptr;
     }
     #endif
-    #ifndef NDEBUG
-    std::vector<SimulationNode *> partitionNodes;
-    #endif
-    unsigned simulationNodes = 0;
 
     for (unsigned i = 0; i < nodeCount; ++i) { // reverse topological odering
 
@@ -1017,7 +1163,7 @@ fuse_existing_streamset:
         SimulationNode * sn = nullptr;
         if (u < numOfPartitions) {
             if (inputs == 0) {
-                sn = new (allocator) SimulationSourceActor(outputs, allocator);
+                sn = new (allocator) SimulationSourceActor(outputs, 1, allocator);
             } else if (outputs == 0) {
                 sn = new (allocator) SimulationSinkActor(inputs, allocator);
             } else {
@@ -1026,13 +1172,16 @@ fuse_existing_streamset:
             #ifndef NDEBUG
             partitionNodes.push_back(sn);
             #endif
-        } else {
-            assert (inputs == 1 && outputs > 0);
+        } else if (LLVM_LIKELY(outputs > 0)) {
+            assert (inputs == 1);
             sn = new (allocator) SimulationFork(inputs, outputs, allocator);
+        } else {
+            // TODO: this ought to be fixed in the graph
+            continue;
         }
-        assert (simulationNodes < nodeCount);
-        nodes[simulationNodes] = sn;
-        ++simulationNodes;
+        assert (inputNodes < nodeCount);
+        nodes[inputNodes] = sn;
+        ++inputNodes;
         BEGIN_SCOPED_REGION
         unsigned outputIdx = 0;
         for (const auto e : make_iterator_range(out_edges(u, G))) {
@@ -1047,81 +1196,8 @@ fuse_existing_streamset:
         BEGIN_SCOPED_REGION
         unsigned inputIdx = 0;
         for (const auto e : make_iterator_range(in_edges(u, G))) {
-            const PartitionPort & p = G[e];
-            const Binding & binding = p.Binding;
-            // TODO: block size ports aren't correct. ignored for now. Use a node instead?
-
-//            BlockSizedPort * blockSize = nullptr;
-//            if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::BlockSize))) {
-//                const Attribute & attr = binding.findAttribute(AttrId::BlockSize);
-//                blockSize = new (allocator) BlockSizedPort(attr.amount());
-//            }
-            const ProcessingRate & rate = binding.getRate();
-            SimulationPort * port = nullptr;
-            switch (rate.getKind()) {
-                case RateId::Fixed:
-                    BEGIN_SCOPED_REGION
-                    const auto r = rate.getRate() * p.Repetitions;
-                    assert (r.denominator() == 1);
-                    port = new (allocator) FixedPort(r.numerator());
-                    END_SCOPED_REGION
-                    break;
-                case RateId::Bounded:
-                    BEGIN_SCOPED_REGION
-                    const auto l = rate.getLowerBound() * p.Repetitions;
-                    const auto u = rate.getUpperBound() * p.Repetitions;
-                    assert (l.denominator() == 1);
-                    assert (u.denominator() == 1);
-                    port = new (allocator) UniformBoundedPort(l.numerator(), u.numerator());
-                    END_SCOPED_REGION
-                    break;
-                case RateId::PartialSum:
-                    BEGIN_SCOPED_REGION
-                    const auto f = partialSumMap.find(p.Reference);
-                    assert (f != partialSumMap.end());
-                    PartialSumData & data = f->second;
-                    const auto g = partialSumGeneratorMap.find(p.Reference);
-                    PartialSumGenerator * gen = nullptr;
-                    if (LLVM_LIKELY(g == partialSumGeneratorMap.end())) {                        
-                        assert (Relationships[p.Reference].Type == RelationshipNode::IsRelationship);
-                        assert ((data.RequiredCapacity % data.GCD) == 0);
-                        gen = new (allocator) UniformDistributionPartialSumGenerator(
-                                    data.Count, data.StepSize * data.GCD, data.RequiredCapacity / data.GCD, allocator);
-                        gen->initializeGenerator(rng);
-                        partialSumGeneratorMap.emplace(p.Reference, gen);
-                    } else {
-                        gen = g->second;
-                    }
-                    assert (data.Count > 0);
-                    const auto userId = data.Index++;
-                    assert (userId < data.Count);                   
-                    assert (p.PartialSumStepLength <= data.RequiredCapacity);
-                    assert ((p.PartialSumStepLength % data.GCD) == 0);
-                    port = new (allocator) PartialSumPort(*gen, userId, p.PartialSumStepLength / data.GCD);
-                    END_SCOPED_REGION
-                    break;
-                case kernel::ProcessingRate::Relative:
-                    BEGIN_SCOPED_REGION
-                    port = new (allocator) RelativePort(pendingArray[p.Reference]);
-                    END_SCOPED_REGION
-                    break;
-                case kernel::ProcessingRate::Greedy:
-                    BEGIN_SCOPED_REGION
-                    assert (rate.getRate().denominator() == 1);
-                    port = new (allocator) GreedyPort(rate.getRate().numerator());
-                    END_SCOPED_REGION
-                    break;
-                default:
-                    llvm_unreachable("unhandled processing rate");
-            }
-//            if (blockSize) {
-//                blockSize->BaseRate = port;
-//                port = blockSize;
-//            }
-            assert (portMap.count(e) == 0);
-            portMap.emplace(std::make_pair(e, port));
             assert (inputIdx < inputs);
-            sn->Input[inputIdx++] = port;
+            sn->Input[inputIdx++] = makePortNode(e, pendingArray, allocator);
         }
         assert (inputIdx == inputs);
         END_SCOPED_REGION
@@ -1131,12 +1207,10 @@ fuse_existing_streamset:
 
     // TODO: run this for K seconds instead of a fixed number of iterations
 
-    const uint64_t ITERATIONS = 10000;
-
-    for (uint64_t r = 0; r < ITERATIONS; ++r) {
-        for (unsigned i = 0; i < simulationNodes; ++i) {
+    for (uint64_t r = 0; r < DEMAND_ITERATIONS; ++r) {
+        for (unsigned i = 0; i < inputNodes; ++i) {
             assert (nodes[i]);
-            nodes[i]->fire(pendingArray, rng);
+            nodes[i]->demand(pendingArray, rng);
         }
     }
 
@@ -1145,29 +1219,157 @@ fuse_existing_streamset:
     // normalize the number of strides based on the (smallest) segment length
     // of the program's source kernel(s)
 
-    auto minInputStrides = std::numeric_limits<uint64_t>::max();
+    // We cannot assume that we'll require only one stride here. For example,
+    // ztf-phrase-hash processes 1 MB segments but MMap might supply only 4KB
+    // per stride.
+
+    // Instead we want the output rates of every source to satisfy the input
+    // demands of their immediate consumers.
+
+    SmallVector<const SimulationActor *, 100> partitionNode(numOfPartitions);
+    SmallVector<unsigned, 2> sourceVertex;
+
     for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
         const auto u = ordering[i];
         const auto inputs = in_degree(u, G);
         if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
             if (u < numOfPartitions) {
-                assert (j < simulationNodes);
+                assert (j < inputNodes);
+                const SimulationActor * const A =
+                    reinterpret_cast<SimulationActor *>(nodes[j]);
+                assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
+                partitionNode[u] = A;
                 if (inputs == 0) {
-                    const SimulationSourceActor * const A =
-                        reinterpret_cast<SimulationSourceActor *>(nodes[j]);
-                    assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
-                    minInputStrides = std::min(A->SumOfStrides, minInputStrides);
+                    sourceVertex.push_back(u);
                 }
             }
             ++j;
         }
     }
-    assert (minInputStrides < std::numeric_limits<uint64_t>::max());
 
-    // TODO: do we need to rerun this process in a pure data-driven mode once
-    // we are confident we know what the segment length of the source kernel(s)
-    // is? Right now, if we have more than one source kernel we may end up
-    // having a non-integer number or a non-trivial standard deviation.
+    for (const auto u : sourceVertex) {
+        Rational X(1);
+        const auto k = partitionNode[u]->SumOfStrides;
+        for (const auto e : make_iterator_range(out_edges(u, G))) {
+            const auto streamSet = target(e, G);
+            assert (streamSet >= numOfPartitions);
+            for (const auto f : make_iterator_range(out_edges(streamSet, G))) {
+                const auto v = target(f, G);
+                assert (v < numOfPartitions);
+                Rational Y(k, partitionNode[v]->SumOfStrides);
+                X = std::max(X, Y);
+            }
+        }
+        const auto strides = (X.numerator() + (X.denominator() / 2)) / X.denominator();
+        initialSumOfStrides[u] = strides;
+    }
+
+
+//    assert (minInputStrides < std::numeric_limits<uint64_t>::max());
+//    for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
+//        const auto u = ordering[i];
+//        const auto inputs = in_degree(u, G);
+//        if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
+//            if (u < numOfPartitions) {
+//                assert (j < inputNodes);
+//                if (inputs == 0) {
+//                    const SimulationSourceActor * const A =
+//                        reinterpret_cast<SimulationSourceActor *>(nodes[j]);
+//                    assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
+//                    const auto m = (A->SumOfStrides + (minInputStrides/2)) / minInputStrides;
+//                    initialSumOfStrides[u] = m;
+//                }
+//            }
+//            ++j;
+//        }
+//    }
+    END_SCOPED_REGION
+
+    // Rerun this process in a pure data-driven mode once using the segment length
+    // information gathered from the demand-driven execution. It is unclear how we
+    // can correctly handle the standard deviation for the source kernels at run-time.
+
+    #ifndef NDEBUG
+    partitionNodes.clear();
+    #endif
+    portMap.clear();
+    partialSumGeneratorMap.clear();
+    for (auto & itr : partialSumMap) {
+        itr.second.Index = 0;
+    }
+
+    SimulationAllocator allocator;
+
+    SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(inputNodes);
+
+    length_t * const pendingArray = allocator.allocate<length_t>(maxInDegree);
+
+    #ifdef NDEBUG
+    for (unsigned i = 0; i < nodeCount; ++i) {
+        nodes[i] = nullptr;
+    }
+    #endif
+
+    unsigned outputNodes = 0;
+
+    for (auto i = nodeCount; --i; ) { // forward topological odering
+
+        const auto u = ordering[i];
+
+        const auto inputs = in_degree(u, G);
+        const auto outputs = out_degree(u, G);
+
+        if (LLVM_UNLIKELY(inputs == 0 && outputs == 0)) {
+            continue;
+        }
+
+        SimulationNode * sn = nullptr;
+        if (u < numOfPartitions) {
+            if (inputs == 0) {
+                const auto k = initialSumOfStrides[u];
+                assert (k > 0);
+                sn = new (allocator) SimulationSourceActor(outputs, k, allocator);
+            } else {
+                sn = new (allocator) SimulationActor(inputs, outputs, allocator);
+            }
+            #ifndef NDEBUG
+            partitionNodes.push_back(sn);
+            #endif
+        } else {
+            assert (inputs == 1 && outputs > 0);
+            sn = new (allocator) SimulationFork(inputs, outputs, allocator);
+        }
+        assert (outputNodes < inputNodes);
+        nodes[outputNodes] = sn;
+        ++outputNodes;
+        BEGIN_SCOPED_REGION
+        unsigned inputIdx = 0;
+        for (const auto e : make_iterator_range(in_edges(u, G))) {
+            assert (inputIdx < inputs);
+            const auto f = portMap.find(e);
+            assert (f != portMap.end());
+            sn->Input[inputIdx++] = f->second;
+        }
+        assert (inputIdx == inputs);
+        END_SCOPED_REGION
+
+        BEGIN_SCOPED_REGION
+        unsigned outputIdx = 0;
+        for (const auto e : make_iterator_range(out_edges(u, G))) {
+            assert (outputIdx < outputs);
+            sn->Output[outputIdx++] = makePortNode(e, pendingArray, allocator);
+        }
+        assert (outputIdx == outputs);
+        END_SCOPED_REGION
+    }
+
+    for (uint64_t r = 0; r < DATA_ITERATIONS; ++r) {
+        for (unsigned i = 0; i < outputNodes; ++i) {
+            assert (nodes[i]);
+            nodes[i]->fire(pendingArray, rng);
+        }
+    }
+
 
     // At run-time, we execute using a "data-driven" process since estimating
     // demands of future kernels is imprecise and costly at best and impossible
@@ -1179,11 +1381,11 @@ fuse_existing_streamset:
     // bounds to limit the exploration space of a GA and deduce what might
     // lead to the most thread-balanced program.
 
-    for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
+    for (auto i = nodeCount, j = 0UL; --i; ) {
         const auto u = ordering[i];
         const auto inputs = in_degree(u, G);
         if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
-            assert (j < simulationNodes);
+            assert (j < outputNodes);
             if (u < numOfPartitions) {
                 PartitionData & D = P[u];
                 const SimulationActor * const A =
@@ -1192,16 +1394,15 @@ fuse_existing_streamset:
                 const uint64_t SQS = A->SumOfStrides;
                 const uint64_t SSQ = A->SumOfStridesSquared;
 
-
-                errs() << u << ":\tSQS=" << SQS << ",SSQ=" << SSQ << "\n";
+                // errs() << u << ":\tSQS=" << SQS << ",SSQ=" << SSQ << "\n";
 
                 // The mean calculation is (SQS/ITERATIONS) but since we're normalizing
                 // by (minInputStrides/ITERATIONS), we can ignore the ITERATIONS denominator.
-                D.ExpectedStridesPerSegment = Rational{SQS, minInputStrides};
+                D.ExpectedStridesPerSegment = Rational{SQS, DATA_ITERATIONS};
                 if (LLVM_UNLIKELY(inputs == 0 || SQS == 0)) {
                     D.StridesPerSegmentCoV = Rational{0};
                 } else {
-                    const uint64_t a = (ITERATIONS * SSQ);
+                    const uint64_t a = (DATA_ITERATIONS * SSQ);
                     const uint64_t b = (SQS * SQS);
                     assert (a >= b);
                     // We don't need the stddev to be too precise but do want a rational number
