@@ -70,6 +70,7 @@ static cl::opt<bool> FreqBasedCompression("freq-cmp", cl::desc("Phrase selection
 static cl::opt<int> SymCount("length", cl::desc("Length of words."), cl::init(2));
 static cl::opt<int> PhraseLen("plen", cl::desc("Debug - length of phrase."), cl::init(0), cl::cat(ztfHashOptions));
 static cl::opt<int> PhraseLenOffset("offset", cl::desc("Offset to actual length of phrase"), cl::init(1), cl::cat(ztfHashOptions));
+static cl::opt<bool> UseParallelFilterByMask("fbm-p", cl::desc("Use default FilterByMask"), cl::cat(ztfHashOptions), cl::init(false));
 
 typedef void (*ztfHashFunctionType)(uint32_t fd, const char *, const char *);
 typedef void (*ztfHashDecmpFunctionType)(uint32_t fd);
@@ -279,37 +280,21 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     Scalar * dictFileName = P->getInputScalar("dictFileName");
     P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
 
+    StreamSet * const compressed_bytes = P->CreateStreamSet(1, 8);
+    if (UseParallelFilterByMask) {
+        FilterByMask(P, combinedMask, u8bytes, compressed_bytes, /*streamOffset*/0, /*extractionFieldWidth*/64, true);
+    }
+    else {
+        P->CreateKernelCall<FilterCompressedData>(encodingScheme1, SymCount, u8bytes, combinedMask, compressed_bytes);
+        // P->CreateKernelCall<StdOutKernel>(compressed_bytes);
+    }
     // Print compressed output
-    StreamSet * const encoded = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
-
-    StreamSet * const ZTF_basis = P->CreateStreamSet(8);
-    FilterByMask(P, combinedMask, encoded, ZTF_basis);
-
-    StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);
-
     Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, ZTF_bytes);
+    P->CreateKernelCall<FileSink>(outputFileName, compressed_bytes);
 
     StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
-    // StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1); // not needed
-    //do not use bitstream masks for interleave kernel
-    // P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, ZTF_bytes, nonfinal_output_bytes);
-    // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
-    // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
-    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
-
-    // Print interleaved dictionary + compressed output
-    // StreamSet * const interleaved = P->CreateStreamSet(8);
-    // P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, interleaved);
-
-    // StreamSet * const output_basis = P->CreateStreamSet(8);
-    // FilterByMask(P, nonfinal_filter_mask, interleaved, output_basis);
-
-    // StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
-    // P->CreateKernelCall<P2SKernel>(output_basis, output_bytes);
-    // P->CreateKernelCall<StdOutKernel>(output_bytes);
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, compressed_bytes, combinedMask, combinedPhraseMask, nonfinal_output_bytes);
+    P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
 
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }

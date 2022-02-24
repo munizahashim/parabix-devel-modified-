@@ -104,8 +104,8 @@ public:
     InterleaveCompressionSegment(BuilderRef b,
                            StreamSet * byteData,
                            StreamSet * codedBytes,
-                           StreamSet * extractionMask,
-                           StreamSet * dictionaryMask,
+                           StreamSet * combinedMask,
+                           StreamSet * dictMask,
                            StreamSet * combinedBytes,
                            unsigned strideBlocks = 8);
 private:
