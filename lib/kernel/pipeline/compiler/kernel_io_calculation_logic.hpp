@@ -92,34 +92,11 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         if (in_degree(mKernelId, mBufferGraph) != 0) {
             numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
         }
-        if (mHasStrideBound) {
-            mMaximumNumOfStrides = b->getSize(1);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
-                    mMaximumNumOfStrides);
-            #endif
-        }
-        else {
-            mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
-        }
+        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
-
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
-        if (mHasStrideBound) {
-            mMaximumNumOfStrides = b->getSize(1);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
-                    mMaximumNumOfStrides);
-            #endif
-        }
-        else {
-            mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
-                    b->getSize(factor.numerator()),  b->getSize(factor.denominator()), mMaximumNumOfStrides);
-            #endif
-        }
+        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
     }
 }
 
@@ -160,11 +137,18 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
     }
 
-    Value * numOfLinearStrides = nullptr;
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
+
+    Value * numOfLinearStrides = nullptr;
     if (mMayLoopToEntry) {
-        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        if (mExecuteStridesIndividually) {
+            Value * const anyMore = b->CreateICmpNE(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            numOfLinearStrides = b->CreateZExt(anyMore, b->getSizeTy());
+        } else {
+            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        }
     } else {
+        assert (!mExecuteStridesIndividually);
         numOfLinearStrides = mMaximumNumOfStrides;
     }
     assert (numOfLinearStrides);
@@ -191,11 +175,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
             numOfOutputLinearStrides = b->CreateUMin(numOfOutputLinearStrides, strides);
         }
     }
-
-//    if (numOfOutputLinearStrides != numOfLinearStrides) {
-//        Value * const mustExpand = b->CreateIsNull(numOfOutputLinearStrides);
-//        numOfLinearStrides = b->CreateSelect(mustExpand, numOfLinearStrides, numOfOutputLinearStrides);
-//    }
 
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfOutputLinearStrides); // numOfLinearStrides
 

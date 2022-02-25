@@ -88,7 +88,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
-    mHasStrideBound = mKernel->canSetStrideBoundSignal();
+    mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
     mNextPartitionEntryPoint = getPartitionExitPoint(b);
     assert (mNextPartitionEntryPoint);
 
@@ -98,16 +98,16 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     bool mayHaveInsufficientIO = false;
 
+    mMayLoopToEntry = mExecuteStridesIndividually;
+
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
         mIsBounded = false;
         mHasExplicitFinalPartialStride = false;
-        mCheckInputChannels = false;
-        mMayLoopToEntry = false;
+        mCheckInputChannels = mExecuteStridesIndividually;
     } else {
         mIsBounded = isBounded();
         mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
         mCheckInputChannels = false;
-        mMayLoopToEntry = false;
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
             if (port.CanModifySegmentLength) {
@@ -115,9 +115,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
                 break;
             }
         }
-
         mayHaveInsufficientIO = mCheckInputChannels;
-
         for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[output];
             if (port.CanModifySegmentLength) {
@@ -125,11 +123,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
                 break;
             }
         }
-
         if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
             mMayLoopToEntry = true;
         }
-
     }
 
 #ifndef NDEBUG

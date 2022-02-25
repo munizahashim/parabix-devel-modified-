@@ -173,7 +173,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             startLgIdx = 3;
         }
         std::vector<StreamSet *> symHashMarks;
-        StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
+      //  StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
         for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) { // k-sym phrases length range 5-32
             StreamSet * const groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], phraseLenOverflow[sym]/*overflow*/, groupMarks, PhraseLenOffset);
@@ -272,7 +272,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
-    P->CreateKernelCall<PopcountKernel>(combinedMask, P->getOutputScalar("count1"));
+    // P->CreateKernelCall<PopcountKernel>(combinedMask, P->getOutputScalar("count1"));
     // P->CreateKernelCall<DebugDisplayKernel>("combinedMask", combinedMask);
 
     StreamSet * const dict_bytes = P->CreateStreamSet(1, 8);
@@ -280,8 +280,8 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes, dict_partialSum);
     // P->CreateKernelCall<DebugDisplayKernel>("dict_partialSum", dict_partialSum);
 
-    Scalar * dictFileName = P->getInputScalar("dictFileName");
-    P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
+//    Scalar * dictFileName = P->getInputScalar("dictFileName");
+//    P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
 
     StreamSet * const compressed_bytes = P->CreateStreamSet(1, 8);
     if (UseParallelFilterByMask) {
@@ -292,8 +292,8 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
         // P->CreateKernelCall<StdOutKernel>(compressed_bytes);
     }
     // Print compressed output
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, compressed_bytes);
+//    Scalar * outputFileName = P->getInputScalar("outputFileName");
+//    P->CreateKernelCall<FileSink>(outputFileName, compressed_bytes);
 
     P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, compressed_bytes, dict_partialSum, combinedMask);
 
@@ -335,18 +335,23 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
     //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
 
+    const auto n = encodingScheme1.byLength.size();
+
     StreamSet * u8bytes = ztfHash_u8bytes;
     for(unsigned sym = 0; sym < SymCount; sym++) {
         unsigned startIdx = 0;
         if (sym > 0) {
             startIdx = 3;
         }
-        for (unsigned i = startIdx; i < encodingScheme1.byLength.size(); i++) {
+        for (unsigned i = startIdx; i < n; i++) {
             StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
-            P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+
+            const unsigned idx = (sym * encodingScheme1.byLength.size()) + i;
+
+            P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {idx}));
             //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
             StreamSet * const groupDecoded = P->CreateStreamSet(1);
-            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {idx}));
             //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
             StreamSet * const input_bytes = u8bytes;

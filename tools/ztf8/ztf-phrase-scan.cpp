@@ -863,10 +863,13 @@ FilterCompressedData::FilterCompressedData(BuilderRef b,
                    {}, {}, {},
                    {InternalScalar{b->getBitBlockType(), "pendingMaskInverted"}}),
 mNumSym(numSyms), mSubStride(std::min(b->getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS)) {
+
+
+
     if (DelayedAttributeIsSet()) {
-        mOutputStreamSets.emplace_back("cmpBytes", cmpBytes, BoundedRate(0, 1) /*FixedRate(), Delayed(encodingScheme.maxSymbolLength()) */);
+        mOutputStreamSets.emplace_back("cmpBytes", cmpBytes, PopcountOf("phraseMask") /*FixedRate(), Delayed(encodingScheme.maxSymbolLength()) */);
     } else {
-        mOutputStreamSets.emplace_back("cmpBytes", cmpBytes, BoundedRate(0,1));
+        mOutputStreamSets.emplace_back("cmpBytes", cmpBytes, PopcountOf("phraseMask"));
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
     }
     setStride(1024000);
@@ -987,7 +990,7 @@ void FilterCompressedData::generateMultiBlockLogic(BuilderRef b, Value * const n
     segWritePosPhi->addIncoming(segWritePosUpdate, checkFinalLoopCond);
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), stridePrologue, stridesDone);
     b->SetInsertPoint(stridesDone);
-    b->setProducedItemCount("cmpBytes", segWritePosUpdate);
+    // b->setProducedItemCount("cmpBytes", segWritePosUpdate);
     b->CreateCondBr(b->isFinal(), filteringMaskDone, updatePending);
     b->SetInsertPoint(updatePending);
     // No partial phrases in the segment are written in the dicitonary. The phrase shall be moved to the next segment.
@@ -1027,7 +1030,6 @@ mNumSym(numSyms), mOffset(offset), mSubStride(std::min(b->getBitBlockWidth() * s
         addInternalScalar(ArrayType::get(b->getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
     }
     setStride(1024000);
-    // addAttribute(HasStrideBound());
 }
 
 void WriteDictionary::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
@@ -1465,8 +1467,10 @@ InterleaveCompressionSegment::InterleaveCompressionSegment(BuilderRef b,
 mStrideBlocks(strideBlocks) {
     setStride(1);
     addAttribute(SideEffecting());
+    addAttribute(ExecuteStridesIndividually());
 }
 
+#if 0
 void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
 #ifdef PRINT_INTERLEAVE_KERNEL_DEBUG_INFO
     b->CallPrintInt("numOfStrides", numOfStrides);
@@ -1565,7 +1569,21 @@ void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value *
     b->setProcessedItemCount("dictData", b->CreateSelect(b->isFinal(), dictAvail, guaranteedProcessedDict));
     b->setProcessedItemCount("codedBytes", b->CreateSelect(b->isFinal(), cmpAvail, guaranteedProcessedCmp));
 }
+#endif
 
+
+void InterleaveCompressionSegment::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+
+    Value * const dictAvail = b->getAccessibleItemCount("dictData");
+    Value * const cmpAvail = b->getAccessibleItemCount("codedBytes");
+    Value * const dictProcessed = b->getProcessedItemCount("dictData");
+    Value * const cmpProcessed = b->getProcessedItemCount("codedBytes");
+
+    Constant * const stdOutFd = b->getInt32(STDOUT_FILENO);
+    b->CreateWriteCall(stdOutFd, b->getRawInputPointer("dictData", dictProcessed), dictAvail);
+    b->CreateWriteCall(stdOutFd, b->getRawInputPointer("codedBytes", cmpProcessed), cmpAvail);
+
+}
 
 SymbolGroupDecompression::SymbolGroupDecompression(BuilderRef b,
                                                    EncodingInfo encodingScheme,
