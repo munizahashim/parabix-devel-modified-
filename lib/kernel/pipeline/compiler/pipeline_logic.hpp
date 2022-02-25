@@ -125,7 +125,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
     }
-
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif

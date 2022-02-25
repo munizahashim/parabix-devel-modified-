@@ -89,19 +89,39 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
     if (mIsPartitionRoot) {
         auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
+        #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         if (in_degree(mKernelId, mBufferGraph) != 0) {
             numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
         }
-        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
+        #endif
+        if (mHasStrideBound) {
+            mMaximumNumOfStrides = b->getSize(1);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
+                    mMaximumNumOfStrides);
+            #endif
+        }
+        else {
+            mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
+        }
     } else {
 
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
-        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
-                   b->getSize(factor.numerator()),  b->getSize(factor.denominator()), mMaximumNumOfStrides);
-        #endif
+        if (mHasStrideBound) {
+            mMaximumNumOfStrides = b->getSize(1);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
+                    mMaximumNumOfStrides);
+            #endif
+        }
+        else {
+            mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
+                    b->getSize(factor.numerator()),  b->getSize(factor.denominator()), mMaximumNumOfStrides);
+            #endif
+        }
     }
 }
 

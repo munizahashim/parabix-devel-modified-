@@ -296,7 +296,6 @@ public:
     KernelIdVector                  KernelPartitionId;
 
     std::vector<unsigned>           MinimumNumOfStrides;
-//    std::vector<unsigned>           ExpectedNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
 

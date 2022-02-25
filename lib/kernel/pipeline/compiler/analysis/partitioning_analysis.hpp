@@ -5,6 +5,10 @@
 #include <toolchain/toolchain.h>
 #include <util/slab_allocator.h>
 
+// #define PRINT_GRAPH_BITSETS
+
+#define ALWAYS_ADD_NEW_PARTITION_MARKER_FOR_ATTRIBUTE
+
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -20,6 +24,18 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     using PartitionMap = std::map<BitSet, unsigned>;
 
+    #ifdef PRINT_GRAPH_BITSETS
+    auto write_bitset = [](const BitSet & bv) {
+        auto i = bv.find_first();
+        if (i != bv.npos) {
+            errs() << i;
+            while ((i = bv.find_next(i)) != bv.npos) {
+                errs() << ',' << i;
+            }
+        }
+    };
+    #endif
+
     const unsigned n = num_vertices(Relationships);
 
     std::vector<unsigned> sequence;
@@ -27,7 +43,9 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     std::vector<unsigned> mapping(n, -1U);
 
+    #ifndef NDEBUG
     unsigned numOfKernels = 2;
+    #endif
 
     BEGIN_SCOPED_REGION
 
@@ -128,12 +146,13 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         dynamic_bitset<> BitSet;
         AttrId Type;
         unsigned Amount;
+        unsigned StreamSet;
 
-        AttributeClassifier(AttributeClassifier && a)
-        : BitSet(std::move(a.BitSet)), Type(a.Type), Amount(a.Amount) { }
+        AttributeClassifier(const AttributeClassifier & a)
+        : BitSet(a.BitSet), Type(a.Type), Amount(a.Amount), StreamSet(a.StreamSet) { }
 
-        AttributeClassifier(const dynamic_bitset<> & bitSet, AttrId type, const unsigned amount)
-        : BitSet(bitSet), Type(type), Amount(amount) {
+        AttributeClassifier(const dynamic_bitset<> & bitSet, AttrId type, const unsigned amount, const unsigned streamSet)
+        : BitSet(bitSet), Type(type), Amount(amount), StreamSet(streamSet) {
 
         }
     };
@@ -150,9 +169,9 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         }
     };
 
-    std::map<AttributeClassifier, unsigned, AttributeClassifierComp> attrBitIds;
-
     unsigned nextRateId = 0;
+
+    std::vector<AttributeClassifier> knownAttributes;
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -179,15 +198,15 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                     const Binding & b = rn.Binding;
                     const ProcessingRate & rate = b.getRate();
 
-                    // BitSet & I = G[source(e, G)];
-
-
-                    for (const auto e : make_iterator_range(in_edges(i, G))) {
-                        const BitSet & I = G[source(e, G)];
+                    for (const auto f : make_iterator_range(in_edges(i, G))) {
+                        const BitSet & I = G[source(f, G)];
                         V |= I;
                     }
 
                     if (rate.getKind() == RateId::Fixed) {
+
+                        bool addedRateId = false;
+
 
                         // Check the attributes to see whether any impose a partition change
                         for (const Attribute & attr : b.getAttributes()) {
@@ -196,21 +215,37 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                                 case AttrId::BlockSize:
                                 case AttrId::LookAhead:
                                     BEGIN_SCOPED_REGION
-                                    AttributeClassifier key(V, attr.getKind(), attr.amount());
-                                    const auto f = attrBitIds.find(key);
-                                    if (f != attrBitIds.end()) {
-                                        const auto k = f->second;
-                                        assert (k < nextRateId);
-                                        V.set(k);
-                                    } else {
-                                        attrBitIds.emplace(std::move(key), nextRateId);
-                                        assert (nextRateId < V.capacity());
-                                        V.set(nextRateId++);
+                                    #ifdef ALWAYS_ADD_NEW_PARTITION_MARKER_FOR_ATTRIBUTE
+                                    V.set(nextRateId++);
+                                    #else
+                                    bool noMatch = true;
+                                    for (const AttributeClassifier & known : knownAttributes) {
+                                        if (known.Type == attr.getKind()
+                                            && known.Amount == attr.amount()
+                                            // && known.StreamSet == source(e, G)
+                                        ) {
+                                            if (known.BitSet.is_subset_of(V)) {
+                                                noMatch = false;
+                                                break;
+                                            }
+                                        }
                                     }
+                                    if (noMatch) {
+                                        V.set(nextRateId);
+                                        AttributeClassifier key(V, attr.getKind(), attr.amount(), source(e, G));
+                                        knownAttributes.emplace_back(key);
+                                        addedRateId = true;
+                                    }
+                                    #endif
                                     END_SCOPED_REGION
                                 default: break;
                             }
                         }
+
+                        if (addedRateId) {
+                            ++nextRateId;
+                        }
+
 
                     } else {
                         V.set(nextRateId++);
@@ -218,7 +253,6 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
                 }
             }
-
 
             const Kernel * const kernelObj = node.Kernel;
 
@@ -273,7 +307,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                 }
 
                 if (rate.getKind() == RateId::Fixed) {
-
+                    bool addedRateId = false;
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
                         switch (attr.getKind()) {
@@ -284,16 +318,33 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                             // buffer must be dynamic.
                             case AttrId::BlockSize:
                                 BEGIN_SCOPED_REGION
-                                AttributeClassifier key(O, attr.getKind(), attr.amount());
-                                const auto f = attrBitIds.find(key);
-                                if (f != attrBitIds.end()) {
-                                    O.set(f->second);
-                                } else {
-                                    attrBitIds.emplace(std::move(key), nextRateId);
-                                    O.set(nextRateId++);
+                                #ifdef ALWAYS_ADD_NEW_PARTITION_MARKER_FOR_ATTRIBUTE
+                                O.set(nextRateId++);
+                                #else
+                                bool noMatch = true;
+                                for (const AttributeClassifier & known : knownAttributes) {
+                                    if (known.Type == attr.getKind()
+                                        && known.Amount == attr.amount()
+                                        // && known.StreamSet == target(e, G)
+                                    ) {
+                                        if (known.BitSet.is_subset_of(O)) {
+                                            noMatch = false;
+                                            break;
+                                        }
+                                    }
                                 }
+                                if (noMatch) {
+                                    O.set(nextRateId);
+                                    AttributeClassifier key(O, attr.getKind(), attr.amount(), target(e, G));
+                                    knownAttributes.emplace_back(key);
+                                    addedRateId = true;
+                                }
+                                #endif
                                 END_SCOPED_REGION
                             default: break;
+                        }
+                        if (addedRateId) {
+                            ++nextRateId;
                         }
                     }
 
@@ -322,6 +373,39 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     G[0].reset();
     G[m - 1].set(nextRateId);
+
+    #ifdef PRINT_GRAPH_BITSETS
+    BEGIN_SCOPED_REGION
+    auto & out = errs();
+
+    out << "digraph \"G\" {\n";
+    for (auto v : make_iterator_range(vertices(G))) {
+
+        const auto u = sequence[v];
+        const RelationshipNode & node = Relationships[u];
+
+        out << "v" << v << " [label=\"";
+        if (node.Type == RelationshipNode::IsKernel) {
+            out << node.Kernel->getName();
+        }
+        out << " {";
+        write_bitset(G[v]);
+        out << v << "}\"";
+        if (node.Type == RelationshipNode::IsKernel) {
+            out << ",shape=rect";
+        }
+        out << "];\n";
+    }
+    for (auto e : make_iterator_range(edges(G))) {
+        const auto s = source(e, G);
+        const auto t = target(e, G);
+        out << "v" << s << " -> v" << t << ";\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    END_SCOPED_REGION
+    #endif
 
     std::vector<unsigned> partitionIds(m);
 
@@ -476,13 +560,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         const RelationshipNode & node = Relationships[u];
         if (node.Type == RelationshipNode::IsRelationship) {
             const auto j = parent(i, G);
-            const auto producer = sequence[j];
-            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = componentId[j];
             for (const auto e : make_iterator_range(out_edges(i, G))) {
                 const auto k = target(e, G);
-                const auto consumer = sequence[k];
-                assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
                 const auto consPartId = componentId[k];
                 if (prodPartId != consPartId) {
                     assert (consPartId > 0);

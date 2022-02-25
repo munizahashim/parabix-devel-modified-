@@ -130,6 +130,10 @@ bool EnableHybridThreadModel = false;
 static cl::opt<bool, true> EnableHybridThreadModelOption("enable-hybrid-thread-model", cl::location(EnableHybridThreadModel), cl::init(false),
                                                cl::desc("Enable pipeline to construct hybrid fixed data/code model."), cl::cat(CodeGenOptions));
 
+unsigned Z3_Timeout;
+static cl::opt<unsigned, true> Z3_TimeoutOption("Z3-timeout", cl::location(Z3_Timeout), cl::init(3000),
+                                               cl::desc("Z3 timeout"), cl::value_desc("positive integer"));
+
 
 //unsigned NumOfKernels = 0;
 //unsigned NumOfStreamSets = 0;

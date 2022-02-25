@@ -366,6 +366,8 @@ public:
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 
+    LLVM_READNONE bool canSetStrideBoundSignal() const;
+
     virtual void addKernelDeclarations(BuilderRef b);
 
     virtual std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const;

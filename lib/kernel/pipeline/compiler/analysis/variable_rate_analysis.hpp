@@ -11,6 +11,10 @@ namespace kernel {
 
 namespace {
 
+constexpr uint64_t DEMAND_ITERATIONS = 1000;
+
+constexpr uint64_t DATA_ITERATIONS =   100000;
+
 #define USE_GREEDY_DEMAND_BASED_SIMULATION
 
 using SimulationAllocator = SlabAllocator<uint8_t>;
@@ -90,7 +94,7 @@ private:
 
 struct PartialSumGenerator {
 
-    uint64_t readStepValue(const uint64_t start, const uint64_t end, random_engine & rng) {
+    length_t readStepValue(const uint64_t start, const uint64_t end, random_engine & rng) {
 
         // Since PartialSum rates can have multiple ports referring to the same reference streamset, we store the
         // history of partial sum values in a circular buffer but silently drop entries after every user has read
@@ -141,7 +145,7 @@ struct PartialSumGenerator {
         assert (a <= b);
         const auto c = b - a;
         assert (c <= (MaxStepSize * (end - start)));
-        return c;
+        return static_cast<length_t>(c) ;
     }
 
     void updateReadPosition(const unsigned userId, const uint64_t position) {
@@ -632,16 +636,16 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
     // scan through the graph and build up a temporary graph first so we can hopefully lay the
     // memory out for the simulation graph in a more prefetch friendly way.
 
-    // Review Chintana system tomorrow.
-
-    // Cycle counter reporting oddly on colours=always?
-
-
     const auto numOfPartitions = num_vertices(P);
 
-    Graph G(numOfPartitions);
+    #ifndef NDEBUG
+    BEGIN_SCOPED_REGION
+    const reverse_traversal tmp(numOfPartitions);
+    assert (is_valid_topological_sorting(tmp, P));
+    END_SCOPED_REGION
+    #endif
 
-    flat_map<unsigned, unsigned> streamSetMap;
+    Graph G(numOfPartitions);
 
     struct PartialSumData {
         unsigned StepSize;
@@ -649,7 +653,6 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
         unsigned GCD;
         unsigned Count;
         unsigned Index;
-
 
         PartialSumData(const unsigned stepSize)
         : StepSize(stepSize), RequiredCapacity(1), Count(0), Index(0) {
@@ -659,9 +662,11 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
 
     flat_map<unsigned, PartialSumData> partialSumMap;
 
+    flat_map<unsigned, unsigned> streamSetMap;
+
     std::vector<unsigned> ordering;
 
-    for (unsigned partitionId = 1; partitionId < numOfPartitions; ++partitionId) {
+    for (unsigned partitionId = 0; partitionId < numOfPartitions; ++partitionId) {
         const PartitionData & N = P[partitionId];
         const auto n = N.Kernels.size();
         for (unsigned i = 0; i < n; ++i) {
@@ -690,7 +695,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
             // We cannot assume that the ports for this kernel ensure that a referred port
             // occurs prior to the referee.
 
-            PortGraph P;
+            PortGraph H;
 
             for (const auto e : make_iterator_range(in_edges(kernelId, Relationships))) {
                 const auto input = source(e, Relationships);
@@ -713,12 +718,12 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                     const auto producerPartitionId = c->second;
                     assert (producerPartitionId <= partitionId);
                     if (producerPartitionId != partitionId) {
-                        add_vertex(PortNode{static_cast<unsigned>(input), static_cast<unsigned>(streamSet)}, P);
+                        add_vertex(PortNode{static_cast<unsigned>(input), static_cast<unsigned>(streamSet)}, H);
                     }
                 }
             }
 
-            const auto numOfInputs = num_vertices(P);
+            const auto numOfInputs = num_vertices(H);
 
             for (const auto e : make_iterator_range(out_edges(kernelId, Relationships))) {
                 const auto output = target(e, Relationships);
@@ -740,18 +745,18 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                         const auto consumerPartitionId = c->second;
                         assert (partitionId <= consumerPartitionId);
                         if (consumerPartitionId != partitionId) {
-                            add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, P);
+                            add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
                             break;
                         }
                     }
                 }
             }
 
-            const auto numOfPorts = num_vertices(P);
+            const auto numOfPorts = num_vertices(H);
 
             if (numOfPorts > 0) {
                 for (unsigned i = 0; i < numOfPorts; ++i) {
-                    const auto & portNode = P[i];
+                    const auto & portNode = H[i];
                     const RelationshipNode & node = Relationships[portNode.Binding];
                     assert (node.Type == RelationshipNode::IsBinding);
                     const Binding & binding = node.Binding;
@@ -789,8 +794,8 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                                     }
                                 }
                                 for (unsigned j = 0; j < numOfPorts; ++j) {
-                                    if (P[j].Binding == ref) {
-                                        add_edge(i, j, P);
+                                    if (H[j].Binding == ref) {
+                                        add_edge(i, j, H);
                                         break;
                                     }
                                 }
@@ -801,7 +806,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
 found_output_ref:   continue;
                 }
                 assert (ordering.empty());
-                lexical_ordering(P, ordering);
+                lexical_ordering(H, ordering);
                 assert (ordering.size() == numOfPorts);
 
                 // A relative rate can be either relative to an input or an output rate. Only an output port can be
@@ -821,7 +826,7 @@ found_output_ref:   continue;
 
                 for (unsigned i = 0; i < numOfPorts; ++i) {
                     const auto j = ordering[i];
-                    const auto & portNode = P[j];
+                    const auto & portNode = H[j];
                     const RelationshipNode & node = Relationships[portNode.Binding];
                     assert (node.Type == RelationshipNode::IsBinding);
                     const Binding & binding = node.Binding;
@@ -868,7 +873,7 @@ found_output_ref:   continue;
                         assert (itr != streamSetMap.end());
                         streamSet = itr->second;
                         if (rate.isRelative()) {
-                            const auto k = parent(j, P);
+                            const auto k = parent(j, H);
                             assert (k < numOfInputs);
                             refId = getRelativeRefId(k);
                         } else if (rate.isPartialSum()) {
@@ -876,7 +881,7 @@ found_output_ref:   continue;
                         }
                         // if we already have a matching fixed rate, use that intead.
                         bool addEdge = true;
-                        if (rate.isFixed() && !binding.hasAttribute(AttrId::Deferred)) {
+                        if (rate.isFixed()) {
                             for (const auto e : make_iterator_range(in_edges(partitionId, G))) {
                                 if (LLVM_UNLIKELY(source(e, G) == streamSet)) {
                                     const PartitionPort & P = G[e];
@@ -895,9 +900,9 @@ found_output_ref:   continue;
                     } else { // is an output
                         assert (streamSetMap.find(portNode.StreamSet) == streamSetMap.end());
                         if (LLVM_UNLIKELY(rate.isRelative())) {
-                            const auto k = parent(j, P);
+                            const auto k = parent(j, H);
                             if (k >= numOfInputs) {
-                                const auto itr = streamSetMap.find(P[k].StreamSet);
+                                const auto itr = streamSetMap.find(H[k].StreamSet);
                                 assert (itr != streamSetMap.end());
                                 streamSet = itr->second;
                                 goto fuse_existing_streamset;
@@ -1050,12 +1055,6 @@ fuse_existing_streamset:
     #endif
 
     std::vector<uint64_t> initialSumOfStrides(nodeCount);
-
-
-    constexpr uint64_t DEMAND_ITERATIONS = 1000;
-
-    constexpr uint64_t DATA_ITERATIONS = 1000000;
-
 
     auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) {
         const PartitionPort & p = G[e];
@@ -1369,7 +1368,6 @@ fuse_existing_streamset:
             nodes[i]->fire(pendingArray, rng);
         }
     }
-
 
     // At run-time, we execute using a "data-driven" process since estimating
     // demands of future kernels is imprecise and costly at best and impossible

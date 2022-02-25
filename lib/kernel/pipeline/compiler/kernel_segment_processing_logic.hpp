@@ -88,6 +88,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    mHasStrideBound = mKernel->canSetStrideBoundSignal();
     mNextPartitionEntryPoint = getPartitionExitPoint(b);
     assert (mNextPartitionEntryPoint);
 
@@ -131,14 +132,14 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     }
 
-
+#ifndef NDEBUG
     const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
     const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
 //    const auto mIsPartitionRoot = mIsPartitionRoot && (nextPartitionId != jumpId);
 
     assert (nextPartitionId > mCurrentPartitionId);
     assert (jumpId >= nextPartitionId);
-
+#endif
 
     const auto prefix = makeKernelName(mKernelId);
 

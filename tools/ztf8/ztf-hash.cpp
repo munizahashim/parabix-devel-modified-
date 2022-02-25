@@ -92,7 +92,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<RunIndex>(symbolRuns, runIndex, overflow);
 
     StreamSet * const bixHashes = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
-    P->CreateKernelCall<BixHash>(u8basis, symbolRuns, bixHashes);
+    P->CreateKernelCall<BixHash>(u8basis, symbolRuns, bixHashes, 0);
     //P->CreateKernelCall<DebugDisplayKernel>("bixHashes", bixHashes);
 
     StreamSet * const hashValues = P->CreateStreamSet(1, 16);
@@ -168,7 +168,7 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<RunIndex>(symbolRuns, runIndex, overflow);
 
     StreamSet * const bixHashes = P->CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
-    P->CreateKernelCall<BixHash>(ztfHash_u8_Basis, symbolRuns, bixHashes);
+    P->CreateKernelCall<BixHash>(ztfHash_u8_Basis, symbolRuns, bixHashes, 0);
 
     StreamSet * const hashValues = P->CreateStreamSet(1, 16);
     std::vector<StreamSet *> combinedHashData = {bixHashes, runIndex};

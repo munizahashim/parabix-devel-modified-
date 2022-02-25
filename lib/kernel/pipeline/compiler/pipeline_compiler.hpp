@@ -709,6 +709,7 @@ protected:
     bool                                        mIsPartitionRoot = false;
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
+    bool                                        mHasStrideBound = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;

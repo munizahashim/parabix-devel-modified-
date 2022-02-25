@@ -268,11 +268,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     assert (kernels[0] == PipelineInput);
     assert (kernels[numOfKernels - 1] == PipelineOutput);
 
-    const auto origPartitionCount = num_vertices(partitionGraph);
 
     #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     auto calculateSegmentLengthBounds = [&](const unsigned kernelId, const unsigned partitionId, const unsigned newKernelId) {
-        assert (partitionId < origPartitionCount);
         const PartitionData & P = partitionGraph[partitionId];
         const KernelIdVector & K = P.Kernels;
         assert (P.Repetitions.size() == K.size());
@@ -285,15 +283,15 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         StrideStepLength[newKernelId] = sl;
         const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
         Rational ONE{1};
-        const auto min = (cov3 > ONE) ? 0 : floor(P.ExpectedStridesPerSegment * (ONE - cov3));
+        const auto min = (cov3 > ONE) ? 0U: floor(P.ExpectedStridesPerSegment * (ONE - cov3));
         const auto max = ceiling(P.ExpectedStridesPerSegment * (ONE + cov3));
         assert (min <= max);
-        MinimumNumOfStrides[newKernelId] = sl * min;
-        MaximumNumOfStrides[newKernelId] = sl * max;
+        MinimumNumOfStrides[newKernelId] = min;
+        MaximumNumOfStrides[newKernelId] = max;
     };
     #else
     auto calculateExpectedNumOfStrides = [&](const unsigned kernelId, const unsigned partitionId) -> unsigned {
-        assert (partitionId < origPartitionCount);
+        assert (partitionId < num_vertices(partitionGraph));
         const PartitionData & P = partitionGraph[partitionId];
         const auto & R = P.Repetitions;
         const KernelIdVector & K = P.Kernels;
@@ -1990,8 +1988,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
         const RelationshipType & port = G[e];
         if (port.Type == PortType::Input) {
             const auto binding = source(e, G);
-            const RelationshipNode & rn = G[binding];
-            assert(rn.Type == RelationshipNode::IsBinding);
+            assert(G[binding].Type == RelationshipNode::IsBinding);
             const auto f = first_in_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = source(f, G);
@@ -2000,8 +1997,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
             insertionFunction(PortType::Input, binding, streamSet);
         } else {
             const auto binding = target(e, G);
-            const RelationshipNode & rn = G[binding];
-            assert(rn.Type == RelationshipNode::IsBinding);
+            assert(G[binding].Type == RelationshipNode::IsBinding);
             const auto f = first_out_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = target(f, G);

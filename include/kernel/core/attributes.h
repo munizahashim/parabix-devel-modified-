@@ -277,6 +277,10 @@ struct Attribute {
 
         // This kernel is infrequently used and should be compiled with O1 instead of O3.
 
+        BoundNumberOfStrides,
+
+        // Run the kernel in a lock step with number of strides bound by BoundNumberOfStrides per segment.
+
         /** COUNT **/
 
         __Count
@@ -510,7 +514,9 @@ inline Attribute RequiresNegatedPopCountArray() {
     return Attribute(Attribute::KindId::RequiresNegatedPopCountArray, 0);
 }
 
-
+inline Attribute HasStrideBound() {
+    return Attribute(Attribute::KindId::BoundNumberOfStrides, 0);
+}
 
 
 }

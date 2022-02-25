@@ -22,6 +22,18 @@
 #include <toolchain/toolchain.h>
 #include <array>
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+    using FixedVectorType = llvm::VectorType;
+#else
+    using FixedVectorType = llvm::FixedVectorType;
+#endif
+
+enum NonCarryCollapsingMode {
+    NestedCapacity = 0,
+    LastIncomingCarryLoopIteration = 1,
+    NestedCarryState = 2
+};
+
 #define LONG_ADVANCE_BREAKPOINT 64
 
 using namespace llvm;
@@ -31,23 +43,6 @@ using BuilderRef = pablo::CompressedCarryManager::BuilderRef;
 namespace pablo {
 
 /* Local Helper Functions */
-
-inline static bool isNonAdvanceCarryGeneratingStatement(const Statement * const stmt) {
-    if (IntrinsicCall const * call = dyn_cast<IntrinsicCall>(stmt)) {
-        return call->isCarryProducing() && !call->isAdvanceType();
-    } else {
-        return isa<CarryProducingStatement>(stmt) && !isa<Advance>(stmt) && !isa<IndexedAdvance>(stmt);
-    }
-}
-
-
-static inline bool isNonRegularLanguage(const PabloBlock * const scope) {
-    if (const Branch * br = scope->getBranch()) {
-        return !br->isRegular();
-    }
-    return false;
-}
-
 
 static inline unsigned ceil_log2(const unsigned v) {
     assert ("log2(0) is undefined!" && v != 0);
@@ -65,53 +60,10 @@ static inline unsigned ceil_udiv(const unsigned x, const unsigned y) {
     return (((x - 1) | (y - 1)) + 1) / y;
 }
 
-
-static Value * castToSummaryType(BuilderRef b, Value * carryOut, Type * summaryTy) {
-    if (!(carryOut->getType()->isIntegerTy() || carryOut->getType() == b->getBitBlockType())) {
-        assert (false);
-    }
-
-    if (carryOut->getType() == summaryTy) {
-        return carryOut;
-    } else if (summaryTy == b->getBitBlockType()) {
-        return b->CreateBitCast(b->CreateZExt(carryOut, b->getIntNTy(b->getBitBlockWidth())), b->getBitBlockType());
-    } else {
-        // assert (carryOut->getType()->getPrimitiveSizeInBits() <= summaryTy->getPrimitiveSizeInBits());
-        return b->CreateZExt(carryOut, summaryTy);
-    }
-}
-
-
-// Recursively determines the minimum summary size needed, in bits, for a given pablo block.
-static int32_t analyseSummarySize(int32_t blockWidth, const PabloBlock * const scope) {
-    int32_t carrySize = 0;
-    for (const Statement * stmt : *scope) {
-        if (LLVM_UNLIKELY(isa<Advance>(stmt) || isa<IndexedAdvance>(stmt))) {
-            int64_t amount = isa<Advance>(stmt)
-                ? cast<Advance>(stmt)->getAmount()
-                : cast<IndexedAdvance>(stmt)->getAmount();
-            if (LLVM_LIKELY(amount < 8)) {
-                carrySize = std::max(8, carrySize);
-            } else if (amount >= 8 && amount < LONG_ADVANCE_BREAKPOINT) {
-                carrySize = std::max(64, carrySize);
-            } else {
-                carrySize = blockWidth;
-            }
-        } else if (LLVM_UNLIKELY(isNonAdvanceCarryGeneratingStatement(stmt))) {
-            carrySize = std::max(8, carrySize);
-        } else if (LLVM_UNLIKELY(isa<If>(stmt))) {
-            carrySize = std::max(analyseSummarySize(blockWidth, cast<If>(stmt)->getBody()), carrySize);
-        } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
-            carrySize = std::max(analyseSummarySize(blockWidth, cast<While>(stmt)->getBody()), carrySize);
-        }
-    }
-    assert (carrySize >= 0 && carrySize <= blockWidth);
-    return carrySize;
-}
-
-
 static Type * toSummaryType(BuilderRef b, int32_t summarySize) {
     switch (summarySize) {
+    case 0:
+        return nullptr;
     case 8:
         return b->getInt8Ty();
     case 64:
@@ -122,172 +74,39 @@ static Type * toSummaryType(BuilderRef b, int32_t summarySize) {
     }
 }
 
-
-static Value * compressImplicitSummary(BuilderRef b, Value * summary) {
-    if (summary->getType() == b->getBitBlockType()) {
-        summary = b->CreateBitCast(summary, b->getIntNTy(b->getBitBlockWidth()));
-    }
-    return b->CreateICmpNE(summary, Constant::getNullValue(summary->getType()));
+inline unsigned getVectorBitWidth(const Type * const ty) {
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+    return cast<FixedVectorType>(ty)->getPrimitiveSizeInBits();
+    #else
+    return cast<FixedVectorType>(ty)->getPrimitiveSizeInBits().getFixedSize();
+    #endif
 }
 
-
-/* ===== Initialization ===== */
-
-
-void CompressedCarryManager::initializeCodeGen(BuilderRef b) {
-
-    assert(!mCarryMetadata.empty());
-    mCarryInfo = &mCarryMetadata[0];
-    assert (!mCarryInfo->hasSummary());
-    mCurrentFrame = b->getScalarFieldPtr("carries");
-    mCurrentFrameIndex = 0;
-    mCarryScopes = 0;
-    mCarryScopeIndex.push_back(0);
-    assert (mCarryFrameStack.empty());
-    assert (mCarrySummaryStack.empty());
-
-    int32_t baseSummarySize = analyseSummarySize(b->getBitBlockWidth(), mKernel->getEntryScope());
-    mBaseSummaryType = baseSummarySize > 0 ? toSummaryType(b, baseSummarySize) : b->getInt8Ty();
-    mCarrySummaryStack.push_back(Constant::getNullValue(mBaseSummaryType));
-
-    if (mHasLoop) {
-        mLoopSelector = b->getScalarField("selector");
-        mNextLoopSelector = b->CreateXor(mLoopSelector, ConstantInt::get(mLoopSelector->getType(), 1));
+inline unsigned getTypeBitWidth(const Type * const ty) {
+    if (LLVM_UNLIKELY(ty == nullptr)) {
+        return 0U;
+    } else if (ty->isIntegerTy()) {
+        return cast<IntegerType>(ty)->getBitWidth();
+    } else {
+        return getVectorBitWidth(ty);
     }
 }
 
 
-/* ===== Scope Changes ===== */
-
-void CompressedCarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
-    assert (mLoopDepth > 0);
-
-    Type * const carryTy = getSummaryTypeFromCurrentFrame();
-    if (mLoopDepth == 1) {
-        Constant * const ONES = Constant::getAllOnesValue(carryTy);
-        mNestedLoopCarryInMaskPhi = b->CreatePHI(carryTy, 2, "loopCarryInMask");
-        mNestedLoopCarryInMaskPhi->addIncoming(ONES, entryBlock);
-    }
-
-    if (mCarryInfo->hasSummary()) {
-        Constant * const ZEROES = Constant::getNullValue(carryTy);
-        PHINode * const phiCarryOutSummary = b->CreatePHI(carryTy, 2, "whileCarryOutSummary");
-        phiCarryOutSummary->addIncoming(ZEROES, entryBlock);
-
-        // Replace the incoming carry summary with the phi node and add the phi node to the stack  so that we can
-        // properly OR it into the outgoing summary value.
-        // NOTE: this may change the base summary value; when exiting to the base scope, replace this summary with
-        // a null value to prevent subsequent nested scopes from inheriting the summary of this scope.
-
-        // (1) Carry-ins: (a) incoming carry data first iterations, (b) zero thereafter
-        // (2) Carry-out accumulators: (a) zero first iteration, (b) |= carry-out of each iteration
-        mCarrySummaryStack.push_back(phiCarryOutSummary); // original carry out summary phi
-        mCarrySummaryStack.push_back(phiCarryOutSummary); // accumulated carry out summary value
-    }
-
-    if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
-        assert ("non carry collapsing mode is not supported yet" && false);
-    }
-}
-
-
-void CompressedCarryManager::leaveLoopBody(BuilderRef b, BasicBlock * exitBlock) {
-    assert (mLoopDepth > 0);
-    if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
-        assert ("non carry collapsing mode is not supported yet" && false);
-    }
-
-    if (mLoopDepth == 1) {
-        Constant * const ZEROES = Constant::getNullValue(mNestedLoopCarryInMaskPhi->getType());
-        mNestedLoopCarryInMaskPhi->addIncoming(ZEROES, exitBlock);
-    }
-
-    if (mCarryInfo->hasSummary()) {
-        const auto n = mCarrySummaryStack.size(); assert (n > 2);
-
-        // (1) Carry-ins: (a) incoming carry data first iterations, (b) zero thereafter
-        // (2) Carry-out accumulators: (a) zero first iteration, (b) |= carry-out of each iteration
-
-        Value * const carryOut = mCarrySummaryStack[n - 1];
-        PHINode * const phiCarryOut = cast<PHINode>(mCarrySummaryStack[n - 2]);
-        phiCarryOut->addIncoming(carryOut, exitBlock);
-        mCarrySummaryStack[n - 2] = carryOut; // replace summary out phi with the final value
-        mCarrySummaryStack.pop_back(); // discard updated carry out value
-    }
-}
-
-
-void CompressedCarryManager::enterIfScope(BuilderRef b, const PabloBlock * const /*scope*/) {
-    ++mIfDepth;
-    enterScope(b);
-    // We zero-initialized the nested summary value and later OR in the current summary into the escaping summary
-    // so that upon processing the subsequent block iteration, we branch into this If scope iff a carry out was
-    // generated by a statement within this If scope and not by a dominating statement in the outer scope.
-    if (mCarryInfo->hasExplicitSummary()) {
-        Type * const summaryTy = getSummaryTypeFromCurrentFrame();
-        mCarrySummaryStack.push_back(Constant::getNullValue(summaryTy)); // new carry out summary accumulator
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief writeCurrentCarryOutSummary
+ ** ------------------------------------------------------------------------------------------------------------- */
+void CompressedCarryManager::writeCurrentCarryOutSummary(BuilderRef b) {
+    if (LLVM_LIKELY(mCarryInfo->hasExplicitSummary())) {
+        const auto n = mCarrySummaryStack.size(); assert (n > 0);
+        writeCarryOutSummary(b, mCarrySummaryStack[n - 1]);
     } else if (mCarryInfo->hasImplicitSummary()) {
-        mCarrySummaryStack.push_back(convertFrameToImplicitSummaryPtr(b));
-    }
-}
-
-
-void CompressedCarryManager::leaveScope() {
-    // Did we use all of the packs in this carry struct?
-    // We can't check this for frames with implicit summaries as there is extra data to pad the frame.
-    assert (mCarryInfo->hasImplicitSummary() || mCurrentFrameIndex == mCurrentFrame->getType()->getPointerElementType()->getStructNumElements());
-    // Sanity test: are there remaining carry frames?
-    assert (!mCarryFrameStack.empty());
-
-    std::tie(mCurrentFrame, mCurrentFrameIndex) = mCarryFrameStack.back();
-    assert(mCurrentFrame->getType()->getPointerElementType()->isStructTy());
-
-    mCarryFrameStack.pop_back();
-    mCarryScopeIndex.pop_back();
-    assert (!mCarryScopeIndex.empty());
-    if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
-        mCarrySummaryStack.pop_back();
-    }
-    mCarryInfo = &mCarryMetadata[mCarryScopeIndex.back()];
-}
-
-
-void CompressedCarryManager::phiCurrentCarryOutSummary(BuilderRef b, BasicBlock * const entryBlock, BasicBlock * const exitBlock) {
-    if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
+        PointerType * const pty = mCarryInfo->getSummarySizeTy()->getPointerTo();
+        Value * const ptr = b->CreatePointerCast(mCurrentFrame, pty);
         const auto n = mCarrySummaryStack.size(); assert (n > 0);
-        Value * const nested = mCarrySummaryStack[n - 1];
-        PHINode * const phi = b->CreatePHI(nested->getType(), 2, "summary");
-        Constant * const ZEROES = Constant::getNullValue(nested->getType());
-        phi->addIncoming(ZEROES, entryBlock);
-        phi->addIncoming(nested, exitBlock);
-        mCarrySummaryStack[n - 1] = phi;
+        mCarrySummaryStack[n - 1] = b->CreateLoad(ptr);
     }
 }
-
-
-void CompressedCarryManager::phiOuterCarryOutSummary(BuilderRef b, llvm::BasicBlock * const entryBlock, llvm::BasicBlock * const exitBlock) {
-    if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
-        const auto n = mCarrySummaryStack.size(); assert (n > 0);
-        if (n > 2) {
-            // When leaving a nested If scope with a summary value, phi out the summary to ensure the
-            // appropriate summary is stored in the outer scope.
-            Value * nested = mCarrySummaryStack[n - 1];
-            Value * outer = mCarrySummaryStack[n - 2];
-            if (nested->getType() != outer->getType()) {
-                if (outer->getType() == b->getBitBlockType()) {
-                    nested = b->bitCast(b->CreateZExt(nested, b->getIntNTy(b->getBitBlockWidth())));
-                } else {
-                    nested = b->CreateZExt(nested, outer->getType());
-                }
-            }
-            PHINode * const phi = b->CreatePHI(outer->getType(), 2, "summary");
-            phi->addIncoming(outer, entryBlock);
-            phi->addIncoming(nested, exitBlock);
-            mCarrySummaryStack[n - 2] = phi;
-        }
-    }
-}
-
 
 void CompressedCarryManager::combineCarryOutSummary(BuilderRef b, const unsigned offset) {
     if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
@@ -297,398 +116,268 @@ void CompressedCarryManager::combineCarryOutSummary(BuilderRef b, const unsigned
         // outer summary
         if (n > 2) {
             Value * nested = mCarrySummaryStack[n - 1];
-            if (mCarryInfo->hasImplicitSummary()) {
-                nested = loadImplicitSummaryFromPtr(b, nested);
-            }
             Value * const outer = mCarrySummaryStack[n - 2];
-            if (nested->getType() != outer->getType()) {
-                nested = compressImplicitSummary(b, nested);
-                if (outer->getType() == b->getBitBlockType()) {
-                    nested = b->bitCast(b->CreateZExt(nested, b->getIntNTy(b->getBitBlockWidth())));
+            Type * const nestedTy = nested->getType();
+            Type * const outerTy = outer->getType();
+            if (nestedTy != outerTy) {
+                const auto nestedBW = getTypeBitWidth(nestedTy);
+                const auto outerBW = getTypeBitWidth(outerTy);
+                assert (nestedBW != outerBW);
+                if (nestedBW < outerBW) {
+                    assert (nestedTy->isIntegerTy());
+                    nested = b->CreateZExt(nested, b->getIntNTy(outerBW));
+                    if (outerTy->isVectorTy()) {
+                        nested = b->CreateBitCast(nested, outerTy);
+                    }
                 } else {
-                    nested = b->CreateZExt(nested, outer->getType());
+                    Type * const intNestedTy = b->getIntNTy(nestedBW);
+                    if (nestedTy->isVectorTy()) {
+                        nested = b->CreateBitCast(nested, intNestedTy);
+                    }
+                    nested = b->CreateICmpNE(nested, Constant::getNullValue(intNestedTy));
+                    assert (outerTy->isIntegerTy());
+                    nested = b->CreateZExt(nested, outerTy);
                 }
             }
+            assert (nested->getType() == outer->getType());
             mCarrySummaryStack[n - offset] = b->CreateOr(outer, nested);
         }
     }
 }
 
-
 /* ===== Operations ===== */
 
-
-Value * CompressedCarryManager::addCarryInCarryOut(BuilderRef b, const Statement * const operation, Value * const e1, Value * const e2) {
-    assert (operation && (isNonAdvanceCarryGeneratingStatement(operation)));
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief shortIndexedAdvanceCarryInCarryOut
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * CompressedCarryManager::shortIndexedAdvanceCarryInCarryOut(BuilderRef b, const unsigned shiftAmount, Value * const strm, Value * const index_strm) {
     Value * carryIn = getNextCarryIn(b);
-    assert (carryIn->getType() == b->getInt8Ty());
+    carryIn = b->CreateBitCast(b->CreateZExt(carryIn, b->getIntNTy(b->getBitBlockWidth())), b->getBitBlockType());
     Value * carryOut, * result;
-    std::tie(carryOut, result) = b->bitblock_add_with_carry(e1, e2, carryIn);
-    assert (result->getType() == b->getBitBlockType());
-    assert (carryOut->getType() == b->getInt8Ty());
+    std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
+    const auto fw = (shiftAmount < 8) ? 8U : 64U;
+    carryOut = b->mvmd_extract(fw, carryOut, 0);
     setNextCarryOut(b, carryOut);
     return result;
 }
 
-
-Value * CompressedCarryManager::advanceCarryInCarryOut(BuilderRef b, const Advance * const advance, Value * const value) {
-    const auto shiftAmount = advance->getAmount();
-    if (LLVM_LIKELY(shiftAmount < LONG_ADVANCE_BREAKPOINT)) {
-        Value * carryIn = getNextCarryIn(b);
-        Value * carryOut, * result;
-        std::tie(carryOut, result) = b->bitblock_advance(value, carryIn, shiftAmount);
-        assert (result->getType() == b->getBitBlockType());
-        assert (carryOut->getType() == carryIn->getType());
-        setNextCarryOut(b, carryOut);
-        return result;
-    } else {
-        return longAdvanceCarryInCarryOut(b, value, shiftAmount);
-    }
-}
-
-Value * CompressedCarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b,
-                                                              const IndexedAdvance * const advance,
-                                                              Value * const strm,
-                                                              Value * const index_strm)
-{
-    const auto shiftAmount = advance->getAmount();
-    if (LLVM_LIKELY(shiftAmount < LONG_ADVANCE_BREAKPOINT)) {
-        Value * carryIn = getNextCarryIn(b);
-        carryIn = b->CreateBitCast(b->CreateZExt(carryIn, b->getIntNTy(b->getBitBlockWidth())), b->getBitBlockType());
-        Value * carryOut, * result;
-        std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
-        const uint32_t fw = shiftAmount < 8 ? 8 : 64;
-        carryOut = b->mvmd_extract(fw, carryOut, 0);
-        setNextCarryOut(b, carryOut);
-        return result;
-    } else if (shiftAmount <= b->getBitBlockWidth()) {
-        Value * carryPtr = b->CreateGEP(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex++), b->getInt32(0)});
-        assert (carryPtr->getType()->getPointerElementType() == b->getBitBlockType());
-        Value * carryIn = b->CreateBlockAlignedLoad(carryPtr);
-        Value * carryOut, * result;
-        std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
-        assert (carryOut->getType() == b->getBitBlockType());
-        b->CreateBlockAlignedStore(carryOut, carryPtr);
-        if ((mIfDepth > 0) && mCarryInfo->hasExplicitSummary()) {
-            addToCarryOutSummary(b, strm);
-        }
-        return result;
-    } else {
-        unsigned summaryFrame = mCurrentFrameIndex;
-        if (mIfDepth > 0) {
-            // Skip over summary frame to perform the long indexed advance.
-            mCurrentFrameIndex++;
-        }
-        Type * iBitBlock = b->getIntNTy(b->getBitBlockWidth());
-        Constant * blockWidth = b->getSize(b->getBitBlockWidth());
-        Constant * blockWidth_1 = b->getSize(b->getBitBlockWidth() - 1);
-        Value * carryPosition = b->getScalarField("IndexedAdvancePosition" + std::to_string(mIndexedLongAdvanceIndex));
-        Value * carryBlockEndPos = b->CreateAdd(carryPosition, blockWidth_1);
-        unsigned carry_blocks = nearest_pow2(1+ceil_udiv(shiftAmount, b->getBitBlockWidth()));
-        Constant * carryQueueBlocks = b->getSize(carry_blocks);
-        Value * carryBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryPosition, blockWidth), carryQueueBlocks), b->getInt32Ty());
-        Value * carryEndBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryBlockEndPos, blockWidth), carryQueueBlocks), b->getInt32Ty());
-        Constant * const ZERO = b->getInt32(0);
-        Constant * const CFI = b->getInt32(mCurrentFrameIndex);
-        Value * lo_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryBlock});
-        Value * hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
-        Value * c_lo = b->CreateBitCast(b->CreateBlockAlignedLoad(lo_GEP), iBitBlock);
-        Value * c_hi = b->CreateBitCast(b->CreateBlockAlignedLoad(hi_GEP), iBitBlock);
-        Value * lo_shift = b->CreateZExt(b->CreateURem(carryPosition, blockWidth), iBitBlock);
-        Value * hi_shift = b->CreateZExt(b->CreateSub(blockWidth_1, b->CreateURem(carryBlockEndPos, blockWidth)), iBitBlock);
-        Value * carryIn = b->CreateOr(b->CreateLShr(c_lo, lo_shift), b->CreateShl(c_hi, hi_shift));
-        Value * carryOut, * result;
-        std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
-        carryOut = b->CreateBitCast(carryOut, iBitBlock);
-        Value * adv = b->mvmd_extract(sizeof(size_t) * 8, b->simd_popcount(b->getBitBlockWidth(), index_strm), 0);
-        b->setScalarField("IndexedAdvancePosition" + std::to_string(mIndexedLongAdvanceIndex), b->CreateAdd(carryPosition, adv));
-        Value * carryOutPosition = b->CreateAdd(carryPosition, b->getSize(shiftAmount));
-        Value * carryOutEndPos = b->CreateAdd(carryOutPosition, blockWidth_1);
-        carryBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryOutPosition, blockWidth), carryQueueBlocks), b->getInt32Ty());
-        carryEndBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryOutEndPos, blockWidth), carryQueueBlocks), b->getInt32Ty());
-        lo_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryBlock});
-        hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
-        lo_shift = b->CreateZExt(b->CreateURem(carryOutPosition, blockWidth), iBitBlock);
-        hi_shift = b->CreateZExt(b->CreateSub(blockWidth_1, b->CreateURem(carryOutEndPos, blockWidth)), iBitBlock);
-        c_lo = b->CreateOr(b->CreateBitCast(b->CreateBlockAlignedLoad(lo_GEP), iBitBlock), b->CreateShl(carryOut, lo_shift));
-        c_hi = b->CreateLShr(carryOut, hi_shift);
-        b->CreateBlockAlignedStore(b->CreateBitCast(c_lo, b->getBitBlockType()), lo_GEP);
-        b->CreateBlockAlignedStore(b->CreateBitCast(c_hi, b->getBitBlockType()), hi_GEP);
-        mIndexedLongAdvanceIndex++;
-        mCurrentFrameIndex++;
-        // Now handle the summary.
-        if (mIfDepth > 0) {
-            const auto summaryBlocks = ceil_udiv(shiftAmount, b->getBitBlockWidth());
-            const auto summarySize = ceil_udiv(summaryBlocks, b->getBitBlockWidth());
-            Constant * const SF = b->getInt32(summaryFrame);
-            for (unsigned i = 0; i < summarySize; i++) {
-                // All ones summary for now.
-                b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP(mCurrentFrame, {ZERO, SF, b->getInt32(i)}));
-            }
-        }
-        return result;
-    }
-}
-
-
-Value * CompressedCarryManager::generateSummaryTest(BuilderRef b, Value * condition) {
-    if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
-        assert ("summary condition cannot be null!" && condition);
-        assert ("summary test was not generated" && mNextSummaryTest);
-        assert ("summary condition and test must have the same context!" && &condition->getContext() == &mNextSummaryTest->getContext());
-        if (mNextSummaryTest->getType() != condition->getType()) {
-            assert (condition->getType() == b->getBitBlockType());
-            mNextSummaryTest = castToSummaryType(b, mNextSummaryTest, condition->getType());
-        }
-        condition = b->simd_or(condition, mNextSummaryTest);
-        mNextSummaryTest = nullptr;
-    }
-    assert ("summary test was not consumed" && (mNextSummaryTest == nullptr));
-    return condition;
-}
-
-
-/* ===== Single Carry Get/Set ===== */
-
-
-Value * CompressedCarryManager::getNextCarryIn(BuilderRef b) {
-    assert (mCurrentFrameIndex < mCurrentFrame->getType()->getPointerElementType()->getStructNumElements());
-    Constant * const ZERO = b->getInt32(0);
-    FixedArray<Value *, 3> ar;
-    ar[0] = ZERO;
-    ar[1] = b->getInt32(mCurrentFrameIndex);
-    ar[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
-    mCarryPackPtr = b->CreateInBoundsGEP(mCurrentFrame, ar);
-    Type * const carryTy = mCarryPackPtr->getType()->getPointerElementType();
-    Value * const carryIn = b->CreateLoad(mCarryPackPtr);
-    if (mLoopDepth > 0) {
-        b->CreateStore(Constant::getNullValue(carryTy), mCarryPackPtr);
-    }
-    return carryIn;
-}
-
-
-void CompressedCarryManager::setNextCarryOut(BuilderRef b, Value * carryOut) {
-    assert (mCurrentFrameIndex < mCurrentFrame->getType()->getPointerElementType()->getStructNumElements());
-    // errs() << "carryout: " << *carryOut->getType() << "\n";
-    assert("carry out type does not match carry location type" && carryOut->getType() == mCarryPackPtr->getType()->getPointerElementType());
-    if (mCarryInfo->hasSummary()) {
-        addToCarryOutSummary(b, carryOut);
-    }
-    if (mLoopDepth != 0) {
-        mCarryPackPtr = b->CreateGEP(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex), mNextLoopSelector});
-        assert("carry out type does not match carry location type" && carryOut->getType() == mCarryPackPtr->getType()->getPointerElementType());
-        if (LLVM_LIKELY(!mCarryInfo->nonCarryCollapsingMode())) {
-            Value * accum = b->CreateLoad(mCarryPackPtr);
-            carryOut = b->CreateOr(carryOut, accum);
-        }
-    }
-    ++mCurrentFrameIndex;
-    b->CreateStore(carryOut, mCarryPackPtr);
-}
-
-
 /* ===== Summary Operations ===== */
-
 
 Value * CompressedCarryManager::readCarryInSummary(BuilderRef b) const {
     assert (mCarryInfo->hasSummary());
-
+    Value * summary = nullptr;
     if (LLVM_LIKELY(mCarryInfo->hasImplicitSummary())) {
-        Value * summary = convertFrameToImplicitSummary(b);
-        return summary;
+        PointerType * const pty = mCarryInfo->getSummarySizeTy()->getPointerTo();
+        Value * const ptr = b->CreatePointerCast(mCurrentFrame, pty);
+        summary = b->CreateLoad(ptr);
     } else {
         assert (mCarryInfo->hasExplicitSummary());
+        Value * ptr = nullptr;
         Constant * const ZERO = b->getInt32(0);
-        Value * indices[3] { ZERO, ZERO, (mLoopDepth == 0 ? ZERO : mLoopSelector) };
-        ArrayRef<Value *> ar(indices, 3);
-        Value * const ptr = b->CreateGEP(mCurrentFrame, ar);
-        Value * summary = b->CreateLoad(ptr);
+        FixedArray<Value *, 3> indices;
+        indices[0] = ZERO;
+        indices[1] = ZERO;
+        indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
+        ptr = b->CreateGEP(mCurrentFrame, indices);
+        summary = b->CreateLoad(ptr);
         if (mNestedLoopCarryInMaskPhi) {
             summary = b->CreateAnd(summary, mNestedLoopCarryInMaskPhi);
         }
-        return summary;
     }
-}
-
-
-void CompressedCarryManager::writeCarryOutSummary(BuilderRef b, Value * const summary) const {
-    assert (mCarryInfo->hasExplicitSummary());
-    Constant * const ZERO = b->getInt32(0);
-    Value * indices[3] { ZERO, ZERO, (mLoopDepth == 0 ? ZERO : mNextLoopSelector) };
-    ArrayRef<Value *> ar(indices, 3);
-    Value * ptr = b->CreateGEP(mCurrentFrame, ar);
-    assert ("summary type does not match defined type in frame" && ptr->getType()->getPointerElementType() == summary->getType());
-    b->CreateStore(summary, ptr);
-}
-
-
-void CompressedCarryManager::addToCarryOutSummary(BuilderRef b, Value * const value) {
-    assert (mCarryInfo->hasSummary());
-
-    // No need to add to summary if using an implicit summary
-    if (mCarryInfo->hasExplicitSummary()) {
-        assert ("cannot add null summary value!" && value);
-        assert ("summary stack is empty!" && !mCarrySummaryStack.empty());
-
-        Value * & summary = mCarrySummaryStack.back();
-        Value * const carryOut = castToSummaryType(b, value, summary->getType());
-        summary = b->CreateOr(summary, carryOut);
-    }
-}
-
-
-Value * CompressedCarryManager::convertFrameToImplicitSummary(BuilderRef b) const {
-    Value * const ptr = convertFrameToImplicitSummaryPtr(b);
-    Value * const summary = b->CreateAlignedLoad(ptr, 1);
     return summary;
 }
 
-
-Value * CompressedCarryManager::convertFrameToImplicitSummaryPtr(BuilderRef b) const {
-    assert (mCarryInfo->hasSummary() && mCarryInfo->hasImplicitSummary());
-
-    Type * const frameTy = mCurrentFrame->getType()->getPointerElementType();
-    assert (frameTy->isStructTy());
-    auto DL = b->getModule()->getDataLayout();
-    auto frameSize = DL.getStructLayout(cast<StructType>(frameTy))->getSizeInBits();
-    assert (frameSize == 64 || frameSize == b->getBitBlockWidth());
-
-    Type * const summaryTy = frameSize == 64 ? (Type *) b->getInt64Ty() : b->getBitBlockType();
-    return b->CreatePointerCast(mCurrentFrame, summaryTy->getPointerTo());
+Type * CompressedCarryManager::getSummaryTypeFromCurrentFrame(BuilderRef b) const {
+    return mCarryInfo->getSummarySizeTy();
 }
 
-
-Value * CompressedCarryManager::loadImplicitSummaryFromPtr(BuilderRef b, Value * ptr) const {
-    assert (ptr->getType()->isPointerTy());
-    return b->CreateAlignedLoad(ptr, 1);
-}
-
-
-Type * CompressedCarryManager::getSummaryTypeFromCurrentFrame() const {
-    assert (mCurrentFrame->getType()->isPointerTy());
-    assert (mCurrentFrame->getType()->getPointerElementType()->isStructTy());
-    return mCurrentFrame->getType()->getPointerElementType()->getStructElementType(0)->getArrayElementType();
-}
-
-
-/* ==== Scope Analyse ===== */
-StructType * CompressedCarryManager::analyse(BuilderRef b,
-                                             const PabloBlock * const scope,
-                                             const unsigned ifDepth,
-                                             const unsigned whileDepth,
-                                             const bool isNestedWithinNonCarryCollapsingLoop)
-{
-    assert ("scope cannot be null!" && scope);
-    assert ("entry scope (and only the entry scope) must be in scope 0"
-            && (mCarryScopes == 0 ? (scope == mKernel->getEntryScope()) : (scope != mKernel->getEntryScope())));
-    assert (mCarryScopes < mCarryMetadata.size());
-
-    Type * const i8Ty = b->getInt8Ty();
-    Type * const i64Ty = b->getInt64Ty();
-    Type * const blockTy = b->getBitBlockType();
-    const uint32_t blockWidth = b->getBitBlockWidth();
-
-    const uint32_t carryScopeIndex = mCarryScopes++;
-    const bool nonCarryCollapsingMode = isNonRegularLanguage(scope);
-    assert ("non carry collapsing mode is not yet supported by this carry manager" && !nonCarryCollapsingMode);
-
-    const uint64_t packSize = whileDepth == 0 ? 1 : 2;
-    Type * const i8PackTy = ArrayType::get(i8Ty, packSize);
-    Type * const i64PackTy = ArrayType::get(i64Ty, packSize);
-
-    bool canUseImplicitSummary = packSize == 1 && !nonCarryCollapsingMode;
-    std::size_t carryProducingStatementCount = 0;
-    const std::size_t maxNumSmallCarriesForImplicitSummary = blockWidth / 8;
-
-    /* Get Carry Types */
-
-    std::vector<Type *> state;
-    for (const Statement * stmt : *scope) {
-        if (LLVM_UNLIKELY(isa<Advance>(stmt) || isa<IndexedAdvance>(stmt))) {
-            carryProducingStatementCount++;
-            int64_t amount = isa<Advance>(stmt)
-                ? cast<Advance>(stmt)->getAmount()
-                : cast<IndexedAdvance>(stmt)->getAmount();
-            Type * type = i8PackTy;
-            if (LLVM_UNLIKELY(amount >= 8 && amount < LONG_ADVANCE_BREAKPOINT)) {
-                canUseImplicitSummary = false;
-                type = i64PackTy;
-            } else if (LLVM_UNLIKELY(amount >= LONG_ADVANCE_BREAKPOINT)) {
-                canUseImplicitSummary = false;
-                const auto blockWidth = b->getBitBlockWidth();
-                const auto blocks = ceil_udiv(amount, blockWidth);
-                type = ArrayType::get(blockTy, nearest_pow2(blocks + (isa<IndexedAdvance>(stmt) ? 1:0) + ((whileDepth != 0) ? 1 : 0)));
-                if (LLVM_UNLIKELY(ifDepth > 0 && blocks != 1)) {
-                    const auto summarySize = ceil_udiv(blocks, blockWidth);
-                    // 1 bit will mark the presense of any bit in each block.
-                    state.push_back(ArrayType::get(blockTy, summarySize));
-                }
-                mHasLongAdvance = true;
-                if (isa<IndexedAdvance>(stmt)) mIndexedLongAdvanceTotal++;
-            }
-            state.push_back(type);
-        } else if (LLVM_UNLIKELY(isNonAdvanceCarryGeneratingStatement(stmt))) {
-            carryProducingStatementCount++;
-            state.push_back(i8PackTy);
-        } else if (LLVM_UNLIKELY(isa<If>(stmt))) {
-            canUseImplicitSummary = false;
-            state.push_back(analyse(b, cast<If>(stmt)->getBody(), ifDepth+1, whileDepth, nonCarryCollapsingMode | isNestedWithinNonCarryCollapsingLoop));
-        } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
-            canUseImplicitSummary = false;
-            mHasLoop = true;
-            state.push_back(analyse(b, cast<While>(stmt)->getBody(), ifDepth, whileDepth+1, nonCarryCollapsingMode | isNestedWithinNonCarryCollapsingLoop));
-        }
-
-        if (carryProducingStatementCount >= maxNumSmallCarriesForImplicitSummary)
-            canUseImplicitSummary = false;
-    }
-
-    /* Construct Carry State Struct */
-    CarryData & cd = mCarryMetadata[carryScopeIndex];
-    StructType * carryStruct = nullptr;
-    CarryData::SummaryType summaryType = CarryData::NoSummary;
-
-    // if we have at least one non-empty carry state, check if we need a summary
-    if (LLVM_UNLIKELY(isEmptyCarryStruct(state))) {
-        carryStruct = StructType::get(b->getContext(), state);
+inline static bool isCarryGeneratingStatement(const Statement * const stmt) {
+    if (IntrinsicCall const * call = dyn_cast<IntrinsicCall>(stmt)) {
+        return call->isCarryProducing();
     } else {
-        if (LLVM_LIKELY(ifDepth > 0 || whileDepth > 0)) {
-            if (LLVM_LIKELY(canUseImplicitSummary)) {
-                summaryType = CarryData::ImplicitSummary;
+        return isa<CarryProducingStatement>(stmt);
+    }
+}
 
-                // If needed, pad the structure to 64 bits or the bitblock width. This allows us to bitcast the structure to an i64 or
-                // bitblock to get the summary.
-                carryStruct = StructType::get(b->getContext(), state);
-                const DataLayout & DL = b->getModule()->getDataLayout();
-                uint64_t structBitWidth = DL.getStructLayout(carryStruct)->getSizeInBits();
-                const std::size_t targetWidth = structBitWidth <= 64 ? 64 : blockWidth;
-                while (structBitWidth < targetWidth) {
-                    state.push_back(i8Ty);
-                    structBitWidth += 8;
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief analyse
+ ** ------------------------------------------------------------------------------------------------------------- */
+StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * const entryScope) {
+
+    Type * const int8Ty = b->getInt8Ty();
+    Type * const int64Ty = b->getInt64Ty();
+    Type * const blockTy = b->getBitBlockType();
+    const auto blockWidth = b->getBitBlockWidth();
+    const auto maxNumSmallCarriesForImplicitSummary = blockWidth / 8;
+
+    DataLayout dl(b->getModule());
+
+    auto getTypeSize = [&](Type * const type) {
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+        return dl.getTypeAllocSize(type);
+        #else
+        return dl.getTypeAllocSize(type).getFixedSize();
+        #endif
+    };
+
+//    auto getTypeAlign = [&](Type * const type) {
+//        return dl.getABITypeAlignment(type);
+//    };
+
+//    std::vector<Type *> tmp;
+
+    std::function<StructType *(const PabloBlock *, unsigned, unsigned, bool)> analyseRec = [&](
+            const PabloBlock * const scope,
+            const unsigned ifDepth,
+            const unsigned whileDepth,
+            const bool inNonCarryCollapsingLoop) {
+
+        const auto carryScopeIndex = mCarryScopes++;
+
+        const auto packSize = (whileDepth == 0) ? 1U : 2U;
+        ArrayType * const i8PackTy = ArrayType::get(int8Ty, packSize);
+        ArrayType * const i64PackTy = ArrayType::get(int64Ty, packSize);
+
+        auto canUseImplicitSummary = false; // (whileDepth == 0);
+        size_t carryStateBytes = 0;
+
+        /* Get Carry Types */
+
+        auto getNestedSummarySize = [&](const unsigned nestedScopeIndex) -> unsigned {
+            assert (nestedScopeIndex < mCarryMetadata.size());
+            return getTypeBitWidth(mCarryMetadata[nestedScopeIndex].getSummarySizeTy());
+        };
+
+        unsigned summarySize = 0;
+
+        std::vector<Type *> state;
+
+        for (const Statement * stmt : *scope) {
+            if (LLVM_UNLIKELY(isa<Advance>(stmt) || isa<IndexedAdvance>(stmt))) {
+                const auto amount = isa<Advance>(stmt)
+                    ? cast<Advance>(stmt)->getAmount()
+                    : cast<IndexedAdvance>(stmt)->getAmount();
+
+                Type * type = nullptr;
+                if (LLVM_LIKELY(amount < 8)) {
+                    type = i8PackTy;
+                    summarySize = std::max(8U, summarySize);
+                    ++carryStateBytes;
+                } else if (LLVM_UNLIKELY(amount < LONG_ADVANCE_BREAKPOINT)) {
+                    carryStateBytes += (LONG_ADVANCE_BREAKPOINT / 8);
+                    type = i64PackTy;
+                    summarySize = std::max<unsigned>(LONG_ADVANCE_BREAKPOINT, summarySize);
+                } else {
+                    canUseImplicitSummary = false;
+                    const auto numOfBlocks = ceil_udiv(amount, blockWidth);
+                    const auto additionalBlocks = (isa<IndexedAdvance>(stmt) ? 1U : 0U) + ((whileDepth != 0) ? 1U : 0U);
+                    type = ArrayType::get(blockTy, nearest_pow2(numOfBlocks + additionalBlocks));
+                    if (LLVM_UNLIKELY(ifDepth > 0 && numOfBlocks != 1)) {
+                        const auto summarySize = ceil_udiv(numOfBlocks, blockWidth);
+                        // 1 bit will mark the presense of any bit in each block.
+                        state.push_back(ArrayType::get(blockTy, summarySize));
+                    }
+                    mHasLongAdvance = true;
+                    if (isa<IndexedAdvance>(stmt)) {
+                        mIndexedLongAdvanceTotal++;
+                    }
+                    summarySize = blockWidth;
                 }
-            } else {
-                summaryType = CarryData::ExplicitSummary;
-
-                // Insert the smallest possible summary for this scope.
-                int32_t summarySize = analyseSummarySize((int32_t) blockWidth, scope);
-                Type * summaryType = toSummaryType(b, summarySize);
-                state.insert(state.begin(), ArrayType::get(summaryType, packSize));
+                state.push_back(type);
+            } else if (LLVM_UNLIKELY(isCarryGeneratingStatement(stmt))) {
+                ++carryStateBytes;
+                summarySize = std::max(8U, summarySize);
+                state.push_back(i8PackTy);
+            } else if (LLVM_UNLIKELY(isa<If>(stmt))) {
+                canUseImplicitSummary = false;
+                const auto nestedScopeIndex = mCarryScopes;
+                state.push_back(analyseRec(cast<If>(stmt)->getBody(), ifDepth + 1, whileDepth, false));
+                summarySize = std::max(getNestedSummarySize(nestedScopeIndex), summarySize);
+            } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
+                mHasLoop = true;
+                canUseImplicitSummary = false;
+                const auto nestedScopeIndex = mCarryScopes;
+                const PabloBlock * const nestedScope = cast<While>(stmt)->getBody();
+                const auto carryCollapsingMode = cast<While>(stmt)->isRegular();
+                state.push_back(analyseRec(nestedScope, ifDepth, whileDepth + 1, !carryCollapsingMode));
+                summarySize = std::max(getNestedSummarySize(nestedScopeIndex), summarySize);
             }
         }
 
-        carryStruct = StructType::get(b->getContext(), state);
-
-        // If we're in a loop and cannot use collapsing carry mode, convert the carry state struct into a capacity,
-        // carry state pointer, and summary pointer struct.
-        if (LLVM_UNLIKELY(nonCarryCollapsingMode)) {
-            assert ("non carry collapsing mode is not supported yet" && false);
+        if (carryStateBytes > maxNumSmallCarriesForImplicitSummary) {
+            canUseImplicitSummary = false;
         }
-        cd.setNonCollapsingCarryMode(nonCarryCollapsingMode);
-    }
 
-    cd.setSummaryType(summaryType);
-    return carryStruct;
+        /* Construct Carry State Struct */
+        CarryData & cd = mCarryMetadata[carryScopeIndex];
+        StructType * carryState = nullptr;
+        CarryData::SummaryType summaryType = CarryData::NoSummary;
+
+        // Insert the smallest possible summary for this scope.
+        Type * summaryTy = toSummaryType(b, summarySize);
+
+        unsigned packedSizeInBits = 0;
+        const auto n = state.size();
+        for (unsigned i = 0; i < n; ++i) {
+            packedSizeInBits += getTypeSize(state[i]);
+        }
+        packedSizeInBits *= 8;
+
+        unsigned requiredSummaryPaddingInBits = 0;
+
+        if (LLVM_LIKELY(ifDepth != 0 || whileDepth != 0)) {
+            if (LLVM_LIKELY(!isEmptyCarryStruct(state) && !inNonCarryCollapsingLoop)) {
+                if (LLVM_LIKELY(canUseImplicitSummary)) {
+                    summaryType = CarryData::ImplicitSummary;
+                    // Insert padding if necessary to ensure the implicit summary does
+                    // not contain bits of a subsequent frame.
+                    if (packedSizeInBits <= 8) {
+                        summarySize = 8;
+                    } else if (packedSizeInBits <= 64) {
+                        summarySize = 64;
+                    } else {
+                        summarySize = blockWidth;
+                    }
+                    assert (summarySize >= packedSizeInBits);
+                    requiredSummaryPaddingInBits = summarySize - packedSizeInBits;
+                    summaryTy = toSummaryType(b, summarySize);
+                } else {
+                    summaryType = CarryData::ExplicitSummary;
+                    state.insert(state.begin(), ArrayType::get(summaryTy, packSize));
+                }
+            }
+        }
+
+        unsigned alignmentPadding = 0;
+
+        if (summarySize) {
+            const auto unpaddedOffsetInBits = ((requiredSummaryPaddingInBits + packedSizeInBits) % summarySize);
+            alignmentPadding = ((summarySize - unpaddedOffsetInBits) % summarySize);
+        }
+
+        const auto paddingInBits = requiredSummaryPaddingInBits + alignmentPadding;
+        if (paddingInBits) {
+            assert ((paddingInBits % 8) == 0);
+            state.push_back(ArrayType::get(int8Ty, paddingInBits / 8));
+        }
+
+        carryState = StructType::get(b->getContext(), state);
+
+        if (LLVM_UNLIKELY(inNonCarryCollapsingLoop && state.size() > 0)) {
+            mHasNonCarryCollapsingLoops = true;
+            summaryType = (CarryData::SummaryType)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
+            FixedArray<Type *, 3> fields;
+            fields[NestedCapacity] = b->getSizeTy();
+            fields[LastIncomingCarryLoopIteration] = b->getSizeTy();
+            fields[NestedCarryState] = carryState->getPointerTo();
+            carryState = StructType::get(b->getContext(), fields);
+        }
+        cd.setSummarySizeTy(summaryTy);
+        cd.setSummaryType(summaryType);
+        return carryState;
+    };
+
+    return analyseRec(entryScope, 0, 0, false);
 }
 
 CompressedCarryManager::CompressedCarryManager() noexcept

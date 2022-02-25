@@ -480,7 +480,7 @@ public:
                 }
                 live[i] = out_degree(streamSet, S);
                 // initialize the streamset weight in the graph
-                const auto W = ceiling(S[streamSet].Size);
+                const auto W = ceiling(node.Size);
                 // assert (W > 0);
                 weight[firstStreamSet + i] = W;
             }
@@ -515,11 +515,13 @@ private:
 
         for (const auto kernel : candidate) {
             for (const auto output : make_iterator_range(out_edges(kernel, S))) {
+#ifndef NDEBUG
                 const auto streamSet = target(output, S);
                 const SchedulingNode & node = S[streamSet];
                 assert (node.Type != SchedulingNode::IsKernel);
                 assert (node.Type == SchedulingNode::IsStreamSet);
                 assert (streamSetId < numOfStreamSets);
+#endif
                 const auto i = streamSetId++;
 
                 // Each node value in I marks the schedule position.
@@ -963,7 +965,9 @@ struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker
         assert (replacement.size() == numOfKernels);
 
         for (unsigned i = 0; i < numOfKernels; ) {
+#ifndef NDEBUG
             bool progress = false;
+#endif
             for (unsigned j = 0; j != numOfKernels; ++j) {
                 const auto k = L[j];
                 if (remaining[k] == 1) {
@@ -975,7 +979,9 @@ struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker
                         assert (remaining[v] > 1);
                         --remaining[v];
                     }
+#ifndef NDEBUG
                     progress = true;
+#endif
                 }
             }
             assert (progress);
@@ -1095,13 +1101,17 @@ void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, rando
 
         const auto S = makeIntraPartitionSchedulingGraph(P, currentPartitionId);
 
+        #ifndef NDEBUG
         constexpr auto fakeInput = 0U;
+        #endif
         constexpr auto firstKernel = 1U;
 
         const auto & kernels = currentPartition.Kernels;
         const auto numOfKernels = kernels.size();
         assert (numOfKernels > 0);
+        #ifndef NDEBUG
         const auto fakeOutput = numOfKernels + 1U;
+        #endif
 
         // We want to generate a subgraph of S consisting of only the kernel nodes
         // but whose edges initially represent the transitive closure of S. Once we
@@ -1192,8 +1202,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
 
     for (const auto u : kernels) {
 
-        const RelationshipNode & node = Relationships[u];
-        assert (node.Type == RelationshipNode::IsKernel);
+        assert (Relationships[u].Type == RelationshipNode::IsKernel);
         assert (PartitionIds.at(u) == currentPartitionId);
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
             const auto binding = source(e, Relationships);
@@ -1523,7 +1532,9 @@ struct ProgramSchedulingJumpAnalysisWorker final {
         assert (replacement.size() == candidateLength);
 
         for (unsigned i = 0; i < candidateLength; ) {
+#ifndef NDEBUG
             bool progress = false;
+#endif
             for (unsigned j = 0; j != candidateLength; ++j) {
                 const auto k = L[j];
                 if (remaining[k] == 1) {
@@ -1535,7 +1546,9 @@ struct ProgramSchedulingJumpAnalysisWorker final {
                         assert (remaining[v] > 1);
                         --remaining[v];
                     }
+#ifndef NDEBUG
                     progress = true;
+#endif
                 }
             }
             assert (progress);

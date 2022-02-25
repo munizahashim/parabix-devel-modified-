@@ -46,6 +46,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(Linear);
         NAME(None);
         NAME(EmptyWriteOverflow);
+        NAME(BoundNumberOfStrides);
         case KindId::__Count: llvm_unreachable("__Count should not be used.");
     }
     #undef NAME
