@@ -90,6 +90,7 @@ public:
                     StreamSet * phraseMask,
                     StreamSet * allLenHashValues,
                     StreamSet * dictBytes,
+                    StreamSet * dictPartialSum,
                     unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
@@ -104,9 +105,8 @@ public:
     InterleaveCompressionSegment(BuilderRef b,
                            StreamSet * byteData,
                            StreamSet * codedBytes,
-                           StreamSet * combinedMask,
-                           StreamSet * dictMask,
-                           StreamSet * combinedBytes,
+                           StreamSet * dictPartialSum,
+                           StreamSet * compressedMask,
                            unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;

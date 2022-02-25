@@ -273,9 +273,12 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     StreamSet * const combinedMask = P->CreateStreamSet(1);
     P->CreateKernelCall<StreamsIntersect>(extractionMasks, combinedMask);
     P->CreateKernelCall<PopcountKernel>(combinedMask, P->getOutputScalar("count1"));
+    // P->CreateKernelCall<DebugDisplayKernel>("combinedMask", combinedMask);
 
     StreamSet * const dict_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes);
+    StreamSet * const dict_partialSum = P->CreateStreamSet(1, 64);
+    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes, dict_partialSum);
+    // P->CreateKernelCall<DebugDisplayKernel>("dict_partialSum", dict_partialSum);
 
     Scalar * dictFileName = P->getInputScalar("dictFileName");
     P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
@@ -292,9 +295,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     Scalar * outputFileName = P->getInputScalar("outputFileName");
     P->CreateKernelCall<FileSink>(outputFileName, compressed_bytes);
 
-    StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, compressed_bytes, combinedMask, combinedPhraseMask, nonfinal_output_bytes);
-    P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, compressed_bytes, dict_partialSum, combinedMask);
 
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }
