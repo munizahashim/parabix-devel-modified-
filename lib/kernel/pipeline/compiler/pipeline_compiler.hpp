@@ -673,6 +673,7 @@ protected:
     Value *                                     mInitialTerminationSignal = nullptr;
     Value *                                     mInitiallyTerminated = nullptr;
     Value *                                     mMaximumNumOfStrides = nullptr;
+    Value *                                     mRemainingNumOfStrides = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;
     PHINode *                                   mTotalNumOfStridesAtLoopExitPhi = nullptr;
@@ -709,7 +710,7 @@ protected:
     bool                                        mIsPartitionRoot = false;
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
-    bool                                        mHasStrideBound = false;
+    bool                                        mExecuteStridesIndividually = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;

@@ -31,7 +31,7 @@ struct CC_Remover : public RE_Transformer {
     }
     RE * transformName (Name * name) override {
         RE * defn = name->getDefinition();
-        if (!defn) return name;
+        if (!defn || isa<Any>(defn)) return makeDiff(name, mExcludedCC);
         RE * d = transform(defn);
         if (d == defn) return name;
         return d;

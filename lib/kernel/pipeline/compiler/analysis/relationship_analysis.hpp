@@ -286,8 +286,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         const auto min = (cov3 > ONE) ? 0U: floor(P.ExpectedStridesPerSegment * (ONE - cov3));
         const auto max = ceiling(P.ExpectedStridesPerSegment * (ONE + cov3));
         assert (min <= max);
-        MinimumNumOfStrides[newKernelId] = min;
-        MaximumNumOfStrides[newKernelId] = max;
+        MinimumNumOfStrides[newKernelId] = sl * min;
+        MaximumNumOfStrides[newKernelId] = sl * max;
     };
     #else
     auto calculateExpectedNumOfStrides = [&](const unsigned kernelId, const unsigned partitionId) -> unsigned {
@@ -366,13 +366,13 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     auto fixStrideStepLength = [&](const unsigned first, const unsigned last) {
-        auto gcd = StrideStepLength[first];
+        auto gcd = MaximumNumOfStrides[first];
         for (auto i = first + 1; i <= last; ++i) {
-            gcd = boost::gcd(gcd, StrideStepLength[i]);
+            gcd = boost::gcd(gcd, MaximumNumOfStrides[i]);
         }
         for (auto i = first; i <= last; ++i) {
-            assert ((StrideStepLength[i] % gcd) == 0); // sanity test
-            StrideStepLength[i] = (StrideStepLength[i] / gcd);
+            assert ((MaximumNumOfStrides[i] % gcd) == 0); // sanity test
+            StrideStepLength[i] = (MaximumNumOfStrides[i] / gcd);
         }
     };
 

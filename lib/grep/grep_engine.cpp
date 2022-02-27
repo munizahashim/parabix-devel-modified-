@@ -312,7 +312,7 @@ void GrepEngine::initREs(std::vector<re::RE *> & REs) {
         setComponent(mExternalComponents, Component::UTF8index);
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
-        setComponent(mExternalComponents, Component::MatchStarts);
+        setComponent(mExternalComponents, Component::MatchSpans);
     }
     if (matchesToEOLrequired()) {
         // Move matches to EOL.   This may be achieved internally by modifying
@@ -521,12 +521,14 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
     StreamSet * u8index1 = P->CreateStreamSet(1, 1);
     P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-    if (hasComponent(mExternalComponents, Component::MatchStarts)) {
+    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * u8initial = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
-        StreamSet * MatchPairs = P->CreateStreamSet(2, 1);
-        P->CreateKernelCall<FixedMatchPairsKernel>(lengths.first, MatchResults, MatchPairs);
-        SpreadByMask(P, u8initial, MatchPairs, Results);
+        StreamSet * MatchSpans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, MatchSpans);
+        StreamSet * ExpandedSpans = P->CreateStreamSet(1, 1);
+        SpreadByMask(P, u8initial, MatchSpans, ExpandedSpans);
+        P->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
     } else {
         SpreadByMask(P, u8index1, MatchResults, Results);
     }
@@ -537,7 +539,7 @@ void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE
     auto lengths = getLengthRange(re, &cc::UTF8);
     options->setSource(Source);
     StreamSet * MatchResults = nullptr;
-    if (hasComponent(mExternalComponents, Component::MatchStarts)) {
+    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         MatchResults = P->CreateStreamSet(1, 1);
         options->setResults(MatchResults);
     } else {
@@ -561,8 +563,8 @@ void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE
     }
     addExternalStreams(P, options, re);
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    if (hasComponent(mExternalComponents, Component::MatchStarts)) {
-        P->CreateKernelCall<FixedMatchPairsKernel>(lengths.first, MatchResults, Results);
+    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
+        P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, Results);
     }
 }
 
@@ -725,7 +727,7 @@ void EmitMatch::finalize_match(char * buffer_end) {
 }
 
 void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
-                                          StreamSet * InsertMarks,
+                                          StreamSet * MatchSpans,
                                           StreamSet * Basis,
                                           StreamSet * ColorizedBasis) {
     std::string ESC = "\x1B";
@@ -733,6 +735,9 @@ void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
     unsigned insertLengthBits = 4;
     std::vector<unsigned> insertAmts;
     for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
+
+    StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
+    E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
 
     StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
     E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
@@ -768,9 +773,8 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
     const auto numOfREs = mREs.size();
     std::vector<StreamSet *> MatchResultsBufs(numOfREs);
 
-    unsigned matchResultStreamCount = (mColoring && !mInvertMatches) ? 2 : 1;
     for(unsigned i = 0; i < numOfREs; ++i) {
-        StreamSet * const MatchResults = E->CreateStreamSet(matchResultStreamCount, 1);
+        StreamSet * const MatchResults = E->CreateStreamSet(1, 1);
         MatchResultsBufs[i] = MatchResults;
         if (UnicodeIndexing) {
             UnicodeIndexedGrep(E, mREs[i], SourceStream, MatchResults);
@@ -780,22 +784,14 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
     }
     StreamSet * Matches = MatchResultsBufs[0];
     if (MatchResultsBufs.size() > 1) {
-        StreamSet * const MergedMatches = E->CreateStreamSet(matchResultStreamCount);
+        StreamSet * const MergedMatches = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<StreamsMerge>(MatchResultsBufs, MergedMatches);
         Matches = MergedMatches;
     }
-    StreamSet * MatchedLineEnds;
-    if (hasComponent(mExternalComponents, Component::MatchStarts)) {
-        StreamSet * Selected = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<StreamSelect>(Selected, Select(Matches, {1}));
-        MatchedLineEnds = Selected;
-    } else {
-        MatchedLineEnds = Matches;
-    }
-
+    StreamSet * MatchedLineEnds = Matches;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = E->CreateStreamSet();
-        E->CreateKernelCall<MatchedLinesKernel>(MatchedLineEnds, mLineBreakStream, MovedMatches);
+        E->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
         MatchedLineEnds = MovedMatches;
     }
     if (mInvertMatches) {
@@ -851,9 +847,9 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
         //E->CreateKernelCall<DebugDisplayKernel>("MatchedLineSpans", MatchedLineSpans);
 
-        StreamSet * InsertMarks = E->CreateStreamSet(2, 1);
-        FilterByMask(E, MatchedLineSpans, Matches, InsertMarks);
-        //E->CreateKernelCall<DebugDisplayKernel>("Matches", Matches);
+        StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
+        FilterByMask(E, MatchedLineSpans, Matches, FilteredMatchSpans);
+        //E->CreateKernelCall<DebugDisplayKernel>("FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (SplitTransposition) {
@@ -863,7 +859,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         }
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        applyColorization(E, InsertMarks, FilteredBasis, ColorizedBasis);
+        applyColorization(E, FilteredMatchSpans, FilteredBasis, ColorizedBasis);
 
         StreamSet * ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);

@@ -94,34 +94,11 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
         }
         #endif
-        if (mHasStrideBound) {
-            mMaximumNumOfStrides = b->getSize(1);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
-                    mMaximumNumOfStrides);
-            #endif
-        }
-        else {
-            mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
-        }
+        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
-
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
-        if (mHasStrideBound) {
-            mMaximumNumOfStrides = b->getSize(1);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides with bound %" PRIu64, mCurrentKernelName,
-                    mMaximumNumOfStrides);
-            #endif
-        }
-        else {
-            mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, + "%s_maximumNumOfStrides (%" PRIu64 ":%" PRIu64 ") = %" PRIu64, mCurrentKernelName,
-                    b->getSize(factor.numerator()),  b->getSize(factor.denominator()), mMaximumNumOfStrides);
-            #endif
-        }
+        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
     }
 }
 
@@ -162,14 +139,22 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
     }
 
-    Value * numOfLinearStrides = nullptr;
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
+
+    Value * numOfLinearStrides = nullptr;
     if (mMayLoopToEntry) {
-        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        if (mExecuteStridesIndividually) {
+            Value * const anyMore = b->CreateICmpNE(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            numOfLinearStrides = b->CreateZExt(anyMore, mMaximumNumOfStrides->getType());
+        } else {
+            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        }
     } else {
+        assert (!mExecuteStridesIndividually);
         numOfLinearStrides = mMaximumNumOfStrides;
     }
     assert (numOfLinearStrides);
+    mRemainingNumOfStrides = numOfLinearStrides;
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -193,11 +178,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
             numOfOutputLinearStrides = b->CreateUMin(numOfOutputLinearStrides, strides);
         }
     }
-
-//    if (numOfOutputLinearStrides != numOfLinearStrides) {
-//        Value * const mustExpand = b->CreateIsNull(numOfOutputLinearStrides);
-//        numOfLinearStrides = b->CreateSelect(mustExpand, numOfLinearStrides, numOfOutputLinearStrides);
-//    }
 
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfOutputLinearStrides); // numOfLinearStrides
 
@@ -272,17 +252,19 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
     getInputVirtualBaseAddresses(b, inputVirtualBaseAddress);
 
     Value * nonFinalNumOfLinearStrides = numOfLinearStrides;
-    if (LLVM_UNLIKELY(mIsPartitionRoot && StrideStepLength[mKernelId] > 1)) {
-        ConstantInt * const STEP = b->getSize(StrideStepLength[mKernelId]);
-        nonFinalNumOfLinearStrides = b->CreateRoundDown(numOfLinearStrides, STEP);
-    }
+
+//    if (LLVM_UNLIKELY(mIsPartitionRoot && StrideStepLength[mKernelId] > 1)) {
+//        Constant * const STEP = b->getSize(StrideStepLength[mKernelId]);
+//        nonFinalNumOfLinearStrides = b->CreateRoundDown(numOfLinearStrides, STEP);
+//    }
 
     if (LLVM_LIKELY(in_degree(mKernelId, mBufferGraph) > 0)) {
 
         const auto prefix = makeKernelName(mKernelId);
+        BasicBlock * const enteringFinalSegment = b->CreateBasicBlock(prefix + "_finalSegment", mKernelCheckOutputSpace);
+
         BasicBlock * const enteringNonFinalSegment = b->CreateBasicBlock(prefix + "_nonFinalSegment", mKernelCheckOutputSpace);
 
-        BasicBlock * const enteringFinalSegment = b->CreateBasicBlock(prefix + "_finalSegment", mKernelCheckOutputSpace);
 
         Vec<Value *> zeroExtendedInputVirtualBaseAddress(numOfInputs, nullptr);
 
@@ -335,26 +317,25 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             truncatedInputVirtualBaseAddress[i] = ze ? ze : vba;
         }
 
-        Value * numOfFinalLinearStrides = numOfLinearStrides;
-
-        if (!mIsPartitionRoot) {
-            for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-                const BufferPort & port = mBufferGraph[input];
-                if (!port.CanModifySegmentLength) {
-                    Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
-                    numOfFinalLinearStrides = b->CreateUMin(numOfFinalLinearStrides, strides);
-                }
-            }
-        }
-
-        Value * const isFinal = b->CreateICmpEQ(numOfFinalLinearStrides, sz_ZERO);
-
         /// -------------------------------------------------------------------------------------
         /// KERNEL ENTERING FINAL STRIDE
         /// -------------------------------------------------------------------------------------
 
+        Value * numOfFinalLinearStrides = numOfLinearStrides;
         BasicBlock * penultimateSegmentExit = nullptr;
         if (LLVM_LIKELY(mMayLoopToEntry)) {
+
+            if (!mIsPartitionRoot) {
+                for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+                    const BufferPort & port = mBufferGraph[input];
+                    if (!port.CanModifySegmentLength) {
+                        Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
+                        numOfFinalLinearStrides = b->CreateUMin(numOfFinalLinearStrides, strides);
+                    }
+                }
+            }
+
+            Value * const isFinal = b->CreateICmpEQ(numOfFinalLinearStrides, sz_ZERO);
             BasicBlock * const enteringFinalStride = b->CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
             penultimateSegmentExit = b->GetInsertBlock();
             b->CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringNonFinalSegment);
@@ -653,12 +634,7 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         Value * enoughInput = b->CreateAnd(notAtSegmentLimit, nonFinal);
 
         ConstantInt * const amount = b->getSize(StrideStepLength[mKernelId]);
-        Value * const nextStrideIndex = b->CreateAdd(mNumOfLinearStrides, amount);
-
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "_nextStrideIndex = %" PRIu64, nextStrideIndex);
-        #endif
-
+        Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
 
         while (ei != ei_end) {
             const auto e = *ei++;
@@ -1122,6 +1098,12 @@ Value * PipelineCompiler::getNumOfAccessibleStrides(BuilderRef b,
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "< " + prefix + "_numOfStrides = %" PRIu64, numOfStrides);
     #endif
+    if (mIsPartitionRoot && StrideStepLength[mKernelId] > 1) {
+        Value * const stepLength = b->getSize(StrideStepLength[mKernelId]);
+        Value * const closed = isClosed(b, inputPort);
+        Value * const synchronousNumOfStrides = b->CreateRoundDown(numOfStrides, stepLength);
+        numOfStrides = b->CreateSelect(closed, numOfStrides, synchronousNumOfStrides);
+    }
     return numOfStrides;
 }
 

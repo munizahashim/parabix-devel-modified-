@@ -14,9 +14,6 @@
 #include <llvm/Support/Format.h>
 #include "../pipeline_compiler.hpp"
 
-
-// #define PRINT_STAGES
-
 namespace kernel {
 
 struct PipelineAnalysis : public PipelineCommonGraphFunctions {
@@ -27,14 +24,13 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         PipelineAnalysis P(pipelineKernel);
 
-        // TODO:: address FIXED PIPELINE COMPILATION SEED
+        const auto seed = 2081280305;
 
-        const auto seed = 2081280305; // std::random_device{}();
+        // const auto seed = std::random_device{}();
 
         random_engine rng(seed);
 
-//        const auto graphSeed = 2081280305; //rng(); // 2081280305, 2081280305
-
+//        const auto graphSeed = 2081280305;
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
 
         P.generateInitialPipelineGraph(b);

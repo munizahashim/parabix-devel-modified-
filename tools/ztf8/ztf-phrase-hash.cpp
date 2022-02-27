@@ -70,6 +70,7 @@ static cl::opt<bool> FreqBasedCompression("freq-cmp", cl::desc("Phrase selection
 static cl::opt<int> SymCount("length", cl::desc("Length of words."), cl::init(2));
 static cl::opt<int> PhraseLen("plen", cl::desc("Debug - length of phrase."), cl::init(0), cl::cat(ztfHashOptions));
 static cl::opt<int> PhraseLenOffset("offset", cl::desc("Offset to actual length of phrase"), cl::init(1), cl::cat(ztfHashOptions));
+static cl::opt<bool> UseParallelFilterByMask("fbm-p", cl::desc("Use default FilterByMask"), cl::cat(ztfHashOptions), cl::init(false));
 
 typedef void (*ztfHashFunctionType)(uint32_t fd, const char *, const char *);
 typedef void (*ztfHashDecmpFunctionType)(uint32_t fd);
@@ -172,7 +173,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
             startLgIdx = 3;
         }
         std::vector<StreamSet *> symHashMarks;
-        StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
+      //  StreamSet * hashMarksNonFinal = P->CreateStreamSet(1);
         for (unsigned i = startLgIdx; i < encodingScheme1.byLength.size(); i++) { // k-sym phrases length range 5-32
             StreamSet * const groupMarks = P->CreateStreamSet(1);
             P->CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, phraseRuns, phraseLenBixnum[sym], phraseLenOverflow[sym]/*overflow*/, groupMarks, PhraseLenOffset);
@@ -274,42 +275,26 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     // P->CreateKernelCall<PopcountKernel>(combinedMask, P->getOutputScalar("count1"));
 
     StreamSet * const dict_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes);
+    StreamSet * const dict_partialSum = P->CreateStreamSet(1, 64);
+    P->CreateKernelCall<WriteDictionary>(PhraseLen, encodingScheme1, SymCount, PhraseLenOffset, codeUnitStream, u8bytes, combinedPhraseMask, phraseLenBytes, dict_bytes, dict_partialSum);
+    // P->CreateKernelCall<DebugDisplayKernel>("dict_partialSum", dict_partialSum);
 
-    Scalar * dictFileName = P->getInputScalar("dictFileName");
-    P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
+//    Scalar * dictFileName = P->getInputScalar("dictFileName");
+//    P->CreateKernelCall<FileSink>(dictFileName, dict_bytes);
 
+    StreamSet * const compressed_bytes = P->CreateStreamSet(1, 8);
+    if (UseParallelFilterByMask) {
+        FilterByMask(P, combinedMask, u8bytes, compressed_bytes, /*streamOffset*/0, /*extractionFieldWidth*/64, true);
+    }
+    else {
+        P->CreateKernelCall<FilterCompressedData>(encodingScheme1, SymCount, u8bytes, combinedMask, compressed_bytes);
+        // P->CreateKernelCall<StdOutKernel>(compressed_bytes);
+    }
     // Print compressed output
-    StreamSet * const encoded = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
+//    Scalar * outputFileName = P->getInputScalar("outputFileName");
+//    P->CreateKernelCall<FileSink>(outputFileName, compressed_bytes);
 
-    StreamSet * const ZTF_basis = P->CreateStreamSet(8);
-    FilterByMask(P, combinedMask, encoded, ZTF_basis);
-
-    StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);
-
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, ZTF_bytes);
-
-    StreamSet * const nonfinal_output_bytes = P->CreateStreamSet(1, 8);
-    // StreamSet * const nonfinal_filter_mask = P->CreateStreamSet(1); // not needed
-    //do not use bitstream masks for interleave kernel
-    // P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, ZTF_bytes, nonfinal_output_bytes);
-    // P->CreateKernelCall<StdOutKernel>(nonfinal_output_bytes);
-    // P->CreateKernelCall<DebugDisplayKernel>("nonfinal_filter_mask", nonfinal_filter_mask);
-    // P->CreateKernelCall<PopcountKernel>(nonfinal_filter_mask, P->getOutputScalar("count1"));
-
-    // Print interleaved dictionary + compressed output
-    // StreamSet * const interleaved = P->CreateStreamSet(8);
-    // P->CreateKernelCall<S2PKernel>(nonfinal_output_bytes, interleaved);
-
-    // StreamSet * const output_basis = P->CreateStreamSet(8);
-    // FilterByMask(P, nonfinal_filter_mask, interleaved, output_basis);
-
-    // StreamSet * const output_bytes = P->CreateStreamSet(1, 8);
-    // P->CreateKernelCall<P2SKernel>(output_basis, output_bytes);
-    // P->CreateKernelCall<StdOutKernel>(output_bytes);
+    P->CreateKernelCall<InterleaveCompressionSegment>(dict_bytes, compressed_bytes, dict_partialSum, combinedMask);
 
     return reinterpret_cast<ztfHashFunctionType>(P->compile());
 }
@@ -349,18 +334,23 @@ ztfHashDecmpFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<P2SKernel>(ztfHash_u8_Basis, ztfHash_u8bytes);
     //P->CreateKernelCall<StdOutKernel>(ztfHash_u8bytes);
 
+    const auto n = encodingScheme1.byLength.size();
+
     StreamSet * u8bytes = ztfHash_u8bytes;
     for(unsigned sym = 0; sym < SymCount; sym++) {
         unsigned startIdx = 0;
         if (sym > 0) {
             startIdx = 3;
         }
-        for (unsigned i = startIdx; i < encodingScheme1.byLength.size(); i++) {
+        for (unsigned i = startIdx; i < n; i++) {
             StreamSet * const hashGroupMarks = P->CreateStreamSet(1);
-            P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+
+            const unsigned idx = (sym * encodingScheme1.byLength.size()) + i;
+
+            P->CreateKernelCall<StreamSelect>(hashGroupMarks, Select(hashtableMarks, {idx}));
             //P->CreateKernelCall<DebugDisplayKernel>("hashGroupMarks", hashGroupMarks);
             StreamSet * const groupDecoded = P->CreateStreamSet(1);
-            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {(sym * encodingScheme1.byLength.size()) + i}));
+            P->CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {idx}));
             //P->CreateKernelCall<DebugDisplayKernel>("groupDecoded", groupDecoded);
 
             StreamSet * const input_bytes = u8bytes;

@@ -119,9 +119,6 @@ void addKernelProperties(const std::vector<Kernel *> & kernels, Kernel * const o
                 case AttrId::SideEffecting:
                     sideEffecting = true;
                     break;
-                case AttrId::BoundNumberOfStrides:
-                    hasStrideBound = true;
-                    break;
                 default: continue;
             }
         }
@@ -145,10 +142,6 @@ void addKernelProperties(const std::vector<Kernel *> & kernels, Kernel * const o
         output->addAttribute(SideEffecting());
     }
     output->setStride(stride);
-    if (hasStrideBound) {
-        output->addAttribute(HasStrideBound());
-        // output->setStride(1);
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

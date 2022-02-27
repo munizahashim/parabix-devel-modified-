@@ -131,20 +131,6 @@ bool Kernel::canSetTerminateSignal() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief canSetStrideBoundSignal
- ** ------------------------------------------------------------------------------------------------------------ */
-bool Kernel::canSetStrideBoundSignal() const {
-    for (const Attribute & attr : getAttributes()) {
-        switch (attr.getKind()) {
-            case AttrId::BoundNumberOfStrides:
-                return true;
-            default: continue;
-        }
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<KernelCompiler> Kernel::instantiateKernelCompiler(BuilderRef /* b */) const {

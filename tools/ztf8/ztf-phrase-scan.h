@@ -63,6 +63,21 @@ private:
     const unsigned mOffset;
 };
 
+class FilterCompressedData final : public MultiBlockKernel {
+public:
+    FilterCompressedData(BuilderRef b,
+                    EncodingInfo encodingScheme,
+                    unsigned numSyms,
+                    StreamSet * byteData,
+                    StreamSet * combinedMask,
+                    StreamSet * cmpBytes,
+                    unsigned strideBlocks = 8);
+private:
+    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    const unsigned mNumSym;
+    const unsigned mSubStride;
+};
+
 class WriteDictionary final : public MultiBlockKernel {
 public:
     WriteDictionary(BuilderRef b,
@@ -75,6 +90,7 @@ public:
                     StreamSet * phraseMask,
                     StreamSet * allLenHashValues,
                     StreamSet * dictBytes,
+                    StreamSet * dictPartialSum,
                     unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
@@ -89,9 +105,8 @@ public:
     InterleaveCompressionSegment(BuilderRef b,
                            StreamSet * byteData,
                            StreamSet * codedBytes,
-                           StreamSet * extractionMask,
-                           StreamSet * dictionaryMask,
-                           StreamSet * combinedBytes,
+                           StreamSet * dictPartialSum,
+                           StreamSet * compressedMask,
                            unsigned strideBlocks = 8);
 private:
     void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;

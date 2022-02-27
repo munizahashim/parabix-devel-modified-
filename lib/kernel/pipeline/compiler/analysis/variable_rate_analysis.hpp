@@ -620,6 +620,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
     struct PartitionPort {
         Rational Repetitions;
         BindingRef Binding;
+        Rational Fixed; // we analyze and override dataflow of the fixed rate
         unsigned Reference;
         unsigned PartialSumStepLength;
         PartitionPort() = default;
@@ -938,15 +939,24 @@ fuse_existing_streamset:
         }
     }
 
+    // Normalize purely fixed-rate streamset I/O rates by their GCD
 
+    const auto nodeCount = num_vertices(G);
+
+//    for (auto i = numOfPartitions; i < nodeCount; ++i) {
+
+//        const auto output = in_edge(i, G);
+//        G[e]
+
+
+//    }
 
 
     // TODO: we could apply post-order minimization-like pass to fixed rates to further
     // simplify the graph but we would have to mark the set of partitions each node
-    // represents. Normalize purely fixed-rate streamset I/O rates by their GCD?
+    // represents.
 
     assert (ordering.empty());
-    const auto nodeCount = num_vertices(G);
     ordering.reserve(nodeCount);
     topological_sort(G, std::back_inserter(ordering)); // reverse topological ordering
     assert (ordering.size() == nodeCount);
