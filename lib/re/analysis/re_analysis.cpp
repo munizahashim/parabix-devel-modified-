@@ -476,6 +476,28 @@ bool hasTriCCwithinLimit(RE * r, unsigned byteCClimit, RE * & prefixRE, RE * & s
 }
 
 
+bool hasStartAnchor(const RE * re) {
+    if (const Alt * alt = dyn_cast<Alt>(re)) {
+        for (const RE * re : *alt) {
+            if (!hasStartAnchor(re)) {
+                return false;
+            }
+        }
+        return true;
+    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
+        return (!seq->empty()) && hasStartAnchor(seq->front());
+    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
+        return hasStartAnchor(rep->getRE());
+    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
+        return hasStartAnchor(diff->getLH());
+    } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
+        return hasStartAnchor(e->getLH()) && hasStartAnchor(e->getRH());
+    } else if (isa<Start>(re)) {
+        return true;
+    }
+    return false; // otherwise
+}
+
 bool hasEndAnchor(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         for (const RE * re : *alt) {
@@ -485,11 +507,11 @@ bool hasEndAnchor(const RE * re) {
         }
         return true;
     } else if (const Seq * seq = dyn_cast<Seq>(re)) {
-        return (!seq->empty()) && isa<End>(seq->back());
+        return (!seq->empty()) && hasEndAnchor(seq->back());
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
         return hasEndAnchor(rep->getRE());
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
-        return hasEndAnchor(diff->getLH()) && !hasEndAnchor(diff->getRH());
+        return hasEndAnchor(diff->getLH());
     } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
         return hasEndAnchor(e->getLH()) && hasEndAnchor(e->getRH());
     } else if (isa<End>(re)) {

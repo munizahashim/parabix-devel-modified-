@@ -93,13 +93,35 @@ private:
     void generateDoBlockMethod(BuilderRef iBuilder) override;
 };
 
-class FixedMatchPairsKernel : public pablo::PabloKernel {
+class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
-    FixedMatchPairsKernel(BuilderRef builder, unsigned length, StreamSet * MatchEnds, StreamSet * MatchPairs);
+    FixedMatchSpansKernel(BuilderRef builder, unsigned length, StreamSet * MatchFollows, StreamSet * MatchSpans);
     bool hasFamilyName() const override { return true; }
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;
+};
+
+//
+//  Given an input stream consisting of spans of 1s, return a pair of
+//  streams marking the starts of each span as well as the follows.
+//
+//  Ex:  spans   .....1111.......1111111.........1....
+//       starts  .....1..........1...............1....
+//       follows .........1.............1.........1...
+//
+class SpansToMarksKernel : public pablo::PabloKernel {
+public:
+    SpansToMarksKernel(BuilderRef builder, StreamSet * Spans, StreamSet * EndMarks);
+protected:
+    void generatePabloMethod() override;
+};
+
+class U8Spans : public pablo::PabloKernel {
+public:
+    U8Spans(BuilderRef builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans);
+protected:
+    void generatePabloMethod() override;
 };
 
 class PopcountKernel : public pablo::PabloKernel {
