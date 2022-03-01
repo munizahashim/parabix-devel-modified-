@@ -774,6 +774,7 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
 
         auto arg = doSegment->arg_begin();
         auto setNextArgName = [&](const StringRef name) {
+            assert (arg);
             assert (arg != doSegment->arg_end());
             arg->setName(name);
             // TODO: add WriteOnly attributes for the appropriate I/O parameters?

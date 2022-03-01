@@ -417,6 +417,7 @@ struct SimulationFork final : public SimulationNode {
         for (unsigned i = 0; i < Outputs; ++i) {
             Output[i]->QueueLength += ql;
         }
+
     }
 
 };
@@ -589,6 +590,10 @@ struct SimulationSinkActor final : public SimulationActor {
             ++strides;
         }
     }
+
+    void fire(length_t * const /* pendingArray */, random_engine & /* rng */) override {
+        llvm_unreachable("cannot fire a sink node");
+    }
 };
 
 } // end of anonymous namespace
@@ -634,6 +639,20 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
 
     using Graph = adjacency_list<vecS, vecS, bidirectionalS, no_property, PartitionPort>;
 
+
+    struct PartialSumData {
+        unsigned StepSize;
+        unsigned RequiredCapacity;
+        unsigned GCD;
+        unsigned Count;
+        unsigned Index;
+
+        PartialSumData(const unsigned stepSize, unsigned capacity = 1, unsigned count = 0)
+        : StepSize(stepSize), RequiredCapacity(capacity), GCD(capacity), Count(count), Index(0) {
+
+        }
+    };
+
     // scan through the graph and build up a temporary graph first so we can hopefully lay the
     // memory out for the simulation graph in a more prefetch friendly way.
 
@@ -648,19 +667,6 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
 
     Graph G(numOfPartitions);
 
-    struct PartialSumData {
-        unsigned StepSize;
-        unsigned RequiredCapacity;
-        unsigned GCD;
-        unsigned Count;
-        unsigned Index;
-
-        PartialSumData(const unsigned stepSize)
-        : StepSize(stepSize), RequiredCapacity(1), Count(0), Index(0) {
-
-        }
-    };
-
     flat_map<unsigned, PartialSumData> partialSumMap;
 
     flat_map<unsigned, unsigned> streamSetMap;
@@ -670,6 +676,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
     for (unsigned partitionId = 0; partitionId < numOfPartitions; ++partitionId) {
         const PartitionData & N = P[partitionId];
         const auto n = N.Kernels.size();
+
         for (unsigned i = 0; i < n; ++i) {
             const auto kernelId = N.Kernels[i];
             assert (Relationships[kernelId].Type == RelationshipNode::IsKernel);
@@ -684,12 +691,12 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                 assert (rate.isFixed());
                 const auto stepSize = rate.getRate() * reps;
                 assert (stepSize.denominator() == 1);
+                const unsigned k = stepSize.numerator();
                 const auto output = child(kernelId, Relationships);
                 assert (Relationships[output].Type == RelationshipNode::IsBinding);
                 const auto streamSet = child(output, Relationships);
                 assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
                 assert (isa<StreamSet>(Relationships[streamSet].Relationship));
-                const unsigned k = stepSize.numerator();
                 partialSumMap.emplace(streamSet, PartialSumData{k});
             }
 
@@ -765,46 +772,82 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                     if (LLVM_UNLIKELY(rate.isRelative() || rate.isPartialSum())) {
                         RelationshipGraph::in_edge_iterator ei, ei_end;
                         std::tie(ei, ei_end) = in_edges(portNode.Binding, Relationships);
-                        assert (in_degree(portNode.Binding, Relationships) > 1);
-                        while (++ei != ei_end) {
-                            if (LLVM_LIKELY(Relationships[*ei].Reason == ReasonType::Reference)) {
-                                const auto ref = source(*ei, Relationships);
-                                assert (Relationships[ref].Type == RelationshipNode::IsBinding);
-                                assert (ref != portNode.Binding);
-                                if (LLVM_LIKELY(rate.isPartialSum())) {
-                                    const Binding & refBinding = Relationships[ref].Binding;
-                                    const ProcessingRate & refRate = refBinding.getRate();
-                                    assert (refRate.isFixed());
-                                    const auto g = in_edge(ref, Relationships);
-                                    assert (Relationships[g].Reason == ReasonType::ImplicitPopCount);
-                                    const auto R = refRate.getRate() * reps;
-                                    assert (R.denominator() == 1);
-                                    const auto cap = R.numerator();
-                                    const auto partialSumStreamSet = source(g, Relationships);
-                                    const auto p = partialSumMap.find(partialSumStreamSet);
-                                    assert (p != partialSumMap.end());
-                                    PartialSumData & P = p->second;
-                                    if (P.Count == 0) {
-                                        P.RequiredCapacity = cap;
-                                        P.GCD = cap;
-                                        P.Count = 1;
-                                    } else {
-                                        P.RequiredCapacity = boost::lcm<unsigned>(P.RequiredCapacity, cap);
-                                        P.GCD = boost::gcd<unsigned>(P.GCD, cap);
-                                        P.Count++;
-                                    }
+                        assert (in_degree(portNode.Binding, Relationships) == 2);
+                        const auto input = *ei++;
+                        assert (Relationships[*ei].Reason == ReasonType::Reference);
+                        const auto ref = source(*ei, Relationships);
+                        assert (Relationships[ref].Type == RelationshipNode::IsBinding);
+                        assert (ref != portNode.Binding);
+
+                        if (LLVM_LIKELY(rate.isPartialSum())) {
+
+                            const Binding & refBinding = Relationships[ref].Binding;
+                            const ProcessingRate & refRate = refBinding.getRate();
+                            assert (refRate.isFixed());
+                            const auto R = refRate.getRate() * reps;
+                            assert (R.denominator() == 1);
+                            const unsigned cap = R.numerator();
+                            assert (cap > 0);
+
+                            const auto partialSumStreamSet = parent(ref, Relationships);
+                            assert (Relationships[partialSumStreamSet].Type == RelationshipNode::IsRelationship);
+                            assert (isa<StreamSet>(Relationships[partialSumStreamSet].Relationship));
+                            auto p = partialSumMap.find(partialSumStreamSet);
+                            if (p == partialSumMap.end()) {
+
+                                assert (Relationships[input].Reason != ReasonType::Reference);
+                                const auto streamSet = source(input, Relationships);
+                                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                                const auto output = parent(streamSet, Relationships);
+                                assert (Relationships[output].Type == RelationshipNode::IsBinding);
+                                const auto producer = parent(output, Relationships);
+                                assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+
+                                const Binding & outputBinding = Relationships[output].Binding;
+                                const ProcessingRate & outputRate = outputBinding.getRate();
+
+                                const Kernel * const kernelObj = Relationships[producer].Kernel;
+                                const auto strideSize = kernelObj->getStride();
+
+                                const auto c = PartitionIds.find(producer);
+                                assert (c != PartitionIds.end());
+                                const auto producerPartitionId = c->second;
+                                assert (producerPartitionId <= partitionId);
+
+                                const PartitionData & D = P[producerPartitionId];
+                                const auto h = std::find(D.Kernels.begin(), D.Kernels.end(), producer);
+                                assert (h != D.Kernels.end());
+                                const auto j = std::distance(D.Kernels.begin(), h);
+
+                                const auto reps = D.Repetitions[j] * strideSize;
+                                const auto stepSize = outputRate.getUpperBound() * reps;
+                                assert (stepSize.denominator() == 1);
+                                const unsigned k = stepSize.numerator();
+                                assert (k > 0);
+
+                                partialSumMap.emplace(partialSumStreamSet, PartialSumData{k, cap, 1});
+                            } else {
+                                PartialSumData & P = p->second;
+                                if (P.Count == 0) {
+                                    P.RequiredCapacity = cap;
+                                    P.GCD = cap;
+                                    P.Count = 1;
+                                } else {
+                                    P.RequiredCapacity = boost::lcm<unsigned>(P.RequiredCapacity, cap);
+                                    P.GCD = boost::gcd<unsigned>(P.GCD, cap);
+                                    P.Count++;
                                 }
-                                for (unsigned j = 0; j < numOfPorts; ++j) {
-                                    if (H[j].Binding == ref) {
-                                        add_edge(i, j, H);
-                                        break;
-                                    }
-                                }
-                                goto found_output_ref;
                             }
                         }
+
+                        for (unsigned j = 0; j < numOfPorts; ++j) {
+                            if (H[j].Binding == ref) {
+                                add_edge(i, j, H);
+                                break;
+                            }
+                        }
+
                     }
-found_output_ref:   continue;
                 }
                 assert (ordering.empty());
                 lexical_ordering(H, ordering);
@@ -1117,6 +1160,7 @@ fuse_existing_streamset:
                 assert (userId < data.Count);
                 assert (p.PartialSumStepLength <= data.RequiredCapacity);
                 assert ((p.PartialSumStepLength % data.GCD) == 0);
+                assert (p.PartialSumStepLength >= data.GCD);
                 port = new (allocator) PartialSumPort(*gen, userId, p.PartialSumStepLength / data.GCD);
                 END_SCOPED_REGION
                 break;
@@ -1235,19 +1279,17 @@ fuse_existing_streamset:
     // Instead we want the output rates of every source to satisfy the input
     // demands of their immediate consumers.
 
-    SmallVector<const SimulationActor *, 100> partitionNode(numOfPartitions);
     SmallVector<unsigned, 2> sourceVertex;
-
+    SmallVector<const SimulationActor *, 100> P(numOfPartitions);
     for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
         const auto u = ordering[i];
         const auto inputs = in_degree(u, G);
         if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
             if (u < numOfPartitions) {
                 assert (j < inputNodes);
-                const SimulationActor * const A =
-                    reinterpret_cast<SimulationActor *>(nodes[j]);
+                const SimulationActor * const A = reinterpret_cast<SimulationActor *>(nodes[j]);
                 assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
-                partitionNode[u] = A;
+                P[u] = A;
                 if (inputs == 0) {
                     sourceVertex.push_back(u);
                 }
@@ -1256,42 +1298,23 @@ fuse_existing_streamset:
         }
     }
 
+    assert (sourceVertex.size() > 0);
+
     for (const auto u : sourceVertex) {
-        Rational X(1);
-        const auto k = partitionNode[u]->SumOfStrides;
+        auto k = P[u]->SumOfStrides;
         for (const auto e : make_iterator_range(out_edges(u, G))) {
             const auto streamSet = target(e, G);
             assert (streamSet >= numOfPartitions);
             for (const auto f : make_iterator_range(out_edges(streamSet, G))) {
                 const auto v = target(f, G);
                 assert (v < numOfPartitions);
-                Rational Y(k, partitionNode[v]->SumOfStrides);
-                X = std::max(X, Y);
+                k = std::max(k, P[v]->SumOfStrides);
             }
         }
+        Rational X{k, DEMAND_ITERATIONS};
         const auto strides = (X.numerator() + (X.denominator() / 2)) / X.denominator();
         initialSumOfStrides[u] = strides;
     }
-
-
-//    assert (minInputStrides < std::numeric_limits<uint64_t>::max());
-//    for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
-//        const auto u = ordering[i];
-//        const auto inputs = in_degree(u, G);
-//        if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
-//            if (u < numOfPartitions) {
-//                assert (j < inputNodes);
-//                if (inputs == 0) {
-//                    const SimulationSourceActor * const A =
-//                        reinterpret_cast<SimulationSourceActor *>(nodes[j]);
-//                    assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
-//                    const auto m = (A->SumOfStrides + (minInputStrides/2)) / minInputStrides;
-//                    initialSumOfStrides[u] = m;
-//                }
-//            }
-//            ++j;
-//        }
-//    }
     END_SCOPED_REGION
 
     // Rerun this process in a pure data-driven mode once using the segment length
@@ -1321,7 +1344,7 @@ fuse_existing_streamset:
 
     unsigned outputNodes = 0;
 
-    for (auto i = nodeCount; --i; ) { // forward topological odering
+    for (auto i = nodeCount; i--; ) { // forward topological ordering
 
         const auto u = ordering[i];
 
@@ -1389,26 +1412,29 @@ fuse_existing_streamset:
     // bounds to limit the exploration space of a GA and deduce what might
     // lead to the most thread-balanced program.
 
-    for (auto i = nodeCount, j = 0UL; --i; ) {
+     //   const auto numOfLinkedPartitionGroups = linkedPartitionGroups.size();
+
+    for (auto i = nodeCount, j = 0UL; i--; ) {
         const auto u = ordering[i];
         const auto inputs = in_degree(u, G);
         if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
             assert (j < outputNodes);
             if (u < numOfPartitions) {
-                PartitionData & D = P[u];
+
                 const SimulationActor * const A =
                     reinterpret_cast<SimulationActor *>(nodes[j]);
                 assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
                 const uint64_t SQS = A->SumOfStrides;
                 const uint64_t SSQ = A->SumOfStridesSquared;
 
-                // errs() << u << ":\tSQS=" << SQS << ",SSQ=" << SSQ << "\n";
 
-                // The mean calculation is (SQS/ITERATIONS) but since we're normalizing
-                // by (minInputStrides/ITERATIONS), we can ignore the ITERATIONS denominator.
-                D.ExpectedStridesPerSegment = Rational{SQS, DATA_ITERATIONS};
+
+                Rational expected;
+                Rational cov;
+
+                expected = Rational{SQS, DATA_ITERATIONS};
                 if (LLVM_UNLIKELY(inputs == 0 || SQS == 0)) {
-                    D.StridesPerSegmentCoV = Rational{0};
+                    cov = Rational{0};
                 } else {
                     const uint64_t a = (DATA_ITERATIONS * SSQ);
                     const uint64_t b = (SQS * SQS);
@@ -1427,11 +1453,20 @@ fuse_existing_streamset:
                         }
                         val = a; // a ought to equal ceil(sqrt(val) * 100)
                     }
-                    // Like above, we normalize and ignore the ITERATIONS denominator.
-
                     // (val / (Iterations * 100L)) / (SQS / Iterations)
-                    D.StridesPerSegmentCoV = Rational{val, SQS * 100UL};
+                    cov = Rational{val, SQS * 100UL};
                 }
+
+//                errs() << u << ":\tmean="
+//                       << expected.numerator() << "/" << expected.denominator()
+//                       << ",cov="
+//                       << cov.numerator() << "/" << cov.denominator()
+//                       << "\n";
+
+                PartitionData & D = P[u];
+                D.ExpectedStridesPerSegment = expected;
+                D.StridesPerSegmentCoV = cov;
+
             }
             ++j;
         }

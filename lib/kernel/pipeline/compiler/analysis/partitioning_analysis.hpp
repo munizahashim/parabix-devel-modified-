@@ -174,6 +174,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     for (unsigned i = 0; i < m; ++i) {
         BitSet & V = G[i];
         V.resize(n);
+        assert (V.none());
     }
 
     struct AttributeClassifier {
@@ -206,6 +207,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     unsigned nextRateId = 0;
 
     std::vector<AttributeClassifier> knownAttributes;
+    std::vector<unsigned> LookAheadAmount(m, 0);
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -213,10 +215,12 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         const RelationshipNode & node = Relationships[u];
 
         BitSet & V = G[i];
-        assert (V.none());
 
+        unsigned la = 0;
         for (const auto e : make_iterator_range(in_edges(i, G))) {
-            V |= G[source(e, G)];
+            const auto u = source(e, G);
+            V |= G[u];
+            la = std::max(la, LookAheadAmount[u]);
         }
 
         if (node.Type == RelationshipNode::IsKernel) {
@@ -228,6 +232,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                     assert (node.Kernel == mPipelineKernel);
                 }
             } else {
+
+                unsigned maxLA = 0;
 
                 for (const auto e : make_iterator_range(in_edges(i, G))) {
 
@@ -245,18 +251,15 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
                         // Check the attributes to see whether any impose a partition change
                         for (const Attribute & attr : b.getAttributes()) {
+                            unsigned amount = 0;
                             switch (attr.getKind()) {
-                                case AttrId::Delayed:
-                                case AttrId::BlockSize:
                                 case AttrId::LookAhead:
                                     BEGIN_SCOPED_REGION
-                                    #ifdef ALWAYS_ADD_NEW_PARTITION_MARKER_FOR_ATTRIBUTE
-                                    V.set(nextRateId++);
-                                    #else
+                                    maxLA = std::max(maxLA, attr.amount());
                                     bool noMatch = true;
                                     for (const AttributeClassifier & known : knownAttributes) {
                                         if (known.Type == attr.getKind()
-                                            && known.Amount == attr.amount()
+                                            && known.Amount == (amount + attr.amount())
                                             // && known.StreamSet == source(e, G)
                                         ) {
                                             if (known.BitSet.is_subset_of(V)) {
@@ -267,12 +270,15 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                                     }
                                     if (noMatch) {
                                         V.set(nextRateId);
-                                        AttributeClassifier key(V, attr.getKind(), attr.amount());
+                                        AttributeClassifier key(V, attr.getKind(), amount + attr.amount());
                                         knownAttributes.emplace_back(key);
                                         addedRateId = true;
                                     }
-                                    #endif
+                                    break;
                                     END_SCOPED_REGION
+                                case AttrId::Delayed:
+                                case AttrId::BlockSize:
+                                    V.set(nextRateId++);
                                 default: break;
                             }
                         }
@@ -287,7 +293,11 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
                     }
 
                 }
+
+                la += maxLA;
             }
+
+            LookAheadAmount[u] = la;
 
             const Kernel * const kernelObj = node.Kernel;
 
@@ -528,12 +538,9 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
         if (node.Type == RelationshipNode::IsKernel) {
-            auto & c = componentId[i];
-            assert (componentId[i] == find(i));
-            const auto f = componentIds.find(c);
-            const auto k = std::distance(componentIds.begin(), f);
-            assert (c == 0 ^ k != 0);
-            c = k;
+            const auto f = componentIds.find(componentId[i]);
+            assert (f != componentIds.end());
+            componentId[i] = std::distance(componentIds.begin(), f);
         }
     }
 
@@ -599,6 +606,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     PartitionGraph P(partitionCount);
 
+    flat_set<unsigned> linkedPartitionGroups;
+
     for (unsigned i = 0; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
@@ -608,12 +617,22 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
             assert (j < partitionCount);
             assert ((j > 0 && (j + 1) < partitionCount) ^ (node.Kernel == mPipelineKernel));
             PartitionData & pd = P[j];
-            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == partitionIds[i]);
-            pd.LinkedGroupId = partitionIds[i];
+            const auto pid = partitionIds[i];
+            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == pid);
+            pd.LinkedGroupId = pid;
+            linkedPartitionGroups.insert(pid);
             pd.Kernels.push_back(u);
             PartitionIds.emplace(u, j);
         }
     }
+
+    for (unsigned partitionId = 0; partitionId < partitionCount; ++partitionId) {
+        PartitionData & N = P[partitionId];
+        const auto f = linkedPartitionGroups.find(N.LinkedGroupId);
+        assert (f != linkedPartitionGroups.end());
+        N.LinkedGroupId = std::distance(linkedPartitionGroups.begin(), f);
+    }
+
 
     #ifndef NDEBUG
     BEGIN_SCOPED_REGION
