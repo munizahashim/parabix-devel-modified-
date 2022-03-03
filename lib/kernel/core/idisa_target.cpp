@@ -43,12 +43,10 @@ Features getHostCPUFeatures() {
 
 bool ARM_available() {
     StringMap<bool> features;
-    llvm::errs() << "Checking ARM_available\n";
     if (sys::getHostCPUFeatures(features)) {
-        llvm::errs() << "features.lookup(neon) " << features.lookup("neon") << "\n";
         return features.lookup("neon");
     }
-    return true;
+    return false;
 }
 
 bool SSSE3_available() {
