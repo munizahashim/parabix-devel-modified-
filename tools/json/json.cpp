@@ -13,6 +13,7 @@
 #include <kernel/scan/scan.h>
 #include <kernel/scan/reader.h>
 #include <kernel/util/linebreak_kernel.h>
+#include <kernel/util/debug_display.h>
 #include <kernel/util/nesting.h>
 #include <llvm/IR/Function.h>                      // for Function, Function...
 #include <llvm/IR/Module.h>                        // for Module
@@ -70,6 +71,8 @@ static cl::opt<int, true> OnlyDepthOption("only-depth", cl::location(OnlyDepth),
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
+ParabixIllustrator illustrator(64);
+
 jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> jsonPabloSrc) {
 
     auto & b = driver.getBuilder();
@@ -82,6 +85,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
 
+    illustrator.captureByteData(P, "codeUnitStream", codeUnitStream);
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
@@ -108,6 +112,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         stringMarker,
         stringSpan
     );
+    illustrator.captureBitstream(P, "stringSpan", stringSpan);
 
     // 4. Mark end of keywords (true, false, null)
     // Note: We mark the words later when we sanitize the input because
@@ -132,6 +137,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         numberSpan,
         numberErr
     );
+    illustrator.captureBitstream(P, "numberSpan", numberSpan);
 
     // 6. Validate strings
     StreamSet * const utf8Err = P->CreateStreamSet(1);
@@ -174,6 +180,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             depthErr,
             MaxDepth
         );
+        illustrator.captureBixNum(P, "encDepth", encDepth);
         P->CreateKernelCall<JSONParser>(
             lexStream,
             combinedLexers,
@@ -290,6 +297,7 @@ int main(int argc, char ** argv) {
         auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
         jsonParsingFunction(fd);
         close(fd);
+        illustrator.displayAllCapturedData();
     }
     return 0;
 }
