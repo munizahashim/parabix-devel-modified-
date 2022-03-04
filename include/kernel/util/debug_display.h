@@ -7,6 +7,8 @@
 
 #include <kernel/core/kernel.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <pablo/pablo_kernel.h>
+#include <fstream>
 
 namespace kernel {
 
@@ -52,5 +54,88 @@ inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::String
 }
 
 } // namespace kernel::util
+
+/*
+  Displays the contents of multiple aligned streams to stderr.
+
+  A ParabixIllustrator object is initially created with a specified
+  display width.   All stream data will be displayed using this width.  Ex:
+
+  ParabixIllustrator illustrator(50);  // an illustrator with width 50.
+
+  Byte streams or bit streams may be added for display.   Byte streams
+  are displayed using printable ASCII characters only, with a substitution
+  character used for nonprintable characters.
+
+  For example, with a program builder P and StreamSet ByteData:
+  illustrator.captureByteData(P, "bytedata", ByteData);
+
+  Bit streams are printed in left to right order, with one bits shown
+  using the '1' character and zero bits shown using the '.' character
+  by default.
+
+  To capture aligned bit stream data:
+  illustrator.captureBitstream(P, "bitstream", BitStream);
+
+  As many bytestreams and bitstreams as desired may be captured.
+
+  Upon completion of pipeline processing, all captured data is emitted
+  to stderr with the call:
+  illustrator.displayAllCapturedData();
+ */
+
+class ParabixIllustrator {
+    using ProgramBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
+public:
+    ParabixIllustrator(unsigned displayWidth) :  mDisplayWidth(displayWidth), mMaxStreamNameSize(0) {}
+
+    void captureByteData(ProgramBuilderRef P, std::string streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
+    void captureBitstream(ProgramBuilderRef P, std::string streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
+
+    void appendStreamText(unsigned streamNo, std::string streamText);
+    void displayAllCapturedData();
+
+protected:
+    unsigned addStream(std::string streamName);
+
+private:
+    std::vector<std::string> mStreamNames;
+    std::vector<std::string> mStreamData;
+    unsigned mDisplayWidth;
+    unsigned mMaxStreamNameSize;
+};
+
+/* Helper classes for ParabixIllustrator. */
+
+class CaptureBlock : public kernel::BlockOrientedKernel {
+public:
+    CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream);
+protected:
+    void generateDoBlockMethod(BuilderRef b) override;
+    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingByte) override;
+};
+
+class BitstreamIllustrator : public pablo::PabloKernel {
+    using BuilderRef = BuilderRef;
+public:
+    BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh = '.', char oneCh = '1');
+protected:
+    void generatePabloMethod() override;
+
+private:
+    char mZeroCh;
+    char mOneCh;
+};
+
+class PrintableASCII : public pablo::PabloKernel {
+    using BuilderRef = BuilderRef;
+public:
+    PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute = '.');
+protected:
+    void generatePabloMethod() override;
+
+private:
+    char mNonASCIIsubstitute;
+};
 
 } // namespace kernel

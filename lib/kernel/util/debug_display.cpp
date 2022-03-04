@@ -1,11 +1,19 @@
 /*
- *  Copyright (c) 2019 International Characters.
+ *  Copyright (c) 2022 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  */
 
+#include <toolchain/toolchain.h>
 #include <kernel/util/debug_display.h>
-
 #include <kernel/core/kernel_builder.h>
+#include <kernel/basis/s2p_kernel.h>
+#include <kernel/basis/p2s_kernel.h>
+#include <pablo/pabloAST.h>
+#include <pablo/builder.hpp>
+#include <pablo/pe_zeroes.h>
+#include <pablo/pe_ones.h>
+#include <re/cc/cc_compiler.h>
+#include <iostream>
 
 using namespace llvm;
 
@@ -88,5 +96,153 @@ void DebugDisplayKernel::generateMultiBlockLogic(BuilderRef b, Value * const num
 
     b->SetInsertPoint(exit);
 }
+
+extern "C" void appendStreamText_wrapper(intptr_t illustrator_addr, uint64_t streamNo, char * streamText, uint64_t lgth) {
+    assert ("passed a null accumulator" && illustrator_addr);
+    std::string text = std::string(streamText, lgth);
+    reinterpret_cast<ParabixIllustrator *>(illustrator_addr)->appendStreamText(streamNo, text);
+}
+
+unsigned ParabixIllustrator::addStream(std::string streamName) {
+    unsigned streamNo = mStreamNames.size();
+    mStreamNames.push_back(streamName);
+    mStreamData.push_back("");
+    if (streamName.size() > mMaxStreamNameSize) mMaxStreamNameSize = streamName.size();
+    return streamNo;
+}
+
+void ParabixIllustrator::appendStreamText(unsigned streamNo, std::string streamText) {
+    mStreamData[streamNo].append(streamText);
+}
+
+void ParabixIllustrator::captureByteData(ProgramBuilderRef P, std::string streamLabel, StreamSet * byteData, char nonASCIIsubstitute) {
+    unsigned illustratedStreamNo = addStream(streamLabel);
+    StreamSet * basis = P->CreateStreamSet(8);
+    P->CreateKernelCall<S2PKernel>(byteData, basis);
+    StreamSet * printableBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
+    StreamSet * printableData = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * accum_obj = P->CreateConstant(P->getDriver().getBuilder()->getSize((intptr_t) this));
+    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
+    Kernel * scK = P->CreateKernelCall<CaptureBlock>(accum_obj, streamNo, printableData);
+    scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+}
+
+void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string streamLabel, StreamSet * bitstream, char zeroCh, char oneCh) {
+    unsigned illustratedStreamNo = addStream(streamLabel);
+    StreamSet * printableBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
+    StreamSet * printableData = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * accum_obj = P->CreateConstant(P->getDriver().getBuilder()->getSize((intptr_t) this));
+    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
+    Kernel * scK = P->CreateKernelCall<CaptureBlock>(accum_obj, streamNo, printableData);
+    scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+}
+
+void ParabixIllustrator::displayAllCapturedData() {
+    unsigned fullPages = mStreamData[0].size() / mDisplayWidth;
+    unsigned partialPage = mStreamData[0].size() % mDisplayWidth;
+
+    for (unsigned page = 0; page < fullPages; page++) {
+        unsigned pagePos = mDisplayWidth * page;
+        for (unsigned i = 0; i < mStreamData.size(); i++) {
+            std::cerr << std::setw(mMaxStreamNameSize) << mStreamNames[i]  << " | ";
+            std::cerr << mStreamData[i].substr(pagePos, mDisplayWidth) << "\n";
+        }
+    }
+    if (partialPage > 0) {
+        unsigned pagePos = mDisplayWidth * fullPages;
+        for (unsigned i = 0; i < mStreamData.size(); i++) {
+            std::cerr << std::setw(mMaxStreamNameSize) << mStreamNames[i] << " | ";
+            std::cerr << mStreamData[i].substr(pagePos, partialPage) << "\n";
+        }
+    }
+}
+
+BitstreamIllustrator::BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh, char oneCh)
+    : pablo::PabloKernel(kb, "BitstreamIllustrator" + std::to_string(zeroCh) + "_" + std::to_string(oneCh),
+                  {Binding{"bits", bits}},
+                  {Binding{"displayBasis", displayBasis}}),
+                  mZeroCh(zeroCh), mOneCh(oneCh) {}
+
+void BitstreamIllustrator::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    pablo::PabloAST * data = getInputStreamSet("bits")[0];
+
+    pablo::Var * displayBasis = getOutputStreamVar("displayBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        unsigned bit = (unsigned) 1 << i;
+        pablo::PabloAST * displayBit = nullptr;
+        if ((bit & mOneCh & mZeroCh) == bit) {
+            displayBit = pb.createOnes();
+        }
+        else if (((bit & mOneCh) == 0) && ((bit & mZeroCh) == 0)) {
+            displayBit = pb.createZeroes();
+        }
+        else if (((bit & mOneCh) == bit) && ((bit & mZeroCh) == 0)) {
+            displayBit = data;
+        }
+        else {
+            displayBit = pb.createNot(data);
+       }
+       pb.createAssign(pb.createExtract(displayBasis, pb.getInteger(i)), displayBit);
+    }
+}
+
+PrintableASCII::PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
+    : pablo::PabloKernel(kb, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
+                  {Binding{"basisBits", basisBits}},
+                  {Binding{"printableBasis", printableBasis}}),
+                  mNonASCIIsubstitute(nonASCIIsubstitute) {}
+
+void PrintableASCII::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<pablo::PabloAST *> basisBits = getInputStreamSet("basisBits");
+    cc::Parabix_CC_Compiler ccc(getEntryScope(), basisBits);
+    PabloAST * isPrintable = ccc.compileCC(re::makeCC(0x20, 0x7E));
+    PabloAST * notPrintable = pb.createNot(isPrintable);
+    pablo::Var * printableVar = getOutputStreamVar("printableBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        unsigned bit = (unsigned) 1 << i;
+        PabloAST * displayBit = basisBits[i];
+        if ((bit & mNonASCIIsubstitute) == bit) {
+            displayBit = pb.createOr(displayBit, notPrintable);
+        } else {
+            displayBit = pb.createAnd(displayBit, isPrintable);
+        }
+       pb.createAssign(pb.createExtract(printableVar, pb.getInteger(i)), displayBit);
+    }
+}
+
+CaptureBlock::CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream)
+: BlockOrientedKernel(b, "CallBack",
+                      {Binding{"byteStream", byteStream}},
+                      {},
+                      {Binding{"accumObj", accumObj}, Binding{"streamNo", streamNo}}, //input scalars
+                      {},
+                      {}) {
+                          addAttribute(SideEffecting());
+                      }
+
+void CaptureBlock::generateDoBlockMethod(BuilderRef b) {
+    Value * byteStreamBasePtr = b->CreatePointerCast(b->getInputStreamBlockPtr("byteStream", b->getSize(0)), b->getInt8PtrTy());
+    Value * accumObj = b->getScalarField("accumObj");
+    Value * streamNo = b->getScalarField("streamNo");
+    Function * callback = b->getModule()->getFunction("appendStreamText_wrapper");
+    FunctionType * fty = callback->getFunctionType();
+    b->CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, b->getSize(codegen::BlockSize)});
+}
+
+void CaptureBlock::generateFinalBlockMethod(BuilderRef b, Value * const remainingBytes) {
+    Value * byteStreamBasePtr = b->CreatePointerCast(b->getInputStreamBlockPtr("byteStream", b->getSize(0)), b->getInt8PtrTy());
+    Value * accumObj = b->getScalarField("accumObj");
+    Value * streamNo = b->getScalarField("streamNo");
+    Function * callback = b->getModule()->getFunction("appendStreamText_wrapper");
+    FunctionType * fty = callback->getFunctionType();
+    b->CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, remainingBytes});
+}
+
 
 }
