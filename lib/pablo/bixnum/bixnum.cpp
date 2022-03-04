@@ -148,6 +148,18 @@ PabloAST * BixNumCompiler::NEQ(BixNum value, BixNum test, const llvm::StringRef 
     }
 }
 
+BixNum BixNumCompiler::Select(PabloAST * cond, BixNum val1, BixNum val0) {
+    if (val1.size() < val0.size()) return Select(mPB.createNot(cond), val0, val1);
+    BixNum selected(val1.size());
+    for (unsigned i = 0; i < val0.size(); i++) {
+        selected[i] = mPB.createSel(cond, val1[i], val0[i], "selected");
+    }
+    for (unsigned i = val0.size(); i < val1.size(); i++) {
+        selected[i] = mPB.createAnd(cond, val1[i], "selected");
+    }
+    return selected;
+}
+
 BixNum BixNumCompiler::ZeroExtend(BixNum value, unsigned extended_size) {
     assert(extended_size >= value.size());
     BixNum extended(extended_size);
