@@ -77,6 +77,11 @@ inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::String
   To capture aligned bit stream data:
   illustrator.captureBitstream(P, "bitstream", BitStream);
 
+  Streamsets representing bixnums of up to 4 digits may be captured
+  and displayed in hexadecimal notation.
+
+  illustrator.captureBixNum(P, "bixnum", BixNum);
+
   As many bytestreams and bitstreams as desired may be captured.
 
   Upon completion of pipeline processing, all captured data is emitted
@@ -91,6 +96,7 @@ public:
 
     void captureByteData(ProgramBuilderRef P, std::string streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
     void captureBitstream(ProgramBuilderRef P, std::string streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
+    void captureBixNum(ProgramBuilderRef P, std::string streamName, StreamSet * bixnum, char hexBase = 'A');
 
     void appendStreamText(unsigned streamNo, std::string streamText);
     void displayAllCapturedData();
@@ -136,6 +142,17 @@ protected:
 
 private:
     char mNonASCIIsubstitute;
+};
+
+class PrintableBixNum : public pablo::PabloKernel {
+    using BuilderRef = BuilderRef;
+public:
+    PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printable, char hexBase = 'A');
+protected:
+    void generatePabloMethod() override;
+
+private:
+    char mHexBase;
 };
 
 } // namespace kernel

@@ -12,6 +12,7 @@
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
 #include <pablo/pe_ones.h>
+#include <pablo/bixnum/bixnum.h>
 #include <re/cc/cc_compiler.h>
 #include <iostream>
 
@@ -141,6 +142,18 @@ void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string strea
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
 
+void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLabel, StreamSet * bixnum, char hexBase) {
+    unsigned illustratedStreamNo = addStream(streamLabel);
+    StreamSet * printableBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
+    StreamSet * printableData = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * accum_obj = P->CreateConstant(P->getDriver().getBuilder()->getSize((intptr_t) this));
+    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
+    Kernel * scK = P->CreateKernelCall<CaptureBlock>(accum_obj, streamNo, printableData);
+    scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+}
+
 void ParabixIllustrator::displayAllCapturedData() {
     unsigned fullPages = mStreamData[0].size() / mDisplayWidth;
     unsigned partialPage = mStreamData[0].size() % mDisplayWidth;
@@ -151,6 +164,7 @@ void ParabixIllustrator::displayAllCapturedData() {
             std::cerr << std::setw(mMaxStreamNameSize) << mStreamNames[i]  << " | ";
             std::cerr << mStreamData[i].substr(pagePos, mDisplayWidth) << "\n";
         }
+        std::cerr << "\n";
     }
     if (partialPage > 0) {
         unsigned pagePos = mDisplayWidth * fullPages;
@@ -213,6 +227,29 @@ void PrintableASCII::generatePabloMethod() {
             displayBit = pb.createAnd(displayBit, isPrintable);
         }
        pb.createAssign(pb.createExtract(printableVar, pb.getInteger(i)), displayBit);
+    }
+}
+
+PrintableBixNum::PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
+    : pablo::PabloKernel(kb, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
+                  {Binding{"bixnum", bixnum}},
+                  {Binding{"printableBasis", printableBasis}}), mHexBase(hexBase) {}
+
+void PrintableBixNum::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    pablo::BixNumCompiler bnc(pb);
+    pablo::BixNum num = getInputStreamSet("bixnum");
+    if (num.size() > 4) num = bnc.Truncate(num, 4);
+    num = bnc.ZeroExtend(num, 7);
+    pablo::BixNum digits = bnc.AddModular(num, 0x30);   //  ASCII for [0-9]
+    pablo::BixNum hex = bnc.AddModular(num, mHexBase - 10);  // ASCII for hex digits [A-F] or [a-f]
+    pablo::BixNum result = bnc.Select(bnc.UGE(num, 10), hex, digits);
+    pablo::Var * printableVar = getOutputStreamVar("printableBasis");
+    for (unsigned i = 0; i < result.size(); i++) {
+       pb.createAssign(pb.createExtract(printableVar, pb.getInteger(i)), result[i]);
+    }
+    for (unsigned i = result.size(); i < 8; i++) {
+       pb.createAssign(pb.createExtract(printableVar, pb.getInteger(i)), pb.createZeroes());
     }
 }
 
