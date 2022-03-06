@@ -58,6 +58,60 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
     const auto m = num_vertices(Relationships);
 
+
+    using ConstraintGraph = boost::adjacency_matrix<boost::undirectedS>;
+
+    ConstraintGraph G(numOfPartitions);
+
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        const PartitionData & N = P[producerPartitionId];
+        for (const auto u : N.Kernels) {
+            for (const auto e : make_iterator_range(out_edges(u, Relationships))) {
+                const auto outputBinding = target(e, Relationships);
+                if (Relationships[outputBinding].Type == RelationshipNode::IsBinding) {
+                    const auto f = first_out_edge(outputBinding, Relationships);
+                    assert (Relationships[f].Reason != ReasonType::Reference);
+                    const auto streamSet = target(f, Relationships);
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+
+                    for (const auto g : make_iterator_range(out_edges(streamSet, Relationships))) {
+                        assert (Relationships[g].Reason != ReasonType::Reference);
+                        const auto inputBinding = target(g, Relationships);
+                        assert (Relationships[inputBinding].Type == RelationshipNode::IsBinding);
+                        const auto h = first_out_edge(inputBinding, Relationships);
+                        assert (Relationships[h].Reason != ReasonType::Reference);
+                        const auto consumer = target(h, Relationships);
+                        assert (Relationships[consumer].Type == RelationshipNode::IsKernel);
+
+                        const auto c = PartitionIds.find(consumer);
+                        assert (c != PartitionIds.end());
+                        const auto consumerPartitionId = c->second;
+                        assert (producerPartitionId <= consumerPartitionId);
+
+                        if (producerPartitionId != consumerPartitionId) {
+                            if (!edge(producerPartitionId, consumerPartitionId, G).second) {
+
+                                auto isNonFixedRate = [&](const unsigned binding) -> bool {
+                                    const RelationshipNode & bn = Relationships[binding];
+                                    assert (bn.Type == RelationshipNode::IsBinding);
+                                    const Binding & bd = bn.Binding;
+                                    return !bd.getRate().isFixed();
+                                };
+
+                                if (isNonFixedRate(outputBinding) || isNonFixedRate(inputBinding)) {
+                                  add_edge(producerPartitionId, consumerPartitionId, G);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
+
     std::vector<Z3_ast> VarList(m);
 
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
@@ -133,12 +187,11 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                             const auto producerPartitionId = c->second;
                             assert (producerPartitionId <= partitionId);
 
-                            Z3_ast rate = constant_real(inputRate.getRate() * N.Kernel->getStride());
-                            Z3_ast constraint = Z3_mk_eq(ctx, VarList[streamSet], multiply(VarList[u], rate));
-                            if (producerPartitionId == partitionId) {
+                            //if (!edge(producerPartitionId, partitionId, G).second) {
+                            if (producerPartitionId != partitionId) {
+                                Z3_ast rate = constant_real(inputRate.getRate() * N.Kernel->getStride());
+                                Z3_ast constraint = Z3_mk_eq(ctx, VarList[streamSet], multiply(VarList[u], rate));
                                 hard_assert(constraint);
-                            } else {
-                                soft_assert(constraint);
                             }
 
                         }
