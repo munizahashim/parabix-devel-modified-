@@ -48,7 +48,8 @@ void NestingDepth::generatePabloMethod() {
     Var * errs = pb.createVar("errs", pb.createAtEOF(bscan));
     Var * pendingL = pb.createVar("pendingL", pb.createAnd(bscan, LBrak));
     PabloAST * span =
-      pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {LBrak, bscan});
+    //  pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {LBrak, bscan});
+      pb.createMatchStar(LBrak, pb.createNot(bscan));
     // initialize nesting to 1 for positions in span
     pb.createAssign(nestingDepthVar[0], span);
     // Set up a while loop, with loop body wb.
@@ -57,7 +58,8 @@ void NestingDepth::generatePabloMethod() {
     PabloAST * unmatchedR = wb.createAnd(RBrak, wb.createNot(closed), "unmatchedR");
     PabloAST * inPlay = wb.createOr(pendingL, unmatchedR, "inPlay");
     bscan = wb.createAdvanceThenScanTo(pendingL, inPlay);
-    span = wb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {pendingL, bscan});
+    //span = wb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {pendingL, bscan});
+    span = wb.createMatchStar(pendingL, pb.createNot(bscan));
     BixNum increment(1, span);
     BixNum nesting(mNestingDepthBits);
     for (unsigned i = 0; i < mNestingDepthBits; i++) {
