@@ -59,7 +59,7 @@ void NestingDepth::generatePabloMethod() {
     PabloAST * inPlay = wb.createOr(pendingL, unmatchedR, "inPlay");
     bscan = wb.createAdvanceThenScanTo(pendingL, inPlay);
     //span = wb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {pendingL, bscan});
-    span = wb.createMatchStar(pendingL, pb.createNot(bscan));
+    span = wb.createMatchStar(pendingL, wb.createNot(bscan));
     BixNum increment(1, span);
     BixNum nesting(mNestingDepthBits);
     for (unsigned i = 0; i < mNestingDepthBits; i++) {
