@@ -287,10 +287,25 @@ void JSONParser::generatePabloMethod() {
 
     // parsing non-nesting values
     PabloAST * otherND = bnc.UGT(ND, 0);
+    PabloAST * zeroND = bnc.EQ(ND, 0);
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
-    PabloAST * firstValue = pb.createScanTo(begin, valueToken);
-    PabloAST * nonNestedValue = pb.createScanTo(pb.createAdvance(firstValue, 1), valueToken);
-    PabloAST * errSimpleValue = pb.createAnd(nonNestedValue, pb.createNot(otherND));
+    PabloAST * valueAtZero = pb.createAnd(valueToken, zeroND);
+    PabloAST * stopAtEOF = pb.createXor(pb.createOnes(), EOFbit);
+
+    // If we have simple value at depth 0, we cannot have any other token
+    PabloAST * firstValue = pb.createScanTo(begin, valueAtZero);
+    PabloAST * nonNestedValue = pb.createScanTo(pb.createAdvance(firstValue, 1), anyToken);
+    PabloAST * errValue = pb.createScanThru(pb.createAdvance(nonNestedValue, 1), stopAtEOF);
+    
+    // If we have any symbol, we cannot have any value at depth 0
+    PabloAST * firstSymbol = pb.createScanTo(begin, symbols);
+    PabloAST * valueAtZeroAfterSymbol = pb.createScanTo(pb.createAdvance(firstSymbol, 1), valueAtZero);
+    PabloAST * errSymbol = pb.createScanThru(pb.createAdvance(valueAtZeroAfterSymbol, 1), stopAtEOF);
+    
+    // EOFbit is always at depth 0, otherwise we have unmatched parens
+    PabloAST * errEOF = pb.createAnd(EOFbit, otherND);
+    PabloAST * errSimpleValue = pb.createOr3(errValue, errSymbol, errEOF);
 
     // parsing arr
     Var * const errArray = pb.createVar("errArray", pb.createZeroes());

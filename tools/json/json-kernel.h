@@ -189,7 +189,7 @@ class JSONParser: public pablo::PabloKernel {
                             Binding{"ND", nestingDepth}
                          },
                          {
-                            Binding{"syntaxErr", syntaxErr}
+                            Binding{"syntaxErr", syntaxErr, FixedRate(), Add1()}
                          }),
     mMaxDepth(maxDepth), mOnlyDepth(onlyDepth) {}
     bool isCachable() const override { return true; }

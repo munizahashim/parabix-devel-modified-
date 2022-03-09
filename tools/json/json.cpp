@@ -154,7 +154,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // 7. Clean lexers (in case there's special chars inside string)
     // 8. Validate rest of the output (check for extraneous chars)
     // We also take the opportunity to create the keyword marker
-    StreamSet * /* TODO: const */ combinedLexers = P->CreateStreamSet(4);
+    StreamSet * const combinedLexers = P->CreateStreamSet(4);
     StreamSet * const extraErr = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
         lexStream,
@@ -186,7 +186,8 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             MaxDepth,
             OnlyDepth
         );
-        /*TODO: delete */ combinedLexers = syntaxErr;
+
+        illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
 
         StreamSet * const Errors = P->CreateStreamSet(5, 1);
         P->CreateKernelCall<StreamsMerge>(
