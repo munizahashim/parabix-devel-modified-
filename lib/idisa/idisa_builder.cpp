@@ -1047,30 +1047,18 @@ std::pair<Value *, Value *> IDISA_Builder::bitblock_add_with_carry(Value * a, Va
 
 // full subtract producing {borrowOut, difference}
 std::pair<Value *, Value *> IDISA_Builder::bitblock_subtract_with_borrow(Value * a, Value * b, Value * borrowIn) {
-    Value * gen = simd_and(a, b);
-    Value * prop = simd_or(a, b);
-    Value * partial = simd_sub(mBitBlockWidth, simd_sub(mBitBlockWidth, a, b), borrowIn);
-    Value * b1 = simd_or(gen, simd_and(prop, partial));
-    b1 = simd_srli(mBitBlockWidth, b1, mBitBlockWidth - 1);
-    Value * difference = simd_sub(mBitBlockWidth, partial, b1);
-    Value * borrowOut = simd_or(gen, simd_and(prop, difference));
-    return std::make_pair(bitCast(borrowOut), bitCast(difference));
-}
-
-// full subtract producing {propagateOut, difference}
-std::pair<Value *, Value *> IDISA_Builder::bitblock_subtract_with_propagate(Value * a, Value * b, Value * const propagateIn) {
-    Value * in = propagateIn;
-    if (propagateIn->getType() != mBitBlockType) {
-        in = bitCast(CreateZExt(propagateIn, getIntNTy(mBitBlockWidth)));
+    Value * in = borrowIn;
+    if (borrowIn->getType() != mBitBlockType) {
+        in = bitCast(CreateZExt(borrowIn, getIntNTy(mBitBlockWidth)));
     }
-    Value * partial = simd_sub(mBitBlockWidth, a, simd_or(b, in));
-    Value * propagateOut = simd_srli(mBitBlockWidth, partial, mBitBlockWidth - 1);
-    if (propagateIn->getType() == mBitBlockType) {
-        propagateOut = bitCast(propagateOut);
+    Value * partial = simd_sub(mBitBlockWidth, simd_sub(mBitBlockWidth, a, b), in);
+    Value * borrowOut = simd_srli(mBitBlockWidth, partial, mBitBlockWidth - 1);
+    if (borrowIn->getType() == mBitBlockType) {
+        borrowOut = bitCast(borrowOut);
     } else {
-        propagateOut = CreateTrunc(CreateBitCast(propagateOut, getIntNTy(mBitBlockWidth)), propagateIn->getType());
+        borrowOut = CreateTrunc(CreateBitCast(borrowOut, getIntNTy(mBitBlockWidth)), borrowIn->getType());
     }
-    return std::make_pair(propagateOut, bitCast(partial));
+    return std::make_pair(borrowOut, bitCast(partial));
 }
 
 // full shift producing {shiftout, shifted}
