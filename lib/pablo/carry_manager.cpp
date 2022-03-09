@@ -701,7 +701,7 @@ Value * CarryManager::subBorrowInBorrowOut(BuilderRef b, const Statement * opera
     assert (operation);
     Value * const borrowIn = getNextCarryIn(b);
     Value * borrowOut, * result;
-    std::tie(borrowOut, result) = b->bitblock_subtract_with_propagate(e1, e2, borrowIn);
+    std::tie(borrowOut, result) = b->bitblock_subtract_with_borrow(e1, e2, borrowIn);
     assert (borrowIn->getType() == borrowOut->getType());
     setNextCarryOut(b, borrowOut);
     return result;
