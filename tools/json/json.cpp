@@ -56,14 +56,11 @@ using namespace codegen;
 static cl::OptionCategory jsonOptions("json Options", "json options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(jsonOptions));
 bool ToCSVFlag;
-static cl::opt<bool, true> ToCSVOption("c", cl::location(ToCSVFlag), cl::desc("Print equivalent CSV"), cl::cat(jsonOptions));
-static cl::alias ToCSVAlias("to-csv", cl::desc("Alias for -c"), cl::aliasopt(ToCSVOption));
+static cl::opt<bool, true> ToCSVOption("to-csv", cl::location(ToCSVFlag), cl::desc("Print equivalent CSV"), cl::cat(jsonOptions));
 bool ShowLinesFlag;
-static cl::opt<bool, true> ShowLinesOption("s", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
-static cl::alias ShowLinesAlias("show-lines", cl::desc("Alias for -s"), cl::aliasopt(ShowLinesOption));
-static cl::opt<bool> ParallelBracketMatch("parallel-bracket-match", cl::desc("Apply parallel bracket matching."), cl::cat(jsonOptions));
-int ShowSpanLocations;
-static cl::opt<int, true> ShowSpanLocationsOption("show-spans", cl::location(ShowSpanLocations), cl::desc("Generate locations debug output for combinedLexers stream with values 0..<4"), cl::cat(jsonOptions), cl::init(-1));
+static cl::opt<bool, true> ShowLinesOption("show-lines", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
+bool ShowStreamsFlag;
+static cl::opt<bool, true> ShowStreamsOption("show-streams", cl::location(ShowStreamsFlag), cl::desc("Show streams with Parabix illustrator."), cl::cat(jsonOptions));
 unsigned MaxDepth;
 static cl::opt<unsigned, true> MaxDepthOption("max-depth", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::cat(jsonOptions), cl::init(15));
 int OnlyDepth;
@@ -257,26 +254,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         scan::Reader(P, driver, normalErrFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
     }
 
-// for debugging
-    if (ShowSpanLocations > -1) {
-        StreamSet * const symbols = su::Select(P, combinedLexers, ShowSpanLocations);
-        StreamSet * filteredBasis = P->CreateStreamSet(8);
-        P->CreateKernelCall<PabloSourceKernel>(
-            parser,
-            jsonPabloSrc,
-            "SpanLocations",
-            Bindings { // Input Stream Bindings
-                Binding {"span", symbols}
-            },
-            Bindings { // Output Stream Bindings
-                Binding {"output", filteredBasis}
-            }
-        );
-        StreamSet * filtered = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
-        P->CreateKernelCall<StdOutKernel>(filtered);
-    }
-
     return reinterpret_cast<jsonFunctionType>(P->compile());
 }
 
@@ -297,7 +274,7 @@ int main(int argc, char ** argv) {
         auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
         jsonParsingFunction(fd);
         close(fd);
-        illustrator.displayAllCapturedData();
+        if (ShowStreamsFlag) illustrator.displayAllCapturedData();
     }
     return 0;
 }
