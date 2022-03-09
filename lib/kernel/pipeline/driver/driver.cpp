@@ -115,7 +115,11 @@ BaseDriver::BaseDriver(std::string && moduleName)
     }
 }
 
+// static void dummy_segf_handler(int sig, siginfo_t *si, void *unused) { }
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief destructor
  ** ------------------------------------------------------------------------------------------------------------- */
-BaseDriver::~BaseDriver() { }
+BaseDriver::~BaseDriver() {
+
+}

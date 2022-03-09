@@ -154,7 +154,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = mMaximumNumOfStrides;
     }
     assert (numOfLinearStrides);
-    mRemainingNumOfStrides = numOfLinearStrides;
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -253,11 +252,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
     Value * nonFinalNumOfLinearStrides = numOfLinearStrides;
 
-//    if (LLVM_UNLIKELY(mIsPartitionRoot && StrideStepLength[mKernelId] > 1)) {
-//        Constant * const STEP = b->getSize(StrideStepLength[mKernelId]);
-//        nonFinalNumOfLinearStrides = b->CreateRoundDown(numOfLinearStrides, STEP);
-//    }
-
     if (LLVM_LIKELY(in_degree(mKernelId, mBufferGraph) > 0)) {
 
         const auto prefix = makeKernelName(mKernelId);
@@ -322,6 +316,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         /// -------------------------------------------------------------------------------------
 
         Value * numOfFinalLinearStrides = numOfLinearStrides;
+
         BasicBlock * penultimateSegmentExit = nullptr;
         if (LLVM_LIKELY(mMayLoopToEntry)) {
 
@@ -345,8 +340,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * fixedItemFactor = nullptr;
         Value * partialPartitionStride = nullptr;
-
-
         calculateFinalItemCounts(b, accessibleItems, writableItems, fixedItemFactor, partialPartitionStride);
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         zeroInputAfterFinalItemCount(b, accessibleItems, truncatedInputVirtualBaseAddress);
@@ -432,7 +425,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     Value * stepLength = nullptr;
 
-    if (mIsPartitionRoot && StrideStepLength[mKernelId] > 1) {
+    if (StrideStepLength[mKernelId] > 1) {
         stepLength = b->getSize(StrideStepLength[mKernelId]);
         Value * const closed = isClosed(b, inputPort);
         stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
@@ -1711,7 +1704,6 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
             Value * const start = b->CreateURem(index, sz_maxStepFactor);
             Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
-
             Value * const bitblockSplat = b->bitCast(splat);
             Value * const cond = b->CreateICmpULT(initial, sz_spanLength);
             b->CreateCondBr(cond, splatLoopBody, splatLoopExit);

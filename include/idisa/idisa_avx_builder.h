@@ -26,7 +26,7 @@ public:
     llvm::Value * CreatePextract(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
     llvm::Value * CreatePdeposit(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
 
-    ~IDISA_AVX_Builder() {}
+    ~IDISA_AVX_Builder() override {}
 protected:
     bool hasBMI1;
     bool hasBMI2;
@@ -57,7 +57,7 @@ public:
     std::vector<llvm::Value *> simd_pext(unsigned fw, std::vector<llvm::Value *> v, llvm::Value * extract_mask) override;
     llvm::Value * simd_pdep(unsigned fw, llvm::Value * v, llvm::Value * deposit_mask) override;
 
-    ~IDISA_AVX2_Builder() {}
+    ~IDISA_AVX2_Builder() override {}
 };
 
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
@@ -88,7 +88,7 @@ public:
     llvm::Value * simd_ternary(unsigned char mask, llvm::Value * a, llvm::Value * b, llvm::Value * c) override;
     std::pair<llvm::Value *, llvm::Value *> bitblock_advance(llvm::Value * a, llvm::Value * shiftin, unsigned shift) override;
 
-    ~IDISA_AVX512F_Builder() {
+    ~IDISA_AVX512F_Builder() override {
     }
 private:
     struct Features {

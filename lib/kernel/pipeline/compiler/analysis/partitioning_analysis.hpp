@@ -207,7 +207,7 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
     unsigned nextRateId = 0;
 
     std::vector<AttributeClassifier> knownAttributes;
-    std::vector<unsigned> LookAheadAmount(m, 0);
+    std::vector<unsigned> LookAheadAmount(n, 0);
 
     for (unsigned i = 0; i < m; ++i) {
 

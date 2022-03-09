@@ -339,7 +339,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
                 currentGroupId = groupId;
             }
             #endif
-            errs() << "Partition " << inputPartitionId << " -> " << outputPartitionId << "\n";
+            // errs() << "Partition " << inputPartitionId << " -> " << outputPartitionId << "\n";
         #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
         }
         #endif

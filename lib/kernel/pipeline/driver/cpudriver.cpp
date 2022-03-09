@@ -319,6 +319,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
 
     // return the compiled main method
     mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
+    const auto mainModulePtr = mainModule.get();
     mEngine->addModule(std::move(mainModule));
     mEngine->finalizeObject();
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
@@ -328,6 +329,10 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
     #endif
     removeModules(Normal);
     removeModules(Infrequent);
+    //#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
+    mEngine->removeModule(mainModulePtr);
+    mEngine->removeModule(mMainModule);
+    //#endif
     return reinterpret_cast<void *>(mainFnPtr);
 }
 
