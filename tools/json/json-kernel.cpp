@@ -227,8 +227,9 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
 
     PabloAST * keywordSpans = pb.createOr3(nSpan, tSpan, fSpan);
 
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * extraneousChars = pb.createNot(pb.createOr(keywordSpans, combinedSpans));
-    PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, extraneousChars);
+    PabloAST * sanitizedErr = sanitizeLexInput(pb, pb.createOr(ws, EOFbit), extraneousChars);
 
     // ------------------- Validate values and terminals
 

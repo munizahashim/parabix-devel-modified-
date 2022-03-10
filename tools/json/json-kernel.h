@@ -119,7 +119,11 @@ public:
                             Binding{"lexIn", lexIn},
                             Binding{"strSpan", strSpan}
                          },
-                         {Binding{"nbrLex", nbrLex}, Binding{"nbrSpan", nbrSpan}, Binding{"nbrErr", nbrErr}}) {}
+                         {
+                            Binding{"nbrLex", nbrLex},
+                            Binding{"nbrSpan", nbrSpan},
+                            Binding{"nbrErr", nbrErr, FixedRate(), Add1()}
+                        }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -141,7 +145,7 @@ protected:
 
 */
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
-    public:
+public:
     JSONFindKwAndExtraneousChars(
                         const std::unique_ptr<KernelBuilder> & b,
                         StreamSet * const lexIn,
@@ -161,7 +165,7 @@ class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
                          },
                          {
                             Binding{"combinedLexs", combinedLexs},
-                            Binding{"extraErr", extraErr},
+                            Binding{"extraErr", extraErr, FixedRate(), Add1()},
                          }) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
@@ -170,7 +174,7 @@ protected:
 };
 
 class JSONParser: public pablo::PabloKernel {
-    public:
+public:
     JSONParser(
         const std::unique_ptr<KernelBuilder> & b,
         StreamSet * const lexIn,
@@ -194,11 +198,12 @@ class JSONParser: public pablo::PabloKernel {
     mMaxDepth(maxDepth), mOnlyDepth(onlyDepth) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
-  protected:
+protected:
     void generatePabloMethod() override;
     unsigned mMaxDepth;
     int mOnlyDepth;
-  };
+};
+
 }
 
 #endif

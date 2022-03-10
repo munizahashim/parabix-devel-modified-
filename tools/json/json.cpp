@@ -15,6 +15,7 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/util/nesting.h>
+#include <grep/grep_kernel.h>
 #include <llvm/IR/Function.h>                      // for Function, Function...
 #include <llvm/IR/Module.h>                        // for Module
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
@@ -74,7 +75,14 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
 
     auto & b = driver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
+    Type * const int64Ty = b->getInt64Ty();
+    bool ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
+    Bindings bindingsParallel = {Binding{int64Ty, "errCount"}};
+    Bindings bindingsRegular = {};
+    auto P = driver.makePipeline(
+        {Binding{int32Ty, "fd"}},
+        (ParallelProcess ? bindingsParallel : bindingsRegular)
+    );
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 
@@ -147,7 +155,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             Binding {"lex", lexStream}
         },
         Bindings { // Output Stream Bindings
-            Binding {"utf8Err", utf8Err}
+            Binding {"utf8Err", utf8Err, FixedRate(), Add1()}
         }
     );
 
@@ -166,7 +174,7 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     );
 
     // 9.1 Prepare and validate StreamSets
-    if (!ToCSVFlag && !ShowLinesFlag) {
+    if (ParallelProcess) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
         StreamSet * const depthErr = P->CreateStreamSet(1);
         StreamSet * const syntaxErr = P->CreateStreamSet(1);
@@ -187,20 +195,24 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             OnlyDepth
         );
 
-        illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
-
+        // 10. Output error in case JSON is not valid
         StreamSet * const Errors = P->CreateStreamSet(5, 1);
+        // Important: make sure all the streams inside StreamsMerge have Add1, otherwise it fails
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxErr},
             Errors
         );
-
         StreamSet * const Errs = su::Collapse(P, Errors);
-        StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
-
-        // 10. Output error in case JSON is not valid
+        illustrator.captureBitstream(P, "extraErr", extraErr);
+        illustrator.captureBitstream(P, "utf8Err", utf8Err);
+        illustrator.captureBitstream(P, "numberErr", numberErr);
+        illustrator.captureBitstream(P, "depthErr", depthErr);
+        illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
+        illustrator.captureBitstream(P, "Errs", Errs);
         auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
-        scan::Reader(P, driver, simpleErrFn, codeUnitStream, { ErrIndices });
+        Scalar * const errCount = P->getOutputScalar("errCount");
+        P->CreateKernelCall<PopcountKernel>(Errs, errCount);
+        P->CreateCall(simpleErrFn.name, *simpleErrFn.func, { errCount });
     } else {
         StreamSet * collapsedLex;
         StreamSet * const symbols = su::Select(P, combinedLexers, 0);
