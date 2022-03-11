@@ -17,3 +17,18 @@ DEPS
     toolchain
 )
 
+parabix_add_executable(
+NAME
+    csv_column
+SRC
+    csv_column.cpp
+DEPS
+    pablo
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
+
