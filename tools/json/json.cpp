@@ -67,7 +67,7 @@ static cl::opt<unsigned, true> MaxDepthOption("max-depth", cl::location(MaxDepth
 int OnlyDepth;
 static cl::opt<int, true> OnlyDepthOption("only-depth", cl::location(OnlyDepth), cl::desc("Only generate code for depth n of JSON."), cl::cat(jsonOptions), cl::init(-1));
 
-typedef void (*jsonFunctionType)(uint32_t fd);
+typedef void (*jsonFunctionType)(uint32_t fd, ParabixIllustrator *);
 
 jsonFunctionType json_parsing_gen(
     CPUDriver & driver,
@@ -78,15 +78,18 @@ jsonFunctionType json_parsing_gen(
     auto & b = driver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
     Type * const int64Ty = b->getInt64Ty();
+    Type * const intPtrTy = b->getIntAddrTy();
     bool ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
     Bindings bindingsParallel = {Binding{int64Ty, "errCount"}};
     Bindings bindingsRegular = {};
     auto P = driver.makePipeline(
-        {Binding{int32Ty, "fd"}},
+        {Binding{int32Ty, "fd"}, Binding{intPtrTy, "illustratorAddr"}},
         (ParallelProcess ? bindingsParallel : bindingsRegular)
     );
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
+    Scalar * const illustratorAddr = P->getInputScalar("illustratorAddr");
+    illustrator.registerIllustrator(illustratorAddr);
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
@@ -293,7 +296,7 @@ int main(int argc, char ** argv) {
     } else {
         ParabixIllustrator illustrator(64);
         auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource, illustrator);
-        jsonParsingFunction(fd);
+        jsonParsingFunction(fd, &illustrator);
         close(fd);
         if (ShowStreamsFlag) illustrator.displayAllCapturedData();
     }
