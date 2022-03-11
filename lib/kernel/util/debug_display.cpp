@@ -179,7 +179,7 @@ void ParabixIllustrator::displayAllCapturedData() {
 BitstreamIllustrator::BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh, char oneCh)
     : pablo::PabloKernel(kb, "BitstreamIllustrator" + std::to_string(zeroCh) + "_" + std::to_string(oneCh),
                   {Binding{"bits", bits}},
-                  {Binding{"displayBasis", displayBasis}}),
+                  {Binding{"displayBasis", displayBasis, FixedRate(), Add1()}}),
                   mZeroCh(zeroCh), mOneCh(oneCh) {}
 
 void BitstreamIllustrator::generatePabloMethod() {
@@ -209,7 +209,7 @@ void BitstreamIllustrator::generatePabloMethod() {
 PrintableASCII::PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
     : pablo::PabloKernel(kb, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
                   {Binding{"basisBits", basisBits}},
-                  {Binding{"printableBasis", printableBasis}}),
+                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}),
                   mNonASCIIsubstitute(nonASCIIsubstitute) {}
 
 void PrintableASCII::generatePabloMethod() {
@@ -234,7 +234,7 @@ void PrintableASCII::generatePabloMethod() {
 PrintableBixNum::PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
     : pablo::PabloKernel(kb, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
                   {Binding{"bixnum", bixnum}},
-                  {Binding{"printableBasis", printableBasis}}), mHexBase(hexBase) {}
+                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}), mHexBase(hexBase) {}
 
 void PrintableBixNum::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
