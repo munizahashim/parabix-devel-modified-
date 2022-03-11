@@ -59,7 +59,7 @@ static void parseValue(const uint8_t *ptr) {
         stack.push_back(ptr);
         currentState = JArrInit;
     } else {
-        postproc_parensError(nullptr);
+        postproc_parensError(1);
     }
 }
 
@@ -92,7 +92,7 @@ static void popAndFindNewState() {
     } else if (last == '[') {
         currentState = JFindNewState;
     } else {
-        postproc_parensError(nullptr);
+        postproc_parensError(1);
     }
 }
 
@@ -115,7 +115,10 @@ void postproc_parensValidate(const uint8_t * ptr) {
     jsonJumpTable[currentState](ptr);
 }
 
-void postproc_parensError(const uint8_t * /*ptr*/) {
-    fprintf(stderr, "The JSON document has an improper structure: parentheses don't match.\n");
-    exit(-1);
+extern bool ShowStreamsFlag;
+void postproc_parensError(const uint64_t errsCount) {
+    if (errsCount > 0) {
+        fprintf(stderr, "The JSON document has an improper structure: parentheses don't match.\n");
+        if (!ShowStreamsFlag) exit(-1);
+    }
 }

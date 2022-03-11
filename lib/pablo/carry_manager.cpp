@@ -290,9 +290,11 @@ Value * CarryManager::generateEntrySummaryTest(BuilderRef b, Value * condition) 
         if (LLVM_LIKELY(condition->getType() == b->getBitBlockType())) {
             condition = b->bitblock_any(condition);
         }
+       // b->CallPrintInt(" --- entry condition0", condition);
         const auto n = mNonCarryCollapsingModeStack.size();
         Value * const lastIncomingCarryIteration = mNonCarryCollapsingModeStack[n - 3];
         condition = b->CreateOr(condition, b->CreateIsNotNull(lastIncomingCarryIteration));
+       // b->CallPrintInt(" --- entry condition", condition);
     } else if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
         assert ("summary condition cannot be null!" && condition);
         assert ("summary test was not generated" && mNextSummaryTest);
@@ -339,7 +341,11 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         // (1) Carry-ins: (a) incoming carry data first iterations, (b) zero thereafter
         // (2) Carry-out accumulators: (a) zero first iteration, (b) |= carry-out of each iteration
         mCarrySummaryStack.push_back(phiCarryOutSummary); // original carry out summary phi
-        mCarrySummaryStack.push_back(phiCarryOutSummary); // accumulated carry out summary value
+        if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
+            mCarrySummaryStack.push_back(ZEROES); // accumulated carry out summary value
+        } else {
+            mCarrySummaryStack.push_back(phiCarryOutSummary); // accumulated carry out summary value
+        }
     }
 
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
@@ -701,7 +707,7 @@ Value * CarryManager::subBorrowInBorrowOut(BuilderRef b, const Statement * opera
     assert (operation);
     Value * const borrowIn = getNextCarryIn(b);
     Value * borrowOut, * result;
-    std::tie(borrowOut, result) = b->bitblock_subtract_with_propagate(e1, e2, borrowIn);
+    std::tie(borrowOut, result) = b->bitblock_subtract_with_borrow(e1, e2, borrowIn);
     assert (borrowIn->getType() == borrowOut->getType());
     setNextCarryOut(b, borrowOut);
     return result;
@@ -717,7 +723,6 @@ Value * CarryManager::advanceCarryInCarryOut(BuilderRef b, const Advance * const
         Value * carryOut, * result;
         std::tie(carryOut, result) = b->bitblock_advance(value, carryIn, shiftAmount);
         setNextCarryOut(b, carryOut);
-       // assert (result->getType() == b->getBitBlockType());
         return result;
     } else {
         return longAdvanceCarryInCarryOut(b, value, shiftAmount);

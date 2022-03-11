@@ -6,6 +6,7 @@
 #include <kernel/core/idisa_target.h>
 
 #include <toolchain/toolchain.h>
+#include <idisa/idisa_arm_builder.h>
 #include <idisa/idisa_sse_builder.h>
 #include <idisa/idisa_avx_builder.h>
 #include <idisa/idisa_i64_builder.h>
@@ -38,6 +39,14 @@ Features getHostCPUFeatures() {
         hostCPUFeatures.hasAVX512F = features.lookup("avx512f");
     }
     return hostCPUFeatures;
+}
+
+bool ARM_available() {
+    StringMap<bool> features;
+    if (sys::getHostCPUFeatures(features)) {
+        return features.lookup("neon");
+    }
+    return false;
 }
 
 bool SSSE3_available() {
@@ -96,6 +105,7 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
         }
     }
 #endif
+    if (ARM_available()) return new KernelBuilderImpl<IDISA_ARM_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
     if (codegen::BlockSize >= 256) {
         // AVX2 or AVX builders can only be used for BlockSize multiples of 256
         if (hostCPUFeatures.hasAVX2) {

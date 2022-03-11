@@ -11,6 +11,6 @@
 extern "C" {
 
 void postproc_parensValidate(const uint8_t * ptr);
-void postproc_parensError(const uint8_t * /*ptr*/);
+void postproc_parensError(const uint64_t errsCount);
 
 } // extern "C"
