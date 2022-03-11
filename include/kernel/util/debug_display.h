@@ -62,6 +62,13 @@ inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::String
   display width.   All stream data will be displayed using this width.  Ex:
 
   ParabixIllustrator illustrator(50);  // an illustrator with width 50.
+ 
+  To include an illustrator object in a Parabix pipeline, it should be passed
+  in as a pipeline parameter:   Binding{b->getIntAddrTy(), "illustratorAddr"}
+  Then this parameter should be registered in the illustrator object for
+  code generation.
+  Scalar * callback_obj = P->getInputScalar("illustrator");
+  illustrator.registerIllustrator(callback_obj);
 
   Byte streams or bit streams may be added for display.   Byte streams
   are displayed using printable ASCII characters only, with a substitution
@@ -94,6 +101,8 @@ class ParabixIllustrator {
 public:
     ParabixIllustrator(unsigned displayWidth) :  mDisplayWidth(displayWidth), mMaxStreamNameSize(0) {}
 
+    void registerIllustrator(Scalar * illustrator);
+
     void captureByteData(ProgramBuilderRef P, std::string streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
     void captureBitstream(ProgramBuilderRef P, std::string streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
     void captureBixNum(ProgramBuilderRef P, std::string streamName, StreamSet * bixnum, char hexBase = 'A');
@@ -105,6 +114,7 @@ protected:
     unsigned addStream(std::string streamName);
 
 private:
+    Scalar * mIllustrator;
     std::vector<std::string> mStreamNames;
     std::vector<std::string> mStreamData;
     unsigned mDisplayWidth;

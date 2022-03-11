@@ -54,16 +54,17 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 static cl::opt<bool> UseFilterByMaskKernel("filter-by-mask-kernel", cl::desc("Use experimental FilterByMaskKernel"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<bool> FilterOnly("filter-only", cl::desc("Perform initial CSV filtering only"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<bool> ShowStreams("show-streams", cl::desc("Show CSV parsing streams"), cl::init(false), cl::cat(CSV_Options));
-typedef void (*CSVFunctionType)(uint32_t fd);
 
 ParabixIllustrator illustrator(50);
 
+typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
 CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
+                                    Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap
@@ -164,6 +165,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
     //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
     if (ShowStreams) {
+        Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
+        illustrator.registerIllustrator(illustratorAddr);
         illustrator.captureByteData(P, "bytedata", ByteStream, '?');
         illustrator.captureBitstream(P, "recordSeparators", recordSeparators, '_', '1');
         illustrator.captureBitstream(P, "fieldSeparators", fieldSeparators);
@@ -253,7 +256,7 @@ int main(int argc, char *argv[]) {
         //  Run the pipeline.
         printf("%s", templatePrologue.c_str());
         fflush(stdout);
-        fn(fd);
+        fn(fd, &illustrator);
         close(fd);
         printf("%s", templateEpilogue.c_str());
         #ifdef REPORT_PAPI_TESTS
