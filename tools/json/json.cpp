@@ -69,9 +69,11 @@ static cl::opt<int, true> OnlyDepthOption("only-depth", cl::location(OnlyDepth),
 
 typedef void (*jsonFunctionType)(uint32_t fd);
 
-ParabixIllustrator illustrator(64);
-
-jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> jsonPabloSrc) {
+jsonFunctionType json_parsing_gen(
+    CPUDriver & driver,
+    std::shared_ptr<PabloParser> parser,
+    std::shared_ptr<SourceFile> jsonPabloSrc,
+    ParabixIllustrator & illustrator) {
 
     auto & b = driver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
@@ -89,8 +91,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
-
-    illustrator.captureByteData(P, "codeUnitStream", codeUnitStream);
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
@@ -117,7 +117,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         stringMarker,
         stringSpan
     );
-    illustrator.captureBitstream(P, "stringSpan", stringSpan);
 
     // 4. Mark end of keywords (true, false, null)
     // Note: We mark the words later when we sanitize the input because
@@ -142,7 +141,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         numberSpan,
         numberErr
     );
-    illustrator.captureBitstream(P, "numberSpan", numberSpan);
 
     // 6. Validate strings
     StreamSet * const utf8Err = P->CreateStreamSet(1);
@@ -173,6 +171,12 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
         extraErr
     );
 
+    if (ShowStreamsFlag) {
+        illustrator.captureByteData(P, "codeUnitStream", codeUnitStream);
+        illustrator.captureBitstream(P, "stringSpan", stringSpan);
+        illustrator.captureBitstream(P, "numberSpan", numberSpan);
+    }
+
     // 9.1 Prepare and validate StreamSets
     if (ParallelProcess) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
@@ -185,7 +189,6 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             depthErr,
             MaxDepth
         );
-        illustrator.captureBixNum(P, "encDepth", encDepth);
         P->CreateKernelCall<JSONParser>(
             lexStream,
             combinedLexers,
@@ -203,16 +206,20 @@ jsonFunctionType json_parsing_gen(CPUDriver & driver, std::shared_ptr<PabloParse
             Errors
         );
         StreamSet * const Errs = su::Collapse(P, Errors);
-        illustrator.captureBitstream(P, "extraErr", extraErr);
-        illustrator.captureBitstream(P, "utf8Err", utf8Err);
-        illustrator.captureBitstream(P, "numberErr", numberErr);
-        illustrator.captureBitstream(P, "depthErr", depthErr);
-        illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
-        illustrator.captureBitstream(P, "Errs", Errs);
         auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
         Scalar * const errCount = P->getOutputScalar("errCount");
         P->CreateKernelCall<PopcountKernel>(Errs, errCount);
         P->CreateCall(simpleErrFn.name, *simpleErrFn.func, { errCount });
+
+        if (ShowStreamsFlag) {
+            illustrator.captureBixNum(P, "encDepth", encDepth);
+            illustrator.captureBitstream(P, "extraErr", extraErr);
+            illustrator.captureBitstream(P, "utf8Err", utf8Err);
+            illustrator.captureBitstream(P, "numberErr", numberErr);
+            illustrator.captureBitstream(P, "depthErr", depthErr);
+            illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
+            illustrator.captureBitstream(P, "Errs", Errs);
+        }
     } else {
         StreamSet * collapsedLex;
         StreamSet * const symbols = su::Select(P, combinedLexers, 0);
@@ -284,7 +291,8 @@ int main(int argc, char ** argv) {
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
+        ParabixIllustrator illustrator(64);
+        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource, illustrator);
         jsonParsingFunction(fd);
         close(fd);
         if (ShowStreamsFlag) illustrator.displayAllCapturedData();
