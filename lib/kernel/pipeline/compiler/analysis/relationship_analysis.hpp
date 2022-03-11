@@ -283,8 +283,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         StrideStepLength[newKernelId] = sl;
         const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
         Rational ONE{1};
-        const auto min = (cov3 > ONE) ? 0U: floor(P.ExpectedStridesPerSegment * (ONE - cov3));
-        const auto max = ceiling(P.ExpectedStridesPerSegment * (ONE + cov3));
+        const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
+        const auto max = ceiling(ONE + cov3);
         assert (min <= max);
         MinimumNumOfStrides[newKernelId] = sl * min;
         MaximumNumOfStrides[newKernelId] = sl * max;

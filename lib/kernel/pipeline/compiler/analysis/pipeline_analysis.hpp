@@ -38,11 +38,13 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
-        auto partitionGraph = P.identifyKernelPartitions();
         #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
-        P.computeIntraPartitionRepetitionVectors(partitionGraph);
-        P.estimateInterPartitionDataflow(partitionGraph, rng);
+        auto initialGraph = P.initialPartitioningPass();
+        P.computeIntraPartitionRepetitionVectors(initialGraph);
+        P.estimateInterPartitionDataflow(initialGraph, rng);
+        auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
         #else
+        auto partitionGraph = P.identifyKernelPartitions();
         P.computeMinimumExpectedDataflow(partitionGraph);
         #endif
         P.schedulePartitionedProgram(partitionGraph, rng);
@@ -153,6 +155,10 @@ private:
 
 
     // partitioning analysis
+    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+    PartitionGraph initialPartitioningPass();
+    PartitionGraph postDataflowAnalysisPartitioningPass(PartitionGraph & initial);
+    #endif
 
     PartitionGraph identifyKernelPartitions();
 

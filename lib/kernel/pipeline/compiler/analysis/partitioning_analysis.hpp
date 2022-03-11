@@ -7,9 +7,1018 @@
 
 // #define PRINT_GRAPH_BITSETS
 
-// #define ALWAYS_ADD_NEW_PARTITION_MARKER_FOR_ATTRIBUTE
-
 namespace kernel {
+
+#ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+
+namespace {
+
+using BitSet = dynamic_bitset<>;
+
+using BindingVertex = RelationshipGraph::vertex_descriptor;
+
+using Graph = adjacency_list<vecS, vecS, bidirectionalS, BitSet, BindingVertex>;
+
+using PartitionMap = std::map<BitSet, unsigned>;
+
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initialPartitioningPass
+ ** ------------------------------------------------------------------------------------------------------------- */
+PartitionGraph PipelineAnalysis::initialPartitioningPass() {
+
+    const unsigned n = num_vertices(Relationships);
+
+    std::vector<unsigned> sequence;
+    sequence.reserve(n);
+
+    std::vector<unsigned> mapping(n, -1U);
+
+    #ifndef NDEBUG
+    unsigned numOfKernels = 2;
+    #endif
+
+    BEGIN_SCOPED_REGION
+
+    std::vector<unsigned> ordering;
+    ordering.reserve(n);
+    if (LLVM_UNLIKELY(!lexical_ordering(Relationships, ordering))) {
+        report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
+    }
+
+    // Convert the relationship graph into a simpler graph G that we can annotate.
+    // For simplicity, force the pipeline input to be the first and the pipeline output
+    // to be the last one.
+
+    // For some reason, the Mac C++ compiler cannot link the constexpr PipelineInput value?
+    // Hardcoding 0 here as a temporary workaround.
+    mapping[0] = 0;
+    sequence.push_back(0);
+
+    for (unsigned u : ordering) {
+        const RelationshipNode & node = Relationships[u];
+        switch (node.Type) {
+            case RelationshipNode::IsKernel:
+                BEGIN_SCOPED_REGION
+                #ifndef NDEBUG
+                const auto & R = Relationships[u];
+                #endif
+                if (u == PipelineInput || u == PipelineOutput) {
+                    assert (R.Kernel == mPipelineKernel);
+                } else {
+                    assert (R.Kernel != mPipelineKernel);
+                    mapping[u] = sequence.size();
+                    sequence.push_back(u);
+                    #ifndef NDEBUG
+                    ++numOfKernels;
+                    #endif
+                }
+                END_SCOPED_REGION
+                break;
+            case RelationshipNode::IsRelationship:
+                BEGIN_SCOPED_REGION
+                const Relationship * const ss = Relationships[u].Relationship;
+                if (LLVM_LIKELY(isa<StreamSet>(ss))) {
+                    mapping[u] = sequence.size();
+                    sequence.push_back(u);
+                }
+                END_SCOPED_REGION
+                break;
+            default: break;
+        }
+    }
+
+    mapping[PipelineOutput] = sequence.size();
+    sequence.push_back(PipelineOutput);
+
+    END_SCOPED_REGION
+    const auto m = sequence.size();
+
+    Graph G(m);
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            addKernelRelationshipsInReferenceOrdering(u, Relationships,
+                [&](const PortType type, const unsigned binding, const unsigned streamSet) {
+                    const auto j = mapping[streamSet];
+                    assert (j < m);
+                    assert (sequence[j] == streamSet);
+                    auto a = i, b = j;
+                    if (type == PortType::Input) {
+                        a = j; b = i;
+                    }
+                    assert (a < b);
+                    assert (Relationships[binding].Type == RelationshipNode::IsBinding);
+                    add_edge(a, b, binding, G);
+                }
+            );
+        }
+    }
+
+    // Stage 1: identify synchronous components
+
+    // wcan through the graph and determine where every non-Fixed relationship exists
+    // so that we can construct our initial set of partitions. The goal here is to act
+    // as a naive first pass to simplify the problem before using Z3.
+
+    // NOTE: any decisions made during this pass *must* be provably correct for any
+    // situation because the choices will *not* be verified.
+
+    for (unsigned i = 0; i < m; ++i) {
+        BitSet & V = G[i];
+        V.resize(n);
+        assert (V.none());
+    }
+
+    unsigned nextRateId = 0;
+
+    for (unsigned i = 0; i < m; ++i) {
+
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+
+        BitSet & V = G[i];
+
+        if (node.Type == RelationshipNode::IsKernel) {
+
+            bool hasInputRateChange = false;
+
+            if (in_degree(i, G) == 0) {
+                if (out_degree(i, G) != 0) {
+                    hasInputRateChange = true;
+                } else {
+                    assert (node.Kernel == mPipelineKernel);
+                }
+            } else {
+                for (const auto e : make_iterator_range(in_edges(i, G))) {
+
+                    const auto bindingId = G[e];
+                    const RelationshipNode & rn = Relationships[bindingId];
+                    assert (rn.Type == RelationshipNode::IsBinding);
+                    const Binding & b = rn.Binding;
+                    const ProcessingRate & rate = b.getRate();
+                    if (rate.isFixed()) {
+                        // Check the attributes to see whether any impose a partition change
+                        for (const Attribute & attr : b.getAttributes()) {
+                            switch (attr.getKind()) {
+                                case AttrId::LookAhead:
+                                case AttrId::BlockSize:
+                                    hasInputRateChange = true;
+                                default: break;
+                            }
+                        }
+                    } else {
+                        hasInputRateChange = true;
+                    }
+                }
+            }
+
+            if (hasInputRateChange) {
+                V.set(nextRateId++);
+            }
+
+            const Kernel * const kernelObj = node.Kernel;
+
+            assert (V.any() || kernelObj == mPipelineKernel);
+
+            // Now iterate through the outputs
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                const auto bindingId = G[e];
+                const RelationshipNode & rn = Relationships[bindingId];
+                assert (rn.Type == RelationshipNode::IsBinding);
+                const Binding & b = rn.Binding;
+                const ProcessingRate & rate = b.getRate();
+                BitSet & O = G[target(e, G)];
+                O |= V;
+                if (rate.isFixed()) {
+                    // Check the attributes to see whether any impose a partition change
+                    for (const Attribute & attr : b.getAttributes()) {
+                        switch (attr.getKind()) {
+                            case AttrId::Delayed:
+                            case AttrId::Deferred:
+                            // A deferred output rate is closer to an bounded rate than a
+                            // countable rate but a deferred input rate simply means the
+                            // buffer must be dynamic.
+                            case AttrId::BlockSize:
+                                goto add_output_rate;
+                            default: break;
+                        }
+                    }
+                } else {
+add_output_rate:    O.set(nextRateId++);
+                }
+
+            }
+        } else { // just propagate the bitsets
+
+            assert (in_degree(i, G) == 1);
+
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                BitSet & R = G[target(e, G)];
+                R |= V;
+            }
+
+        }
+    }
+
+    assert (Relationships[sequence[0]].Kernel == mPipelineKernel);
+    assert (Relationships[sequence[m - 1]].Kernel == mPipelineKernel);
+
+    G[0].reset();
+    G[m - 1].set(nextRateId);
+
+    std::vector<unsigned> partitionIds(m);
+
+    auto convertUniqueNodeBitSetsToUniquePartitionIds = [&]() {
+        PartitionMap partitionSets;
+        unsigned nextPartitionId = 1;
+        for (unsigned i = 0; i < m; ++i) {
+            const auto u = sequence[i];
+            const RelationshipNode & node = Relationships[u];
+            if (node.Type == RelationshipNode::IsKernel) {
+                BitSet & V = G[i];
+                unsigned partitionId = 0;
+                if (LLVM_LIKELY(V.any())) {
+                    auto f = partitionSets.find(V);
+                    if (f == partitionSets.end()) {
+                        partitionId = nextPartitionId++;
+                        partitionSets.emplace(V, partitionId);
+                    } else {
+                        partitionId = f->second;
+                    }
+                    assert (partitionId > 0);
+                } else {
+                    assert (node.Kernel == mPipelineKernel);
+                }
+                partitionIds[i] = partitionId;
+            }
+        }
+        return nextPartitionId;
+    };
+
+    const auto synchronousPartitionCount = convertUniqueNodeBitSetsToUniquePartitionIds();
+
+    assert (synchronousPartitionCount > 0);
+
+    // Stage 6: split (weakly) disconnected components within a partition into separate partitions
+
+    std::vector<unsigned> componentId(m);
+    std::iota(componentId.begin(), componentId.end(), 0);
+
+    std::function<unsigned(unsigned)> find = [&](unsigned x) {
+        assert (x < m);
+        if (componentId[x] != x) {
+            componentId[x] = find(componentId[x]);
+        }
+        return componentId[x];
+    };
+
+    auto union_find = [&](unsigned x, unsigned y) {
+        assert (x < y);
+        x = find(x);
+        y = find(y);
+        if (x != y) {
+            componentId[y] = x;
+        }
+    };
+
+    for (unsigned i = 1; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsRelationship) {
+            const auto j = parent(i, G);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
+            const auto prodPartId = partitionIds[j];
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                const auto k = target(e, G);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
+                const auto consPartId = partitionIds[k];
+                assert (consPartId > 0);
+                if (prodPartId == consPartId) {
+                    union_find(j, k);
+                }
+            }
+        }
+    }
+
+    flat_set<unsigned> componentIds;
+    componentIds.reserve(synchronousPartitionCount * 2);
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            // find(x) updates and returns componentId[x]
+            componentIds.insert(find(i));
+        }
+    }
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            const auto f = componentIds.find(componentId[i]);
+            assert (f != componentIds.end());
+            componentId[i] = std::distance(componentIds.begin(), f);
+        }
+    }
+
+    const auto partitionCount = componentIds.size();
+    assert (partitionCount >= synchronousPartitionCount);
+
+    using RenumberingGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
+
+    // Stage 7: renumber the partition ids
+
+    // To simplify processing later, renumber the partitions such that the partition id
+    // of any predecessor of a kernel K is <= the partition id of K.
+
+    RenumberingGraph T(partitionCount);
+
+    for (unsigned i = 1; i < partitionCount; ++i) {
+        add_edge(0, i, 0, T);
+    }
+
+    for (unsigned i = 1; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsRelationship) {
+            const auto j = parent(i, G);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
+            const auto prodPartId = componentId[j];
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                const auto k = target(e, G);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
+                const auto consPartId = componentId[k];
+                if (prodPartId != consPartId) {
+                    assert (consPartId > 0);
+                    add_edge(prodPartId, consPartId, u, T);
+                }
+            }
+        }
+    }
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (out_degree(i, T) == 0) {
+            add_edge(i, partitionCount - 1, 0, T);
+        }
+    }
+
+    std::vector<unsigned> renumberingSeq;
+    renumberingSeq.reserve(partitionCount);
+
+    if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
+        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+    }
+
+    assert (renumberingSeq[0] == 0);
+
+    std::vector<unsigned> renumbered(partitionCount);
+
+    for (unsigned i = 0; i < partitionCount; ++i) {
+        const auto j = renumberingSeq[i];
+        assert (j < partitionCount);
+        renumbered[j] = i;
+    }
+
+    assert (renumbered[0] == 0);
+
+    PartitionGraph P(partitionCount);
+
+    PartitionIds.clear();
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            assert (componentId[i] < partitionCount);
+            const auto j = renumbered[componentId[i]];
+            assert (j < partitionCount);
+            assert ((j > 0 && (j + 1) < partitionCount) ^ (node.Kernel == mPipelineKernel));
+            PartitionData & pd = P[j];
+            pd.Kernels.push_back(u);
+            PartitionIds.emplace(u, j);
+        }
+    }
+
+    #ifndef NDEBUG
+    BEGIN_SCOPED_REGION
+    flat_set<unsigned> included;
+    included.reserve(numOfKernels);
+    for (const auto u : P[0].Kernels) {
+        assert ("kernel is in multiple partitions?" && included.insert(u).second);
+        const auto & R = Relationships[u];
+        assert (R.Type == RelationshipNode::IsKernel);
+        assert (R.Kernel == mPipelineKernel);
+    }
+    auto numOfPartitionedKernels = P[0].Kernels.size();
+    for (unsigned i = 1; i < partitionCount; ++i) {
+        numOfPartitionedKernels += P[i].Kernels.size();
+        for (const auto u : P[i].Kernels) {
+            assert ("kernel is in multiple partitions?" && included.insert(u).second);
+            const auto & R = Relationships[u];
+            assert (R.Type == RelationshipNode::IsKernel);
+        }
+    }
+    assert (numOfPartitionedKernels == numOfKernels);
+    END_SCOPED_REGION
+    #endif
+
+    flat_set<std::pair<unsigned, unsigned>> duplicateFilter;
+
+    for (unsigned i = 0; i < partitionCount; ++i) {
+        assert (P[i].Kernels.size() > 0);
+        const auto j = renumbered[i];
+        assert (duplicateFilter.empty());
+        for (const auto e : make_iterator_range(out_edges(i, T))) {
+            const auto k = renumbered[target(e, T)];
+            assert (k > j);
+            const auto streamSet = T[e];
+            if (LLVM_UNLIKELY(streamSet == 0)) continue;
+            assert (streamSet < num_vertices(Relationships));
+            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+            if (duplicateFilter.emplace(k, streamSet).second) {
+                add_edge(j, k, streamSet, P);
+            }
+        }
+        duplicateFilter.clear();
+    }
+
+    assert (partitionCount > 2);
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (in_degree(i, P) == 0) {
+            add_edge(0, i, 0, P);
+        }
+        if (out_degree(i, P) == 0) {
+            add_edge(i, partitionCount - 1, 0, P);
+        }
+    }
+
+    PartitionCount = partitionCount;
+
+    #ifdef PRINT_GRAPH_BITSETS
+    BEGIN_SCOPED_REGION
+    auto & out = errs();
+
+    out << "digraph \"H\" {\n";
+    for (auto v : make_iterator_range(vertices(P))) {
+        const PartitionData & D = P[v];
+        out << "v" << v << " [label=\"";
+        for (const auto k : D.Kernels) {
+            const RelationshipNode & node = Relationships[k];
+            assert (node.Type == RelationshipNode::IsKernel);
+            out << k << ". " << node.Kernel->getName() << "\\n";
+        }
+        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
+    }
+    for (auto e : make_iterator_range(edges(P))) {
+        const auto s = source(e, P);
+        const auto t = target(e, P);
+        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    END_SCOPED_REGION
+    #endif
+
+    return P;
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief postDataflowAnalysisPartitioningPass
+ ** ------------------------------------------------------------------------------------------------------------- */
+PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionGraph & initial) {
+
+    const unsigned n = num_vertices(Relationships);
+
+    std::vector<unsigned> sequence;
+    sequence.reserve(n);
+
+    std::vector<unsigned> mapping(n, -1U);
+
+    #ifndef NDEBUG
+    unsigned numOfKernels = 2;
+    #endif
+
+    BEGIN_SCOPED_REGION
+
+    std::vector<unsigned> ordering;
+    ordering.reserve(n);
+    if (LLVM_UNLIKELY(!lexical_ordering(Relationships, ordering))) {
+        report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
+    }
+
+    // Convert the relationship graph into a simpler graph G that we can annotate.
+    // For simplicity, force the pipeline input to be the first and the pipeline output
+    // to be the last one.
+
+    // For some reason, the Mac C++ compiler cannot link the constexpr PipelineInput value?
+    // Hardcoding 0 here as a temporary workaround.
+    mapping[0] = 0;
+    sequence.push_back(0);
+
+    for (unsigned u : ordering) {
+        const RelationshipNode & node = Relationships[u];
+        switch (node.Type) {
+            case RelationshipNode::IsKernel:
+                BEGIN_SCOPED_REGION
+                #ifndef NDEBUG
+                const auto & R = Relationships[u];
+                #endif
+                if (u == PipelineInput || u == PipelineOutput) {
+                    assert (R.Kernel == mPipelineKernel);
+                } else {
+                    assert (R.Kernel != mPipelineKernel);
+                    mapping[u] = sequence.size();
+                    sequence.push_back(u);
+                    #ifndef NDEBUG
+                    ++numOfKernels;
+                    #endif
+                }
+                END_SCOPED_REGION
+                break;
+            case RelationshipNode::IsRelationship:
+                BEGIN_SCOPED_REGION
+                const Relationship * const ss = Relationships[u].Relationship;
+                if (LLVM_LIKELY(isa<StreamSet>(ss))) {
+                    mapping[u] = sequence.size();
+                    sequence.push_back(u);
+                }
+                END_SCOPED_REGION
+                break;
+            default: break;
+        }
+    }
+
+    mapping[PipelineOutput] = sequence.size();
+    sequence.push_back(PipelineOutput);
+
+    END_SCOPED_REGION
+    const auto m = sequence.size();
+
+    Graph G(m);
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            addKernelRelationshipsInReferenceOrdering(u, Relationships,
+                [&](const PortType type, const unsigned binding, const unsigned streamSet) {
+                    const auto j = mapping[streamSet];
+                    assert (j < m);
+                    assert (sequence[j] == streamSet);
+                    auto a = i, b = j;
+                    if (type == PortType::Input) {
+                        a = j; b = i;
+                    }
+                    assert (a < b);
+                    assert (Relationships[binding].Type == RelationshipNode::IsBinding);
+                    add_edge(a, b, binding, G);
+                }
+            );
+        }
+    }
+
+    // Stage 1: identify synchronous components
+
+    // wcan through the graph and determine where every non-Fixed relationship exists
+    // so that we can construct our initial set of partitions. The goal here is to act
+    // as a naive first pass to simplify the problem before using Z3.
+
+    // NOTE: any decisions made during this pass *must* be provably correct for any
+    // situation because the choices will *not* be verified.
+
+    for (unsigned i = 0; i < m; ++i) {
+        BitSet & V = G[i];
+        V.resize(n);
+        assert (V.none());
+    }
+
+    unsigned nextRateId = 0;
+    for (auto i = 0UL, l = num_vertices(initial); i < l; ++i) {
+        const auto & P = initial[i];
+        for (const auto u : P.Kernels) {
+            assert (u < mapping.size());
+            assert (Relationships[u].Type == RelationshipNode::IsKernel);
+            const auto j = mapping[u];
+            assert (j < m);
+            const auto k = P.LinkedGroupId;
+            assert (k <= l);
+            nextRateId = std::max(nextRateId, k + 1U);
+            G[j].set(k);
+        }
+    }
+
+
+    for (unsigned i = 0; i < m; ++i) {
+
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+
+        BitSet & V = G[i];
+
+        for (const auto e : make_iterator_range(in_edges(i, G))) {
+            const auto u = source(e, G);
+            V |= G[u];
+        }
+
+        if (node.Type == RelationshipNode::IsKernel) {
+
+            const Kernel * const kernelObj = node.Kernel;
+
+            assert (V.any() || kernelObj == mPipelineKernel);
+
+            // Check whether this (internal) kernel could terminate early
+            bool demarcateOutputs = (kernelObj == mPipelineKernel);
+            bool useNewRateId = false;
+            if (kernelObj != mPipelineKernel) {
+                // TODO: an internally synchronzied kernel with fixed rate I/O can be contained within a partition
+                // but cannot be the root of a non-isolated partition. To permit them to be roots, they'd need
+                // some way of informing the pipeline as to how many strides they executed or the pipeline
+                // would need to know to calculate it from its outputs. Rather than handling this complication,
+                // for now we simply prevent this case.
+                for (const Attribute & attr : kernelObj->getAttributes()) {
+                    switch (attr.getKind()) {
+                        case AttrId::IsolateOnHybridThread:
+                            if (mPipelineKernel->getNumOfThreads() == 1 || !codegen::EnableHybridThreadModel) {
+                                break;
+                            }
+                        case AttrId::InternallySynchronized:
+                            useNewRateId = true;
+                        case AttrId::CanTerminateEarly:
+                        case AttrId::MayFatallyTerminate:
+                        case AttrId::MustExplicitlyTerminate:
+                            demarcateOutputs = true;
+                        default: break;
+                    }
+                }
+            }
+
+            if (useNewRateId) {
+                V.set(nextRateId++);
+            }
+
+            unsigned demarcationId = 0;
+            if (LLVM_UNLIKELY(demarcateOutputs)) {
+                demarcationId = nextRateId++;
+            }
+
+            // Now iterate through the outputs
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                BitSet & O = G[target(e, G)];
+                O |= V;
+                if (LLVM_UNLIKELY(demarcateOutputs)) {
+                    O.set(demarcationId);
+                }
+            }
+
+        } else { // just propagate the bitsets
+
+            assert (in_degree(i, G) == 1);
+
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                BitSet & R = G[target(e, G)];
+                R |= V;
+            }
+
+        }
+    }
+
+    assert (Relationships[sequence[0]].Kernel == mPipelineKernel);
+    assert (Relationships[sequence[m - 1]].Kernel == mPipelineKernel);
+
+    G[0].reset();
+    G[m - 1].set(nextRateId);
+
+    std::vector<unsigned> partitionIds(m);
+
+    auto convertUniqueNodeBitSetsToUniquePartitionIds = [&]() {
+        PartitionMap partitionSets;
+        unsigned nextPartitionId = 1;
+        for (unsigned i = 0; i < m; ++i) {
+            const auto u = sequence[i];
+            const RelationshipNode & node = Relationships[u];
+            if (node.Type == RelationshipNode::IsKernel) {
+                BitSet & V = G[i];
+                unsigned partitionId = 0;
+                if (LLVM_LIKELY(V.any())) {
+                    auto f = partitionSets.find(V);
+                    if (f == partitionSets.end()) {
+                        partitionId = nextPartitionId++;
+                        partitionSets.emplace(V, partitionId);
+                    } else {
+                        partitionId = f->second;
+                    }
+                    assert (partitionId > 0);
+                } else {
+                    assert (node.Kernel == mPipelineKernel);
+                }
+                partitionIds[i] = partitionId;
+            }
+        }
+        return nextPartitionId;
+    };
+
+    const auto synchronousPartitionCount = convertUniqueNodeBitSetsToUniquePartitionIds();
+
+    assert (synchronousPartitionCount > 0);
+
+
+
+    // Stage 6: split (weakly) disconnected components within a partition into separate partitions
+
+    std::vector<unsigned> componentId(m);
+    std::iota(componentId.begin(), componentId.end(), 0);
+
+    std::function<unsigned(unsigned)> find = [&](unsigned x) {
+        assert (x < m);
+        if (componentId[x] != x) {
+            componentId[x] = find(componentId[x]);
+        }
+        return componentId[x];
+    };
+
+    auto union_find = [&](unsigned x, unsigned y) {
+        assert (x < y);
+        x = find(x);
+        y = find(y);
+        if (x != y) {
+            componentId[y] = x;
+        }
+    };
+
+    for (unsigned i = 1; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsRelationship) {
+            const auto j = parent(i, G);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
+            const auto prodPartId = partitionIds[j];
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                const auto k = target(e, G);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
+                const auto consPartId = partitionIds[k];
+                assert (consPartId > 0);
+                if (prodPartId == consPartId) {
+                    union_find(j, k);
+                }
+            }
+        }
+    }
+
+    flat_set<unsigned> componentIds;
+    componentIds.reserve(synchronousPartitionCount * 2);
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            // find(x) updates and returns componentId[x]
+            componentIds.insert(find(i));
+        }
+    }
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            const auto f = componentIds.find(componentId[i]);
+            assert (f != componentIds.end());
+            componentId[i] = std::distance(componentIds.begin(), f);
+        }
+    }
+
+    const auto partitionCount = componentIds.size();
+    assert (partitionCount >= synchronousPartitionCount);
+
+    using RenumberingGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
+
+    // Stage 7: renumber the partition ids
+
+    // To simplify processing later, renumber the partitions such that the partition id
+    // of any predecessor of a kernel K is <= the partition id of K.
+
+    RenumberingGraph T(partitionCount);
+
+    for (unsigned i = 1; i < partitionCount; ++i) {
+        add_edge(0, i, 0, T);
+    }
+
+    for (unsigned i = 1; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsRelationship) {
+            const auto j = parent(i, G);
+            assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
+            const auto prodPartId = componentId[j];
+            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                const auto k = target(e, G);
+                assert (Relationships[sequence[k]].Type == RelationshipNode::IsKernel);
+                const auto consPartId = componentId[k];
+                if (prodPartId != consPartId) {
+                    assert (consPartId > 0);
+                    add_edge(prodPartId, consPartId, u, T);
+                }
+            }
+        }
+    }
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (out_degree(i, T) == 0) {
+            add_edge(i, partitionCount - 1, 0, T);
+        }
+    }
+
+    std::vector<unsigned> renumberingSeq;
+    renumberingSeq.reserve(partitionCount);
+
+    if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
+        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+    }
+
+    assert (renumberingSeq[0] == 0);
+
+    std::vector<unsigned> renumbered(partitionCount);
+
+    for (unsigned i = 0; i < partitionCount; ++i) {
+        const auto j = renumberingSeq[i];
+        assert (j < partitionCount);
+        renumbered[j] = i;
+    }
+
+    assert (renumbered[0] == 0);
+
+    PartitionGraph P(partitionCount);
+
+    flat_set<unsigned> linkedPartitionGroups;
+
+    PartitionIds.clear();
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = sequence[i];
+        const RelationshipNode & node = Relationships[u];
+        if (node.Type == RelationshipNode::IsKernel) {
+            assert (componentId[i] < partitionCount);
+            const auto j = renumbered[componentId[i]];
+            assert (j < partitionCount);
+            assert ((j > 0 && (j + 1) < partitionCount) ^ (node.Kernel == mPipelineKernel));
+            PartitionData & pd = P[j];
+            const auto pid = partitionIds[i];
+            assert (pd.LinkedGroupId == 0 || pd.LinkedGroupId == pid);
+            pd.LinkedGroupId = pid;
+            linkedPartitionGroups.insert(pid);
+            pd.Kernels.push_back(u);
+            PartitionIds.emplace(u, j);
+        }
+    }
+
+    for (unsigned partitionId = 0; partitionId < partitionCount; ++partitionId) {
+        PartitionData & N = P[partitionId];
+        const auto f = linkedPartitionGroups.find(N.LinkedGroupId);
+        assert (f != linkedPartitionGroups.end());
+        N.LinkedGroupId = std::distance(linkedPartitionGroups.begin(), f);
+    }
+
+
+    #ifndef NDEBUG
+    BEGIN_SCOPED_REGION
+    flat_set<unsigned> included;
+    included.reserve(numOfKernels);
+    for (const auto u : P[0].Kernels) {
+        assert ("kernel is in multiple partitions?" && included.insert(u).second);
+        const auto & R = Relationships[u];
+        assert (R.Type == RelationshipNode::IsKernel);
+        assert (R.Kernel == mPipelineKernel);
+    }
+    auto numOfPartitionedKernels = P[0].Kernels.size();
+    for (unsigned i = 1; i < partitionCount; ++i) {
+        numOfPartitionedKernels += P[i].Kernels.size();
+        for (const auto u : P[i].Kernels) {
+            assert ("kernel is in multiple partitions?" && included.insert(u).second);
+            const auto & R = Relationships[u];
+            assert (R.Type == RelationshipNode::IsKernel);
+        }
+    }
+    assert (numOfPartitionedKernels == numOfKernels);
+    END_SCOPED_REGION
+    #endif
+
+    flat_set<std::pair<unsigned, unsigned>> duplicateFilter;
+
+    for (unsigned i = 0; i < partitionCount; ++i) {
+        assert (P[i].Kernels.size() > 0);
+        const auto j = renumbered[i];
+        assert (duplicateFilter.empty());
+        for (const auto e : make_iterator_range(out_edges(i, T))) {
+            const auto k = renumbered[target(e, T)];
+            assert (k > j);
+            const auto streamSet = T[e];
+            if (LLVM_UNLIKELY(streamSet == 0)) continue;
+            assert (streamSet < num_vertices(Relationships));
+            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+            if (duplicateFilter.emplace(k, streamSet).second) {
+                add_edge(j, k, streamSet, P);
+            }
+        }
+        duplicateFilter.clear();
+    }
+
+    assert (partitionCount > 2);
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (in_degree(i, P) == 0) {
+            add_edge(0, i, 0, P);
+        }
+        if (out_degree(i, P) == 0) {
+            add_edge(i, partitionCount - 1, 0, P);
+        }
+    }
+
+    PartitionCount = partitionCount;
+
+    #ifdef PRINT_GRAPH_BITSETS
+    BEGIN_SCOPED_REGION
+    auto & out = errs();
+
+    out << "digraph \"H\" {\n";
+    for (auto v : make_iterator_range(vertices(P))) {
+        const PartitionData & D = P[v];
+        out << "v" << v << " [label=\"";
+        for (const auto k : D.Kernels) {
+            const RelationshipNode & node = Relationships[k];
+            assert (node.Type == RelationshipNode::IsKernel);
+            out << k << ". " << node.Kernel->getName() << "\\n";
+        }
+        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
+    }
+    for (auto e : make_iterator_range(edges(P))) {
+        const auto s = source(e, P);
+        const auto t = target(e, P);
+        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    END_SCOPED_REGION
+    #endif
+
+    // Convert the dataflow expectations to the new partitioning graph.
+
+    // TODO: there is almost certainly a more efficient way to do this
+
+    struct Expected {
+        Rational Reps;
+        Rational CoV;
+        Expected(Rational reps, Rational cov) : Reps(reps), CoV(cov) { }
+    };
+
+    flat_map<unsigned, Expected> update;
+    update.reserve(numOfKernels);
+
+    for (auto i = 0UL, l = num_vertices(initial); i < l; ++i) {
+        const PartitionData & D = initial[i];
+        const auto m = D.Kernels.size();
+        assert (D.Repetitions.size() == m);
+        const auto exp = floor(D.ExpectedStridesPerSegment + Rational{1, 2});
+        for (unsigned j = 0; j < m; ++j) {
+            const auto k = D.Kernels[j];
+            assert (Relationships[k].Type == RelationshipNode::IsKernel);
+            const auto reps = D.Repetitions[j] * exp;
+            assert (Relationships[k].Kernel == mPipelineKernel || reps > Rational{0});
+            update.emplace(std::make_pair(k, Expected{reps, D.StridesPerSegmentCoV}));
+        }
+    }
+
+    assert (update.size() == numOfKernels);
+
+    for (unsigned partitionId = 0; partitionId < partitionCount; ++partitionId) {
+        PartitionData & N = P[partitionId];
+        const auto m = N.Kernels.size();
+        N.Repetitions.resize(m);
+        for (unsigned j = 0; j < m; ++j) {
+            const auto f = update.find(N.Kernels[j]);
+            assert (f != update.end());
+            const Expected & E = f->second;
+            N.Repetitions[j] = E.Reps;
+            N.StridesPerSegmentCoV += E.CoV;
+            #ifndef NDEBUG
+            update.erase(f);
+            #endif
+        }
+        N.StridesPerSegmentCoV /= m;
+    }
+    assert (update.empty());
+    return P;
+}
+
+#else
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyKernelPartitions
@@ -692,6 +1701,8 @@ PartitionGraph PipelineAnalysis::identifyKernelPartitions() {
 
     return P;
 }
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determinePartitionJumpIndices

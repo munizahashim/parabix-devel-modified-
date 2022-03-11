@@ -1,6 +1,8 @@
 #ifndef VARIABLE_RATE_ANALYSIS_HPP
 #define VARIABLE_RATE_ANALYSIS_HPP
 
+#define PRINT_SIMULATION_DEBUG_STATISTICS
+
 #include "pipeline_analysis.hpp"
 
 #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
@@ -24,6 +26,7 @@ using length_t = int64_t;
 struct SimulationPort {
 
     length_t QueueLength;
+    length_t TotalTransferred;
 
     virtual bool consume(length_t & pending, random_engine & rng) = 0;
 
@@ -31,15 +34,21 @@ struct SimulationPort {
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
+        TotalTransferred += pending;
     }
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
+    virtual void reset() {
+        QueueLength = 0;
+        TotalTransferred = 0;
+    }
+
 protected:
 
-    SimulationPort() : QueueLength(0) { }
+    SimulationPort() : QueueLength(0), TotalTransferred(0) { }
 
 };
 
@@ -56,6 +65,7 @@ struct FixedPort final : public SimulationPort {
 
     void produce(random_engine & /* rng */) override {
         QueueLength += mAmount;
+        TotalTransferred += mAmount;
     }
 
 private:
@@ -83,8 +93,9 @@ struct UniformBoundedPort final : public SimulationPort {
 
     void produce(random_engine & rng) override {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
-        const auto k = dst(rng);
-        QueueLength += k;
+        const auto m = dst(rng);
+        QueueLength += m;
+        TotalTransferred += m;
     }
 
 private:
@@ -255,6 +266,7 @@ struct PartialSumPort final : public SimulationPort {
 
     void commit(const length_t pending) override {
         QueueLength -= pending;
+        TotalTransferred += pending;
         Index += Step;
         #ifndef NDEBUG
         PreviousValue = -1U;
@@ -265,6 +277,7 @@ struct PartialSumPort final : public SimulationPort {
     void produce(random_engine & rng) override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
+        TotalTransferred += m;
         Index += Step;
         Generator.updateReadPosition(UserId, Index);
     }
@@ -292,7 +305,9 @@ struct RelativePort final : public SimulationPort {
     }
 
     void produce(random_engine & /* rng */) override {
-        QueueLength += BaseRateValue;
+        const auto m = BaseRateValue;
+        QueueLength += m;
+        TotalTransferred += m;
     }
 
 private:
@@ -331,10 +346,19 @@ struct SimulationNode {
 
     virtual void demand(length_t * const pendingArray, random_engine & rng) = 0;
 
-    virtual void fire(length_t * const pendingArray, random_engine & rng) = 0;
+    virtual void fire(length_t * const pendingArray, random_engine & rng, uint64_t *& history) = 0;
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
+    }
+
+    virtual void reset() {
+        for (unsigned i = 0; i < Inputs; ++i) {
+            Input[i]->reset();
+        }
+        for (unsigned i = 0; i < Outputs; ++i) {
+            Output[i]->reset();
+        }
     }
 
 protected:
@@ -375,7 +399,7 @@ struct SimulationFork final : public SimulationNode {
         }
     }
 
-    void fire(length_t * const /* endingArray */, random_engine & /* rng */) override {
+    void fire(length_t * const /* endingArray */, random_engine & /* rng */, uint64_t *& /* history */) override {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -384,7 +408,6 @@ struct SimulationFork final : public SimulationNode {
         for (unsigned i = 0; i < Outputs; ++i) {
             Output[i]->QueueLength += ql;
         }
-
     }
 
 };
@@ -449,7 +472,7 @@ no_more_pending_input:
         SumOfStridesSquared += (strides * strides);
     }
 
-    void fire(length_t * const pendingArray, random_engine & rng) override {
+    void fire(length_t * const pendingArray, random_engine & rng, uint64_t *& history) override {
         uint64_t strides = 0;
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
@@ -458,6 +481,7 @@ no_more_pending_input:
                 if (!I->consume(pendingArray[i], rng)) {
                     SumOfStrides += strides;
                     SumOfStridesSquared += (strides * strides);
+                    *history++ = strides;
                     return;
                 }
             }
@@ -471,6 +495,12 @@ no_more_pending_input:
         }
     }
 
+    void reset() override {
+        SimulationNode::reset();
+        SumOfStrides = 0;
+        SumOfStridesSquared = 0;
+    }
+
     uint64_t SumOfStrides;
     uint64_t SumOfStridesSquared;
 };
@@ -478,10 +508,9 @@ no_more_pending_input:
 struct SimulationSourceActor final : public SimulationActor {
 
     SimulationSourceActor(const unsigned outputs,
-                          const unsigned iterations,
                           SimulationAllocator & allocator)
     : SimulationActor(0, outputs, allocator)
-    , RequiredIterations(iterations) {
+    , RequiredIterations(1) {
 
     }
 
@@ -510,7 +539,7 @@ struct SimulationSourceActor final : public SimulationActor {
         #endif
     }
 
-    void fire(length_t * const /* pendingArray */, random_engine & rng) override {
+    void fire(length_t * const /* pendingArray */, random_engine & rng, uint64_t *& history) override {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -519,9 +548,10 @@ struct SimulationSourceActor final : public SimulationActor {
         const uint64_t strides = RequiredIterations;
         SumOfStrides += strides;
         SumOfStridesSquared += (strides * strides);
+        *history++ = strides;
     }
-private:
-    const unsigned RequiredIterations;
+
+    unsigned RequiredIterations;
 };
 
 struct SimulationSinkActor final : public SimulationActor {
@@ -554,9 +584,6 @@ struct SimulationSinkActor final : public SimulationActor {
         }
     }
 
-    void fire(length_t * const /* pendingArray */, random_engine & /* rng */) override {
-        llvm_unreachable("cannot fire a sink node");
-    }
 };
 
 struct BlockSizeActor final : public SimulationActor {
@@ -587,7 +614,7 @@ struct BlockSizeActor final : public SimulationActor {
         }
     }
 
-    void fire(length_t * const /* pendingArray */, random_engine & /* rng */) override {
+    void fire(length_t * const /* pendingArray */, random_engine & /* rng */, uint64_t *& /* history */) override {
         assert (Inputs == 1 && Outputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -759,7 +786,6 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                     const auto producerPartitionId = c->second;
                     assert (producerPartitionId <= partitionId);
                     if (producerPartitionId != partitionId) {
-                        assert (N.LinkedGroupId != P[producerPartitionId].LinkedGroupId);
                         add_vertex(PortNode{static_cast<unsigned>(input), static_cast<unsigned>(streamSet)}, H);
                     }
                 }
@@ -787,7 +813,6 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                         const auto consumerPartitionId = c->second;
                         assert (partitionId <= consumerPartitionId);
                         if (consumerPartitionId != partitionId) {
-                            assert (N.LinkedGroupId != P[consumerPartitionId].LinkedGroupId);
                             add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
                             break;
                         }
@@ -1121,6 +1146,11 @@ equivalent_port_exists:
         }
     }
 
+    if (LLVM_UNLIKELY(num_edges(G) == 0)) {
+        return;
+    }
+
+
     // Normalize purely fixed-rate streamset I/O rates by their GCD. Do not alter
     // ports if they are adjacent to a blocksize node.
 
@@ -1305,18 +1335,23 @@ restart:
     ordering.reserve(nodeCount);
     topological_sort(G, std::back_inserter(ordering)); // reverse topological ordering
     assert (ordering.size() == nodeCount);
-    unsigned maxInDegree = 0;
-    for (unsigned u = 0; u < nodeCount; ++u) {
-        maxInDegree = std::max<unsigned>(maxInDegree, in_degree(u, G));
+
+    size_t maxInDegree = 0;
+
+    unsigned m = 0;
+    for (unsigned i = 0; i < nodeCount; ++i) {
+        const auto u = ordering[i];
+        const auto in = in_degree(u, G);
+        if (in != 0 || out_degree(u, G) != 0) {
+            maxInDegree = std::max(maxInDegree, in);
+            ordering[m++] = u;
+        }
     }
+    ordering.erase(ordering.begin() + m, ordering.end());
 
     flat_map<unsigned, PartialSumGenerator *> partialSumGeneratorMap;
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
-
-    #ifndef NDEBUG
-    std::vector<SimulationNode *> partitionNodes;
-    #endif
 
     std::vector<uint64_t> initialSumOfStrides(nodeCount);
 
@@ -1372,9 +1407,6 @@ restart:
         return port;
     };
 
-    unsigned inputNodes = 0;
-
-    BEGIN_SCOPED_REGION
     SimulationAllocator allocator;
 
     SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(nodeCount);
@@ -1387,29 +1419,26 @@ restart:
     }
     #endif
 
-    for (unsigned i = 0; i < nodeCount; ++i) { // reverse topological odering
+    std::vector<unsigned> actorNodes;
+    actorNodes.reserve(m);
 
-        const auto u = ordering[i];
+    for (unsigned i = 0; i != m; ++i) {
 
+        const auto u = ordering[m - i - 1]; // forward topological ordering
         const auto inputs = in_degree(u, G);
         const auto outputs = out_degree(u, G);
-
-        if (LLVM_UNLIKELY(inputs == 0 && outputs == 0)) {
-            continue;
-        }
+        assert (inputs != 0 || outputs != 0);
 
         SimulationNode * sn = nullptr;
         if (u < numOfPartitions) {
             if (inputs == 0) {
-                sn = new (allocator) SimulationSourceActor(outputs, 1, allocator);
+                sn = new (allocator) SimulationSourceActor(outputs, allocator);
             } else if (outputs == 0) {
                 sn = new (allocator) SimulationSinkActor(inputs, allocator);
             } else {
                 sn = new (allocator) SimulationActor(inputs, outputs, allocator);
             }
-            #ifndef NDEBUG
-            partitionNodes.push_back(sn);
-            #endif
+            actorNodes.push_back(u);
         } else if (G[u].BlockSize) {
             assert (inputs == 1 && outputs == 1);
             sn = new (allocator) BlockSizeActor(G[u].BlockSize, allocator);
@@ -1417,158 +1446,7 @@ restart:
             assert (inputs == 1 && outputs > 0);
             sn = new (allocator) SimulationFork(inputs, outputs, allocator);
         }
-        assert (inputNodes < nodeCount);
-        nodes[inputNodes] = sn;
-        ++inputNodes;
-        BEGIN_SCOPED_REGION
-        unsigned outputIdx = 0;
-        for (const auto e : make_iterator_range(out_edges(u, G))) {
-            assert (outputIdx < outputs);
-            const auto f = portMap.find(e);
-            assert (f != portMap.end());
-            sn->Output[outputIdx++] = f->second;
-        }
-        assert (outputIdx == outputs);
-        END_SCOPED_REGION
-
-        BEGIN_SCOPED_REGION
-        unsigned inputIdx = 0;
-        for (const auto e : make_iterator_range(in_edges(u, G))) {
-            assert (inputIdx < inputs);
-            sn->Input[inputIdx++] = makePortNode(e, pendingArray, allocator);
-        }
-        assert (inputIdx == inputs);
-        END_SCOPED_REGION
-    }
-
-    // run the simulation
-
-    // TODO: run this for K seconds instead of a fixed number of iterations
-
-    for (uint64_t r = 0; r < DEMAND_ITERATIONS; ++r) {
-        for (unsigned i = 0; i < inputNodes; ++i) {
-            nodes[i]->demand(pendingArray, rng);
-        }
-    }
-
-    // Now calculate the expected dataflow from the simulation. since it is up
-    // to the user/programmer to decide what the base segment length is, we
-    // normalize the number of strides based on the (smallest) segment length
-    // of the program's source kernel(s)
-
-    // We cannot assume that we'll require only one stride here. For example,
-    // ztf-phrase-hash processes 1 MB segments but MMap might supply only 4KB
-    // per stride.
-
-    // Instead we want the output rates of every source to satisfy the input
-    // demands of their immediate consumers.
-
-
-    SmallVector<unsigned, 2> sourceVertex;
-    SmallVector<const SimulationActor *, 100> P(numOfPartitions);
-    for (unsigned i = 0, j = 0; i < nodeCount; ++i) {
-        const auto u = ordering[i];
-        const auto inputs = in_degree(u, G);
-        if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
-
-            if (u < numOfPartitions) {
-                assert (j < inputNodes);
-                const SimulationActor * const A = reinterpret_cast<SimulationActor *>(nodes[j]);
-                assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
-                P[u] = A;
-                if (inputs == 0) {
-                    sourceVertex.push_back(u);
-                }
-            }
-            ++j;
-        }
-    }
-
-    assert (sourceVertex.size() > 0);
-
-    // TODO: If the output is supposed to be sparse, I don't want the input to be scaled so
-    // high that it always satisfies the output but would want it to do so if the output
-    // is expected to be dense. Should the output kernels actually be marked as to
-    // their expected output? We could infer it ports were marked to indicate expected
-    // transfer rates.
-
-    for (const auto u : sourceVertex) {
-        auto k = P[u]->SumOfStrides;
-//        for (const auto e : make_iterator_range(out_edges(u, G))) {
-//            const auto streamSet = target(e, G);
-//            assert (streamSet >= numOfPartitions);
-//            for (const auto f : make_iterator_range(out_edges(streamSet, G))) {
-//                const auto v = target(f, G);
-//                assert (v < numOfPartitions);
-//                k = std::min(k, P[v]->SumOfStrides);
-//            }
-//        }
-        Rational X{k, DEMAND_ITERATIONS};
-        const auto strides = (X.numerator() + (X.denominator() / 2)) / X.denominator();
-        initialSumOfStrides[u] = strides;
-    }
-    END_SCOPED_REGION
-
-    // Rerun this process in a pure data-driven mode once using the segment length
-    // information gathered from the demand-driven execution. It is unclear how we
-    // can correctly handle the standard deviation for the source kernels at run-time.
-
-    #ifndef NDEBUG
-    partitionNodes.clear();
-    #endif
-    portMap.clear();
-    partialSumGeneratorMap.clear();
-    for (auto & itr : partialSumMap) {
-        itr.second.Index = 0;
-    }
-
-    SimulationAllocator allocator;
-
-    SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(inputNodes);
-
-    length_t * const pendingArray = allocator.allocate<length_t>(maxInDegree);
-
-    #ifdef NDEBUG
-    for (unsigned i = 0; i < nodeCount; ++i) {
-        nodes[i] = nullptr;
-    }
-    #endif
-
-    unsigned outputNodes = 0;
-
-    for (auto i = nodeCount; i--; ) { // forward topological ordering
-
-        const auto u = ordering[i];
-
-        const auto inputs = in_degree(u, G);
-        const auto outputs = out_degree(u, G);
-
-        if (LLVM_UNLIKELY(inputs == 0 && outputs == 0)) {
-            continue;
-        }
-
-        SimulationNode * sn = nullptr;
-        if (u < numOfPartitions) {
-            if (inputs == 0) {
-                const auto k = initialSumOfStrides[u];
-                assert (k > 0);
-                sn = new (allocator) SimulationSourceActor(outputs, k, allocator);
-            } else {
-                sn = new (allocator) SimulationActor(inputs, outputs, allocator);
-            }
-            #ifndef NDEBUG
-            partitionNodes.push_back(sn);
-            #endif
-        } else if (G[u].BlockSize) {
-            assert (inputs == 1 && outputs == 1);
-            sn = new (allocator) BlockSizeActor(G[u].BlockSize, allocator);
-        } else {
-            assert (inputs == 1 && outputs > 0);
-            sn = new (allocator) SimulationFork(inputs, outputs, allocator);
-        }
-        assert (outputNodes < inputNodes);
-        nodes[outputNodes] = sn;
-        ++outputNodes;
+        nodes[i] = sn;
         BEGIN_SCOPED_REGION
         unsigned inputIdx = 0;
         for (const auto e : make_iterator_range(in_edges(u, G))) {
@@ -1590,11 +1468,137 @@ restart:
         END_SCOPED_REGION
     }
 
-    for (uint64_t r = 0; r < DATA_ITERATIONS; ++r) {
-        for (unsigned i = 0; i < outputNodes; ++i) {
-            nodes[i]->fire(pendingArray, rng);
+    assert (actorNodes.size() <= m);
+
+    // run the simulation
+
+    // TODO: run this for K seconds instead of a fixed number of iterations
+
+    for (uint64_t r = 0; r < DEMAND_ITERATIONS; ++r) {
+        for (auto i = m; i--; ) { // reverse topological ordering
+            nodes[i]->demand(pendingArray, rng);
         }
     }
+
+    // Now calculate the expected dataflow from the simulation. since it is up
+    // to the user/programmer to decide what the base segment length is, we
+    // normalize the number of strides based on the (smallest) segment length
+    // of the program's source kernel(s)
+
+    // We cannot assume that we'll require only one stride here. For example,
+    // ztf-phrase-hash processes 1 MB segments but MMap might supply only 4KB
+    // per stride.
+
+    // Instead we want the output rates of every source to satisfy the input
+    // demands of their immediate consumers.
+
+
+    // TODO: If the output is supposed to be sparse, I don't want the input to be scaled so
+    // high that it always satisfies the output but would want it to do so if the output
+    // is expected to be dense. Should the output kernels actually be marked as to
+    // their expected output? We could infer it ports were marked to indicate expected
+    // transfer rates.
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = ordering[m - i - 1]; // forward topological ordering
+        if (u < numOfPartitions) {
+            if (in_degree(u, G) == 0) {
+                SimulationSourceActor * const A = reinterpret_cast<SimulationSourceActor *>(nodes[i]);
+                Rational X{A->SumOfStrides, DEMAND_ITERATIONS};
+                const auto strides = (X.numerator() + (X.denominator() / 2)) / X.denominator();
+                assert (strides > 0);
+                A->RequiredIterations = strides;
+            }
+        }
+        nodes[i]->reset();
+    }
+
+    // Rerun this process in a pure data-driven mode once using the segment length
+    // information gathered from the demand-driven execution. It is unclear how we
+    // can correctly handle the standard deviation for the source kernels at run-time.
+
+    using LinkingGraph = adjacency_list<vecS, vecS, undirectedS, no_property, Rational>;
+
+    const auto numOfActors = actorNodes.size();
+
+    uint64_t * const strideHistory = allocator.allocate<uint64_t>(numOfActors);
+
+    LinkingGraph L(numOfActors);
+
+    uint64_t * current = strideHistory;
+    for (unsigned i = 0; i < m; ++i) { // forward topological ordering
+        assert (current >= strideHistory);
+        assert ((current - strideHistory) < numOfActors);
+        nodes[i]->fire(pendingArray, rng, current);
+    }
+    assert (current >= strideHistory);
+    assert ((current - strideHistory) == numOfActors);
+    // if at every timestep, the number of strides that two partition nodes execute
+    // are aligned (i.e., identical or one is a constant multiple of the other)
+    // then these partitions are linked with at least 1.0 - 1/(2^n) probability
+    for (unsigned j = 1; j < numOfActors; ++j) {
+        if (strideHistory[j]) {
+            for (unsigned i = 0; i != j; ++i) {
+                if (strideHistory[i]) {
+                    Rational r(strideHistory[i], strideHistory[j]);
+                    // We want an integer (or reciprocal thereof) relationship between
+                    // the actors to avoid scenarios in which fusing both partitions
+                    // would require executing a large number of strides.
+                    if (r.numerator() == 1 || r.denominator() == 1) {
+                        add_edge(i, j, r, L);
+                    }
+                }
+            }
+        }
+    }
+
+    for (uint64_t r = 1; r < DATA_ITERATIONS; ++r) {
+        uint64_t * current = strideHistory;
+        for (unsigned i = 0; i < m; ++i) { // forward topological ordering
+            assert (current >= strideHistory);
+            assert ((current - strideHistory) < numOfActors);
+            nodes[i]->fire(pendingArray, rng, current);
+        }
+        assert (current >= strideHistory);
+        assert ((current - strideHistory) == numOfActors);
+        remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
+            const auto i = source(e, L);
+            const auto a = strideHistory[i];
+            const auto j = target(e, L);
+            const auto b = strideHistory[j];
+            assert (i < j);
+            return (b == 0) || Rational{a, b} != L[e];
+        }, L);
+    }
+
+    unsigned numOfLinkedGroups = 0;
+
+    struct MarkLinkedPartitionsFunctor {
+        using VertexSet = std::deque<LinkingGraph::vertex_descriptor>;
+        void clique(const VertexSet & V, const LinkingGraph &) {
+            const auto id = ++numOfLinkedGroups;
+            for (const auto v : V) {
+                assert (v < M.size());
+                const auto p = M[v];
+                assert (p < num_vertices(P));
+                assert (P[p].LinkedGroupId == 0);
+                P[p].LinkedGroupId = id;
+            }
+        }
+        MarkLinkedPartitionsFunctor(PartitionGraph & P, const std::vector<unsigned> & M, unsigned & numOfLinkedGroups)
+        : P(P), M(M), numOfLinkedGroups(numOfLinkedGroups) {}
+        PartitionGraph & P;
+        const std::vector<unsigned> & M;
+        unsigned & numOfLinkedGroups;
+    };
+
+    // NOTE: ugly workaround here. this algorithm copies the functor at each recursion
+    // level, leading to an incorrect notion of state. Even when I try forcing the
+    // template type to  be a reference type, this seems to get stripped away. To
+    // maintain the state and minimize the copy cost, we make everything in the functor
+    // a reference.
+
+    bron_kerbosch_all_cliques(L, MarkLinkedPartitionsFunctor{P, actorNodes, numOfLinkedGroups}, 1);
 
     // At run-time, we execute using a "data-driven" process since estimating
     // demands of future kernels is imprecise and costly at best and impossible
@@ -1608,73 +1612,55 @@ restart:
     // would be time as the GA approach would require many magnitutes more time
     // to complete than a single simulation run.
 
-    for (auto i = nodeCount, j = 0UL; i--; ) {
-        const auto u = ordering[i];
-        const auto inputs = in_degree(u, G);
-        if (LLVM_LIKELY(inputs != 0 || out_degree(u, G) != 0)) {
-            assert (j < outputNodes);
-            if (u < numOfPartitions) {
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = ordering[m - i - 1];
+        assert (in_degree(u, G) != 0 || out_degree(u, G) != 0);
+        if (u < numOfPartitions) {
+            const SimulationActor * const A =
+                reinterpret_cast<SimulationActor *>(nodes[i]);
+            const uint64_t SQS = A->SumOfStrides;
+            const uint64_t SSQ = A->SumOfStridesSquared;
 
-                const SimulationActor * const A =
-                    reinterpret_cast<SimulationActor *>(nodes[j]);
-                assert (std::find(partitionNodes.begin(), partitionNodes.end(), A) != partitionNodes.end());
-                const uint64_t SQS = A->SumOfStrides;
-                const uint64_t SSQ = A->SumOfStridesSquared;
+            Rational expected{SQS, DATA_ITERATIONS};
+            Rational cov;
 
-                Rational expected;
-                Rational cov;
-
-                expected = Rational{SQS, DATA_ITERATIONS};
-                if (LLVM_UNLIKELY(inputs == 0 || SQS == 0)) {
-                    cov = Rational{0};
-                } else {
-                    const uint64_t a = (DATA_ITERATIONS * SSQ);
-                    const uint64_t b = (SQS * SQS);
-                    assert (a >= b);
-                    // We don't need the stddev to be too precise but do want a rational number
-                    // to simplify the rest of the system. We use Newton's method but initially
-                    // scale the value by 100^2 to get 2 digits of precision.
-                    uint64_t val = (a - b) * 10000UL;
-                    if (LLVM_LIKELY(val > 1)) {
-                        auto a = 1UL << (floor_log2(val) / 2UL); // <- approximates sqrt(val)
-                        auto b = val;
-                        // while (std::max(a, b) - std::min(a, b)) > 1
-                        while (((a < b) ? (b - a) : (a - b)) > 1) {
-                            b = val / a;
-                            a = (a + b) / 2;
-                        }
-                        val = a; // a ought to equal ceil(sqrt(val) * 100)
+            if (LLVM_UNLIKELY(in_degree(u, G) == 0 || SQS == 0)) {
+                cov = Rational{0};
+            } else {
+                const uint64_t a = (DATA_ITERATIONS * SSQ);
+                const uint64_t b = (SQS * SQS);
+                assert (a >= b);
+                // We don't need the stddev to be too precise but do want a rational number
+                // to simplify the rest of the system. We use Newton's method but initially
+                // scale the value by 100^2 to get 2 digits of precision.
+                uint64_t val = (a - b) * 10000UL;
+                if (LLVM_LIKELY(val > 1)) {
+                    auto a = 1UL << (floor_log2(val) / 2UL); // <- approximates sqrt(val)
+                    auto b = val;
+                    // while (std::max(a, b) - std::min(a, b)) > 1
+                    while (((a < b) ? (b - a) : (a - b)) > 1) {
+                        b = val / a;
+                        a = (a + b) / 2;
                     }
-                    // (val / (Iterations * 100L)) / (SQS / Iterations)
-                    cov = Rational{val, SQS * 100UL};
+                    val = a; // a ought to equal ceil(sqrt(val) * 100)
                 }
-
-                PartitionData & D = P[u];
-                D.ExpectedStridesPerSegment = expected;
-                D.StridesPerSegmentCoV = cov;
-
-                #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
-                errs() << u << ":\tmean="
-                       << expected.numerator() << "/" << expected.denominator()
-                       << ",cov="
-                       << cov.numerator() << "/" << cov.denominator()
-                       << "\n";
-                #endif
-
-
+                // (val / (Iterations * 100L)) / (SQS / Iterations)
+                cov = Rational{val, SQS * 100UL};
             }
-            ++j;
-        }
-    }
-    for (unsigned i = 1; i < numOfPartitions; ++i) {
-        PartitionData & A = P[i];
-        for (unsigned j = 0; j != i; ++j) {
-            PartitionData & B = P[j];
-            if (A.LinkedGroupId == B.LinkedGroupId) {
-                const auto cov = std::max(A.StridesPerSegmentCoV, B.StridesPerSegmentCoV);
-                A.StridesPerSegmentCoV = cov;
-                B.StridesPerSegmentCoV = cov;
-            }
+
+            PartitionData & D = P[u];
+            D.ExpectedStridesPerSegment = expected;
+            D.StridesPerSegmentCoV = cov;
+
+            #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+            errs() << u << ":\tmean="
+                   << expected.numerator() << "/" << expected.denominator()
+                   << ",cov="
+                   << cov.numerator() << "/" << cov.denominator()
+                   << ",linkId=" << D.LinkedGroupId
+                   << "\n";
+            #endif
+
         }
     }
 }

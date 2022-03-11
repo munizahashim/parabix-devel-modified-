@@ -19,6 +19,7 @@
 
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/dominator_tree.hpp>
+#include <boost/graph/bron_kerbosch_all_cliques.hpp>
 
 using namespace boost;
 using namespace boost::adaptors;
