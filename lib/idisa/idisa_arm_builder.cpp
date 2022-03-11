@@ -13,7 +13,7 @@ std::string IDISA_ARM_Builder::getBuilderUniqueName() { return mBitBlockWidth !=
 
 Value * IDISA_ARM_Builder::hsimd_signmask(unsigned fw, Value * a) {
   if (getVectorBitWidth(a) == ARM_width) {
-    std::vector<Constant *> shuffle_amount;
+    SmallVector<Constant *, 16> shuffle_amount;
     switch(fw) {
       case 64:
         for (int i = 0; i < 2; i++) {
@@ -38,6 +38,7 @@ Value * IDISA_ARM_Builder::hsimd_signmask(unsigned fw, Value * a) {
     Value * shift_left_a = CreateShl(fwCast(fw, temp), shift);
     return CreateAddReduce(fwCast(fw, shift_left_a));    
   }
+  return IDISA_Builder::hsimd_signmask(fw, a);
 }
 
 Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) {

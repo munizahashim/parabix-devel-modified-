@@ -135,10 +135,6 @@ void JSONNumberSpan::generatePabloMethod() {
     cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
     PabloAST * hyphenIn = getInputStreamSet("lexIn")[Lex::hyphen];
     PabloAST * digitIn = getInputStreamSet("lexIn")[Lex::digit];
-    PabloAST * rCurlyIn = getInputStreamSet("lexIn")[Lex::rCurly];
-    PabloAST * rBracketIn = getInputStreamSet("lexIn")[Lex::rBracket];
-    PabloAST * commaIn = getInputStreamSet("lexIn")[Lex::comma];
-    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
 
     PabloAST * strSpan = getInputStreamSet("strSpan")[0];
     Var * const nbrLex = getOutputStreamVar("nbrLex");
@@ -152,13 +148,19 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * notStrSpan = pb.createNot(strSpan);
     PabloAST * hyphen = pb.createAnd(notStrSpan, hyphenIn);
     PabloAST * digit = pb.createAnd(notStrSpan, digitIn);
-    PabloAST * eE = pb.createAnd(notStrSpan, alleE);
-    PabloAST * dot = pb.createAnd(notStrSpan, allDot);
-    PabloAST * plusMinus = pb.createAnd(notStrSpan, allPlusMinus);
+    PabloAST * alleEAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), alleE);
+    PabloAST * eE = pb.createAnd(notStrSpan, alleEAfterDigit);
+    PabloAST * allDotAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), allDot);
+    PabloAST * dot = pb.createAnd(notStrSpan, allDotAfterDigit);
+    PabloAST * allPlusMinusAftereE = pb.createAnd(pb.createAdvance(eE, 1), allPlusMinus);
+    PabloAST * plusMinus = pb.createAnd(notStrSpan, pb.createOr(hyphen, allPlusMinusAftereE));
 
     PabloAST * nondigit = pb.createNot(digit);
     PabloAST * nonDigitNorEe = pb.createAnd(nondigit, pb.createNot(eE));
-    PabloAST * advHyphen = pb.createAnd(hyphen, pb.createAdvance(nonDigitNorEe, 1));
+    PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * beginIsHyphen = pb.createAnd(hyphen, begin);
+    PabloAST * otherIsHyphen = pb.createAnd(hyphen, pb.createAdvance(nonDigitNorEe, 1));
+    PabloAST * advHyphen = pb.createOr(beginIsHyphen, otherIsHyphen);
 
     PabloAST * nonDigitEePlusMinus = pb.createAnd(nonDigitNorEe, pb.createNot(plusMinus));
     PabloAST * nonDigitEePlusMinusDot = pb.createAnd(nonDigitEePlusMinus, pb.createNot(dot));
@@ -170,17 +172,11 @@ void JSONNumberSpan::generatePabloMethod() {
     PabloAST * errPlusMinus = pb.createAnd(pb.createAdvance(plusMinus, 1), nondigit);
     PabloAST * eENotPlusMinus = pb.createAnd(pb.createAdvance(eE, 1), pb.createNot(plusMinus));
     PabloAST * erreENotPlusMinus = pb.createAnd(eENotPlusMinus, nondigit);
-    PabloAST * potentialErr = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
-
-    PabloAST * validToken = pb.createOr3(rCurlyIn, rBracketIn, commaIn);
-    PabloAST * nextValidToken = pb.createOr(ws, validToken);
-    PabloAST * err = sanitizeLexInput(pb, nextValidToken, potentialErr);
+    PabloAST * err = pb.createOr3(errDot, errPlusMinus, erreENotPlusMinus);
     pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), err);
 
-    PabloAST * fstPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {beginNbr, digit});
-    PabloAST * sndPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {eE, digit});
-    PabloAST * trdPartNbr = pb.createIntrinsicCall(Intrinsic::InclusiveSpan, {dot, digit});
-    PabloAST * finalNbr = pb.createOr3(fstPartNbr, sndPartNbr, trdPartNbr);
+    PabloAST * endNbr = pb.createAnd(pb.createAdvance(digit, 1), nonDigitEePlusMinusDot);
+    PabloAST * finalNbr = pb.createIntrinsicCall(Intrinsic::SpanUpTo, {beginNbr, endNbr});
     pb.createAssign(pb.createExtract(nbrSpan, pb.getInteger(0)), finalNbr);
 }
 
@@ -194,10 +190,7 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
 
     Var * const nbrErr = getOutputStreamVar("extraErr");
-    Var * const syntaxErr = getOutputStreamVar("syntaxErr");
-    Var * const lexOut = getOutputStreamVar("firstLexs");
-    Var * const brackets = getOutputStreamVar("combinedBrackets");
-    Var * const keywordMarker = getOutputStreamVar("kwMarker");
+    Var * const combinedOut = getOutputStreamVar("combinedLexs");
 
     PabloAST * sanitizelCurly = sanitizeLexInput(pb, strSpan, getInputStreamSet("lexIn")[Lex::lCurly]);
     PabloAST * sanitizerCurly = sanitizeLexInput(pb, strSpan, getInputStreamSet("lexIn")[Lex::rCurly]);
@@ -232,26 +225,11 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
         { fBegin, kwEndMarkers[KwMarker::kwFalseEnd] }
     );
 
-    PabloAST * finalKeywordMarker = pb.createOr3(nBegin, tBegin, fBegin);
     PabloAST * keywordSpans = pb.createOr3(nSpan, tSpan, fSpan);
 
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * extraneousChars = pb.createNot(pb.createOr(keywordSpans, combinedSpans));
-    PabloAST * sanitizedErr = sanitizeLexInput(pb, ws, extraneousChars);
-
-    PabloAST * orCurly = pb.createOr(sanitizelCurly, sanitizerCurly);
-    PabloAST * orBracket = pb.createOr(sanitizelBracket, sanitizerBracket);
-    PabloAST * orAllBrackets = pb.createOr(orCurly, orBracket);
-
-    pb.createAssign(pb.createExtract(keywordMarker, pb.getInteger(0)), finalKeywordMarker);
-    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lCurly)), sanitizelCurly);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::rCurly)), sanitizerCurly);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::lBracket)), sanitizelBracket);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::rBracket)), sanitizerBracket);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::colon)), sanitizeColon);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::comma)), sanitizeComma);
-    pb.createAssign(pb.createExtract(lexOut, pb.getInteger(Lex::hyphen)), sanitizeHyphen);
-    pb.createAssign(pb.createExtract(brackets, pb.getInteger(0)), orAllBrackets);
+    PabloAST * sanitizedErr = sanitizeLexInput(pb, pb.createOr(ws, EOFbit), extraneousChars);
 
     // ------------------- Validate values and terminals
 
@@ -270,24 +248,171 @@ void JSONFindKwAndExtraneousChars::generatePabloMethod() {
     PabloAST * notStrSpan = pb.createNot(strSpan);
     PabloAST * strMarker = pb.createAnd(pb.createAdvance(strSpan, 1), notStrSpan);
 
-    PabloAST * terminalBrackets = pb.createOr(sanitizerCurly, sanitizerBracket);
-    PabloAST * terminalAfterValue = pb.createOr(sanitizeComma, terminalBrackets);
-    PabloAST * allTerminals = pb.createOr(terminalAfterValue, sanitizeColon);
-    PabloAST * allValuesMinusStr = pb.createOr(kwMarker, numMarker);
+    PabloAST * allValues = pb.createOr3(kwMarker, numMarker, strMarker);
+    PabloAST * lBrak = pb.createOr(sanitizelCurly, sanitizelBracket);
+    PabloAST * rBrak = pb.createOr(sanitizerCurly, sanitizerBracket);
+    PabloAST * specialSymbols = pb.createOr(sanitizeColon, sanitizeComma);
+    PabloAST * allSymbols = pb.createOr3(lBrak, rBrak, specialSymbols);
 
-    // <String> [':', '}', ']', ',']
-    PabloAST * wsThruStr = pb.createScanThru(strMarker, ws);
-    PabloAST * errStr = pb.createAnd(wsThruStr, pb.createNot(allTerminals));
+    pb.createAssign(pb.createExtract(nbrErr, pb.getInteger(0)), sanitizedErr);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::symbols)), allSymbols);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::lBrak)), lBrak);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::rBrak)), rBrak);
+    pb.createAssign(pb.createExtract(combinedOut, pb.getInteger(Combined::values)), allValues);
+}
 
-    // <Value> ['}', ']', ',']
-    PabloAST * wsThruValues = pb.createScanThru(allValuesMinusStr, ws);
-    PabloAST * errValues = pb.createAnd(wsThruValues, pb.createNot(terminalAfterValue));
+void JSONParser::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
 
-    // [':', ','] <value>
-    PabloAST * colonOrComma = pb.createOr(sanitizeComma, sanitizeColon);
-    PabloAST * wsThruColonOrComma = pb.createAdvanceThenScanThru(colonOrComma, ws);
-    PabloAST * errTerminals = pb.createAnd(wsThruColonOrComma, allTerminals);
+    bool genSingleBlock = mOnlyDepth > -1;
+    BixNum ND = getInputStreamSet("ND");
 
-    PabloAST * allErrs = pb.createOr3(errStr, errValues, errTerminals);
+    PabloAST * symbols = getInputStreamSet("combinedLexs")[Combined::symbols];
+    PabloAST * validRBrak = getInputStreamSet("combinedLexs")[Combined::rBrak];
+    PabloAST * allValues = getInputStreamSet("combinedLexs")[Combined::values];
+    PabloAST * valueToken = pb.createLookahead(allValues, 1);
+    PabloAST * anyToken = pb.createOr(symbols, valueToken);
+
+    PabloAST * lCurly = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::lCurly]);
+    PabloAST * rCurly = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::rCurly]);
+    PabloAST * lBracket = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::lBracket]);
+    PabloAST * rBracket = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::rBracket]);
+    PabloAST * comma = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::comma]);
+    PabloAST * colon = pb.createAnd(symbols, getInputStreamSet("lexIn")[Lex::colon]);
+    PabloAST * ws = getInputStreamSet("lexIn")[Lex::ws];
+    PabloAST * str = pb.createAnd(valueToken, getInputStreamSet("lexIn")[Lex::dQuote]);
+    PabloAST * valueTokenMinusStr = pb.createXor(valueToken, str);
+
+    Var * const syntaxErr = getOutputStreamVar("syntaxErr");
+
+    // parsing non-nesting values
+    PabloAST * otherND = bnc.UGT(ND, 0);
+    PabloAST * zeroND = bnc.EQ(ND, 0);
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * begin = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
+    PabloAST * valueAtZero = pb.createAnd(valueToken, zeroND);
+    PabloAST * stopAtEOF = pb.createXor(pb.createOnes(), EOFbit);
+
+    // If we have simple value at depth 0, we cannot have any other token
+    PabloAST * firstValue = pb.createScanTo(begin, valueAtZero);
+    PabloAST * nonNestedValue = pb.createScanTo(pb.createAdvance(firstValue, 1), anyToken);
+    PabloAST * errValue = pb.createScanThru(pb.createAdvance(nonNestedValue, 1), stopAtEOF);
+    
+    // If we have any symbol, we cannot have any value at depth 0
+    PabloAST * firstSymbol = pb.createScanTo(begin, symbols);
+    PabloAST * valueAtZeroAfterSymbol = pb.createScanTo(pb.createAdvance(firstSymbol, 1), valueAtZero);
+    PabloAST * errSymbol = pb.createScanThru(pb.createAdvance(valueAtZeroAfterSymbol, 1), stopAtEOF);
+    
+    // EOFbit is always at depth 0, otherwise we have unmatched parens
+    PabloAST * errEOF = pb.createAnd(EOFbit, otherND);
+    PabloAST * errSimpleValue = pb.createOr3(errValue, errSymbol, errEOF);
+
+    // parsing arr
+    Var * const errArray = pb.createVar("errArray", pb.createZeroes());
+    for (int i = mMaxDepth; i >= 0; --i) {
+        PabloAST * atDepth = bnc.EQ(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * nested = bnc.UGT(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * arrayStart = pb.createAnd(atDepth, lBracket);
+        PabloAST * atDepthSpan = pb.createAnd(atDepth, pb.createNot(validRBrak));
+        PabloAST * arrayEnd = pb.createScanThru(arrayStart, pb.createOr(nested, atDepthSpan));
+        // it must not finish in rCurly
+        PabloAST * errorAtEnd = pb.createAnd(arrayEnd, rCurly);
+
+        PabloAST * arraySpan = pb.createIntrinsicCall(
+            Intrinsic::ExclusiveSpan,
+            { arrayStart, arrayEnd }
+        );
+
+        // Now validate that every value or nested item is followed
+        // either by a comma or a the end rBracket.
+        PabloAST * nestedSpan = pb.createAnd(nested, arraySpan);
+        PabloAST * afterNested = pb.createAnd(pb.createAdvance(nestedSpan, 1), atDepth);
+        PabloAST * valueAtDepth = pb.createAnd(atDepth, valueToken);
+        PabloAST * afterToken = pb.createAdvance(pb.createAnd(valueAtDepth, arraySpan), 1);
+        PabloAST * tokenNext = pb.createScanThru(pb.createOr(afterNested, afterToken), ws);
+        PabloAST * notCommaRBracket = pb.createNot(pb.createOr(comma, rBracket));
+        PabloAST * errAfterValue = pb.createAnd(tokenNext, notCommaRBracket);
+
+        // Every comma must be followed by a value
+        PabloAST * commaAtDepth = pb.createAnd3(comma, atDepth, arraySpan);
+        PabloAST * nestedOrVTk = pb.createOr(nested, valueAtDepth);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
+        PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(nestedOrVTk));
+
+        // After the lBracket we must have either a value or an rBracket.
+        PabloAST * nestedOrVTkRBracket = pb.createOr(nestedOrVTk, rBracket);
+        PabloAST * scanAnyTkAfterArrStart = pb.createScanTo(pb.createAdvance(arrayStart, 1), anyToken);
+        PabloAST * errAfterLBracket = pb.createAnd(scanAnyTkAfterArrStart, pb.createNot(nestedOrVTkRBracket));
+
+        PabloAST * errBracket = pb.createOr(errorAtEnd, errAfterLBracket);
+        PabloAST * errElement = pb.createOr(errAfterComma, errAfterValue);
+        pb.createAssign(errArray, pb.createOr3(errArray, errBracket, errElement));
+
+        if (genSingleBlock) { break; }
+    }
+
+    // parsing objects
+    Var * const errObj = pb.createVar("errObj", pb.createZeroes());
+    for (int i = mMaxDepth; i >= 0; --i) {
+        PabloAST * atDepth = bnc.EQ(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * nested = bnc.UGT(ND, genSingleBlock ? mOnlyDepth : i);
+        PabloAST * objStart = pb.createAnd(atDepth, lCurly);
+        PabloAST * atDepthSpan = pb.createAnd(atDepth, pb.createNot(validRBrak));
+        PabloAST * objEnd = pb.createScanThru(objStart, pb.createOr(nested, atDepthSpan));
+        // it must not finish in rBracket
+        PabloAST * errorAtEnd = pb.createAnd(objEnd, rBracket);
+
+        PabloAST * objSpan = pb.createIntrinsicCall(
+            Intrinsic::ExclusiveSpan,
+            { objStart, objEnd }
+        );
+
+        // Now validate that every value or nested item is followed
+        // either by a comma or a the end rBracket.
+        PabloAST * nestedSpan = pb.createAnd(nested, objSpan);
+        PabloAST * afterNested = pb.createAnd(pb.createAdvance(nestedSpan, 1), atDepth);
+
+        // process all values that are not str
+        PabloAST * valueMinusStrAtDepth = pb.createAnd(atDepth, valueTokenMinusStr);
+        PabloAST * afterTokenMinusStr = pb.createAdvance(pb.createAnd(valueMinusStrAtDepth, objSpan), 1);
+        PabloAST * tokenNextMinusStr = pb.createScanThru(pb.createOr(afterNested, afterTokenMinusStr), ws);
+        PabloAST * commaRCurly = pb.createOr(comma, rCurly);
+        PabloAST * errAfterValueMinusStr = pb.createAnd(tokenNextMinusStr, pb.createNot(commaRCurly));
+
+        // process str as both key and value
+        PabloAST * strAtDepth = pb.createAnd3(str, atDepth, objSpan);
+        PabloAST * afterTokenStr = pb.createAdvance(pb.createAnd(strAtDepth, objSpan), 1);
+        PabloAST * tokenNextStr = pb.createScanThru(pb.createOr(afterNested, afterTokenStr), ws);
+        PabloAST * commaColonRCurly = pb.createOr(commaRCurly, colon);
+        PabloAST * errAfterValueStr = pb.createAnd(tokenNextStr, pb.createNot(commaColonRCurly));
+
+        PabloAST * errAfterValue = pb.createOr(errAfterValueStr, errAfterValueMinusStr);
+
+        // Every colon must be followed by a value
+        PabloAST * colonAtDepth = pb.createAnd3(colon, atDepth, objSpan);
+        PabloAST * nestedOrVTk = pb.createOr(nested, valueToken);
+        PabloAST * scanAnyTkAfterColon = pb.createScanTo(pb.createAdvance(colonAtDepth, 1), anyToken);
+        PabloAST * errAfterColon = pb.createAnd(scanAnyTkAfterColon, pb.createNot(nestedOrVTk));
+
+        // Every comma must be followed by a key string
+        PabloAST * commaAtDepth = pb.createAnd3(comma, atDepth, objSpan);
+        PabloAST * scanAnyTkAfterComma = pb.createScanTo(pb.createAdvance(commaAtDepth, 1), anyToken);
+        PabloAST * errAfterComma = pb.createAnd(scanAnyTkAfterComma, pb.createNot(strAtDepth));
+
+        // After the lCurly we must have either a value or an rCurly.
+        PabloAST * nestedOrVTkRCurly = pb.createOr(nestedOrVTk, rCurly);
+        PabloAST * scanAnyTkAfterObjStart = pb.createScanTo(pb.createAdvance(objStart, 1), anyToken);
+        PabloAST * errAfterLCurly = pb.createAnd(scanAnyTkAfterObjStart, pb.createNot(nestedOrVTkRCurly));
+
+        PabloAST * errCurly = pb.createOr(errorAtEnd, errAfterLCurly);
+        PabloAST * errElement = pb.createOr3(errAfterColon, errAfterComma, errAfterValue);
+        pb.createAssign(errObj, pb.createOr3(errObj, errCurly, errElement));
+
+        if (genSingleBlock) { break; }
+    }
+
+    PabloAST * allErrs = pb.createOr3(errSimpleValue, errArray, errObj);
+
     pb.createAssign(pb.createExtract(syntaxErr, pb.getInteger(0)), allErrs);
 }
