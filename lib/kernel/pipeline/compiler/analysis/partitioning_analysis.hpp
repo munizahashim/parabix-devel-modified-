@@ -5,7 +5,7 @@
 #include <toolchain/toolchain.h>
 #include <util/slab_allocator.h>
 
-// #define PRINT_GRAPH_BITSETS
+#define PRINT_GRAPH_BITSETS
 
 namespace kernel {
 
@@ -947,7 +947,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
     BEGIN_SCOPED_REGION
     auto & out = errs();
 
-    out << "digraph \"H\" {\n";
+    out << "digraph \"H2\" {\n";
     for (auto v : make_iterator_range(vertices(P))) {
         const PartitionData & D = P[v];
         out << "v" << v << " [label=\"";

@@ -99,6 +99,8 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
             P.printBufferGraph(errs());
         }
 
+        exit(-1);
+
         return P;
     }
 

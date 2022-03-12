@@ -1,4 +1,4 @@
-#ifndef VARIABLE_RATE_ANALYSIS_HPP
+﻿#ifndef VARIABLE_RATE_ANALYSIS_HPP
 #define VARIABLE_RATE_ANALYSIS_HPP
 
 #define PRINT_SIMULATION_DEBUG_STATISTICS
@@ -26,7 +26,6 @@ using length_t = int64_t;
 struct SimulationPort {
 
     length_t QueueLength;
-    length_t TotalTransferred;
 
     virtual bool consume(length_t & pending, random_engine & rng) = 0;
 
@@ -34,21 +33,23 @@ struct SimulationPort {
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
-        TotalTransferred += pending;
+    }
+
+    virtual void produce_zero_if_not_fixed(random_engine & rng) {
+        return produce(rng);
     }
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
-    virtual void reset() {
-        QueueLength = 0;
-        TotalTransferred = 0;
+    virtual void reset(const length_t delay) {
+        QueueLength = -delay;
     }
 
 protected:
 
-    SimulationPort() : QueueLength(0), TotalTransferred(0) { }
+    SimulationPort() : QueueLength(0) { }
 
 };
 
@@ -65,7 +66,6 @@ struct FixedPort final : public SimulationPort {
 
     void produce(random_engine & /* rng */) override {
         QueueLength += mAmount;
-        TotalTransferred += mAmount;
     }
 
 private:
@@ -95,12 +95,13 @@ struct UniformBoundedPort final : public SimulationPort {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
         const auto m = dst(rng);
         QueueLength += m;
-        TotalTransferred += m;
     }
 
+    virtual void produce_zero_if_not_fixed(random_engine & /* rng */) { }
+
 private:
-    const unsigned mMin;
-    const unsigned mMax;
+    const uint32_t mMin;
+    const uint32_t mMax;
 };
 
 struct PartialSumGenerator {
@@ -266,7 +267,6 @@ struct PartialSumPort final : public SimulationPort {
 
     void commit(const length_t pending) override {
         QueueLength -= pending;
-        TotalTransferred += pending;
         Index += Step;
         #ifndef NDEBUG
         PreviousValue = -1U;
@@ -277,10 +277,11 @@ struct PartialSumPort final : public SimulationPort {
     void produce(random_engine & rng) override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
-        TotalTransferred += m;
         Index += Step;
         Generator.updateReadPosition(UserId, Index);
     }
+
+    virtual void produce_zero_if_not_fixed(random_engine & /* rng */) { }
 
 private:
     PartialSumGenerator & Generator;
@@ -307,7 +308,6 @@ struct RelativePort final : public SimulationPort {
     void produce(random_engine & /* rng */) override {
         const auto m = BaseRateValue;
         QueueLength += m;
-        TotalTransferred += m;
     }
 
 private:
@@ -348,18 +348,15 @@ struct SimulationNode {
 
     virtual void fire(length_t * const pendingArray, random_engine & rng, uint64_t *& history) = 0;
 
+    virtual void fire_produce_zero_if_not_fixed(length_t * const pendingArray, random_engine & rng, uint64_t *& history) {
+        return fire(pendingArray, rng, history);
+    }
+
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
-    virtual void reset() {
-        for (unsigned i = 0; i < Inputs; ++i) {
-            Input[i]->reset();
-        }
-        for (unsigned i = 0; i < Outputs; ++i) {
-            Output[i]->reset();
-        }
-    }
+    virtual void reset() {}
 
 protected:
 
@@ -495,6 +492,29 @@ no_more_pending_input:
         }
     }
 
+    virtual void fire_produce_zero_if_not_fixed(length_t * const pendingArray, random_engine & rng, uint64_t *& history) {
+        uint64_t strides = 0;
+        for (;;) {
+            // can't remove any items until we determine we can execute a full stride
+            for (unsigned i = 0; i < Inputs; ++i) {
+                SimulationPort * const I = Input[i];
+                if (!I->consume(pendingArray[i], rng)) {
+                    SumOfStrides += strides;
+                    SumOfStridesSquared += (strides * strides);
+                    *history++ = strides;
+                    return;
+                }
+            }
+            for (unsigned i = 0; i < Inputs; ++i) {
+                Input[i]->commit(pendingArray[i]);
+            }
+            for (unsigned i = 0; i < Outputs; ++i) {
+                Output[i]->produce_zero_if_not_fixed(rng);
+            }
+            ++strides;
+        }
+    }
+
     void reset() override {
         SimulationNode::reset();
         SumOfStrides = 0;
@@ -543,6 +563,18 @@ struct SimulationSourceActor final : public SimulationActor {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
+            }
+        }
+        const uint64_t strides = RequiredIterations;
+        SumOfStrides += strides;
+        SumOfStridesSquared += (strides * strides);
+        *history++ = strides;
+    }
+
+    virtual void fire_produce_zero_if_not_fixed(length_t * const /* pendingArray */, random_engine & rng, uint64_t *& history) {
+        for (auto r = RequiredIterations; r--; ){
+            for (unsigned i = 0; i < Outputs; ++i) {
+                Output[i]->produce_zero_if_not_fixed(rng);
             }
         }
         const uint64_t strides = RequiredIterations;
@@ -666,13 +698,16 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
         unsigned Reference;
         unsigned MaxStepSize;
 
+        SimulationPort * PortObject;
+
         PartitionPort() = default;
         PartitionPort(RateId type, const unsigned lb, const unsigned ub,
                       const unsigned delay, const unsigned refId, const unsigned maxStepSize)
         : Type(type), LowerBound(lb), UpperBound(ub)
         , Delay(delay)
         , Reference(refId)
-        , MaxStepSize(maxStepSize) {
+        , MaxStepSize(maxStepSize)
+        , PortObject(nullptr) {
 
         }
 
@@ -1356,7 +1391,7 @@ restart:
     std::vector<uint64_t> initialSumOfStrides(nodeCount);
 
     auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) {
-        const PartitionPort & p = G[e];
+        PartitionPort & p = G[e];
         SimulationPort * port = nullptr;
         switch (p.Type) {
             case RateId::Fixed:
@@ -1401,9 +1436,10 @@ restart:
             default:
                 llvm_unreachable("unhandled processing rate");
         }
-        port->QueueLength -= (length_t)p.Delay;
+        port->reset(p.Delay);
         assert (portMap.count(e) == 0);
         portMap.emplace(std::make_pair(e, port));
+        p.PortObject = port;
         return port;
     };
 
@@ -1485,12 +1521,26 @@ restart:
     // normalize the number of strides based on the (smallest) segment length
     // of the program's source kernel(s)
 
+    // At run-time, we execute using a "data-driven" process since estimating
+    // demands of future kernels is imprecise and costly at best and impossible
+    // at worst so the source kernels will always execute a fixed number of
+    // strides.
+
     // We cannot assume that we'll require only one stride here. For example,
     // ztf-phrase-hash processes 1 MB segments but MMap might supply only 4KB
     // per stride.
 
     // Instead we want the output rates of every source to satisfy the input
     // demands of their immediate consumers.
+
+
+    // TODO: right now, we silently drop the stddev from the inputs but we could
+    // instead use what we've learned from the initial run as segment length
+    // bounds to limit the exploration space of a GA and deduce what might
+    // lead to the most thread-balanced program. The problem of course here
+    // would be time as the GA approach would require many magnitutes more time
+    // to complete than a single simulation run.
+
 
 
     // TODO: If the output is supposed to be sparse, I don't want the input to be scaled so
@@ -1513,6 +1563,11 @@ restart:
         nodes[i]->reset();
     }
 
+    for (const auto e : make_iterator_range(edges(G))) {
+        const PartitionPort & p = G[e];
+        p.PortObject->reset(p.Delay);
+    }
+
     // Rerun this process in a pure data-driven mode once using the segment length
     // information gathered from the demand-driven execution. It is unclear how we
     // can correctly handle the standard deviation for the source kernels at run-time.
@@ -1525,6 +1580,7 @@ restart:
 
     LinkingGraph L(numOfActors);
 
+    BEGIN_SCOPED_REGION
     uint64_t * current = strideHistory;
     for (unsigned i = 0; i < m; ++i) { // forward topological ordering
         assert (current >= strideHistory);
@@ -1551,8 +1607,9 @@ restart:
             }
         }
     }
+    END_SCOPED_REGION
 
-    for (uint64_t r = 1; r < DATA_ITERATIONS; ++r) {
+    for (uint64_t r = 1; r < DATA_ITERATIONS; ++r) { // numOfActors +
         uint64_t * current = strideHistory;
         for (unsigned i = 0; i < m; ++i) { // forward topological ordering
             assert (current >= strideHistory);
@@ -1561,6 +1618,9 @@ restart:
         }
         assert (current >= strideHistory);
         assert ((current - strideHistory) == numOfActors);
+        // update the linked partition graph; we expect this graph
+        // to be very sparse after a few iterations and likely not
+        // change afterwards.
         remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
             const auto i = source(e, L);
             const auto a = strideHistory[i];
@@ -1570,6 +1630,99 @@ restart:
             return (b == 0) || Rational{a, b} != L[e];
         }, L);
     }
+
+#if 0
+    // In the final pass, we want to iteratively attempt to break any
+    // partition links that might have arisen from a high production
+    // probability
+
+    for (uint64_t r = 0; r < numOfActors; ++r) {
+        uint64_t * current = strideHistory;
+        for (unsigned i = 0; i < m; ++i) { // forward topological ordering
+            assert (current >= strideHistory);
+            assert ((current - strideHistory) < numOfActors);
+            if (i == actorNodes[r]) {
+                nodes[i]->fire_produce_zero_if_not_fixed(pendingArray, rng, current);
+            } else {
+                nodes[i]->fire(pendingArray, rng, current);
+            }
+        }
+        assert (current >= strideHistory);
+        assert ((current - strideHistory) == numOfActors);
+        // update the linked partition graph; we expect this graph
+        // to be very sparse after a few iterations and likely not
+        // change afterwards.
+        remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
+            const auto i = source(e, L);
+            const auto a = strideHistory[i];
+            const auto j = target(e, L);
+            const auto b = strideHistory[j];
+            assert (i < j);
+            return (b == 0) || Rational{a, b} != L[e];
+        }, L);
+    }
+#endif
+
+    // We could have a scenario in which a kernel has only greedy inputs that
+    // consumes data from one that produces it at a variable rate which in turn
+    // consumes it from a purely fixed rate source. This could lead the system
+    // to wrongly conclude both the source and "greedy" kernel is linked despite
+    // having an interleaving kernel that violates this contract.
+
+    // Since reasoning about that later can only lead to a worse solution for
+    // the max. clique identification, cut such violations from the graph here.
+
+    std::vector<unsigned> component(numOfActors);
+    const auto numOfComponents = connected_components(L, component.data());
+
+    std::vector<unsigned> componentInG(nodeCount, -1U);
+    for (unsigned i = 0; i < numOfActors; ++i) {
+        const auto j = actorNodes[i];
+        assert (j < m);
+        componentInG[j] = component[i];
+    }
+
+    dynamic_bitset<size_t> visited(nodeCount);
+
+    remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
+        // all paths between these vertices in G must belong to the same
+        // connected component in L
+        assert (source(e, L) < target(e, L));
+        const auto s = actorNodes[source(e, L)];
+        const auto t = actorNodes[target(e, L)];
+        assert (s < t);
+        const auto c = componentInG[s];
+        assert (c != -1U);
+        assert (c == component[source(e, L)]);
+        assert (c == componentInG[t]);
+        assert (c == component[target(e, L)]);
+        // init the new dfs search
+        visited.reset();
+        visited.set(t);
+        std::function<bool(Graph::vertex_descriptor)> not_all_paths = [&](const Graph::vertex_descriptor u) {
+            for (const auto f : make_iterator_range(out_edges(u, G))) {
+                const auto v = target(f, G);
+                if (visited.test(v)) { // we've found or gone past our target
+                    return false;
+                }
+                const auto x = componentInG[v];
+                assert (x < numOfComponents || x == -1U);
+                if ((x != c && x != -1U) || not_all_paths(v)) {
+                    return true;
+                }
+                // visited.set(v);
+            }
+            return false;
+        };
+        return not_all_paths(s);
+    }, L);
+
+    // Now identify all of the max. cliques. We want to ensure that we only
+    // link partitions that will not force the system to wait for large
+    // amounts of data. E.g., if one partition happens to execute one stride per
+    // timestep, it could be aligned with every fixed-rate partition but
+    // those partitions might have stride rates that do not have an integer
+    // relationship between them.
 
     unsigned numOfLinkedGroups = 0;
 
@@ -1594,23 +1747,10 @@ restart:
 
     // NOTE: ugly workaround here. this algorithm copies the functor at each recursion
     // level, leading to an incorrect notion of state. Even when I try forcing the
-    // template type to  be a reference type, this seems to get stripped away. To
-    // maintain the state and minimize the copy cost, we make everything in the functor
-    // a reference.
+    // template type to be a reference type, this gets stripped away. To maintain the
+    // state and minimize the copy cost, we make everything in the functor a reference.
 
     bron_kerbosch_all_cliques(L, MarkLinkedPartitionsFunctor{P, actorNodes, numOfLinkedGroups}, 1);
-
-    // At run-time, we execute using a "data-driven" process since estimating
-    // demands of future kernels is imprecise and costly at best and impossible
-    // at worst so the source kernels will always execute a fixed number of
-    // strides.
-
-    // TODO: right now, we silently drop the stddev from the inputs but we could
-    // instead use what we've learned from the initial run as segment length
-    // bounds to limit the exploration space of a GA and deduce what might
-    // lead to the most thread-balanced program. The problem of course here
-    // would be time as the GA approach would require many magnitutes more time
-    // to complete than a single simulation run.
 
     for (unsigned i = 0; i < m; ++i) {
         const auto u = ordering[m - i - 1];
@@ -1661,6 +1801,7 @@ restart:
                    << "\n";
             #endif
 
+            assert (D.LinkedGroupId != 0);
         }
     }
 }
