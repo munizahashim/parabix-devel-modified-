@@ -163,7 +163,7 @@ void StreamSelect::generateDoBlockMethod(BuilderRef b) {
 IStreamSelect::IStreamSelect(BuilderRef b, StreamSet * output, SelectOperation operation)
 : MultiBlockKernel(b, "IStreamSelect" + streamutils::genSignature(operation),
     {},
-    {{"output", output, BoundedRate(0, 1)}},
+    {{"output", output, FixedRate(1)}}, // BoundedRate(0, 1)
     {}, {}, {})
 {
 //    assert(resultStreamCount(operation) == output->getNumElements());
@@ -179,7 +179,7 @@ IStreamSelect::IStreamSelect(BuilderRef b, StreamSet * output, SelectOperation o
         assert(mFieldWidth == 0 ? true : mFieldWidth == kv.first->getFieldWidth());
         mFieldWidth = kv.first->getFieldWidth();
         assert(mFieldWidth == output->getFieldWidth());
-        mInputStreamSets.push_back({kv.second, kv.first, BoundedRate(0, 1)});
+        mInputStreamSets.push_back({kv.second, kv.first, FixedRate(1)}); // BoundedRate(0, 1)
     }
     setStride(1);
 }
@@ -203,9 +203,7 @@ void IStreamSelect::generateMultiBlockLogic(BuilderRef b, Value * const numOfStr
             b->CreateStore(val, b->getRawOutputPointer("output", b->getInt32(outIdx), absPos));
             outIdx++;
         }
-        b->setProcessedItemCount(name, b->CreateAdd(b->getProcessedItemCount(name), b->getSize(1)));
     }
-    b->setProducedItemCount("output", b->CreateAdd(b->getProducedItemCount("output"), b->getSize(1)));
     Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
     strideNo->addIncoming(nextStrideNo, block_Loop);
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), block_Loop, block_Exit);

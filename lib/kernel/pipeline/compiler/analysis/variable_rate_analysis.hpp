@@ -17,7 +17,7 @@ namespace {
 
 constexpr uint64_t DEMAND_ITERATIONS = 1000;
 
-constexpr uint64_t DATA_ITERATIONS =   100000;
+constexpr uint64_t DATA_ITERATIONS =   1000;
 
 using SimulationAllocator = SlabAllocator<uint8_t>;
 
@@ -27,16 +27,12 @@ struct SimulationPort {
 
     length_t QueueLength;
 
-    virtual bool consume(length_t & pending, random_engine & rng) = 0;
+    virtual bool consume(length_t & pending, xoroshiro128 & rng) = 0;
 
-    virtual void produce(random_engine & rng) = 0;
+    virtual void produce(xoroshiro128 & rng) = 0;
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
-    }
-
-    virtual void produce_zero_if_not_fixed(random_engine & rng) {
-        return produce(rng);
     }
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
@@ -59,12 +55,12 @@ struct FixedPort final : public SimulationPort {
     : SimulationPort()
     ,  mAmount(amount) { }
 
-    bool consume(length_t & pending, random_engine & /* rng */) override {
+    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
         pending = mAmount;
         return (QueueLength >= mAmount) ;
     }
 
-    void produce(random_engine & /* rng */) override {
+    void produce(xoroshiro128 & /* rng */) override {
         QueueLength += mAmount;
     }
 
@@ -79,7 +75,7 @@ struct UniformBoundedPort final : public SimulationPort {
     : SimulationPort()
     ,  mMin(min), mMax(max) { }
 
-    bool consume(length_t & pending, random_engine & rng) override {
+    bool consume(length_t & pending, xoroshiro128 & rng) override {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
         if (QueueLength < mMax) {
@@ -91,13 +87,13 @@ struct UniformBoundedPort final : public SimulationPort {
         return true;
     }
 
-    void produce(random_engine & rng) override {
+    void produce(xoroshiro128 & rng) override {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
         const auto m = dst(rng);
         QueueLength += m;
     }
 
-    virtual void produce_zero_if_not_fixed(random_engine & /* rng */) { }
+    virtual void produce_zero_if_not_fixed(xoroshiro128 & /* rng */) { }
 
 private:
     const uint32_t mMin;
@@ -106,7 +102,7 @@ private:
 
 struct PartialSumGenerator {
 
-    length_t readStepValue(const uint64_t start, const uint64_t end, random_engine & rng) {
+    length_t readStepValue(const uint64_t start, const uint64_t end, xoroshiro128 & rng) {
 
         // Since PartialSum rates can have multiple ports referring to the same reference streamset, we store the
         // history of partial sum values in a circular buffer but silently drop entries after every user has read
@@ -186,7 +182,7 @@ struct PartialSumGenerator {
         assert (historyLength > 0);
     }
 
-    void initializeGenerator(random_engine & rng) {
+    void initializeGenerator(xoroshiro128 & rng) {
         uint64_t partialSum = 0;
         History[0] = 0;
         for (unsigned i = 1; i < Capacity; ++i) {
@@ -205,7 +201,7 @@ struct PartialSumGenerator {
 
 protected:
 
-    virtual uint32_t generateStepValue(random_engine & rng) const = 0;
+    virtual uint32_t generateStepValue(xoroshiro128 & rng) const = 0;
 
     const uint32_t MaxStepSize;
 
@@ -234,7 +230,7 @@ struct UniformDistributionPartialSumGenerator : public PartialSumGenerator {
 
 protected:
 
-    uint32_t generateStepValue(random_engine & rng) const override {
+    uint32_t generateStepValue(xoroshiro128 & rng) const override {
         std::uniform_int_distribution<uint32_t> dst(0U, MaxStepSize);
         const auto r = dst(rng);
         assert (r <= MaxStepSize);
@@ -255,7 +251,7 @@ struct PartialSumPort final : public SimulationPort {
         assert (step > 0);
     }
 
-    bool consume(length_t & pending, random_engine & rng) override {
+    bool consume(length_t & pending, xoroshiro128 & rng) override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         assert (m == PreviousValue || PreviousValue == -1U);
         pending = m;
@@ -274,14 +270,12 @@ struct PartialSumPort final : public SimulationPort {
         Generator.updateReadPosition(UserId, Index);
     }
 
-    void produce(random_engine & rng) override {
+    void produce(xoroshiro128 & rng) override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
         Index += Step;
         Generator.updateReadPosition(UserId, Index);
     }
-
-    virtual void produce_zero_if_not_fixed(random_engine & /* rng */) { }
 
 private:
     PartialSumGenerator & Generator;
@@ -300,12 +294,12 @@ struct RelativePort final : public SimulationPort {
     : SimulationPort()
     , BaseRateValue(baseRateValue){ }
 
-    bool consume(length_t & pending, random_engine & /* rng */) override {
+    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
         pending = BaseRateValue;
         return (QueueLength >= BaseRateValue);
     }
 
-    void produce(random_engine & /* rng */) override {
+    void produce(xoroshiro128 & /* rng */) override {
         const auto m = BaseRateValue;
         QueueLength += m;
     }
@@ -320,7 +314,7 @@ struct GreedyPort final : public SimulationPort {
     : SimulationPort()
     , LowerBound(min){ }
 
-    bool consume(length_t & pending, random_engine & /* rng */) override {
+    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
         if (QueueLength < LowerBound || QueueLength == 0) {
             pending = LowerBound;
             return false;
@@ -330,7 +324,7 @@ struct GreedyPort final : public SimulationPort {
         return true;
     }
 
-    void produce(random_engine & /* rng */) override {
+    void produce(xoroshiro128 & /* rng */) override {
         llvm_unreachable("uncaught program error? greedy rate cannot be an output rate");
     }
 
@@ -344,13 +338,9 @@ struct SimulationNode {
     const unsigned Inputs;
     const unsigned Outputs;
 
-    virtual void demand(length_t * const pendingArray, random_engine & rng) = 0;
+    virtual void demand(length_t * const pendingArray, xoroshiro128 & rng) = 0;
 
-    virtual void fire(length_t * const pendingArray, random_engine & rng, uint64_t *& history) = 0;
-
-    virtual void fire_produce_zero_if_not_fixed(length_t * const pendingArray, random_engine & rng, uint64_t *& history) {
-        return fire(pendingArray, rng, history);
-    }
+    virtual void fire(length_t * const pendingArray, xoroshiro128 & rng, uint64_t *& history) = 0;
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
@@ -376,7 +366,7 @@ struct SimulationFork final : public SimulationNode {
 
     }
 
-    void demand(length_t * const /* endingArray */, random_engine & /* rng */) override {
+    void demand(length_t * const /* endingArray */, xoroshiro128 & /* rng */) override {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -396,7 +386,7 @@ struct SimulationFork final : public SimulationNode {
         }
     }
 
-    void fire(length_t * const /* endingArray */, random_engine & /* rng */, uint64_t *& /* history */) override {
+    void fire(length_t * const /* endingArray */, xoroshiro128 & /* rng */, uint64_t *& /* history */) override {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -418,7 +408,7 @@ struct SimulationActor : public SimulationNode {
 
     }
 
-    void demand(length_t * const pendingArray, random_engine & rng) override {
+    void demand(length_t * const pendingArray, xoroshiro128 & rng) override {
         uint64_t strides = 0;
         assert (Inputs > 0 && Outputs > 0);
         // Greedily consume any input on the incoming channels
@@ -469,7 +459,7 @@ no_more_pending_input:
         SumOfStridesSquared += (strides * strides);
     }
 
-    void fire(length_t * const pendingArray, random_engine & rng, uint64_t *& history) override {
+    void fire(length_t * const pendingArray, xoroshiro128 & rng, uint64_t *& history) override {
         uint64_t strides = 0;
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
@@ -487,29 +477,6 @@ no_more_pending_input:
             }
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
-            }
-            ++strides;
-        }
-    }
-
-    virtual void fire_produce_zero_if_not_fixed(length_t * const pendingArray, random_engine & rng, uint64_t *& history) {
-        uint64_t strides = 0;
-        for (;;) {
-            // can't remove any items until we determine we can execute a full stride
-            for (unsigned i = 0; i < Inputs; ++i) {
-                SimulationPort * const I = Input[i];
-                if (!I->consume(pendingArray[i], rng)) {
-                    SumOfStrides += strides;
-                    SumOfStridesSquared += (strides * strides);
-                    *history++ = strides;
-                    return;
-                }
-            }
-            for (unsigned i = 0; i < Inputs; ++i) {
-                Input[i]->commit(pendingArray[i]);
-            }
-            for (unsigned i = 0; i < Outputs; ++i) {
-                Output[i]->produce_zero_if_not_fixed(rng);
             }
             ++strides;
         }
@@ -534,7 +501,7 @@ struct SimulationSourceActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const /* pendingArray */, random_engine & rng) override {
+    void demand(length_t * const /* pendingArray */, xoroshiro128 & rng) override {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -559,22 +526,10 @@ struct SimulationSourceActor final : public SimulationActor {
         #endif
     }
 
-    void fire(length_t * const /* pendingArray */, random_engine & rng, uint64_t *& history) override {
+    void fire(length_t * const /* pendingArray */, xoroshiro128 & rng, uint64_t *& history) override {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
-            }
-        }
-        const uint64_t strides = RequiredIterations;
-        SumOfStrides += strides;
-        SumOfStridesSquared += (strides * strides);
-        *history++ = strides;
-    }
-
-    virtual void fire_produce_zero_if_not_fixed(length_t * const /* pendingArray */, random_engine & rng, uint64_t *& history) {
-        for (auto r = RequiredIterations; r--; ){
-            for (unsigned i = 0; i < Outputs; ++i) {
-                Output[i]->produce_zero_if_not_fixed(rng);
             }
         }
         const uint64_t strides = RequiredIterations;
@@ -593,7 +548,7 @@ struct SimulationSinkActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const pendingArray, random_engine & rng) override {
+    void demand(length_t * const pendingArray, xoroshiro128 & rng) override {
         // In a demand-driven system, a sink actor must always require at least
         // one iteration to enforce the demands on the preceding network.
         for (unsigned i = 0; i < Inputs; ++i) {
@@ -624,7 +579,7 @@ struct BlockSizeActor final : public SimulationActor {
     : SimulationActor(1, 1, allocator)
     , BlockSize(blockSize) { }
 
-    void demand(length_t * const /* pendingArray */, random_engine & /* rng */) override {
+    void demand(length_t * const /* pendingArray */, xoroshiro128 & /* rng */) override {
         assert (Inputs == 1 && Outputs == 1);
         // round up the demand but deposit "added" items in the output port
         SimulationPort * const I = Input[0];
@@ -646,7 +601,7 @@ struct BlockSizeActor final : public SimulationActor {
         }
     }
 
-    void fire(length_t * const /* pendingArray */, random_engine & /* rng */, uint64_t *& /* history */) override {
+    void fire(length_t * const /* pendingArray */, xoroshiro128 & /* rng */, uint64_t *& /* history */) override {
         assert (Inputs == 1 && Outputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -675,7 +630,7 @@ private:
  * Since we're only interested in modelling the steady state with an infinite input stream, we ignore attributes
  * such as Add and ZeroExtend but do consider Delay, LookAhead, and BlockSize.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random_engine & rng) {
+void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoroshiro128 & rng) {
 
     struct PortNode {
         unsigned Binding;
@@ -1034,6 +989,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                     };
 
                     auto makePartitionPort = [&]() -> PartitionPort {
+                        auto kindId = rate.getKind();
                         unsigned lb = 0, ub = 0;
                         switch (rate.getKind()) {
                             case RateId::Fixed:
@@ -1064,7 +1020,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, random
                             default:
                                 llvm_unreachable("unhandled processing rate type in variable rate simulator");
                         }
-                        return PartitionPort{rate.getKind(), lb, ub, delay, refId, stepLength};
+                        return PartitionPort{kindId, lb, ub, delay, refId, stepLength};
                     };
 
                     if (j < numOfInputs) {
@@ -1167,6 +1123,9 @@ make_blocksize_node_for_existing_streamset:
                             add_edge(streamSet, blockSizeNode, PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0}, G);
                             streamSet = blockSizeNode;
                         }
+                        if (binding.hasAttribute(AttrId::Deferred)) {
+
+                        }
 fuse_existing_streamset:
                         assert (in_degree(streamSet, G) == 1);
                         streamSetMap.emplace(std::make_pair(portNode.StreamSet, streamSet));
@@ -1184,6 +1143,79 @@ equivalent_port_exists:
     if (LLVM_UNLIKELY(num_edges(G) == 0)) {
         return;
     }
+
+
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+
+    auto print_graph = [&](llvm::raw_ostream & out) {
+
+        std::array<char, RateId::__Count> C;
+        C[RateId::Fixed] = 'F';
+        C[RateId::PopCount] = 'P';
+        C[RateId::NegatedPopCount] = 'N';
+        C[RateId::PartialSum] = 'S';
+        C[RateId::Relative] = 'R';
+        C[RateId::Bounded] = 'B';
+        C[RateId::Greedy] = 'G';
+        C[RateId::Unknown] = 'U';
+
+        out << "digraph \"G\" {\n";
+        for (auto v : make_iterator_range(vertices(G))) {
+            out << "v" << v;
+            if (v < numOfPartitions) {
+                out << " [shape=\"box\",label=\"" << v << "\"]";
+            } else if (G[v].BlockSize) {
+                assert (in_degree(v, G) == 1 && out_degree(v, G) == 1);
+                out  << " [shape=\"box\",style=\"rounded\",label=\"" << G[v].BlockSize << "\"]";
+            }
+            out << ";\n";
+        }
+
+        for (const auto e : make_iterator_range(edges(G))) {
+            const auto s = source(e, G);
+            const auto t = target(e, G);
+            out << "v" << s << " -> v" << t << " [label=\"";
+            const PartitionPort & p = G[e];
+            switch (p.Type) {
+                case RateId::Fixed:
+                case RateId::Greedy:
+                case RateId::Unknown:
+                    out << C[p.Type] << p.LowerBound;
+                    break;
+                case RateId::Relative:
+                    out << C[RateId::Relative];
+                    break;
+                case RateId::Bounded:
+                    out << C[RateId::Bounded] << p.LowerBound << '-' << p.UpperBound;
+                    break;
+                case RateId::PartialSum:
+                    BEGIN_SCOPED_REGION
+                    out << C[RateId::PartialSum];
+                    const auto f = partialSumMap.find(p.Reference);
+                    assert (f != partialSumMap.end());
+                    PartialSumData & data = f->second;
+                    out << data.StepSize << "x" << data.GCD;
+                    END_SCOPED_REGION
+                    break;
+                default:
+                    llvm_unreachable("unknown processing rate");
+            }
+            if (p.Reference) {
+                out << " ref=" << p.Reference;
+            }
+            if (p.Delay) {
+                out << " delay=" << p.Delay;
+            }
+            out << "\"];\n";
+        }
+
+
+        out << "}\n\n";
+        out.flush();
+
+    };
+
+    #endif
 
 
     // Normalize purely fixed-rate streamset I/O rates by their GCD. Do not alter
@@ -1293,78 +1325,9 @@ restart:
     // TODO: we could apply transitive-reduction-like pass to fixed rates to further
     // simplify the graph
 
-#ifdef PRINT_SIMULATION_DEBUG_STATISTICS
-
-    BEGIN_SCOPED_REGION
-
-    auto & out = errs();
-
-    std::array<char, RateId::__Count> C;
-    C[RateId::Fixed] = 'F';
-    C[RateId::PopCount] = 'P';
-    C[RateId::NegatedPopCount] = 'N';
-    C[RateId::PartialSum] = 'S';
-    C[RateId::Relative] = 'R';
-    C[RateId::Bounded] = 'B';
-    C[RateId::Greedy] = 'G';
-    C[RateId::Unknown] = 'U';
-
-    out << "digraph \"G\" {\n";
-    for (auto v : make_iterator_range(vertices(G))) {
-        out << "v" << v;
-        if (v < numOfPartitions) {
-            out << " [shape=\"box\",label=\"" << v << "\"]";
-        } else if (G[v].BlockSize) {
-            assert (in_degree(v, G) == 1 && out_degree(v, G) == 1);
-            out  << " [shape=\"box\",style=\"rounded\",label=\"" << G[v].BlockSize << "\"]";
-        }
-        out << ";\n";
-    }
-
-    for (const auto e : make_iterator_range(edges(G))) {
-        const auto s = source(e, G);
-        const auto t = target(e, G);
-        out << "v" << s << " -> v" << t << " [label=\"";
-        const PartitionPort & p = G[e];
-        switch (p.Type) {
-            case RateId::Fixed:
-            case RateId::Greedy:
-            case RateId::Unknown:
-                out << C[p.Type] << p.LowerBound;
-                break;
-            case RateId::Relative:
-                out << C[RateId::Relative];
-                break;
-            case RateId::Bounded:
-                out << C[RateId::Bounded] << p.LowerBound << '-' << p.UpperBound;
-                break;
-            case RateId::PartialSum:
-                BEGIN_SCOPED_REGION
-                out << C[RateId::PartialSum];
-                const auto f = partialSumMap.find(p.Reference);
-                assert (f != partialSumMap.end());
-                PartialSumData & data = f->second;
-                out << data.StepSize << "x" << data.GCD;
-                END_SCOPED_REGION
-                break;
-            default:
-                llvm_unreachable("unknown processing rate");
-        }
-        if (p.Reference) {
-            out << " ref=" << p.Reference;
-        }
-        if (p.Delay) {
-            out << " delay=" << p.Delay;
-        }
-        out << "\"];\n";
-    }
-
-
-    out << "}\n\n";
-    out.flush();
-
-    END_SCOPED_REGION
-#endif
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+    print_graph(errs());
+    #endif
 
     assert (ordering.empty());
     ordering.reserve(nodeCount);
@@ -1631,38 +1594,6 @@ restart:
         }, L);
     }
 
-#if 0
-    // In the final pass, we want to iteratively attempt to break any
-    // partition links that might have arisen from a high production
-    // probability
-
-    for (uint64_t r = 0; r < numOfActors; ++r) {
-        uint64_t * current = strideHistory;
-        for (unsigned i = 0; i < m; ++i) { // forward topological ordering
-            assert (current >= strideHistory);
-            assert ((current - strideHistory) < numOfActors);
-            if (i == actorNodes[r]) {
-                nodes[i]->fire_produce_zero_if_not_fixed(pendingArray, rng, current);
-            } else {
-                nodes[i]->fire(pendingArray, rng, current);
-            }
-        }
-        assert (current >= strideHistory);
-        assert ((current - strideHistory) == numOfActors);
-        // update the linked partition graph; we expect this graph
-        // to be very sparse after a few iterations and likely not
-        // change afterwards.
-        remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
-            const auto i = source(e, L);
-            const auto a = strideHistory[i];
-            const auto j = target(e, L);
-            const auto b = strideHistory[j];
-            assert (i < j);
-            return (b == 0) || Rational{a, b} != L[e];
-        }, L);
-    }
-#endif
-
     // We could have a scenario in which a kernel has only greedy inputs that
     // consumes data from one that produces it at a variable rate which in turn
     // consumes it from a purely fixed rate source. This could lead the system
@@ -1678,7 +1609,7 @@ restart:
     std::vector<unsigned> componentInG(nodeCount, -1U);
     for (unsigned i = 0; i < numOfActors; ++i) {
         const auto j = actorNodes[i];
-        assert (j < m);
+        assert (j < nodeCount);
         componentInG[j] = component[i];
     }
 
@@ -1690,7 +1621,6 @@ restart:
         assert (source(e, L) < target(e, L));
         const auto s = actorNodes[source(e, L)];
         const auto t = actorNodes[target(e, L)];
-        assert (s < t);
         const auto c = componentInG[s];
         assert (c != -1U);
         assert (c == component[source(e, L)]);
@@ -1702,7 +1632,7 @@ restart:
         std::function<bool(Graph::vertex_descriptor)> not_all_paths = [&](const Graph::vertex_descriptor u) {
             for (const auto f : make_iterator_range(out_edges(u, G))) {
                 const auto v = target(f, G);
-                if (visited.test(v)) { // we've found or gone past our target
+                if (visited.test(v)) {
                     return false;
                 }
                 const auto x = componentInG[v];
@@ -1710,7 +1640,7 @@ restart:
                 if ((x != c && x != -1U) || not_all_paths(v)) {
                     return true;
                 }
-                // visited.set(v);
+                visited.set(v);
             }
             return false;
         };

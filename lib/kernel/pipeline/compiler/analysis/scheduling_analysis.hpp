@@ -94,7 +94,7 @@ void printDAWG(const OrderingDAWG & G, raw_ostream & out, const StringRef name =
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief analyzeDataflowWithinPartitions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, random_engine & rng) {
+void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, xoroshiro128 & rng) {
 
     // Once we analyze the dataflow within the partitions, P contains DAWG that is either
     // edgeless if any permutation of its kernels is valid or contains all of its optimal
@@ -339,9 +339,9 @@ struct MaxCutHarmonySearch : public BitStringBasedHarmonySearch {
     MaxCutHarmonySearch(const MemIntervalGraph & I,
                         const WeightMap & maxCutWeights,
                         const unsigned numOfRounds,
-                        const size_t seed)
+                        xoroshiro128 & rng)
     : BitStringBasedHarmonySearch(numOfNonIsolatedVertices(I), numOfRounds,
-                                  MAX_CUT_HS_POPULATION_SIZE, MAX_CUT_HS_AVERAGE_STALL_THRESHOLD, MAX_CUT_HS_MAX_AVERAGE_STALLS, seed)
+                                  MAX_CUT_HS_POPULATION_SIZE, MAX_CUT_HS_AVERAGE_STALL_THRESHOLD, MAX_CUT_HS_MAX_AVERAGE_STALLS, rng)
     , I(I)
     , maxCutWeights(maxCutWeights)
     , toVertexIndex(candidateLength)
@@ -411,8 +411,6 @@ class MemoryAnalysis {
         }
 
     };
-
-    using random_engine = std::default_random_engine;
 
     using TransitiveGraph = adjacency_list<vecS, vecS, undirectedS, no_property, EdgeOrientation>;
 
@@ -739,9 +737,7 @@ is_bipartite_graph:
             return 0;
         }
 
-        std::uniform_int_distribution<uintmax_t> distribution(0, std::numeric_limits<uintmax_t>::max());
-        const auto seed = distribution(rng);
-        MaxCutHarmonySearch HS(I, maxCutWeights, numOfRounds, seed);
+        MaxCutHarmonySearch HS(I, maxCutWeights, numOfRounds, rng);
         HS.runHarmonySearch();
         const auto assignment = HS.getResult();
 
@@ -864,7 +860,7 @@ is_bipartite_graph:
 
 public:
 
-    MemoryAnalysis(const SchedulingGraph & S, const unsigned numOfKernels, random_engine & rng)
+    MemoryAnalysis(const SchedulingGraph & S, const unsigned numOfKernels, xoroshiro128 & rng)
     : S(S)
     , numOfKernels(numOfKernels)
     , numOfStreamSets(num_vertices(S) - numOfKernels)
@@ -889,7 +885,7 @@ protected:
     const unsigned numOfKernels;
     const unsigned numOfStreamSets;
 
-    random_engine & rng;
+    xoroshiro128 & rng;
 
 private:
 
@@ -930,7 +926,7 @@ protected:
     SchedulingAnalysisWorker(const SchedulingGraph & S,
                        const unsigned numOfKernels,
                        const unsigned candidateLength,
-                       random_engine & rng)
+                       xoroshiro128 & rng)
     : numOfKernels(numOfKernels)
     , candidateLength(candidateLength)
     , rng(rng)
@@ -942,7 +938,7 @@ public:
 
     const unsigned numOfKernels;
     const unsigned candidateLength;
-    random_engine & rng;
+    xoroshiro128 & rng;
     MemoryAnalysis analyzer;
 
 };
@@ -997,7 +993,7 @@ public:
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     PartitionSchedulingAnalysisWorker(const SchedulingGraph & S, const PartitionDependencyGraph & D,
-                                      const unsigned numOfKernels, random_engine & rng)
+                                      const unsigned numOfKernels, xoroshiro128 & rng)
     : SchedulingAnalysisWorker(S, numOfKernels, numOfKernels, rng)
     , D(D)
     , replacement(numOfKernels)
@@ -1054,7 +1050,7 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     PartitionSchedulingAnalysis(const SchedulingGraph & S, const PartitionDependencyGraph & D,
-                                const unsigned numOfKernels, random_engine & rng)
+                                const unsigned numOfKernels, xoroshiro128 & rng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PARITION_SCHEDULING_GA_ROUNDS, PARITION_SCHEDULING_GA_STALLS, MAX_PARTITION_POPULATION_SIZE, rng)
     , D(D)
     , worker(S, D, numOfKernels, rng) {
@@ -1074,7 +1070,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief analyzeDataflowWithinPartitions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, random_engine & rng) const {
+void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, xoroshiro128 & rng) const {
 
     /// --------------------------------------------
     /// Construct our partition schedules
@@ -1675,7 +1671,7 @@ public:
                                         const PartitionGraph & P,
                                         const std::vector<unsigned> & initialDegree,
                                         const unsigned candidateLength,
-                                        random_engine & rng)
+                                        xoroshiro128 & rng)
     : G(G)
     , P(P)
     , candidateLength(candidateLength)
@@ -1697,7 +1693,7 @@ private:
     const GlobalDependencyGraph & G;
     const PartitionGraph & P;
     const unsigned candidateLength;
-    random_engine & rng;
+    xoroshiro128 & rng;
 
     const std::vector<unsigned> & initialDegree;
 
@@ -1751,7 +1747,7 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                               const PartitionGraph & P,
                               const std::vector<unsigned> & initialDegree,
                               const unsigned numOfUnlinkedPartitions,
-                              random_engine & srcRng)
+                              xoroshiro128 & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_ROUNDS,
                                             JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, srcRng)
     , worker(G, P, initialDegree, numOfUnlinkedPartitions, srcRng) {
@@ -2016,7 +2012,7 @@ public:
     ProgramSchedulingAnalysisWorker(const SchedulingGraph & S,
                                     const OrderingDAWG & I,
                                     const unsigned numOfKernels,
-                                    random_engine & rng)
+                                    xoroshiro128 & rng)
     : SchedulingAnalysisWorker(S, numOfKernels, numOfKernels, rng)
     , I(I)
     , index(numOfKernels)
@@ -2095,7 +2091,7 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
     ProgramSchedulingAnalysis(const SchedulingGraph & S,
                               const OrderingDAWG & I,
                               const unsigned numOfKernels,
-                              random_engine & srcRng)
+                              xoroshiro128 & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_ROUNDS,
                                             PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, srcRng)
     , worker(S, I, numOfKernels, srcRng) {
@@ -2113,7 +2109,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief scheduleProgramGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, random_engine & rng) const {
+OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, xoroshiro128 & rng) const {
 
     // create a bipartite graph consisting of partitions and inter-partition
     // streamset nodes and relationships

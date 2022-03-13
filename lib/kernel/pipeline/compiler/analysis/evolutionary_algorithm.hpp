@@ -73,7 +73,7 @@ public:
 
         }
 
-        void randomize(random_engine & rng) {
+        void randomize(xoroshiro128 & rng) {
             std::uniform_int_distribution<size_t> distribution(std::numeric_limits<size_t>::min(), std::numeric_limits<size_t>::max());
             for (auto & a : _value) {
                 a = distribution(rng);
@@ -490,7 +490,7 @@ private:
             END_SCOPED_REGION
 in_trie:    ++i;
         }
-    };
+    }
 
 protected:
 
@@ -498,7 +498,7 @@ protected:
                                          , const unsigned maxRounds
                                          , const unsigned maxStallRounds
                                          , const unsigned maxCandidates
-                                         , random_engine & rng)
+                                         , xoroshiro128 & rng)
     : candidateLength(candidateLength)
     , maxGenerations(maxRounds)
     , maxCandidates(maxCandidates)
@@ -523,7 +523,7 @@ protected:
 
     std::map<Candidate, FitnessValueType> candidates;
 
-    random_engine rng;
+    xoroshiro128 & rng;
 
 };
 
@@ -807,21 +807,15 @@ protected:
     BitStringBasedHarmonySearch(const unsigned candidateLength
                           , const unsigned maxRounds
                           , const unsigned maxCandidates
-//                          , const double minHMCR
-//                          , const double maxHMCR
-//                          , const double frequency
                           , const FitnessValueType averageStallThreshold
                           , const unsigned maxStallGenerations
-                          , const size_t seed)
+                          , xoroshiro128 & rng)
     : candidateLength(candidateLength)
     , maxRounds(maxRounds)
     , maxCandidates(maxCandidates)
-//    , MinHMCR(minHMCR)
-//    , MaxHMCR(maxHMCR)
-//    , CosAngularFrequency(frequency)
     , averageStallThreshold(averageStallThreshold)
     , maxStallGenerations(maxStallGenerations)
-    , rng(seed) {
+    , rng(rng) {
 
     }
 
@@ -847,7 +841,7 @@ public:
 
     Candidates candidates;
 
-    random_engine rng;
+    xoroshiro128 & rng;
 
 };
 

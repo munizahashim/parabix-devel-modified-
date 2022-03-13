@@ -2,6 +2,7 @@
 #define BINDING_H
 
 #include "processing_rate.h"
+#include "processing_rate_probability_function.h"
 #include "attributes.h"
 #include <llvm/ADT/STLExtras.h>
 

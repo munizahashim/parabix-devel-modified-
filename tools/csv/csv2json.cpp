@@ -174,6 +174,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         illustrator.captureBixNum(P, "InsertBixNum", InsertBixNum);
     }
 
+
+    // TODO: need to mark this as having a high output rate
     StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
 
     // Baais bit streams expanded with 0 bits for each string to be inserted.

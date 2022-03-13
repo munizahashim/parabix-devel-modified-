@@ -89,11 +89,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
     if (mIsPartitionRoot) {
         auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
-        #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         if (in_degree(mKernelId, mBufferGraph) != 0) {
             numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
         }
-        #endif
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
@@ -128,6 +126,8 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         if (port.CanModifySegmentLength) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
+        } else { // make sure we have read/initialized the accessible item count
+            getAccessibleInputItems(b, port);
         }
     }
 

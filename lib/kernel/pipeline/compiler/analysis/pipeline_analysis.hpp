@@ -24,11 +24,10 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         PipelineAnalysis P(pipelineKernel);
 
-        const auto seed = 2081280305;
+//        std::random_device rd;
+//        xoroshiro128 rng(rd);
 
-        // const auto seed = std::random_device{}();
-
-        random_engine rng(seed);
+        xoroshiro128 rng;
 
 //        const auto graphSeed = 2081280305;
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
@@ -99,8 +98,6 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
             P.printBufferGraph(errs());
         }
 
-        exit(-1);
-
         return P;
     }
 
@@ -170,15 +167,15 @@ private:
 
     // scheduling analysis
 
-    void schedulePartitionedProgram(PartitionGraph & P, random_engine & rng);
+    void schedulePartitionedProgram(PartitionGraph & P, xoroshiro128 & rng);
 
-    void analyzeDataflowWithinPartitions(PartitionGraph & P, random_engine & rng) const;
+    void analyzeDataflowWithinPartitions(PartitionGraph & P, xoroshiro128 & rng) const;
 
     SchedulingGraph makeIntraPartitionSchedulingGraph(const PartitionGraph & P, const unsigned currentPartitionId) const;
 
     PartitionDependencyGraph makePartitionDependencyGraph(const unsigned numOfKernels, const SchedulingGraph & S) const;
 
-    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, random_engine & rng) const;
+    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, xoroshiro128 & rng) const;
 
     OrderingDAWG assembleFullSchedule(const PartitionGraph & P, const OrderingDAWG & partial) const;
 
@@ -195,7 +192,7 @@ private:
 
     void determineBufferSize(BuilderRef b);
 
-    void determineBufferLayout(BuilderRef b, random_engine & rng);
+    void determineBufferLayout(BuilderRef b, xoroshiro128 & rng);
 
     void identifyOwnedBuffers();
 
@@ -216,7 +213,7 @@ private:
     // dataflow analysis functions
     #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     void computeIntraPartitionRepetitionVectors(PartitionGraph & P);
-    void estimateInterPartitionDataflow(PartitionGraph & P, random_engine & rng);
+    void estimateInterPartitionDataflow(PartitionGraph & P, xoroshiro128 & rng);
     #endif
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);

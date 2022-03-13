@@ -4,6 +4,7 @@
 #include "graphs.h"
 #include <boost/iterator/iterator_facade.hpp>
 #include <random>
+#include "../analysis/xoroshiro128.hpp"
 
 namespace kernel {
 
@@ -19,8 +20,6 @@ template <typename T, unsigned n = 16>
 using Vec = SmallVector<T, n>;
 
 using SimulationAllocator = SlabAllocator<>;
-
-using random_engine = std::default_random_engine; // TODO: look into xorshift for this
 
 // Many of the topological orderings of the graphs are simply
 // a reverse traversal through the nodes of the graph.

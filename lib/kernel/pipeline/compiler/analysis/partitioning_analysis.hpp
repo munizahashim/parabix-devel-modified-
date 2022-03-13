@@ -36,9 +36,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
 
     std::vector<unsigned> mapping(n, -1U);
 
-    #ifndef NDEBUG
     unsigned numOfKernels = 2;
-    #endif
 
     BEGIN_SCOPED_REGION
 
@@ -71,9 +69,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                     assert (R.Kernel != mPipelineKernel);
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
-                    #ifndef NDEBUG
                     ++numOfKernels;
-                    #endif
                 }
                 END_SCOPED_REGION
                 break;
@@ -503,9 +499,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     std::vector<unsigned> mapping(n, -1U);
 
-    #ifndef NDEBUG
     unsigned numOfKernels = 2;
-    #endif
 
     BEGIN_SCOPED_REGION
 
@@ -538,9 +532,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                     assert (R.Kernel != mPipelineKernel);
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
-                    #ifndef NDEBUG
                     ++numOfKernels;
-                    #endif
                 }
                 END_SCOPED_REGION
                 break;

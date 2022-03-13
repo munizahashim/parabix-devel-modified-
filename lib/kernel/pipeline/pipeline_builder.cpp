@@ -102,7 +102,6 @@ void addKernelProperties(const std::vector<Kernel *> & kernels, Kernel * const o
     bool canTerminate = false;
     bool sideEffecting = false;
     bool fatalTermination = false;
-    bool hasStrideBound = false;
     unsigned stride = 0;
     for (const Kernel * kernel : kernels) {
         for (const Attribute & attr : kernel->getAttributes()) {
