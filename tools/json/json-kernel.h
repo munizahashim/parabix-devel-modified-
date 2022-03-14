@@ -173,9 +173,9 @@ protected:
     void generatePabloMethod() override;
 };
 
-class JSONParser: public pablo::PabloKernel {
+class JSONParserArr : public pablo::PabloKernel {
 public:
-    JSONParser(
+    JSONParserArr(
         const std::unique_ptr<KernelBuilder> & b,
         StreamSet * const lexIn,
         StreamSet * const combinedLexs,
@@ -185,7 +185,38 @@ public:
         int onlyDepth = -1
     )
     : pablo::PabloKernel(b,
-                         "JSONParser-max=" +
+                         "JSONParserArr-max=" +
+                            std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
+                         {
+                            Binding{"lexIn", lexIn},
+                            Binding{"combinedLexs", combinedLexs, FixedRate(1), LookAhead(1)},
+                            Binding{"ND", nestingDepth}
+                         },
+                         {
+                            Binding{"syntaxErr", syntaxErr, FixedRate(), Add1()}
+                         }),
+    mMaxDepth(maxDepth), mOnlyDepth(onlyDepth) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+protected:
+    void generatePabloMethod() override;
+    unsigned mMaxDepth;
+    int mOnlyDepth;
+};
+
+class JSONParserObj: public pablo::PabloKernel {
+public:
+    JSONParserObj(
+        const std::unique_ptr<KernelBuilder> & b,
+        StreamSet * const lexIn,
+        StreamSet * const combinedLexs,
+        StreamSet * const nestingDepth,
+        StreamSet * const syntaxErr,
+        unsigned maxDepth = 15,
+        int onlyDepth = -1
+    )
+    : pablo::PabloKernel(b,
+                         "JSONParserObj-max=" +
                             std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
                          {
                             Binding{"lexIn", lexIn},

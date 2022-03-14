@@ -184,7 +184,8 @@ jsonFunctionType json_parsing_gen(
     if (ParallelProcess) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
         StreamSet * const depthErr = P->CreateStreamSet(1);
-        StreamSet * const syntaxErr = P->CreateStreamSet(1);
+        StreamSet * const syntaxArrErr = P->CreateStreamSet(1);
+        StreamSet * const syntaxObjErr = P->CreateStreamSet(1);
         StreamSet * const encDepth = P->CreateStreamSet(std::ceil(std::log2(MaxDepth+1)));
         P->CreateKernelCall<NestingDepth>(
             brackets,
@@ -192,11 +193,20 @@ jsonFunctionType json_parsing_gen(
             depthErr,
             MaxDepth
         );
-        P->CreateKernelCall<JSONParser>(
+        P->CreateKernelCall<JSONParserArr>(
             lexStream,
             combinedLexers,
             encDepth,
-            syntaxErr,
+            syntaxArrErr,
+            MaxDepth,
+            OnlyDepth
+        );
+
+        P->CreateKernelCall<JSONParserObj>(
+            lexStream,
+            combinedLexers,
+            encDepth,
+            syntaxObjErr,
             MaxDepth,
             OnlyDepth
         );
@@ -205,7 +215,7 @@ jsonFunctionType json_parsing_gen(
         StreamSet * const Errors = P->CreateStreamSet(5, 1);
         // Important: make sure all the streams inside StreamsMerge have Add1, otherwise it fails
         P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxErr},
+            std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxArrErr, syntaxObjErr},
             Errors
         );
         StreamSet * const Errs = su::Collapse(P, Errors);
@@ -220,7 +230,8 @@ jsonFunctionType json_parsing_gen(
             illustrator.captureBitstream(P, "utf8Err", utf8Err);
             illustrator.captureBitstream(P, "numberErr", numberErr);
             illustrator.captureBitstream(P, "depthErr", depthErr);
-            illustrator.captureBitstream(P, "syntaxErr", syntaxErr);
+            illustrator.captureBitstream(P, "syntaxArrErr", syntaxArrErr);
+            illustrator.captureBitstream(P, "syntaxObjErr", syntaxObjErr);
             illustrator.captureBitstream(P, "Errs", Errs);
         }
     } else {
