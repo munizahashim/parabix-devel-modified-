@@ -45,7 +45,7 @@ static cl::opt<int> REsPerGroup("re-num", cl::desc("Number of regular expression
 
 static re::ModeFlagSet globalFlags = re::MULTILINE_MODE_FLAG;
 
-std::vector<re::RE *> readExpressions() {
+re::RE * readRE() {
 
     if (argv::FileFlag != "") {
         std::ifstream regexFile(argv::FileFlag.c_str());
@@ -74,41 +74,16 @@ std::vector<re::RE *> readExpressions() {
         re::RE * re_ast = re::RE_Parser::parse(argv::RegexpVector[i], globalFlags, argv::RegexpSyntax, ByteMode);
         REs.push_back(re_ast);
     }
+    re::RE * fullRE = makeAlt(REs.begin(), REs.end());
 
-
-    // If there are multiple REs, combine them into groups.
-    // A separate kernel will be created for each group.
-    if (REs.size() > 1) {
-        if (REsPerGroup == 0) {
-            // If no grouping factor is specified, we use a default formula.
-            REsPerGroup = (REs.size() + codegen::SegmentThreads) / (codegen::SegmentThreads + 1);
-        }
-        std::vector<re::RE *> groups;
-        auto start = REs.begin();
-        auto end = start + REsPerGroup;
-        while (end < REs.end()) {
-            groups.push_back(re::makeAlt(start, end));
-            start = end;
-            end += REsPerGroup;
-        }
-        if ((REs.end() - start) > 1) {
-            groups.push_back(re::makeAlt(start, REs.end()));
-        } else {
-            groups.push_back(*start);
-        }
-    REs.swap(groups);
+    if (argv::WordRegexpFlag) {
+        fullRE = re::makeSeq({re::makeWordBoundary(), fullRE, re::makeWordBoundary()});
     }
-    for (re::RE *& re_ast : REs) {
-        assert (re_ast);
-        if (argv::WordRegexpFlag) {
-            re_ast = re::makeSeq({re::makeWordBoundary(), re_ast, re::makeWordBoundary()});
-        }
-        if (argv::LineRegexpFlag) {
-            re_ast = re::makeSeq({re::makeStart(), re_ast, re::makeEnd()});
-        }
+    if (argv::LineRegexpFlag) {
+        fullRE = re::makeSeq({re::makeStart(), fullRE, re::makeEnd()});
     }
 
-    return REs;
+    return fullRE;
 }
 
 namespace fs = boost::filesystem;
@@ -118,7 +93,7 @@ int main(int argc, char *argv[]) {
     argv::InitializeCommandLineInterface(argc, argv);
     CPUDriver driver("icgrep");
 
-    auto REs = readExpressions();
+    auto RE = readRE();
 
     const auto allFiles = argv::getFullFileList(driver, inputFiles);
     if (inputFiles.empty()) {
@@ -171,7 +146,7 @@ int main(int argc, char *argv[]) {
         grep->setColoring();
     }    
     grep->initFileResult(allFiles); // unnecessary copy!
-    grep->initREs(REs);
+    grep->initRE(RE);
     grep->grepCodeGen();
     #ifdef REPORT_PAPI_TESTS
     papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
