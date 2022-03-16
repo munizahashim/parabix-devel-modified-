@@ -109,10 +109,10 @@ protected:
 
 WordCountKernel::WordCountKernel (BuilderRef b, StreamSet * const countable)
 : PabloKernel(b, "wc_" + wc_modes,
-    {Binding{"countable", countable}},
+    {Bind("countable", countable, Principal())},
     {},
     {},
-    {Binding{b->getSizeTy(), "lineCount"}, Binding{b->getSizeTy(), "wordCount"}, Binding{b->getSizeTy(), "charCount"}}) {
+    {Bind(b->getSizeTy(), "lineCount"), Bind(b->getSizeTy(), "wordCount"), Bind(b->getSizeTy(), "charCount")}) {
  addAttribute(IsolateOnHybridThread());
 }
 

@@ -4,6 +4,7 @@
 #define PRINT_SIMULATION_DEBUG_STATISTICS
 
 #include "pipeline_analysis.hpp"
+#include <boost/math/distributions/skew_normal.hpp>
 
 #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
 
@@ -15,6 +16,8 @@ namespace {
 
 // #define PRINT_SIMULATION_DEBUG_STATISTICS
 
+
+
 constexpr uint64_t DEMAND_ITERATIONS = 1000;
 
 constexpr uint64_t DATA_ITERATIONS =   1000;
@@ -22,6 +25,89 @@ constexpr uint64_t DATA_ITERATIONS =   1000;
 using SimulationAllocator = SlabAllocator<uint8_t>;
 
 using length_t = int64_t;
+
+using DistTypeId = ProcessingRateProbabilityDistribution::DistributionTypeId;
+
+struct UniformDistributionModel {
+    uint32_t next(xoroshiro128 & rng) const {
+        std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
+        return dst(rng);
+    }
+
+    uint32_t getMax() const {
+        return mMax;
+    }
+
+    UniformDistributionModel(const uint32_t min, const uint32_t max)
+    : mMin(min), mMax(max) {
+
+    }
+private:
+    const uint32_t mMin;
+    const uint32_t mMax;
+};
+
+struct GammaDistributionModel {
+    uint32_t next(xoroshiro128 & rng) const {
+        std::gamma_distribution<float> dst(mAlpha, mBeta);
+        return (uint32_t)(dst(rng) + 0.5f);
+    }
+
+    uint32_t getMax() const {
+        return mMax;
+    }
+
+    GammaDistributionModel(const float alpha, const float beta, const unsigned max)
+    : mAlpha(alpha), mBeta(beta), mMax(max) {
+
+    }
+private:
+    const float mAlpha;
+    const float mBeta;
+    const uint32_t mMax;
+};
+
+struct NormalDistributionModel {
+    uint32_t next(xoroshiro128 & rng) const {
+        std::normal_distribution<float> dst(mMean, mStdDev);
+        return (uint32_t)(dst(rng) + 0.5f);
+    }
+
+    uint32_t getMax() const {
+        return mMax;
+    }
+
+    NormalDistributionModel(const float mean, const float stddev, const unsigned max)
+    : mMean(mean), mStdDev(stddev), mMax(max) {
+
+    }
+private:
+    const float mMean;
+    const float mStdDev;
+    const uint32_t mMax;
+};
+
+struct SkewNormalDistributionModel {
+    uint32_t next(xoroshiro128 & rng) const {
+        std::uniform_real_distribution<float> dst(0.0f, 1.0f);
+        math::skew_normal_distribution<float> sk(mMean, mStdDev, mSkew);
+        return (uint32_t)(math::quantile(sk, dst(rng)) + 0.5f);
+    }
+
+    uint32_t getMax() const {
+        return mMax;
+    }
+
+    SkewNormalDistributionModel(const float mean, const float stddev, const float skew, const unsigned max)
+    : mMean(mean), mStdDev(stddev), mSkew(skew), mMax(max) {
+
+    }
+private:
+    const float mMean;
+    const float mStdDev;
+    const float mSkew;
+    const uint32_t mMax;
+};
 
 struct SimulationPort {
 
@@ -68,39 +154,94 @@ private:
     const length_t mAmount;
 };
 
+template <typename DistributionModel>
+struct BoundedPort final : public SimulationPort {
 
-struct UniformBoundedPort final : public SimulationPort {
-
-    UniformBoundedPort(const unsigned min, const unsigned max)
-    : SimulationPort()
-    ,  mMin(min), mMax(max) { }
+    BoundedPort(DistributionModel m) : SimulationPort(),  Model(m) { }
 
     bool consume(length_t & pending, xoroshiro128 & rng) override {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
-        if (QueueLength < mMax) {
-            pending = mMax;
+        if (QueueLength < Model.getMax()) {
+            pending = Model.getMax();
             return false;
         }
-        std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
-        pending = dst(rng);
+        pending = Model.next(rng);
         return true;
     }
 
     void produce(xoroshiro128 & rng) override {
-        std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
-        const auto m = dst(rng);
-        QueueLength += m;
+        QueueLength += Model.next(rng);
     }
 
-    virtual void produce_zero_if_not_fixed(xoroshiro128 & /* rng */) { }
-
 private:
-    const uint32_t mMin;
-    const uint32_t mMax;
+    const DistributionModel Model;
 };
 
-struct PartialSumGenerator {
+
+//struct UniformBoundedPort final : public SimulationPort {
+
+//    UniformBoundedPort(const unsigned min, const unsigned max)
+//    : SimulationPort()
+//    ,  mMin(min), mMax(max) { }
+
+//    bool consume(length_t & pending, xoroshiro128 & rng) override {
+//        // The pipeline does not know how many tokens are required
+//        // of the streamset until after it invokes the kernel.
+//        if (QueueLength < mMax) {
+//            pending = mMax;
+//            return false;
+//        }
+//        std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
+//        pending = dst(rng);
+//        return true;
+//    }
+
+//    void produce(xoroshiro128 & rng) override {
+//        std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
+//        const auto m = dst(rng);
+//        QueueLength += m;
+//    }
+
+//private:
+//    const uint32_t mMin;
+//    const uint32_t mMax;
+//};
+
+//struct GammaBoundedPort final : public SimulationPort {
+
+//    GammaBoundedPort(const float alpha, const float beta, const unsigned max)
+//    : SimulationPort()
+//    ,  mAlpha(alpha), mBeta(beta), mDelta((float)(max) / (alpha * beta)), mMax(max) {
+
+//    }
+
+//    bool consume(length_t & pending, xoroshiro128 & rng) override {
+//        // The pipeline does not know how many tokens are required
+//        // of the streamset until after it invokes the kernel.
+//        if (QueueLength < mMax) {
+//            pending = mMax;
+//            return false;
+//        }
+//        std::gamma_distribution<float> dst(mAlpha, mBeta);
+//        pending = (uint32_t)(dst(rng) * mDelta + 0.5f);
+//        return true;
+//    }
+
+//    void produce(xoroshiro128 & rng) override {
+//        std::gamma_distribution<float> dst(mAlpha, mBeta);
+//        const auto m = (uint32_t)(dst(rng) * mDelta + 0.5f);
+//        QueueLength += m;
+//    }
+
+//private:
+//    const float mAlpha;
+//    const float mBeta;
+//    const float mDelta;
+//    const uint32_t mMax;
+//};
+
+struct BasePartialSumGenerator {
 
     length_t readStepValue(const uint64_t start, const uint64_t end, xoroshiro128 & rng) {
 
@@ -152,7 +293,7 @@ struct PartialSumGenerator {
         const auto b = History[j];
         assert (a <= b);
         const auto c = b - a;
-        assert (c <= (MaxStepSize * (end - start)));
+
         return static_cast<length_t>(c) ;
     }
 
@@ -169,9 +310,8 @@ struct PartialSumGenerator {
         HeadPosition = min;
     }
 
-    PartialSumGenerator(const unsigned users, const unsigned historyLength, const unsigned maxSize, SimulationAllocator & allocator)
-    : MaxStepSize(maxSize)
-    , Users(users)
+    BasePartialSumGenerator(const unsigned users, const unsigned historyLength, SimulationAllocator & allocator)
+    : Users(users)
     , HeadPosition(0)
     , HeadOffset(0)
     , TailOffset(0)
@@ -203,8 +343,6 @@ protected:
 
     virtual uint32_t generateStepValue(xoroshiro128 & rng) const = 0;
 
-    const uint32_t MaxStepSize;
-
 private:
     const unsigned Users;
     uint64_t HeadPosition;
@@ -215,33 +353,58 @@ private:
     uint64_t * History;
     uint64_t * const UserReadPosition;
 
+
     SimulationAllocator & Allocator;
 };
 
-struct UniformDistributionPartialSumGenerator : public PartialSumGenerator {
+template<typename DistributionModel>
+struct PartialSumGenerator : public BasePartialSumGenerator {
 
-    UniformDistributionPartialSumGenerator(const uint32_t users,
-                                           const uint32_t maxValuePerStep,
-                                           const unsigned historyLength,
-                                           SimulationAllocator & allocator)
-    : PartialSumGenerator(users, historyLength, maxValuePerStep, allocator) {
-        assert (maxValuePerStep > 0);
+    PartialSumGenerator(const DistributionModel model,
+                        const uint32_t users,
+                        const unsigned historyLength,
+                        SimulationAllocator & allocator)
+    : BasePartialSumGenerator(users, historyLength, allocator)
+    , Model(model) {
+
     }
 
 protected:
 
     uint32_t generateStepValue(xoroshiro128 & rng) const override {
-        std::uniform_int_distribution<uint32_t> dst(0U, MaxStepSize);
-        const auto r = dst(rng);
-        assert (r <= MaxStepSize);
+        const auto r = Model.next(rng);
+        assert (r <= Model.getMax());
         return r;
     }
 
+private:
+    const DistributionModel Model;
 };
+
+//struct UniformDistributionPartialSumGenerator : public PartialSumGenerator {
+
+//    UniformDistributionPartialSumGenerator(const uint32_t users,
+//                                           const uint32_t maxValuePerStep,
+//                                           const unsigned historyLength,
+//                                           SimulationAllocator & allocator)
+//    : PartialSumGenerator(users, historyLength, maxValuePerStep, allocator) {
+//        assert (maxValuePerStep > 0);
+//    }
+
+//protected:
+
+//    uint32_t generateStepValue(xoroshiro128 & rng) const override {
+//        std::uniform_int_distribution<uint32_t> dst(0U, MaxStepSize);
+//        const auto r = dst(rng);
+//        assert (r <= MaxStepSize);
+//        return r;
+//    }
+
+//};
 
 struct PartialSumPort final : public SimulationPort {
 
-    PartialSumPort(PartialSumGenerator & generator, const unsigned userId, const unsigned step)
+    PartialSumPort(BasePartialSumGenerator & generator, const unsigned userId, const unsigned step)
     : SimulationPort()
     , Generator(generator), UserId(userId), Step(step), Index(0)
     #ifndef NDEBUG
@@ -278,7 +441,7 @@ struct PartialSumPort final : public SimulationPort {
     }
 
 private:
-    PartialSumGenerator & Generator;
+    BasePartialSumGenerator & Generator;
     const unsigned UserId;
     const unsigned Step;
     unsigned Index;
@@ -652,16 +815,30 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
         unsigned Delay;
         unsigned Reference;
         unsigned MaxStepSize;
+        ProcessingRateProbabilityDistribution Distribution;
 
         SimulationPort * PortObject;
 
-        PartitionPort() = default;
+        PartitionPort()
+        : Type(RateId::Fixed)
+        , LowerBound(0)
+        , UpperBound(0)
+        , Delay(0)
+        , Reference(0)
+        , MaxStepSize(0)
+        , Distribution(UniformDistribution())
+        , PortObject(nullptr) {
+
+        }
+
         PartitionPort(RateId type, const unsigned lb, const unsigned ub,
-                      const unsigned delay, const unsigned refId, const unsigned maxStepSize)
+                      const unsigned delay, const unsigned refId, const unsigned maxStepSize,
+                      ProcessingRateProbabilityDistribution df)
         : Type(type), LowerBound(lb), UpperBound(ub)
         , Delay(delay)
         , Reference(refId)
         , MaxStepSize(maxStepSize)
+        , Distribution(df)
         , PortObject(nullptr) {
 
         }
@@ -1020,7 +1197,40 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
                             default:
                                 llvm_unreachable("unhandled processing rate type in variable rate simulator");
                         }
-                        return PartitionPort{kindId, lb, ub, delay, refId, stepLength};
+
+
+                        auto makeProbabilityDistributionModel = [&]() -> ProcessingRateProbabilityDistribution {
+                            const ProcessingRateProbabilityDistribution & base = binding.getDistribution();
+                            #define SCALE_BY_REPS(x) \
+                                ((double)(x) * (double)reps.numerator()) / ((double)reps.denominator())
+                            switch (base.getTypeId()) {
+                                case DistTypeId::Uniform:
+                                    BEGIN_SCOPED_REGION
+                                    const auto min = SCALE_BY_REPS(base.getMin());
+                                    const auto max = SCALE_BY_REPS(base.getMax());
+                                    return UniformDistribution((float)min, (float)max);
+                                    END_SCOPED_REGION
+                                case DistTypeId::Gamma:
+                                    BEGIN_SCOPED_REGION
+                                    const auto alpha = base.getAlpha();
+                                    // Since beta=1/theta, scale by inverse ratio
+                                    const auto beta = ((double)(base.getBeta()) * (double)reps.denominator()) / ((double)reps.numerator());
+                                    return GammaDistribution((float)alpha, (float)beta);
+                                    END_SCOPED_REGION
+                                case DistTypeId::Normal:
+                                    BEGIN_SCOPED_REGION
+                                    const auto mean = SCALE_BY_REPS(base.getMean());
+                                    const auto stddev = SCALE_BY_REPS(base.getStdDev());
+                                    return NormalDistribution((float)mean, (float)stddev);
+                                    END_SCOPED_REGION
+                            }
+                            #undef SCALE_BY_REPS
+                        };
+                        return PartitionPort{kindId, lb, ub, delay, refId, stepLength, makeProbabilityDistributionModel()};
+                    };
+
+                    auto makeBlockSizePartitionPort = [&]() -> PartitionPort {
+                        return PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0, UniformDistribution()};
                     };
 
                     if (j < numOfInputs) {
@@ -1055,7 +1265,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
                                                             goto equivalent_port_exists;
                                                         }
                                                     }
-                                                    add_edge(v, partitionId, PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0}, G);
+                                                    add_edge(v, partitionId, makeBlockSizePartitionPort(), G);
                                                     goto equivalent_port_exists;
                                                 }
                                             }
@@ -1068,7 +1278,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
                         if (blockSize) {
                             const auto blockSizeNode = add_vertex(blockSize, G);
                             add_edge(streamSet, blockSizeNode, port, G);
-                            add_edge(blockSizeNode, partitionId, PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0}, G);
+                            add_edge(blockSizeNode, partitionId, makeBlockSizePartitionPort(), G);
                         } else {
                             add_edge(streamSet, partitionId, port, G);
                         }
@@ -1120,11 +1330,11 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
 make_blocksize_node_for_existing_streamset:
                             assert (in_degree(streamSet, G) == 1);
                             const auto blockSizeNode = add_vertex(blockSize, G);
-                            add_edge(streamSet, blockSizeNode, PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0}, G);
+                            add_edge(streamSet, blockSizeNode, makeBlockSizePartitionPort(), G);
                             streamSet = blockSizeNode;
                         }
                         if (binding.hasAttribute(AttrId::Deferred)) {
-
+                            #warning a deferred output ought to release data in periodic bursts
                         }
 fuse_existing_streamset:
                         assert (in_degree(streamSet, G) == 1);
@@ -1316,7 +1526,7 @@ restart:
                     const auto s = source(output, G);
                     const auto t = target(input, G);
                     assert (s != t);
-                    add_edge(s, t, PartitionPort{RateId::Fixed, 1, 1, 0, 0, 0}, G);
+                    add_edge(s, t, PartitionPort{RateId::Fixed, 1, 1, 0, 0, 0, UniformDistribution()}, G);
                 }
             }
         }
@@ -1347,7 +1557,7 @@ restart:
     }
     ordering.erase(ordering.begin() + m, ordering.end());
 
-    flat_map<unsigned, PartialSumGenerator *> partialSumGeneratorMap;
+    flat_map<unsigned, BasePartialSumGenerator *> partialSumGeneratorMap;
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
@@ -1361,6 +1571,8 @@ restart:
                 port = new (allocator) FixedPort(p.LowerBound);
                 break;
             case RateId::Bounded:
+
+
                 port = new (allocator) UniformBoundedPort(p.LowerBound, p.UpperBound);
                 break;
             case RateId::PartialSum:
