@@ -240,26 +240,19 @@ bool GrepEngine::matchesToEOLrequired () {
     // may be on the CR of a CRLF.
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) return true;
     // If all REs are anchored to EOL already, then we can avoid moving them.
-    bool allAnchored = true;
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        if (!hasEndAnchor(mREs[i])) allAnchored = false;
-    }
-    if (allAnchored) return false;
+    if (hasEndAnchor(mRE)) return false;
     //
     // Not all REs are anchored.   We can avoid moving matches, if we are
     // in MatchOnly mode (or CountOnly with MaxCount = 1) and no invert match inversion.
     return (mEngineKind == EngineKind::EmitMatches) || (mMaxCount != 1) || mInvertMatches;
 }
 
-void GrepEngine::initREs(std::vector<re::RE *> & REs) {
+void GrepEngine::initRE(re::RE * re) {
     if (mEngineKind != EngineKind::EmitMatches) mColoring = false;
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
-        for (unsigned i = 0; i < REs.size(); ++i) {
-            if (hasEndAnchor(REs[i])) {
-                UnicodeIndexing = true;
-                break;
-            }
+        if (hasEndAnchor(re)) {
+            UnicodeIndexing = true;
         }
     } else if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
         mBreakCC = re::makeCC(0, &cc::Unicode);  // Null
@@ -275,36 +268,25 @@ void GrepEngine::initREs(std::vector<re::RE *> & REs) {
         mExternalNames.insert(anchorName);
     }
 
-    mREs = REs;
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        mREs[i] = resolveModesAndExternalSymbols(mREs[i], mCaseInsensitive);
-        mREs[i] = re::exclude_CC(mREs[i], mBreakCC);
-        mREs[i] = resolveAnchors(mREs[i], anchorRE);
-        if (!mColoring) mREs[i] = remove_nullable_ends(mREs[i]);
-        mREs[i] = regular_expression_passes(mREs[i]);
-        mREs[i] = name_variable_length_CCs(mREs[i]);
+    mRE = re;
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
+    mRE = re::exclude_CC(mRE, mBreakCC);
+    if (!mColoring) mRE = remove_nullable_ends(mRE);
+    mRE = resolveAnchors(mRE, anchorRE);
+    mRE = regular_expression_passes(mRE);
+    mRE = name_variable_length_CCs(mRE);
+    if (hasGraphemeClusterBoundary(mRE)) {
+        UnicodeIndexing = true;
+        setComponent(mExternalComponents, Component::GraphemeClusterBoundary);
     }
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        if (hasGraphemeClusterBoundary(mREs[i])) {
+    if (hasWordBoundary(mRE)) {
+        UnicodeIndexing = true;
+        setComponent(mExternalComponents, Component::WordBoundary);
+    }
+    if (!validateFixedUTF8(mRE)) {
+        setComponent(mExternalComponents, Component::UTF8index);
+        if (mColoring) {
             UnicodeIndexing = true;
-            setComponent(mExternalComponents, Component::GraphemeClusterBoundary);
-            break;
-        }
-    }
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        if (hasWordBoundary(mREs[i])) {
-            UnicodeIndexing = true;
-            setComponent(mExternalComponents, Component::WordBoundary);
-            break;
-        }
-    }
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        if (!validateFixedUTF8(mREs[i])) {
-            setComponent(mExternalComponents, Component::UTF8index);
-            if (mColoring) {
-                UnicodeIndexing = true;
-            }
-            break;
         }
     }
     if (UnicodeIndexing) {
@@ -327,25 +309,20 @@ void GrepEngine::initREs(std::vector<re::RE *> & REs) {
     }
     if (hasComponent(mInternalComponents, Component::MoveMatchesToEOL)) {
         re::RE * notBreak = re::makeDiff(re::makeByte(0x00, 0xFF), toUTF8(mBreakCC));
-        for (unsigned i = 0; i < mREs.size(); ++i) {
-            if (!hasEndAnchor(mREs[i])) {
-                mREs[i] = re::makeSeq({mREs[i], re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
-            }
+        if (!hasEndAnchor(mRE)) {
+            mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    for (unsigned i = 0; i < mREs.size(); ++i) {
-        re::gatherNames(mREs[i], mExternalNames);
-    }
+    re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
     // can bypass transposition and use the Direct CC compiler.
     mPrefixRE = nullptr;
     mSuffixRE = nullptr;
-    if ((mREs.size() == 1) && (mGrepRecordBreak != GrepRecordBreakKind::Unicode) &&
-        mExternalNames.empty() && !UnicodeIndexing) {
-        if (byteTestsWithinLimit(mREs[0], ByteCClimit)) {
+    if ((mGrepRecordBreak != GrepRecordBreakKind::Unicode) && mExternalNames.empty() && !UnicodeIndexing) {
+        if (byteTestsWithinLimit(mRE, ByteCClimit)) {
             return;  // skip transposition
-        } else if (hasTriCCwithinLimit(mREs[0], ByteCClimit, mPrefixRE, mSuffixRE)) {
+        } else if (hasTriCCwithinLimit(mRE, ByteCClimit, mPrefixRE, mSuffixRE)) {
             return;  // skip transposition and set mPrefixRE, mSuffixRE
         } else {
             setComponent(mExternalComponents, Component::S2P);
@@ -575,25 +552,12 @@ StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & P, 
 
     prepareExternalStreams(P, SourceStream);
 
-    const auto numOfREs = mREs.size();
-    std::vector<StreamSet *> MatchResultsBufs(numOfREs);
-
-    for(unsigned i = 0; i < numOfREs; ++i) {
-        StreamSet * const MatchResults = P->CreateStreamSet(1, 1);
-        MatchResultsBufs[i] = MatchResults;
+    StreamSet * Matches = P->CreateStreamSet(1, 1);
         if (UnicodeIndexing) {
-            UnicodeIndexedGrep(P, mREs[i], SourceStream, MatchResults);
+            UnicodeIndexedGrep(P, mRE, SourceStream, Matches);
         } else {
-            U8indexedGrep(P, mREs[i], SourceStream, MatchResults);
+            U8indexedGrep(P, mRE, SourceStream, Matches);
         }
-    }
-
-    StreamSet * Matches = MatchResultsBufs[0];
-    if (MatchResultsBufs.size() > 1) {
-        StreamSet * const MergedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<StreamsMerge>(MatchResultsBufs, MergedMatches);
-        Matches = MergedMatches;
-    }
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
         P->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
@@ -770,23 +734,11 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
 
     prepareExternalStreams(E, SourceStream);
 
-    const auto numOfREs = mREs.size();
-    std::vector<StreamSet *> MatchResultsBufs(numOfREs);
-
-    for(unsigned i = 0; i < numOfREs; ++i) {
-        StreamSet * const MatchResults = E->CreateStreamSet(1, 1);
-        MatchResultsBufs[i] = MatchResults;
-        if (UnicodeIndexing) {
-            UnicodeIndexedGrep(E, mREs[i], SourceStream, MatchResults);
-        } else {
-            U8indexedGrep(E, mREs[i], SourceStream, MatchResults);
-        }
-    }
-    StreamSet * Matches = MatchResultsBufs[0];
-    if (MatchResultsBufs.size() > 1) {
-        StreamSet * const MergedMatches = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<StreamsMerge>(MatchResultsBufs, MergedMatches);
-        Matches = MergedMatches;
+    StreamSet * Matches = E->CreateStreamSet(1, 1);
+    if (UnicodeIndexing) {
+        UnicodeIndexedGrep(E, mRE, SourceStream, Matches);
+    } else {
+        U8indexedGrep(E, mRE, SourceStream, Matches);
     }
     StreamSet * MatchedLineEnds = Matches;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {

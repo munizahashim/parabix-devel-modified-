@@ -103,7 +103,7 @@ public:
     void setRecordBreak(GrepRecordBreakKind b);
     void initFileResult(const std::vector<boost::filesystem::path> & filenames);
     bool haveFileBatch();
-    void initREs(std::vector<re::RE *> & REs);
+    void initRE(re::RE * re);
     virtual void grepCodeGen();
     bool searchAllFiles();
     void * DoGrepThreadMethod();
@@ -176,7 +176,7 @@ protected:
     bool grepMatchFound;
     GrepRecordBreakKind mGrepRecordBreak;
 
-    std::vector<re:: RE *> mREs;
+    re:: RE * mRE;
     std::set<re::Name *> mExternalNames;
     re::CC * mBreakCC;
     re::RE * mPrefixRE;
