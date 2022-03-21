@@ -103,111 +103,113 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
         P->CreateKernelCall<StdOutKernel>(filtered);
     } else {
-//  NORMAL
-    StreamSet * recordsByField = P->CreateStreamSet(1);
-    if (UseFilterByMaskKernel) {
-        P->CreateKernelCall<FilterByMaskKernel>
-            (Select(fieldSeparators, {0}),
-             SelectOperationList{Select(recordSeparators, {0})},
-             recordsByField);
-    } else {
-        FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
-    }
+    //  NORMAL
+        StreamSet * recordsByField = P->CreateStreamSet(1);
+        if (UseFilterByMaskKernel) {
+            P->CreateKernelCall<FilterByMaskKernel>
+                (Select(fieldSeparators, {0}),
+                 SelectOperationList{Select(recordSeparators, {0})},
+                 recordsByField);
+        } else {
+            FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
+        }
+        // P->CreateKernelCall<DebugDisplayKernel>("recordsByField", recordsByField);
 
-    StreamSet * translatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
+        StreamSet * translatedBasis = P->CreateStreamSet(8);
+        P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
 
-    StreamSet * filteredBasis = P->CreateStreamSet(8);
-    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-    if (UseFilterByMaskKernel) {
-        P->CreateKernelCall<FilterByMaskKernel>
-            (Select(toKeep, {0}),
-             SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))},
-             filteredBasis);
-        P->CreateKernelCall<FilterByMaskKernel>
-            (Select(toKeep, {0}),
-             SelectOperationList{Select(fieldSeparators, {0})},
-             filteredFieldSeparators);
-    } else {
-        FilterByMask(P, toKeep, translatedBasis, filteredBasis);
-        FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
-    }
+        StreamSet * filteredBasis = P->CreateStreamSet(8);
+        StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
+        if (UseFilterByMaskKernel) {
+            P->CreateKernelCall<FilterByMaskKernel>
+                (Select(toKeep, {0}),
+                 SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))},
+                 filteredBasis);
+            P->CreateKernelCall<FilterByMaskKernel>
+                (Select(toKeep, {0}),
+                 SelectOperationList{Select(fieldSeparators, {0})},
+                 filteredFieldSeparators);
+        } else {
+            FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+            FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
+        }
 
-    //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
-    //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
+        //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
+        //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
 
-    const unsigned fieldCount = templateStrs.size();
-    const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
-    StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
+        const unsigned fieldCount = templateStrs.size();
+        const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
+        StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
 
-    P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, RunIndex::Kind::RunOf0);
-    //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
+        P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, RunIndex::Kind::RunOf0);
+        //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
 
-    StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
-    P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
-    //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
+        StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
+        P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
+        //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
 
-    StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
-    SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
+        StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
+        SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
 
-    //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
+        //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
 
-    std::vector<unsigned> insertionAmts;
-    unsigned maxInsertAmt = 0;
-    for (auto & s : templateStrs) {
-        unsigned insertAmt = s.size();
-        insertionAmts.push_back(insertAmt);
-        if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
-    }
-    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
+        std::vector<unsigned> insertionAmts;
+        unsigned maxInsertAmt = 0;
+        for (auto & s : templateStrs) {
+            unsigned insertAmt = s.size();
+            insertionAmts.push_back(insertAmt);
+            if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
+        }
+        const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
-    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
-    //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-    if (ShowStreams) {
-        Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-        illustrator.captureByteData(P, "bytedata", ByteStream, '?');
-        illustrator.captureBitstream(P, "recordSeparators", recordSeparators, '_', '1');
-        illustrator.captureBitstream(P, "fieldSeparators", fieldSeparators);
-        illustrator.captureBitstream(P, "filteredFieldSeparators", filteredFieldSeparators);
-        illustrator.captureBixNum(P, "InsertBixNum", InsertBixNum);
-    }
+        StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
+        P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
+        //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
+        if (ShowStreams) {
+            Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
+            illustrator.registerIllustrator(illustratorAddr);
+            illustrator.captureByteData(P, "bytedata", ByteStream, '?');
+            illustrator.captureBitstream(P, "recordSeparators", recordSeparators, '_', '1');
+            illustrator.captureBitstream(P, "fieldSeparators", fieldSeparators);
+            illustrator.captureBitstream(P, "filteredFieldSeparators", filteredFieldSeparators);
+            illustrator.captureBixNum(P, "InsertBixNum", InsertBixNum);
+        }
 
+        // TODO: these aren't very tight bounds but works for now
+        StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before,
+                                                           GammaDistribution(5.0f, 0.1f), NormalDistribution(0.7f, 0.05f));
+        // P->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
 
-    // TODO: need to mark this as having a high output rate
-    StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
+        // Baais bit streams expanded with 0 bits for each string to be inserted.
+        StreamSet * ExpandedBasis = P->CreateStreamSet(8);
+        SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, GammaDistribution(5.0f, 0.1f));
+        // P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
-    // Baais bit streams expanded with 0 bits for each string to be inserted.
-    StreamSet * ExpandedBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis);
-    //P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+        // We need to insert strings at all positions marked by 0s in the
+        // SpreadMask, plus the additional 0 at the delimiter position.
+        //StreamSet * InsertMask = P->CreateStreamSet(1);
+        //P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
 
-    // We need to insert strings at all positions marked by 0s in the
-    // SpreadMask, plus the additional 0 at the delimiter position.
-    //StreamSet * InsertMask = P->CreateStreamSet(1);
-    //P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
+        // For each run of 0s marking insert positions, create a parallel
+        // bixnum sequentially numbering the string insert positions.
+        StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
+        P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+        //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
-    // For each run of 0s marking insert positions, create a parallel
-    // bixnum sequentially numbering the string insert positions.
-    StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-    //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+        StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
+        SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum, GammaDistribution(5.0f, 0.1f));
+        // P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
 
-    StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
-    SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum);
-    //P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
+        StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
+        P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -1);
 
-    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -1);
+        // The computed output can be converted back to byte stream form by the
+        // P2S kernel (parallel-to-serial).
+        StreamSet * Instantiated = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
 
-    // The computed output can be converted back to byte stream form by the
-    // P2S kernel (parallel-to-serial).
-    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
-
-    //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(Instantiated);
+        //  The StdOut kernel writes a byte stream to standard output.
+        P->CreateKernelCall<StdOutKernel>(Instantiated);
     }
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }

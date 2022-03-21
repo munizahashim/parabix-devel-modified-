@@ -36,13 +36,19 @@ enum class StreamExpandOptimization {None, NullCheck};
     FieldDepositKernel.
  
  */
-
 void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset = 0,
                   StreamExpandOptimization opt = StreamExpandOptimization::None,
-                  unsigned expansionFieldWidth = 64);
-    
+                  unsigned expansionFieldWidth = 64,
+                  ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution());
+
+inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
+                         StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
+    return SpreadByMask(P, mask, toSpread, outputs, 0, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+}
+
 /*  Create a spread mask for inserting a single item into a stream for each position
     in the given insertion mask that is nonzero.   The insertion mask may be
     a bixnum; in this case the spread mask will have a single insert position
@@ -52,7 +58,8 @@ enum class InsertPosition {Before, After};
 
 StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
                                     StreamSet * insertion_mask,
-                                    InsertPosition p = InsertPosition::Before);
+                                    InsertPosition p = InsertPosition::Before,
+                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
 
 /*   Prepare a spread mask for inserting data into bit streams.
      At each stream position, a bixnum encodes the number of items
@@ -68,7 +75,9 @@ StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
 
 StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
                                 StreamSet * bixNumInsertCount,
-                                InsertPosition p = InsertPosition::Before);
+                                InsertPosition p = InsertPosition::Before,
+                                ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
+                                ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
 
 /* The following kernels are used by SpreadByMask internally. */
 
@@ -80,7 +89,8 @@ public:
                        StreamSet * expanded,
                        Scalar * base,
                        const StreamExpandOptimization = StreamExpandOptimization::None,
-                       const unsigned FieldWidth = sizeof(size_t) * 8);
+                       const unsigned FieldWidth = sizeof(size_t) * 8,
+                       ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability = UniformDistribution());
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
 private:

@@ -1042,6 +1042,8 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
                     const auto j = f.first->second;
                     const auto m = out_degree(j, G);
 
+
+
                     if (LLVM_UNLIKELY(out_degree(i, G) != m)) {
                         error = true;
                     } else {
@@ -1114,6 +1116,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
                         rn.Kernel = nullptr;
                         unmodified = false;
                     }
+
                     if (LLVM_UNLIKELY(error)) {
                         report_fatal_error(kernel->getName() + " is ambiguous: multiple I/O layouts have the same signature");
                     }

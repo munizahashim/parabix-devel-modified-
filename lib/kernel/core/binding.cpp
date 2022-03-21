@@ -19,7 +19,8 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r)
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(value->getType())
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -28,7 +29,8 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r,
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(value->getType())
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -37,7 +39,8 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r,
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(value->getType())
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -46,7 +49,8 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(scalarType)
-, mRelationship(nullptr) {
+, mRelationship(nullptr)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -55,7 +59,8 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(scalarType)
-, mRelationship(nullptr) {
+, mRelationship(nullptr)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -64,7 +69,8 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(scalarType)
-, mRelationship(nullptr) {
+, mRelationship(nullptr)
+, mDistribution(UniformDistribution()) {
 
 }
 
@@ -73,7 +79,8 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(type)
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
         llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
     }
@@ -87,7 +94,8 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(type)
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
         llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
     }
@@ -101,7 +109,8 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mName(std::move(name))
 , mRate(std::move(r))
 , mType(type)
-, mRelationship(value) {
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
         llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
     }
@@ -115,7 +124,8 @@ Binding::Binding(const Binding & original, ProcessingRate r)
 , mName(original.getName())
 , mRate(std::move(r))
 , mType(original.getType())
-, mRelationship(original.getRelationship()) {
+, mRelationship(original.getRelationship())
+, mDistribution(original.getDistribution()) {
 
 }
 

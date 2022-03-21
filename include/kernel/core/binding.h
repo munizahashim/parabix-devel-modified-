@@ -179,7 +179,7 @@ BOOST_FORCEINLINE void Binding::__set_binding_param<Attribute>(Binding & binding
 
 template <>
 BOOST_FORCEINLINE void Binding::__set_binding_param<ProcessingRateProbabilityDistribution>(Binding & binding, ProcessingRateProbabilityDistribution df) {
-
+    binding.mDistribution = df;
 }
 
 template<unsigned I, typename... ParamTypes>

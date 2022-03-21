@@ -5,11 +5,12 @@
 #include <toolchain/toolchain.h>
 #include <util/slab_allocator.h>
 
-#define PRINT_GRAPH_BITSETS
+// #define PRINT_GRAPH_BITSETS
 
 namespace kernel {
 
 #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
+
 
 namespace {
 
@@ -722,8 +723,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     assert (synchronousPartitionCount > 0);
 
-
-
     // Stage 6: split (weakly) disconnected components within a partition into separate partitions
 
     std::vector<unsigned> componentId(m);
@@ -978,7 +977,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         const PartitionData & D = initial[i];
         const auto m = D.Kernels.size();
         assert (D.Repetitions.size() == m);
-        const auto exp = floor(D.ExpectedStridesPerSegment + Rational{1, 2});
+        const auto exp = std::max(floor(D.ExpectedStridesPerSegment + Rational{1, 2}), 1U);
         for (unsigned j = 0; j < m; ++j) {
             const auto k = D.Kernels[j];
             assert (Relationships[k].Type == RelationshipNode::IsKernel);

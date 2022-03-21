@@ -518,6 +518,28 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             }
         }
         #endif
+
+        using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
+
+
+
+        const auto & D = binding.getDistribution();
+        switch (D.getTypeId()) {
+            case DistId::Uniform: break;
+            case DistId::Normal:
+                out << " [Dist: " << "Normal "
+                    << llvm::format("%0.2f", D.getMean())
+                    << ","
+                    << llvm::format("%0.2f", D.getStdDev()) << "]";
+                break;
+          case DistId::Gamma:
+            out << " [Dist: " << "Gamma "
+                << llvm::format("%0.2f", D.getAlpha())
+                << ","
+                << llvm::format("%0.2f", D.getBeta()) << "]";
+            break;
+        }
+
         if (port.LookBehind) {
             out << " [LB:" << port.LookBehind << ']';
         }
