@@ -573,11 +573,25 @@ public:
             V = (V | (value ? mask : ZERO)) & ~(value ? ZERO : mask);
         }
 
+        void reset() {
+            for (auto & v : _value) {
+                v = 0;
+            }
+        }
+
         bool test(const BitWord i) const {
             constexpr BitWord ONE{1};
             const auto & V = _value[i / BITWORD_SIZE];
             const auto mask = BitWord(1) << (i & (BITWORD_SIZE - ONE));
             return (V & mask) != 0;
+        }
+
+        size_t count() const {
+            size_t c = 0;
+            for (auto v : _value) {
+                c += std::bitset<BITWORD_SIZE>{v}.count();
+            }
+            return c;
         }
 
         size_t hash() const {
@@ -597,6 +611,10 @@ public:
                 if (*i != *j) return false;
             }
             return true;
+        }
+
+        void swap(Candidate & other) {
+            other._value.swap(_value);
         }
 
     private:
@@ -629,7 +647,7 @@ public:
 
     struct FitnessComparator {
         bool operator()(const Individual & a,const Individual & b) const{
-            return FitnessValueEvaluator::eval(a->second, b->second);;
+            return FitnessValueEvaluator::eval(a->second, b->second);
         }
     };
 
@@ -695,6 +713,8 @@ public:
                     newCandidate.set(j, zeroOrOneInt(rng));
                 }
             }
+
+            repairCandidate(newCandidate);
 
             const auto f = candidates.insert(std::make_pair(newCandidate, 0));
             if (LLVM_LIKELY(f.second)) {
@@ -796,6 +816,11 @@ protected:
      * @brief initGA
      ** ------------------------------------------------------------------------------------------------------------- */
     virtual bool initialize(Population & initialPopulation) = 0;
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief repairCandidate
+     ** ------------------------------------------------------------------------------------------------------------- */
+    virtual void repairCandidate(Candidate &) { }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness

@@ -1903,39 +1903,6 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
            const auto inversionCost = inversion_cost();
 
-           auto updatePath = [&](const Candidate & path, const double inversionCost) {
-
-               const auto numOfKernels = path.size();
-
-               if (inversionCost > bestInversionCost) {
-
-                   const auto d = inversionCost - bestInversionCost;
-                   const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
-
-                   for (unsigned i = 1; i < numOfKernels; ++i) {
-                       const auto e = std::make_pair(path[i - 1], path[i]);
-                       const auto f = trail.find(e);
-                       assert (f != trail.end());
-                       double & t = f->second;
-                       t = std::max(t - deposit, HAMILTONIAN_PATH_ACO_TAU_MIN);
-                   }
-
-               } else if (inversionCost < bestInversionCost) {
-                   const auto d = bestInversionCost - inversionCost;
-                   const auto deposit = d / (HAMILTONIAN_PATH_INVERSE_K + d);
-
-                   for (unsigned i = 1; i < numOfKernels; ++i) {
-                       const auto e = std::make_pair(path[i - 1], path[i]);
-                       const auto f = trail.find(e);
-                       assert (f != trail.end());
-                       double & t = f->second;
-                       t = std::min(t + deposit, HAMILTONIAN_PATH_ACO_TAU_MAX);
-                   }
-
-               }
-
-           };
-
            if (inversionCost > bestInversionCost) {
 
                const auto d = inversionCost - bestInversionCost;

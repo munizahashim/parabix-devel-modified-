@@ -659,6 +659,8 @@ struct SimulationSinkActor final : public SimulationActor {
 
 };
 
+#if 0
+
 struct InputBlockSizeActor final : public SimulationActor {
 
     InputBlockSizeActor(const unsigned blockSize, SimulationAllocator & allocator)
@@ -742,6 +744,8 @@ private:
     uint32_t PendingStrides;
 };
 
+#endif
+
 struct BlockSizeActor final : public SimulationActor {
 
     BlockSizeActor(const unsigned blockSize, SimulationAllocator & allocator)
@@ -793,6 +797,19 @@ private:
     const unsigned BlockSize;
 };
 
+using LinkingGraph = adjacency_list<vecS, vecS, undirectedS, no_property, Rational>;
+
+using VertexSet = std::deque<LinkingGraph::vertex_descriptor>;
+
+template<typename Lambda>
+struct CliqueLambdaDispatcher {
+    inline void clique(const VertexSet & V, const LinkingGraph &) {
+        functor(V);
+    }
+    CliqueLambdaDispatcher(Lambda functor)
+    : functor(functor) {}
+    Lambda functor;
+};
 
 } // end of anonymous namespace
 
@@ -1936,12 +1953,21 @@ restart_delay_merge:
                     // the actors to avoid scenarios in which fusing both partitions
                     // would require executing a large number of strides.
                     if (r.numerator() == 1 || r.denominator() == 1) {
-                        add_edge(i, j, r, L);
+                        const auto a = actorNodes[i];
+                        const auto b = actorNodes[j];
+                        if (in_degree(a, G) > 0 || in_degree(b, G) > 0) {
+                            add_edge(i, j, r, L);
+                        }
                     }
                 }
             }
         }
     }
+
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+    printGraph(L, errs(), "L0");
+    #endif
+
     END_SCOPED_REGION
 
     #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
@@ -1991,98 +2017,178 @@ restart_delay_merge:
     errs() << " -- end of data simulation\n";
     #endif
 
-    // We could have a scenario in which a kernel has only greedy inputs that
-    // consumes data from one that produces it at a variable rate which in turn
-    // consumes it from a purely fixed rate source. This could lead the system
-    // to wrongly conclude both the source and "greedy" kernel is linked despite
-    // having an interleaving kernel that violates this contract.
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+    printGraph(L, errs(), "L1");
+    #endif
 
-    // Since reasoning about that later can only lead to a worse solution for
-    // the max. clique identification, cut such violations from the graph here.
+    BEGIN_SCOPED_REGION
 
-    std::vector<unsigned> component(numOfActors);
-    const auto numOfComponents = connected_components(L, component.data());
+    using VertexList = std::vector<Graph::vertex_descriptor>;
 
-    std::vector<unsigned> componentInG(nodeCount, -1U);
+    std::set<VertexList> cliques;
+
+    BEGIN_SCOPED_REGION
+
+    std::vector<unsigned> mapping(nodeCount, -1U);
     for (unsigned i = 0; i < numOfActors; ++i) {
         const auto j = actorNodes[i];
         assert (j < nodeCount);
-        componentInG[j] = component[i];
+        mapping[j] = i;
+        VertexList L{1};
+        L[0] = i;
+        cliques.emplace(std::move(L));
     }
+
+    VertexList path;
+    path.reserve(nodeCount);
 
     dynamic_bitset<size_t> visited(nodeCount);
 
-    remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
-        // all paths between these vertices in G must belong to the same
-        // connected component in L
-        assert (source(e, L) < target(e, L));
-        const auto s = actorNodes[source(e, L)];
-        const auto t = actorNodes[target(e, L)];
-        const auto c = componentInG[s];
-        assert (c != -1U);
-        assert (c == component[source(e, L)]);
-        assert (c == componentInG[t]);
-        assert (c == component[target(e, L)]);
-        // init the new dfs search
-        visited.reset();
-        visited.set(t);
-        std::function<bool(Graph::vertex_descriptor)> not_all_paths = [&](const Graph::vertex_descriptor u) {
-            for (const auto f : make_iterator_range(out_edges(u, G))) {
-                const auto v = target(f, G);
-                if (visited.test(v)) {
-                    return false;
+    std::function<void(const VertexSet &)> checkClique = [&](const VertexSet & V) {
+        assert (V.size() > 1);
+
+        LinkingGraph H(numOfActors);
+        const auto n = V.size();
+        for (unsigned i = 1; i < n; ++i) {
+            for (unsigned j = 0; j != i; ++j) {
+                auto a = V[i];
+                auto b = V[j];
+                if (b < a) {
+                    std::swap(a, b);
                 }
-                const auto x = componentInG[v];
-                assert (x < numOfComponents || x == -1U);
-                if ((x != c && x != -1U) || not_all_paths(v)) {
-                    return true;
-                }
-                visited.set(v);
-            }
-            return false;
-        };
-        return not_all_paths(s);
-    }, L);
-
-    // Now identify all of the max. cliques. We want to ensure that we only
-    // link partitions that will not force the system to wait for large
-    // amounts of data. E.g., if one partition happens to execute one stride per
-    // timestep, it could be aligned with every fixed-rate partition but
-    // those partitions might have stride rates that do not have an integer
-    // relationship between them.
-
-    // TODO: a partition could actually belong to two or more partially overlapping
-    // partition groups. Can the partitioning algorithm be made to consider that
-    // and choose which it ought to belong to? Termination attributes might split
-    // these partitions arbritarily.
-
-    unsigned numOfLinkedGroups = 0;
-
-    struct MarkLinkedPartitionsFunctor {
-        using VertexSet = std::deque<LinkingGraph::vertex_descriptor>;
-        void clique(const VertexSet & V, const LinkingGraph &) {
-            const auto id = ++numOfLinkedGroups;
-            for (const auto v : V) {
-                assert (v < M.size());
-                const auto p = M[v];
-                assert (p < num_vertices(P));
-               // assert (P[p].LinkedGroupId == 0);
-                P[p].LinkedGroupId = id;
+                add_edge(a, b, H);
             }
         }
-        MarkLinkedPartitionsFunctor(PartitionGraph & P, const std::vector<unsigned> & M, unsigned & numOfLinkedGroups)
-        : P(P), M(M), numOfLinkedGroups(numOfLinkedGroups) {}
-        PartitionGraph & P;
-        const std::vector<unsigned> & M;
-        unsigned & numOfLinkedGroups;
+
+        assert (num_edges(H) == (n * (n - 1)) / 2);
+
+        remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
+            // all paths between these vertices in G must belong to the same
+            // connected component in L
+            const auto a = source(e, H);
+            assert (a < target(e, H));
+            const auto s = actorNodes[a];
+            assert (mapping[s] == a);
+            const auto t = actorNodes[target(e, H)];
+            assert (mapping[t] == target(e, H));
+
+            // init the new dfs search
+            visited.reset();
+            assert (path.empty());
+            std::function<bool(Graph::vertex_descriptor)> not_all_paths = [&](const Graph::vertex_descriptor u) {
+                if (u == t) {
+                    for (const auto w : path) {
+                        const auto b = mapping[w];
+                        assert (b != -1U);
+                        assert (actorNodes[b] == w);
+                        if (!edge(a, b, H).second) {
+                            assert (!edge(b, a, H).second);
+                            return true;
+                        }
+                    }
+                } else {
+                    for (const auto f : make_iterator_range(out_edges(u, P))) {
+                        const auto v = target(f, P);
+                        if (visited.test(v)) {
+                            continue;
+                        }
+                        visited.set(v);
+                        path.push_back(v);
+                        if (not_all_paths(v)) {
+                            return true;
+                        }
+                        path.pop_back();
+                    }
+                }
+                return false;
+            };
+            const auto r = not_all_paths(s);
+            path.clear();
+            return r;
+        }, H);
+
+        assert (path.empty());
+
+        // Since H contains a single clique, if we removed any vertices we'll have fewer than (n * (n-1) / 2) edges.
+        // If so, recurse; otherwise sort then add the set (to ensure a canonical ordering.)
+        if (num_edges(H) != (n * (n - 1)) / 2) {
+            bron_kerbosch_all_cliques(H, CliqueLambdaDispatcher<decltype(checkClique)>{checkClique}, 2);
+        } else {
+            VertexList I(V.begin(), V.end());
+            std::sort(I.begin(), I.end());
+            cliques.emplace(std::move(I));
+        }
     };
 
-    // NOTE: ugly workaround here. this algorithm copies the functor at each recursion
-    // level, leading to an incorrect notion of state. Even when I try forcing the
-    // template type to be a reference type, it gets stripped away. To maintain the
-    // state and minimize the copy cost, we make everything in the functor a reference.
+    bron_kerbosch_all_cliques(L, CliqueLambdaDispatcher<decltype(checkClique)>{checkClique}, 2);
 
-    bron_kerbosch_all_cliques(L, MarkLinkedPartitionsFunctor{P, actorNodes, numOfLinkedGroups}, 1);
+    END_SCOPED_REGION
+
+    const auto n = cliques.size();
+
+    assert (n >= numOfActors);
+
+    // We just perform a modified greedy set cover here that will always return an exact cover in our case.
+    // If we had a better notion of a cost function, it might be beneficial to enumerate them with algorithm X
+    // and choose a good one instead. As of now, the only cost function I can think of would be akin to running
+    // the second partitioning pass and scheduler each time and thus far too costly to consider doing for complex
+    // programs (which would be the ones most likely to benefit from a non-greedy solution.)
+
+    using CliqueGraph = adjacency_list<vecS, vecS, bidirectionalS>;
+
+    CliqueGraph C(numOfActors + n);
+    auto cliqueSet = numOfActors;
+    for (const VertexList & c : cliques) {
+        for (auto v : c) {
+            add_edge(cliqueSet, v, C);
+        }
+        ++cliqueSet;
+    }
+
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+    printGraph(C, errs(), "C");
+    #endif
+
+    assert (cliqueSet == num_vertices(C));
+    assert (num_edges(C) >= numOfActors);
+
+    unsigned numOfLinkedGroups = 1;
+
+    flat_set<CliqueGraph::vertex_descriptor> toClear;
+
+    while (num_edges(C) > 0) {
+
+        unsigned chosen = 0;
+        size_t max = 0;
+        for (unsigned i = 0; i < n; ++i) {
+            const auto value = out_degree(i + numOfActors, C);
+            if (max < value) {
+                chosen = i;
+                max = value;
+            }
+        }
+        assert (max > 0);
+        for (const auto e : make_iterator_range(out_edges(chosen + numOfActors, C))) {
+            const auto v = target(e, C);
+            assert (v < numOfActors);
+            const auto p = actorNodes[v];
+            assert (p < numOfPartitions);
+            assert (P[p].LinkedGroupId == 0);
+            P[p].LinkedGroupId = numOfLinkedGroups;
+            for (const auto f : make_iterator_range(in_edges(v, C))) {
+                toClear.insert(source(f, C));
+            }
+        }
+        assert (toClear.size() > 0);
+        for (const auto v : toClear) {
+            clear_out_edges(v, C);
+        }
+        toClear.clear();
+
+        ++numOfLinkedGroups;
+    }
+
+    END_SCOPED_REGION
 
     for (unsigned i = 0; i < m; ++i) {
         const auto u = ordering[m - i - 1];
