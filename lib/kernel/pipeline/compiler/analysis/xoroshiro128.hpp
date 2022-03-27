@@ -5,28 +5,27 @@
 #include <array>
 
 
-class xoroshiro128 {
+class xoshiro256 {
 
-    constexpr std::uint32_t rotl(const std::uint32_t x, const int s) noexcept {
-        return (x << s) | (x >> (32 - s));
+    static inline uint64_t rotl(const uint64_t x, int k) {
+        return (x << k) | (x >> (64 - k));
     }
 
 public:
 
-    using state_type = std::array<std::uint32_t, 4>;
-    using result_type = uint32_t;
+    using state_type = std::array<uint64_t, 4>;
+    using result_type = std::default_random_engine::result_type;
 
     static constexpr result_type (min)() { return 0; }
     static constexpr result_type (max)() { return UINT32_MAX; }
-    friend bool operator==(xoroshiro128 const &, xoroshiro128 const &);
-    friend bool operator!=(xoroshiro128 const &, xoroshiro128 const &);
+    friend bool operator==(xoshiro256 const &, xoshiro256 const &);
+    friend bool operator!=(xoshiro256 const &, xoshiro256 const &);
 
-    xoroshiro128()
-    : _state({0xB0F3D4F1, 0x51723f59, 0x2fb5c3e4, 0xf6e3f1c9 }) {
+    xoshiro256() : _state({ 0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c }) {
 
     }
 
-    explicit xoroshiro128(std::random_device &rd) {
+    explicit xoshiro256(std::random_device &rd) {
         seed(rd);
     }
 
@@ -36,8 +35,8 @@ public:
         }
     }
 
-    result_type operator()() {
-        const uint64_t result = rotl(_state[1] * 5, 7) * 9;
+    inline result_type operator()() {
+        const uint64_t result = rotl(_state[0] + _state[3], 23) + _state[0];
         const uint64_t t = _state[1] << 17;
         _state[2] ^= _state[0];
         _state[3] ^= _state[1];
@@ -48,8 +47,7 @@ public:
         return result;
     }
 
-    void discard(unsigned long long n)
-    {
+    inline void discard(unsigned long long n) {
         for (unsigned long long i = 0; i < n; ++i)
             operator()();
     }
@@ -58,11 +56,11 @@ private:
     state_type _state;
 };
 
-bool operator==(xoroshiro128 const &lhs, xoroshiro128 const &rhs)
+bool operator==(xoshiro256 const &lhs, xoshiro256 const &rhs)
 {
     return lhs._state == rhs._state;
 }
-bool operator!=(xoroshiro128 const &lhs, xoroshiro128 const &rhs)
+bool operator!=(xoshiro256 const &lhs, xoshiro256 const &rhs)
 {
     return lhs._state != rhs._state;
 }

@@ -1,15 +1,13 @@
 ﻿#ifndef VARIABLE_RATE_ANALYSIS_HPP
 #define VARIABLE_RATE_ANALYSIS_HPP
 
-// #define PRINT_SIMULATION_DEBUG_STATISTICS
-
 #include "pipeline_analysis.hpp"
 #include <boost/math/distributions/skew_normal.hpp>
 #include <chrono>
 
-#ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
-
 #include <util/slab_allocator.h>
+
+#define HOT  __attribute__ ((hot))
 
 namespace kernel {
 
@@ -17,9 +15,9 @@ namespace {
 
 // #define PRINT_SIMULATION_DEBUG_STATISTICS
 
-constexpr uint64_t DEMAND_ITERATIONS = 1000;
+constexpr uint64_t DEMAND_ITERATIONS = 200;
 
-constexpr uint64_t MAX_DATA_ITERATIONS =   1000000;
+constexpr uint64_t MAX_DATA_ITERATIONS =   100000;
 
 constexpr long APPROXIMATE_TIMEOUT_SECONDS = 10;
 
@@ -30,13 +28,17 @@ using length_t = int64_t;
 using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
 
 struct UniformDistributionModel {
-    uint32_t next(xoroshiro128 & rng) const {
+    uint32_t next(xoshiro256 & rng) const {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
         return dst(rng);
     }
 
     uint32_t getMax() const {
         return mMax;
+    }
+
+    float getExpected() const {
+        return (mMin + mMax) * 0.5f;
     }
 
     UniformDistributionModel(const uint32_t min, const uint32_t max)
@@ -53,13 +55,17 @@ inline constexpr uint32_t clamp(const uint32_t x, const uint32_t min, const uint
 }
 
 struct GammaDistributionModel {
-    uint32_t next(xoroshiro128 & rng) const {
+    uint32_t next(xoshiro256 & rng) const {
         std::gamma_distribution<float> dst(mAlpha, mBeta);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
 
     uint32_t getMax() const {
         return mMax;
+    }
+
+    float getExpected() const {
+        return mAlpha * mBeta;
     }
 
     GammaDistributionModel(const float alpha, const float beta, const unsigned min, const unsigned max)
@@ -74,13 +80,17 @@ private:
 };
 
 struct NormalDistributionModel {
-    uint32_t next(xoroshiro128 & rng) const {
+    uint32_t next(xoshiro256 & rng) const {
         std::normal_distribution<float> dst(mMean, mStdDev);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
 
     uint32_t getMax() const {
         return mMax;
+    }
+
+    float getExpected() const {
+        return mMean;
     }
 
     NormalDistributionModel(const float mean, const float stddev, const unsigned min, const unsigned max)
@@ -95,9 +105,9 @@ private:
 };
 
 struct SkewNormalDistributionModel {
-    uint32_t next(xoroshiro128 & rng) const {
+    uint32_t next(xoshiro256 & rng) const {
         std::uniform_real_distribution<float> dst(0.0f, 1.0f);
-        math::skew_normal_distribution<float> sk(mMean, mStdDev, mSkew);
+        math::skew_normal_distribution<float> sk(mLocation, mScale, mShape);
         return clamp((uint32_t)(math::quantile(sk, dst(rng)) + 0.5f), mMin, mMax);
     }
 
@@ -106,13 +116,19 @@ struct SkewNormalDistributionModel {
     }
 
     SkewNormalDistributionModel(const float mean, const float stddev, const float skew, const unsigned min, const unsigned max)
-    : mMean(mean), mStdDev(stddev), mSkew(skew), mMin(min), mMax(max) {
+    : mLocation(mean), mScale(stddev), mShape(skew), mMin(min), mMax(max) {
 
     }
+
+    float getExpected() const {
+        constexpr float SQRT_2_OVER_PI = 0.79788456080286535587989211986876373695171726f;
+        return mLocation + (mScale * mShape * SQRT_2_OVER_PI) / std::sqrt(1.0f + (mShape * mShape));
+    }
+
 private:
-    const float mMean;
-    const float mStdDev;
-    const float mSkew;
+    const float mLocation;
+    const float mScale;
+    const float mShape;
     const uint32_t mMin;
     const uint32_t mMax;
 };
@@ -121,9 +137,11 @@ struct SimulationPort {
 
     length_t QueueLength;
 
-    virtual bool consume(length_t & pending, xoroshiro128 & rng) = 0;
+    virtual bool consume(length_t & pending, xoshiro256 & rng) const = 0;
 
-    virtual void produce(xoroshiro128 & rng) = 0;
+    virtual void produce(xoshiro256 & rng) = 0;
+
+    virtual float expected() const = 0;
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
@@ -149,13 +167,17 @@ struct FixedPort final : public SimulationPort {
     : SimulationPort()
     ,  mAmount(amount) { }
 
-    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
+    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
         pending = mAmount;
         return (QueueLength >= mAmount) ;
     }
 
-    void produce(xoroshiro128 & /* rng */) override {
+    void produce(xoshiro256 & /* rng */) override {
         QueueLength += mAmount;
+    }
+
+    float expected() const override {
+        return (float)mAmount;
     }
 
 private:
@@ -167,7 +189,7 @@ struct BoundedPort final : public SimulationPort {
 
     BoundedPort(DistributionModel m) : SimulationPort(),  Model(m) { }
 
-    bool consume(length_t & pending, xoroshiro128 & rng) override {
+    bool consume(length_t & pending, xoshiro256 & rng) const override {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
         if (QueueLength < Model.getMax()) {
@@ -178,8 +200,12 @@ struct BoundedPort final : public SimulationPort {
         return true;
     }
 
-    void produce(xoroshiro128 & rng) override {
+    void produce(xoshiro256 & rng) override {
         QueueLength += Model.next(rng);
+    }
+
+    float expected() const override {
+        return Model.getExpected();
     }
 
 private:
@@ -189,7 +215,9 @@ private:
 
 struct BasePartialSumGenerator {
 
-    length_t readStepValue(const uint64_t start, const uint64_t end, xoroshiro128 & rng) {
+    friend struct PartialSumPort;
+
+    length_t readStepValue(const uint64_t start, const uint64_t end, xoshiro256 & rng) {
 
         // Since PartialSum rates can have multiple ports referring to the same reference streamset, we store the
         // history of partial sum values in a circular buffer but silently drop entries after every user has read
@@ -258,8 +286,8 @@ struct BasePartialSumGenerator {
 
     BasePartialSumGenerator(const unsigned users, const unsigned historyLength, SimulationAllocator & allocator)
     : Users(users)
-    , HeadPosition(0)
     , HeadOffset(0)
+    , HeadPosition(0)
     , TailOffset(0)
     , Capacity(std::max<unsigned>(historyLength * 2, 32))
     , History(allocator.allocate<uint64_t>(Capacity))
@@ -268,7 +296,7 @@ struct BasePartialSumGenerator {
         assert (historyLength > 0);
     }
 
-    void initializeGenerator(xoroshiro128 & rng) {
+    void initializeGenerator(xoshiro256 & rng) {
         uint64_t partialSum = 0;
         History[0] = 0;
         for (unsigned i = 1; i < Capacity; ++i) {
@@ -287,7 +315,9 @@ struct BasePartialSumGenerator {
 
 protected:
 
-    virtual uint32_t generateStepValue(xoroshiro128 & rng) const = 0;
+    virtual float expected() const = 0;
+
+    virtual uint32_t generateStepValue(xoshiro256 & rng) const = 0;
 
 private:
     const unsigned Users;
@@ -317,10 +347,14 @@ struct PartialSumGenerator : public BasePartialSumGenerator {
 
 protected:
 
-    uint32_t generateStepValue(xoroshiro128 & rng) const override {
+    uint32_t generateStepValue(xoshiro256 & rng) const override {
         const auto r = Model.next(rng);
         assert (r <= Model.getMax());
         return r;
+    }
+
+    float expected() const override {
+        return Model.getExpected();
     }
 
 private:
@@ -339,7 +373,7 @@ struct PartialSumPort final : public SimulationPort {
         assert (step > 0);
     }
 
-    bool consume(length_t & pending, xoroshiro128 & rng) override {
+    bool consume(length_t & pending, xoshiro256 & rng) const override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         assert (m == PreviousValue || PreviousValue == -1U);
         pending = m;
@@ -358,11 +392,15 @@ struct PartialSumPort final : public SimulationPort {
         Generator.updateReadPosition(UserId, Index);
     }
 
-    void produce(xoroshiro128 & rng) override {
+    void produce(xoshiro256 & rng) override {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
         Index += Step;
         Generator.updateReadPosition(UserId, Index);
+    }
+
+    float expected() const override {
+        return Generator.expected();
     }
 
 private:
@@ -371,7 +409,7 @@ private:
     const unsigned Step;
     unsigned Index;
     #ifndef NDEBUG
-    unsigned PreviousValue;
+    mutable unsigned PreviousValue;
     #endif
 };
 
@@ -382,14 +420,18 @@ struct RelativePort final : public SimulationPort {
     : SimulationPort()
     , BaseRateValue(baseRateValue){ }
 
-    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
+    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
         pending = BaseRateValue;
         return (QueueLength >= BaseRateValue);
     }
 
-    void produce(xoroshiro128 & /* rng */) override {
+    void produce(xoshiro256 & /* rng */) override {
         const auto m = BaseRateValue;
         QueueLength += m;
+    }
+
+    float expected() const override {
+        return 0.0f;
     }
 
 private:
@@ -402,7 +444,7 @@ struct GreedyPort final : public SimulationPort {
     : SimulationPort()
     , LowerBound(min){ }
 
-    bool consume(length_t & pending, xoroshiro128 & /* rng */) override {
+    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
         if (QueueLength < LowerBound || QueueLength == 0) {
             pending = LowerBound;
             return false;
@@ -412,8 +454,12 @@ struct GreedyPort final : public SimulationPort {
         return true;
     }
 
-    void produce(xoroshiro128 & /* rng */) override {
+    void produce(xoshiro256 & /* rng */) override {
         llvm_unreachable("uncaught program error? greedy rate cannot be an output rate");
+    }
+
+    float expected() const override {
+        return 0.0f;
     }
 
 private:
@@ -426,9 +472,9 @@ struct SimulationNode {
     const unsigned Inputs;
     const unsigned Outputs;
 
-    virtual void demand(length_t * const pendingArray, xoroshiro128 & rng) = 0;
+    virtual void demand(length_t * const pendingArray, xoshiro256 & rng) = 0;
 
-    virtual void fire(length_t * const pendingArray, xoroshiro128 & rng, uint64_t *& history) = 0;
+    virtual void fire(length_t * const pendingArray, xoshiro256 & rng, uint64_t *& history) = 0;
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
@@ -454,7 +500,7 @@ struct SimulationFork final : public SimulationNode {
 
     }
 
-    void demand(length_t * const /* endingArray */, xoroshiro128 & /* rng */) override {
+    void demand(length_t * const /* endingArray */, xoshiro256 & /* rng */) override HOT {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -473,7 +519,7 @@ struct SimulationFork final : public SimulationNode {
         }
     }
 
-    void fire(length_t * const /* endingArray */, xoroshiro128 & /* rng */, uint64_t *& /* history */) override {
+    void fire(length_t * const /* endingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
         assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -494,58 +540,58 @@ struct SimulationActor : public SimulationNode {
 
     }
 
-    void demand(length_t * const pendingArray, xoroshiro128 & rng) override {
-        uint64_t strides = 0;
+    void demand(length_t * const pendingArray, xoshiro256 & rng) override HOT {
+        uint64_t greedyStrides = 0;
         assert (Inputs > 0 && Outputs > 0);
         // Greedily consume any input on the incoming channels
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
             for (unsigned i = 0; i < Inputs; ++i) {
-                SimulationPort * const I = Input[i];
-                if (!I->consume(pendingArray[i], rng)) {
+                if (!Input[i]->consume(pendingArray[i], rng)) {
                     goto no_more_pending_input;
                 }
             }
             for (unsigned i = 0; i < Inputs; ++i) {
                 Input[i]->commit(pendingArray[i]);
             }
-            for (unsigned i = 0; i < Outputs; ++i) {
-                Output[i]->produce(rng);
-            }
-            ++strides;
+            ++greedyStrides;
         }
 no_more_pending_input:
+        if (greedyStrides) {
+            for (unsigned i = 0; i < Outputs; ++i) {
+                for (auto d = greedyStrides; d--; ) {
+                    Output[i]->produce(rng);
+                }
+            }
+        }
         // Then satisfy any demands on the output channels
-        uint64_t additionalStrides = 0;
+        uint64_t demandStrides = 0;
         for (unsigned i = 0; i < Outputs; ++i) {
             while (Output[i]->QueueLength < 0L) {
                 for (unsigned j = 0; j < Outputs; ++j) {
                     Output[j]->produce(rng);
                 }
-                ++additionalStrides;
+                ++demandStrides;
             }
+            assert (Output[i]->QueueLength >= 0);
         }
 
         // Demand enough input to satisfy the output channels
-        for (unsigned i = 0; i < Inputs; ++i) {
-            SimulationPort * const I = Input[i];
-            for (auto d = additionalStrides; d--; ) {
-                I->consume(pendingArray[i], rng);
-                I->commit(pendingArray[i]);
+        if (demandStrides) {
+            for (unsigned i = 0; i < Inputs; ++i) {
+                SimulationPort * const I = Input[i];
+                for (auto d = demandStrides; d--; ) {
+                    I->consume(pendingArray[i], rng);
+                    I->commit(pendingArray[i]);
+                }
             }
         }
-        #ifndef NDEBUG
-        for (unsigned i = 0; i < Outputs; ++i) {
-            assert (Output[i]->QueueLength >= 0);
-        }
-        #endif
-        strides += additionalStrides;
-
-        SumOfStrides += strides;
-        SumOfStridesSquared += (strides * strides);
+        const auto totalStrides = greedyStrides + demandStrides;
+        SumOfStrides += totalStrides;
+        SumOfStridesSquared += (totalStrides * totalStrides);
     }
 
-    void fire(length_t * const pendingArray, xoroshiro128 & rng, uint64_t *& history) override {
+    void fire(length_t * const pendingArray, xoshiro256 & rng, uint64_t *& history) override HOT {
         uint64_t strides = 0;
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
@@ -587,7 +633,7 @@ struct SimulationSourceActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const /* pendingArray */, xoroshiro128 & rng) override {
+    void demand(length_t * const /* pendingArray */, xoshiro256 & rng) override HOT {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -612,7 +658,7 @@ struct SimulationSourceActor final : public SimulationActor {
         #endif
     }
 
-    void fire(length_t * const /* pendingArray */, xoroshiro128 & rng, uint64_t *& history) override {
+    void fire(length_t * const /* pendingArray */, xoshiro256 & rng, uint64_t *& history) override HOT {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -634,27 +680,31 @@ struct SimulationSinkActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const pendingArray, xoroshiro128 & rng) override {
+    void demand(length_t * const pendingArray, xoshiro256 & rng) override HOT {
         // In a demand-driven system, a sink actor must always require at least
         // one iteration to enforce the demands on the preceding network.
-        for (unsigned i = 0; i < Inputs; ++i) {
-            Input[i]->consume(pendingArray[i], rng);
-        }
-        uint64_t strides = 1;
+
+        uint64_t strides = 0;
         // can't remove any items until we determine we can execute a full stride
         for (;;) {
+            bool hasEnough = true;
+            for (unsigned i = 0; i < Inputs; ++i) {
+                hasEnough &= Input[i]->consume(pendingArray[i], rng);
+            }
+            if (LLVM_UNLIKELY(!hasEnough && strides > 0)) {
+                break;
+            }
             for (unsigned i = 0; i < Inputs; ++i) {
                 Input[i]->commit(pendingArray[i]);
             }
-            for (unsigned i = 0; i < Inputs; ++i) {
-                if (!Input[i]->consume(pendingArray[i], rng)) {
-                    SumOfStrides += strides;
-                    SumOfStridesSquared += (strides * strides);
-                    return;
-                }
-            }
             ++strides;
+            if (LLVM_LIKELY(!hasEnough)) {
+                break;
+            }
         }
+        SumOfStrides += strides;
+        SumOfStridesSquared += (strides * strides);
+
     }
 
 };
@@ -756,7 +806,7 @@ struct BlockSizeActor final : public SimulationActor {
     // have blocksize actors consume as many units as they can but each time the amount ticks over
     // the required blocking amount, add one output? make the port a 1:1 one?
 
-    void demand(length_t * const /* pendingArray */, xoroshiro128 & /* rng */) override {
+    void demand(length_t * const /* pendingArray */, xoshiro256 & /* rng */) override HOT {
         assert (Inputs == 1 && Outputs == 1);
         // round up the demand but deposit "added" items in the output port
         SimulationPort * const I = Input[0];
@@ -780,7 +830,7 @@ struct BlockSizeActor final : public SimulationActor {
         assert (O->QueueLength >= 0);
     }
 
-    void fire(length_t * const /* pendingArray */, xoroshiro128 & /* rng */, uint64_t *& /* history */) override {
+    void fire(length_t * const /* pendingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
         assert (Inputs == 1 && Outputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
@@ -822,7 +872,7 @@ struct CliqueLambdaDispatcher {
  * Since we're only interested in modelling the steady state with an infinite input stream, we ignore attributes
  * such as Add and ZeroExtend but do consider Delay, LookAhead, and BlockSize.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoroshiro128 & rng) {
+void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshiro256 & rng) {
 
     struct PortNode {
         unsigned Binding;
@@ -897,6 +947,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xorosh
 
     using Graph = adjacency_list<vecS, vecS, bidirectionalS, NodeData, PartitionPort>;
 
+    using Vertex = Graph::vertex_descriptor;
 
     struct PartialSumData {
         unsigned StepSize;
@@ -1473,10 +1524,74 @@ equivalent_port_exists:
     print_graph(errs());
     #endif
 
+    const auto nodeCount = num_vertices(G);
+
+    BEGIN_SCOPED_REGION
+
+repeat_graph_simplification:
+
+    bool anyGraphModification = false;
+
+    // If have multiple countable-rate inputs from the same streamset, we only really
+    // care about the one with the largest delay. Similarly if we have multiple Fixed
+    // inputs from the same partition, we need only keep the largest one.
+
+    for (unsigned u = 0; u < numOfPartitions; ++u) {
+        Graph::in_edge_iterator ei, ei_end;
+restart_port_merge:
+        if (in_degree(u, G) > 1) {
+            std::tie(ei, ei_end) = in_edges(u, G);
+            for (; ei != ei_end; ++ei) {
+                PartitionPort & A = G[*ei];
+                if (A.Type == RateId::Fixed || A.Type == RateId::PartialSum) {
+                    const auto streamSet = source(*ei, G);
+                    auto maxDelay = A.Delay;
+                    auto ej = ei;
+                    bool changed = false;
+                    for (++ej; ej != ei_end; ) {
+                        const auto e = *ej++;
+                        if (LLVM_UNLIKELY(source(e, G) == streamSet)) {
+                            const PartitionPort & B = G[e];
+                            if (B.Type == A.Type && B.Reference == A.Reference && A.UpperBound == B.UpperBound) {
+                                maxDelay = std::max(maxDelay, B.Delay);
+                                remove_edge(e, G);
+                                changed = true;
+                            }
+                        }
+                    }
+                    if (changed) {
+                        A.Delay = maxDelay;
+                        anyGraphModification = true;
+                        goto restart_port_merge;
+                    }
+                    if (A.Type == RateId::Fixed) {
+                        auto upperBound = A.UpperBound;
+                        auto ej = ei;
+                        bool changed = false;
+                        for (++ej; ej != ei_end; ) {
+                            const auto e = *ej++;
+                            if (LLVM_UNLIKELY(source(e, G) == streamSet)) {
+                                const PartitionPort & B = G[e];
+                                if (B.Type == RateId::Fixed && A.Delay == B.Delay) {
+                                    upperBound = std::max(upperBound, B.UpperBound);
+                                    remove_edge(e, G);
+                                    changed = true;
+                                }
+                            }
+                        }
+                        if (changed) {
+                            A.UpperBound = upperBound;
+                            anyGraphModification = true;
+                            goto restart_port_merge;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Normalize purely fixed-rate streamset I/O rates by their GCD. Do not alter
     // ports if they are adjacent to a blocksize node.
-
-    const auto nodeCount = num_vertices(G);
 
     for (auto u = numOfPartitions; u < nodeCount; ++u) {
         if (G[u].BlockSize == 0) {
@@ -1500,24 +1615,28 @@ equivalent_port_exists:
                     for (const auto output : make_iterator_range(out_edges(u, G))) {
                         gcd = boost::gcd(gcd, G[output].LowerBound);
                     }
-                    assert (I.LowerBound == I.UpperBound);
-                    I.LowerBound /= gcd;
-                    I.UpperBound = I.LowerBound;
-                    for (const auto output : make_iterator_range(out_edges(u, G))) {
-                        auto & O = G[output];
-                        assert (O.LowerBound == O.UpperBound);
-                        O.LowerBound /= gcd;
-                        O.UpperBound = O.LowerBound;
+                    if (gcd != 1) {
+                        assert (I.LowerBound == I.UpperBound);
+                        I.LowerBound /= gcd;
+                        I.UpperBound = I.LowerBound;
+                        for (const auto output : make_iterator_range(out_edges(u, G))) {
+                            auto & O = G[output];
+                            assert (O.LowerBound == O.UpperBound);
+                            O.LowerBound /= gcd;
+                            O.UpperBound = O.LowerBound;
+                        }
                     }
                 }
             }
         }
     }
 
+    // TODO: just sum the delays?
+
     // Contract out any duplicate streamsets revealed by the GCD normalization
     for (auto u = 0UL; u < numOfPartitions; ++u) {
         Graph::out_edge_iterator ei, ei_end;
-restart:
+restart_contraction:
         std::tie(ei, ei_end) = out_edges(u, G);
         for (; ei != ei_end; ++ei) {
             const PartitionPort & O = G[*ei];
@@ -1546,46 +1665,64 @@ restart:
                                 add_edge(a, v, G[*eb], G);
                             }
                         }
+                        anyGraphModification = true;
                         clear_vertex(b, G);
-                        goto restart;
+                        goto restart_contraction;
                     }
                 }
             }
         }
     }
 
-    // If have multiple countable-rate inputs from the same streamset, we only really
-    // care about the one with the largest delay.
+    // Apply transitive-reduction-like pass to the graph on the Fixed input rates.
+    // This will remove any ports that are trivially guaranteed by some prior
+    // I/O relationship in the graph.
 
-    for (auto u = 0UL; u < numOfPartitions; ++u) {
-        Graph::in_edge_iterator ei, ei_end;
-restart_delay_merge:
-        std::tie(ei, ei_end) = in_edges(u, G);
-        for (; ei != ei_end; ++ei) {
-            PartitionPort & A = G[*ei];
-            if (A.Type == RateId::Fixed || A.Type == RateId::PartialSum) {
-                const auto streamSet = source(*ei, G);
-                assert (streamSet >= numOfPartitions);
-                auto maxDelay = A.Delay;
-                auto ej = ei;
-                bool changed = false;
-                for (++ej; ej != ei_end; ) {
-                    const auto e = *ej++;
-                    if (LLVM_UNLIKELY(source(e, G) == streamSet)) {
-                        const PartitionPort & B = G[e];
-                        if (B.Type == A.Type && B.Reference == A.Reference) {
-                            maxDelay = std::max(maxDelay, B.Delay);
-                            remove_edge(e, G);
-                            changed = true;
+    dynamic_bitset<> visited(nodeCount);
+
+    for (auto u = numOfPartitions; u < nodeCount; ++u) {
+restart_fixed_rate_transitive_reduction:
+        if (out_degree(u, G) > 1) {
+            Graph::out_edge_iterator ei, ei_end;
+            std::tie(ei, ei_end) = out_edges(u, G);
+            for (; ei != ei_end; ++ei) {
+                PartitionPort & A = G[*ei];
+                if (A.Type == RateId::Fixed) {
+                    visited.reset();
+                    std::function<void(Vertex)> check_dfs = [&](const Vertex u) {
+                        for (const auto e : make_iterator_range(out_edges(u, G))) {
+                            const auto v = target(e, G);
+                            if (!visited.test(v)) {
+                                visited.set(v);
+                                check_dfs(v);
+                            }
                         }
+                    };
+                    check_dfs(target(*ei, G));
+                    assert (!visited.test(target(*ei, G)));
+
+                    bool changed = false;
+
+                    remove_out_edge_if(u, [&](Graph::edge_descriptor e) {
+                        if (visited.test(target(e, G))) {
+                            const PartitionPort & B = G[e];
+                            return (B.Type == RateId::Fixed && B.UpperBound == A.UpperBound && B.Delay == A.Delay);
+                        }
+                        return false;
+                    }, G);
+
+                    if (changed) {
+                        anyGraphModification = true;
+                        goto restart_fixed_rate_transitive_reduction;
                     }
-                }
-                if (changed) {
-                    A.Delay = maxDelay;
-                    goto restart_delay_merge;
+
                 }
             }
         }
+    }
+
+    if (anyGraphModification) {
+        goto repeat_graph_simplification;
     }
 
     // Any streamset with exactly one fixed-rate input and output fixed-rate port
@@ -1616,13 +1753,13 @@ restart_delay_merge:
                     if (toAdd) {
                         add_edge(s, t, I, G);
                     }
+                    // anyGraphModification = true;
                 }
             }
         }
     }
 
-    // TODO: we could apply transitive-reduction-like pass to fixed rates to further
-    // simplify the graph
+    END_SCOPED_REGION
 
     #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
     print_graph(errs());
@@ -1650,8 +1787,6 @@ restart_delay_merge:
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
-    std::vector<uint64_t> initialSumOfStrides(nodeCount);
-
     auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) {
         PartitionPort & p = G[e];
         SimulationPort * port = nullptr;
@@ -1678,6 +1813,12 @@ restart_delay_merge:
             }
         };
 
+        #define MAKE_BP(DistributionModel,...) \
+            new (allocator) BoundedPort<DistributionModel>(DistributionModel{__VA_ARGS__})
+
+        #define MAKE_PSG(DistributionModel,...) \
+            new (allocator) PartialSumGenerator<DistributionModel>(DistributionModel{__VA_ARGS__}, \
+                data.Count,capacity,allocator)
 
         switch (p.Type) {
             case RateId::Fixed:
@@ -1686,9 +1827,6 @@ restart_delay_merge:
             case RateId::Bounded:
                 BEGIN_SCOPED_REGION
                 const auto df = makeProbabilityDistributionModel(p.Distribution, p.Repetitions);
-
-                #define MAKE_BP(DistributionModel,...) \
-                    new (allocator) BoundedPort<DistributionModel>(DistributionModel{__VA_ARGS__})
 
                 switch (df.getTypeId()) {
                     case DistId::Uniform:
@@ -1705,7 +1843,6 @@ restart_delay_merge:
                         }
                         break;
                 }
-                #undef MAKE_BP
                 END_SCOPED_REGION
                 break;
             case RateId::PartialSum:
@@ -1713,51 +1850,72 @@ restart_delay_merge:
                 const auto f = partialSumMap.find(p.Reference);
                 assert (f != partialSumMap.end());
                 PartialSumData & data = f->second;
+
                 const auto g = partialSumGeneratorMap.find(p.Reference);
                 BasePartialSumGenerator * gen = nullptr;
                 if (LLVM_LIKELY(g == partialSumGeneratorMap.end())) {
                     assert (Relationships[p.Reference].Type == RelationshipNode::IsRelationship);
                     assert ((data.RequiredCapacity % data.GCD) == 0);
-
                     const auto max = data.StepSize * data.GCD;
 
-                    auto makeProbDistributionModel = [&](const ProcessingRateProbabilityDistribution * const base)
-                            -> ProcessingRateProbabilityDistribution {
-                        Rational reps{max, 1U};
-                        if (base == nullptr) {
-                            return makeProbabilityDistributionModel(UniformDistribution(), reps);
-                        } else {
-                            return makeProbabilityDistributionModel(*base, reps);
+                    if (data.Count == 1) {
+                        // if a popcount has only one user, we can treat it as a standard Bounded rate.
+
+                        const auto df = makeProbabilityDistributionModel(p.Distribution, p.Repetitions);
+
+                        switch (df.getTypeId()) {
+                            case DistId::Uniform:
+                                port = MAKE_BP(UniformDistributionModel, 0, max);
+                                break;
+                            case DistId::Gamma:
+                                port = MAKE_BP(GammaDistributionModel, df.getAlpha(), df.getBeta(), 0, max);
+                                break;
+                            case DistId::Normal:
+                                if (df.getSkew() == 0.0f) {
+                                    port = MAKE_BP(NormalDistributionModel, df.getMean(), df.getStdDev(), 0, max);
+                                } else {
+                                    port = MAKE_BP(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), 0, max);
+                                }
+                                break;
                         }
-                    };
 
-                    const auto capacity = data.RequiredCapacity / data.GCD;
-                    const auto df = makeProbDistributionModel(data.Distribution);
+                        goto make_port;
 
-                    #define MAKE_PSG(DistributionModel,...) \
-                        new (allocator) PartialSumGenerator<DistributionModel>(DistributionModel{__VA_ARGS__}, \
-                            data.Count,capacity,allocator)
+                    } else {
 
-                    switch (df.getTypeId()) {
-                        case DistId::Uniform:
-                            gen = MAKE_PSG(UniformDistributionModel, 0, max);
-                            break;
-                        case DistId::Gamma:
-                            gen = MAKE_PSG(GammaDistributionModel, df.getAlpha(), df.getBeta(), 0, max);
-                            break;
-                        case DistId::Normal:
-                            if (df.getSkew() == 0.0f) {
-                                gen = MAKE_PSG(NormalDistributionModel, df.getMean(), df.getStdDev(), 0, max);
+                        auto makeProbDistributionModel = [&](const ProcessingRateProbabilityDistribution * const base)
+                                -> ProcessingRateProbabilityDistribution {
+                            Rational reps{max, 1U};
+                            if (base == nullptr) {
+                                return makeProbabilityDistributionModel(UniformDistribution(), reps);
                             } else {
-                                gen = MAKE_PSG(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), 0, max);
+                                return makeProbabilityDistributionModel(*base, reps);
                             }
-                            break;
+                        };
+
+                        const auto capacity = data.RequiredCapacity / data.GCD;
+                        const auto df = makeProbDistributionModel(data.Distribution);
+                        switch (df.getTypeId()) {
+                            case DistId::Uniform:
+                                gen = MAKE_PSG(UniformDistributionModel, 0, max);
+                                break;
+                            case DistId::Gamma:
+                                gen = MAKE_PSG(GammaDistributionModel, df.getAlpha(), df.getBeta(), 0, max);
+                                break;
+                            case DistId::Normal:
+                                if (df.getSkew() == 0.0f) {
+                                    gen = MAKE_PSG(NormalDistributionModel, df.getMean(), df.getStdDev(), 0, max);
+                                } else {
+                                    gen = MAKE_PSG(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), 0, max);
+                                }
+                                break;
+                        }
+                        gen->initializeGenerator(rng);
+                        partialSumGeneratorMap.emplace(p.Reference, gen);
+
                     }
 
-                    #undef MAKE_PSG
 
-                    gen->initializeGenerator(rng);
-                    partialSumGeneratorMap.emplace(p.Reference, gen);
                 } else {
                     gen = g->second;
                 }
@@ -1780,6 +1938,7 @@ restart_delay_merge:
             default:
                 llvm_unreachable("unhandled processing rate");
         }
+ make_port:
         port->reset(p.Delay);
         assert (portMap.count(e) == 0);
         portMap.emplace(std::make_pair(e, port));
@@ -1827,7 +1986,6 @@ restart_delay_merge:
             sn = new (allocator) SimulationFork(inputs, outputs, allocator);
         }
         nodes[i] = sn;
-        BEGIN_SCOPED_REGION
         unsigned inputIdx = 0;
         for (const auto e : make_iterator_range(in_edges(u, G))) {
             assert (inputIdx < inputs);
@@ -1836,16 +1994,13 @@ restart_delay_merge:
             sn->Input[inputIdx++] = f->second;
         }
         assert (inputIdx == inputs);
-        END_SCOPED_REGION
 
-        BEGIN_SCOPED_REGION
         unsigned outputIdx = 0;
         for (const auto e : make_iterator_range(out_edges(u, G))) {
             assert (outputIdx < outputs);
             sn->Output[outputIdx++] = makePortNode(e, pendingArray, allocator);
         }
         assert (outputIdx == outputs);
-        END_SCOPED_REGION
     }
 
     assert (actorNodes.size() <= m);
@@ -1893,25 +2048,154 @@ restart_delay_merge:
     // would be time as the GA approach would require many magnitutes more time
     // to complete than a single simulation run.
 
-
-
     // TODO: If the output is supposed to be sparse, I don't want the input to be scaled so
     // high that it always satisfies the output but would want it to do so if the output
     // is expected to be dense. Should the output kernels actually be marked as to
     // their expected output? We could infer it ports were marked to indicate expected
     // transfer rates.
 
+    // TODO: would it be beneficial to regenerate the objects for the data simulator
+    // if we discover the sources must process more than one stride? We might be able
+    // rescale the expected repetitions but thus poses a risk of forcing the system
+    // into a less than ideal throughput.
+
+    BEGIN_SCOPED_REGION
+
+    std::vector<uint64_t> executedStrideCount(numOfPartitions, 0);
+
+    uint64_t minStrideCount = std::numeric_limits<uint64_t>::max();
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = ordering[m - i - 1]; // forward topological ordering
+        if (u < numOfPartitions) {
+            SimulationActor * const A = reinterpret_cast<SimulationActor *>(nodes[i]);
+            assert (executedStrideCount[u] == 0);
+            executedStrideCount[u] = A->SumOfStrides;
+        }
+    }
+
+    for (unsigned u = 0; u < numOfPartitions; ++u) {
+        if (in_degree(u, G) == 0 && out_degree(u, G) != 0) {
+            minStrideCount = std::min(minStrideCount, executedStrideCount[u]);
+            std::function<void(Vertex)> find_immediate_consumers
+                    = [&](const Vertex v) {
+                for (const auto f : make_iterator_range(out_edges(v, G))) {
+                    const auto w = target(f, G);
+                    if (w < numOfPartitions) {
+                        minStrideCount = std::min(minStrideCount, executedStrideCount[w]);
+                    } else {
+                        find_immediate_consumers(w);
+                    }
+                }
+            };
+            find_immediate_consumers(u);
+        }
+    }
+
+#if 0
+
+    uint64_t minSourceStrideCount = std::numeric_limits<uint64_t>::max();
+
+    std::vector<SimulationActor *> actor(numOfPartitions, nullptr);
+
+    for (unsigned i = 0; i < m; ++i) {
+        const auto u = ordering[m - i - 1]; // forward topological ordering
+        if (u < numOfPartitions) {
+            SimulationActor * const A = reinterpret_cast<SimulationActor *>(nodes[i]);
+            assert (executedStrideCount[u] == 0);
+            executedStrideCount[u] = A->SumOfStrides;
+            minSourceStrideCount = std::min(minSourceStrideCount, A->SumOfStrides);
+            actor[u] = A;
+        }
+    }
+
+    for (unsigned u = 0; u < numOfPartitions; ++u) {
+
+        if (in_degree(u, G) == 0 && out_degree(u, G) != 0) {
+            assert (out_degree(u, G) != 0);
+            const auto sourceStrideCount = executedStrideCount[u];
+            assert (sourceStrideCount != 0);
+            SimulationActor * const A = actor[u];
+            assert (A);
+
+
+            const auto sourceNumOfStrides = A->SumOfStrides;
+
+            double ratio = 1.0;
+
+            for (const auto e : make_iterator_range(out_edges(u, G))) {
+                const auto v = target(e, G);
+                if (v < numOfPartitions) {
+                    const double r = ((double)sourceStrideCount) / ((double)executedStrideCount[u]);
+                    ratio = std::max(ratio, r);
+                } else {
+                    const SimulationPort * port = G[e].PortObject;
+                    assert (port);
+                    const double sourceExpected = port->expected();
+                    const double scaledSourceStride = sourceNumOfStrides * sourceExpected;
+
+                    std::function<void(Vertex)> find_immediate_consumers
+                            = [&](const Vertex v) {
+                        for (const auto f : make_iterator_range(out_edges(v, G))) {
+                            const auto w = target(f, G);
+                            if (w < numOfPartitions) {
+                                const SimulationActor * const B = actor[w];
+                                const SimulationPort * port = G[f].PortObject;
+                                const double targetExpected = port->expected();
+                                const double scaledTargetStride = B->SumOfStrides * sourceExpected;
+                                const double r = scaledSourceStride / scaledTargetStride;
+
+
+                            } else {
+                                find_immediate_consumers(w);
+                            }
+                        }
+                    };
+
+
+
+                }
+
+
+
+            }
+
+
+            minStrideCount = std::min<size_t>(executedStrideCount[u], minStrideCount);
+            std::function<void(Vertex)> find_immediate_consumers
+                    = [&](const Vertex u) {
+                for (const auto e : make_iterator_range(out_edges(u, G))) {
+                    const auto v = target(e, G);
+                    if (v < numOfPartitions) {
+                        assert (executedStrideCount[v] != 0);
+                        minStrideCount = std::min<size_t>(executedStrideCount[v], minStrideCount);
+                    } else {
+                        find_immediate_consumers(v);
+                    }
+                }
+            };
+        }
+    }
+
+#endif
+
+    assert (minStrideCount != 0);
+
     for (unsigned i = 0; i < m; ++i) {
         const auto u = ordering[m - i - 1]; // forward topological ordering
         if (u < numOfPartitions) {
             if (in_degree(u, G) == 0) {
                 SimulationSourceActor * const A = reinterpret_cast<SimulationSourceActor *>(nodes[i]);
-                Rational X{A->SumOfStrides, DEMAND_ITERATIONS};
+                Rational X{A->SumOfStrides, minStrideCount};
                 const auto strides = (X.numerator() + (X.denominator() / 2)) / X.denominator();
                 assert (strides > 0);
                 A->RequiredIterations = strides;
             }
         }
+    }
+
+    END_SCOPED_REGION
+
+    for (unsigned i = 0; i < m; ++i) {
         nodes[i]->reset();
     }
 
@@ -1928,27 +2212,27 @@ restart_delay_merge:
 
     const auto numOfActors = actorNodes.size();
 
-    uint64_t * const strideHistory = allocator.allocate<uint64_t>(numOfActors);
+    uint64_t * const segmentLength = allocator.allocate<uint64_t>(numOfActors);
 
     LinkingGraph L(numOfActors);
 
     BEGIN_SCOPED_REGION
-    uint64_t * current = strideHistory;
+    uint64_t * current = segmentLength;
     for (unsigned i = 0; i < m; ++i) { // forward topological ordering
-        assert (current >= strideHistory);
-        assert ((current - strideHistory) < numOfActors);
+        assert (current >= segmentLength);
+        assert (current < (segmentLength + numOfActors));
         nodes[i]->fire(pendingArray, rng, current);
     }
-    assert (current >= strideHistory);
-    assert ((current - strideHistory) == numOfActors);
+    assert (current >= segmentLength);
+    assert (current == (segmentLength + numOfActors));
     // if at every timestep, the number of strides that two partition nodes execute
     // are aligned (i.e., identical or one is a constant multiple of the other)
     // then these partitions are linked with at least 1.0 - 1/(2^n) probability
     for (unsigned j = 1; j < numOfActors; ++j) {
-        if (strideHistory[j]) {
+        if (segmentLength[j]) {
             for (unsigned i = 0; i != j; ++i) {
-                if (strideHistory[i]) {
-                    Rational r(strideHistory[i], strideHistory[j]);
+                if (segmentLength[i]) {
+                    Rational r(segmentLength[i], segmentLength[j]);
                     // We want an integer (or reciprocal thereof) relationship between
                     // the actors to avoid scenarios in which fusing both partitions
                     // would require executing a large number of strides.
@@ -1978,28 +2262,33 @@ restart_delay_merge:
 
     uint64_t dataRounds = 1;
 
-    while (dataRounds < MAX_DATA_ITERATIONS) { // numOfActors +
-        uint64_t * current = strideHistory;
+    while (dataRounds < MAX_DATA_ITERATIONS) {
+        uint64_t * current = segmentLength;
         for (unsigned i = 0; i < m; ++i) { // forward topological ordering
-            assert (current >= strideHistory);
-            assert ((current - strideHistory) < numOfActors);
+            assert (current >= segmentLength);
+            assert (current < (segmentLength + numOfActors));
             nodes[i]->fire(pendingArray, rng, current);
         }
-        assert (current >= strideHistory);
-        assert ((current - strideHistory) == numOfActors);
+        assert (current >= segmentLength);
+        assert (current == (segmentLength + numOfActors));
         // update the linked partition graph; we expect this graph
-        // to be very sparse after a few iterations and likely not
-        // change afterwards.
+        // to be very sparse after a few iterations and not likely
+        // to change afterwards.
         remove_edge_if([&](const LinkingGraph::edge_descriptor e) {
             const auto i = source(e, L);
-            const auto a = strideHistory[i];
+            const auto a = segmentLength[i];
             const auto j = target(e, L);
-            const auto b = strideHistory[j];
+            const auto b = segmentLength[j];
             assert (i < j);
             return (b == 0) || Rational{a, b} != L[e];
         }, L);
 
         ++dataRounds;
+
+        // TODO: if we approximate the pairwise segment-length covariance (using
+        // a running mean) we could make a better prediction for good partition
+        // jumping target candidates. This would put more responsibility on the
+        // programmer to correctly indicate the processing rate behaviour.
 
         if ((dataRounds % 100) == 0) {
             const auto currentTime = std::chrono::system_clock::now() - startTime;
@@ -2023,7 +2312,7 @@ restart_delay_merge:
 
     BEGIN_SCOPED_REGION
 
-    using VertexList = std::vector<Graph::vertex_descriptor>;
+    using VertexList = std::vector<Vertex>;
 
     std::set<VertexList> cliques;
 
@@ -2075,7 +2364,7 @@ restart_delay_merge:
             // init the new dfs search
             visited.reset();
             assert (path.empty());
-            std::function<bool(Graph::vertex_descriptor)> not_all_paths = [&](const Graph::vertex_descriptor u) {
+            std::function<bool(Vertex)> not_all_paths = [&](const Vertex u) {
                 if (u == t) {
                     for (const auto w : path) {
                         const auto b = mapping[w];
@@ -2110,7 +2399,7 @@ restart_delay_merge:
         assert (path.empty());
 
         // Since H contains a single clique, if we removed any vertices we'll have fewer than (n * (n-1) / 2) edges.
-        // If so, recurse; otherwise sort then add the set (to ensure a canonical ordering.)
+        // If so, recurse; otherwise sort then add it to the set (to ensure a canonical ordering.)
         if (num_edges(H) != (n * (n - 1)) / 2) {
             bron_kerbosch_all_cliques(H, CliqueLambdaDispatcher<decltype(checkClique)>{checkClique}, 2);
         } else {
@@ -2154,7 +2443,7 @@ restart_delay_merge:
 
     unsigned numOfLinkedGroups = 1;
 
-    flat_set<CliqueGraph::vertex_descriptor> toClear;
+    flat_set<CliqueGraph::vertex_descriptor> invalidated;
 
     while (num_edges(C) > 0) {
 
@@ -2176,14 +2465,14 @@ restart_delay_merge:
             assert (P[p].LinkedGroupId == 0);
             P[p].LinkedGroupId = numOfLinkedGroups;
             for (const auto f : make_iterator_range(in_edges(v, C))) {
-                toClear.insert(source(f, C));
+                invalidated.insert(source(f, C));
             }
         }
-        assert (toClear.size() > 0);
-        for (const auto v : toClear) {
+        assert (invalidated.size() > 0);
+        for (const auto v : invalidated) {
             clear_out_edges(v, C);
         }
-        toClear.clear();
+        invalidated.clear();
 
         ++numOfLinkedGroups;
     }
@@ -2247,5 +2536,3 @@ restart_delay_merge:
 }
 
 #endif // VARIABLE_RATE_ANALYSIS_HPP
-
-#endif

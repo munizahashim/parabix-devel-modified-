@@ -135,7 +135,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
                          , IntervalGraph && I, IntervalGraph && C
                          , const std::vector<unsigned> & weight
-                         , xoroshiro128 & srcRng)
+                         , xoshiro256 & srcRng)
     : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
                                              BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, srcRng)
     , I(std::move(I))
@@ -170,7 +170,7 @@ private:
  * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
  * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoroshiro128 & rng) {
+void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoshiro256 & rng) {
 
     // Construct the weighted interval graph for our local streamsets
 

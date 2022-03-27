@@ -27,7 +27,7 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 //        std::random_device rd;
 //        xoroshiro128 rng(rd);
 
-        xoroshiro128 rng;
+        xoshiro256 rng;
 
 //        const auto graphSeed = 2081280305;
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
@@ -37,15 +37,11 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
-        #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
         auto initialGraph = P.initialPartitioningPass();
         P.computeIntraPartitionRepetitionVectors(initialGraph);
         P.estimateInterPartitionDataflow(initialGraph, rng);
         auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
-        #else
-        auto partitionGraph = P.identifyKernelPartitions();
-        P.computeMinimumExpectedDataflow(partitionGraph);
-        #endif
+
         P.schedulePartitionedProgram(partitionGraph, rng);
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);
@@ -55,11 +51,6 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
         P.identifyKernelsOnHybridThread();
 
         P.identifyOutputNodeIds();
-
-        #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
-        P.computeMaximumDataflow(false);
-        P.computeMinimumStrideLengthForConsistentDataflow();
-        #endif
 
         P.identifyInterPartitionSymbolicRates();
 
@@ -154,10 +145,8 @@ private:
 
 
     // partitioning analysis
-    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     PartitionGraph initialPartitioningPass();
     PartitionGraph postDataflowAnalysisPartitioningPass(PartitionGraph & initial);
-    #endif
 
     PartitionGraph identifyKernelPartitions();
 
@@ -167,15 +156,15 @@ private:
 
     // scheduling analysis
 
-    void schedulePartitionedProgram(PartitionGraph & P, xoroshiro128 & rng);
+    void schedulePartitionedProgram(PartitionGraph & P, xoshiro256 & rng);
 
-    void analyzeDataflowWithinPartitions(PartitionGraph & P, xoroshiro128 & rng) const;
+    void analyzeDataflowWithinPartitions(PartitionGraph & P, xoshiro256 & rng) const;
 
     SchedulingGraph makeIntraPartitionSchedulingGraph(const PartitionGraph & P, const unsigned currentPartitionId) const;
 
     PartitionDependencyGraph makePartitionDependencyGraph(const unsigned numOfKernels, const SchedulingGraph & S) const;
 
-    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, xoroshiro128 & rng) const;
+    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, xoshiro256 & rng) const;
 
     OrderingDAWG assembleFullSchedule(const PartitionGraph & P, const OrderingDAWG & partial) const;
 
@@ -192,7 +181,7 @@ private:
 
     void determineBufferSize(BuilderRef b);
 
-    void determineBufferLayout(BuilderRef b, xoroshiro128 & rng);
+    void determineBufferLayout(BuilderRef b, xoshiro256 & rng);
 
     void identifyOwnedBuffers();
 
@@ -211,17 +200,10 @@ private:
     void makeConsumerGraph();
 
     // dataflow analysis functions
-    #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
     void computeIntraPartitionRepetitionVectors(PartitionGraph & P);
-    void estimateInterPartitionDataflow(PartitionGraph & P, xoroshiro128 & rng);
-    #endif
+    void estimateInterPartitionDataflow(PartitionGraph & P, xoshiro256 & rng);
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
-
-    #ifndef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
-    void computeMaximumDataflow(const bool expected);
-    void computeMinimumStrideLengthForConsistentDataflow();
-    #endif
 
     void identifyInterPartitionSymbolicRates();
 
@@ -328,9 +310,7 @@ public:
 #include "buffer_size_analysis.hpp"
 #include "consumer_analysis.hpp"
 #include "dataflow_analysis.hpp"
-#ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
 #include "variable_rate_analysis.hpp"
-#endif
 #include "partitioning_analysis.hpp"
 #include "scheduling_analysis.hpp"
 #include "termination_analysis.hpp"

@@ -90,6 +90,7 @@ template <typename Sorting, typename Graph>
 void transitive_closure_dag(const Sorting & ordering, Graph & G,
                             typename Graph::edge_property_type edge_property_value = {}) {
     // Simple transitive closure for DAGs
+    assert (is_valid_topological_sorting(ordering, G));
     for (unsigned u : ordering) {
         for (const auto e : make_iterator_range(in_edges(u, G))) {
             const auto s = source(e, G);
@@ -105,6 +106,7 @@ void transitive_closure_dag(const Sorting & ordering, Graph & G,
 template <typename Sorting, typename Graph>
 void transitive_reduction_dag(const Sorting & ordering, Graph & G) {
     using Edge = typename graph_traits<Graph>::edge_descriptor;
+    assert (is_valid_topological_sorting(ordering, G));
     BitVector sources(num_vertices(G));
     for (unsigned u : ordering ) {
         assert (u < num_vertices(G));

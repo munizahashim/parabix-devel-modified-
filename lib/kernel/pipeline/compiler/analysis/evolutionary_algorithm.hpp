@@ -73,7 +73,7 @@ public:
 
         }
 
-        void randomize(xoroshiro128 & rng) {
+        void randomize(xoshiro256 & rng) {
             std::uniform_int_distribution<size_t> distribution(std::numeric_limits<size_t>::min(), std::numeric_limits<size_t>::max());
             for (auto & a : _value) {
                 a = distribution(rng);
@@ -498,7 +498,7 @@ protected:
                                          , const unsigned maxRounds
                                          , const unsigned maxStallRounds
                                          , const unsigned maxCandidates
-                                         , xoroshiro128 & rng)
+                                         , xoshiro256 & rng)
     : candidateLength(candidateLength)
     , maxGenerations(maxRounds)
     , maxCandidates(maxCandidates)
@@ -523,7 +523,7 @@ protected:
 
     std::map<Candidate, FitnessValueType> candidates;
 
-    xoroshiro128 & rng;
+    xoshiro256 & rng;
 
 };
 
@@ -834,7 +834,7 @@ protected:
                           , const unsigned maxCandidates
                           , const FitnessValueType averageStallThreshold
                           , const unsigned maxStallGenerations
-                          , xoroshiro128 & rng)
+                          , xoshiro256 & rng)
     : candidateLength(candidateLength)
     , maxRounds(maxRounds)
     , maxCandidates(maxCandidates)
@@ -866,7 +866,7 @@ public:
 
     Candidates candidates;
 
-    xoroshiro128 & rng;
+    xoshiro256 & rng;
 
 };
 

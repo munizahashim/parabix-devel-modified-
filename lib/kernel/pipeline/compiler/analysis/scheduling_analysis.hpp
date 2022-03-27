@@ -94,7 +94,7 @@ void printDAWG(const OrderingDAWG & G, raw_ostream & out, const StringRef name =
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief analyzeDataflowWithinPartitions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, xoroshiro128 & rng) {
+void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, xoshiro256 & rng) {
 
     // Once we analyze the dataflow within the partitions, P contains DAWG that is either
     // edgeless if any permutation of its kernels is valid or contains all of its optimal
@@ -339,7 +339,7 @@ struct MaxCutHarmonySearch : public BitStringBasedHarmonySearch {
     MaxCutHarmonySearch(const MemIntervalGraph & I,
                         const WeightMap & maxCutWeights,
                         const unsigned numOfRounds,
-                        xoroshiro128 & rng)
+                        xoshiro256 & rng)
     : BitStringBasedHarmonySearch(numOfNonIsolatedVertices(I), numOfRounds,
                                   MAX_CUT_HS_POPULATION_SIZE, MAX_CUT_HS_AVERAGE_STALL_THRESHOLD, MAX_CUT_HS_MAX_AVERAGE_STALLS, rng)
     , I(I)
@@ -860,7 +860,7 @@ is_bipartite_graph:
 
 public:
 
-    MemoryAnalysis(const SchedulingGraph & S, const unsigned numOfKernels, xoroshiro128 & rng)
+    MemoryAnalysis(const SchedulingGraph & S, const unsigned numOfKernels, xoshiro256 & rng)
     : S(S)
     , numOfKernels(numOfKernels)
     , numOfStreamSets(num_vertices(S) - numOfKernels)
@@ -885,7 +885,7 @@ protected:
     const unsigned numOfKernels;
     const unsigned numOfStreamSets;
 
-    xoroshiro128 & rng;
+    xoshiro256 & rng;
 
 private:
 
@@ -926,7 +926,7 @@ protected:
     SchedulingAnalysisWorker(const SchedulingGraph & S,
                        const unsigned numOfKernels,
                        const unsigned candidateLength,
-                       xoroshiro128 & rng)
+                       xoshiro256 & rng)
     : numOfKernels(numOfKernels)
     , candidateLength(candidateLength)
     , rng(rng)
@@ -938,7 +938,7 @@ public:
 
     const unsigned numOfKernels;
     const unsigned candidateLength;
-    xoroshiro128 & rng;
+    xoshiro256 & rng;
     MemoryAnalysis analyzer;
 
 };
@@ -993,7 +993,7 @@ public:
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     PartitionSchedulingAnalysisWorker(const SchedulingGraph & S, const PartitionDependencyGraph & D,
-                                      const unsigned numOfKernels, xoroshiro128 & rng)
+                                      const unsigned numOfKernels, xoshiro256 & rng)
     : SchedulingAnalysisWorker(S, numOfKernels, numOfKernels, rng)
     , D(D)
     , replacement(numOfKernels)
@@ -1050,7 +1050,7 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     PartitionSchedulingAnalysis(const SchedulingGraph & S, const PartitionDependencyGraph & D,
-                                const unsigned numOfKernels, xoroshiro128 & rng)
+                                const unsigned numOfKernels, xoshiro256 & rng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PARITION_SCHEDULING_GA_ROUNDS, PARITION_SCHEDULING_GA_STALLS, MAX_PARTITION_POPULATION_SIZE, rng)
     , D(D)
     , worker(S, D, numOfKernels, rng) {
@@ -1070,7 +1070,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief analyzeDataflowWithinPartitions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, xoroshiro128 & rng) const {
+void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, xoshiro256 & rng) const {
 
     /// --------------------------------------------
     /// Construct our partition schedules
@@ -1260,11 +1260,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         assert (i <= currentPartition.Repetitions.size());
 
         const auto strideSize =
-            #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
             std::max(currentPartition.Repetitions[i - 1U], Rational{1})
-            #else
-            currentPartition.Repetitions[i - 1U]
-            #endif
             * node.Kernel->getStride();
         assert (strideSize > Rational{0});
 
@@ -1381,7 +1377,10 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         const auto u = kernels[i - 1U];
         const RelationshipNode & node = Relationships[u];
         assert (node.Type == RelationshipNode::IsKernel);
-        const auto strideSize = currentPartition.Repetitions[i - 1U] * node.Kernel->getStride();
+        const auto strideSize =
+            std::max(currentPartition.Repetitions[i - 1U], Rational{1})
+            * node.Kernel->getStride();
+        assert (strideSize > Rational{0});
 
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
             const auto binding = source(e, Relationships);
@@ -1671,7 +1670,7 @@ public:
                                         const PartitionGraph & P,
                                         const std::vector<unsigned> & initialDegree,
                                         const unsigned candidateLength,
-                                        xoroshiro128 & rng)
+                                        xoshiro256 & rng)
     : G(G)
     , P(P)
     , candidateLength(candidateLength)
@@ -1693,7 +1692,7 @@ private:
     const GlobalDependencyGraph & G;
     const PartitionGraph & P;
     const unsigned candidateLength;
-    xoroshiro128 & rng;
+    xoshiro256 & rng;
 
     const std::vector<unsigned> & initialDegree;
 
@@ -1747,7 +1746,7 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                               const PartitionGraph & P,
                               const std::vector<unsigned> & initialDegree,
                               const unsigned numOfUnlinkedPartitions,
-                              xoroshiro128 & srcRng)
+                              xoshiro256 & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_ROUNDS,
                                             JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, srcRng)
     , worker(G, P, initialDegree, numOfUnlinkedPartitions, srcRng) {
@@ -1979,7 +1978,7 @@ public:
     ProgramSchedulingAnalysisWorker(const SchedulingGraph & S,
                                     const OrderingDAWG & I,
                                     const unsigned numOfKernels,
-                                    xoroshiro128 & rng)
+                                    xoshiro256 & rng)
     : SchedulingAnalysisWorker(S, numOfKernels, numOfKernels, rng)
     , I(I)
     , index(numOfKernels)
@@ -2058,7 +2057,7 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
     ProgramSchedulingAnalysis(const SchedulingGraph & S,
                               const OrderingDAWG & I,
                               const unsigned numOfKernels,
-                              xoroshiro128 & srcRng)
+                              xoshiro256 & srcRng)
     : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_ROUNDS,
                                             PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, srcRng)
     , worker(S, I, numOfKernels, srcRng) {
@@ -2076,7 +2075,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief scheduleProgramGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, xoroshiro128 & rng) const {
+OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, xoshiro256 & rng) const {
 
     // create a bipartite graph consisting of partitions and inter-partition
     // streamset nodes and relationships
@@ -2504,13 +2503,8 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, xo
             const auto sum = rate.getLowerBound() + rate.getUpperBound();
             // TODO: after adding in expected mean values, this ought to utilize them.
             const auto expectedItemsPerStride = sum * strideSize * Rational{1, 2};
-            #ifdef USE_EXPERIMENTAL_SIMULATION_BASED_VARIABLE_RATE_ANALYSIS
             const auto expectedItemsPerSegment =
-                N.ExpectedStridesPerSegment *
-                N.Repetitions[index] * expectedItemsPerStride;
-            #else
-            const auto expectedItemsPerSegment = N.Repetitions[index] * expectedItemsPerStride;
-            #endif
+                N.ExpectedStridesPerSegment * N.Repetitions[index] * expectedItemsPerStride;
             const Rational bytesPerItem{outputBinding.getFieldWidth() * outputBinding.getNumElements(), 8};
             node.Size = expectedItemsPerSegment * bytesPerItem; // bytes per segment
         }
