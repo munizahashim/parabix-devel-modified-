@@ -19,10 +19,8 @@ enum Lex {
     rBracket,
     colon,
     comma,
-    dQuote,
     hyphen,
     digit,
-    backslash,
     n, // # first letter of null
     f, // # first letter of false
     t, // # first letter of true
@@ -55,12 +53,27 @@ enum Combined {
 class JSONStringMarker : public pablo::PabloKernel {
 public:
     JSONStringMarker(const std::unique_ptr<KernelBuilder> & b,
-                     StreamSet * const lexIn,
+                     StreamSet * const basis,
                      StreamSet * strMarker, StreamSet * strSpan)
     : pablo::PabloKernel(b,
                          "jsonStrMarker",
-                         {Binding{"lexIn", lexIn}},
+                         {Binding{"basis", basis}},
                          {Binding{"marker", strMarker}, Binding{"span", strSpan}}) {}
+    bool isCachable() const override { return true; }
+    bool hasSignature() const override { return false; }
+protected:
+    void generatePabloMethod() override;
+};
+
+class JSONClassifyBytes : public pablo::PabloKernel {
+public:
+    JSONClassifyBytes(const std::unique_ptr<KernelBuilder> & b,
+                      StreamSet * const basis, StreamSet * const strSpan,
+                      StreamSet * lexStream)
+    : pablo::PabloKernel(b,
+                         "jsonClassifyBytes",
+                         {Binding{"basis", basis}, Binding{"strSpan", strSpan}},
+                         {Binding{"lexStream", lexStream}}) {}
     bool isCachable() const override { return true; }
     bool hasSignature() const override { return false; }
 protected:
@@ -82,14 +95,13 @@ class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
     JSONKeywordEndMarker(const std::unique_ptr<KernelBuilder> & b,
                       StreamSet * const basis,
-                      StreamSet * const lexIn, StreamSet * const strSpan,
+                      StreamSet * const lexIn,
                       StreamSet * kwMarker)
     : pablo::PabloKernel(b,
                          "jsonKeywordMarker",
                          {
                             Binding{"basis", basis},
                             Binding{"lexIn", lexIn},
-                            Binding{"strSpan", strSpan}
                          },
                          {
                             Binding{"kwEndMarker", kwMarker},
@@ -209,6 +221,7 @@ public:
     JSONParserObj(
         const std::unique_ptr<KernelBuilder> & b,
         StreamSet * const lexIn,
+        StreamSet * const strMarker,
         StreamSet * const combinedLexs,
         StreamSet * const nestingDepth,
         StreamSet * const syntaxErr,
@@ -220,6 +233,7 @@ public:
                             std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
                          {
                             Binding{"lexIn", lexIn},
+                            Binding{"strMarker", strMarker},
                             Binding{"combinedLexs", combinedLexs, FixedRate(1), LookAhead(1)},
                             Binding{"ND", nestingDepth}
                          },
