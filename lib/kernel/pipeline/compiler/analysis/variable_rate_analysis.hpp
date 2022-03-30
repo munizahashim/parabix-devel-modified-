@@ -495,13 +495,12 @@ protected:
 // we use a fork for both streamsets and relative rates
 struct SimulationFork final : public SimulationNode {
 
-    SimulationFork(const unsigned inputs, const unsigned outputs, SimulationAllocator & allocator)
-    : SimulationNode(inputs, outputs, allocator) {
+    SimulationFork(const unsigned outputs, SimulationAllocator & allocator)
+    : SimulationNode(1, outputs, allocator) {
 
     }
 
     void demand(length_t * const /* endingArray */, xoshiro256 & /* rng */) override HOT {
-        assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         length_t demand = 0;
@@ -520,7 +519,6 @@ struct SimulationFork final : public SimulationNode {
     }
 
     void fire(length_t * const /* endingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
-        assert (Inputs == 1);
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         I->QueueLength = 0;
@@ -529,6 +527,68 @@ struct SimulationFork final : public SimulationNode {
         }
     }
 
+};
+
+
+struct BlockSizedSimulationFork final : public SimulationNode {
+
+    BlockSizedSimulationFork(const unsigned blockSize, const unsigned outputs, SimulationAllocator & allocator)
+    : SimulationNode(1, outputs, allocator)
+    , BlockSize(blockSize) { }
+
+
+    // have blocksize actors consume as many units as they can but each time the amount ticks over
+    // the required blocking amount, add one output? make the port a 1:1 one?
+
+    void demand(length_t * const /* endingArray */, xoshiro256 & /* rng */) override HOT {
+        SimulationPort * const I = Input[0];
+        const auto ql = I->QueueLength;
+        length_t demand = 0;
+        for (unsigned i = 0; i < Outputs; ++i) {
+            SimulationPort * const O = Output[i];
+            O->QueueLength += ql;
+            demand = std::min(demand, O->QueueLength);
+        }
+        assert (demand <= 0);
+
+        if (LLVM_LIKELY(demand < 0)) {
+            const length_t bs = BlockSize;
+            const length_t n = -demand + bs - 1L;
+            assert (n >= 0);
+            const auto m = n - (n % bs) + bs; // round up
+            assert (m >= -demand);
+            assert ((m % bs) == 0);
+            I->QueueLength = -m;
+            demand += m;
+        } else {
+            I->QueueLength = 0;
+        }
+
+        for (unsigned i = 0; i < Outputs; ++i) {
+            SimulationPort * const O = Output[i];
+            O->QueueLength += demand;
+            assert (O->QueueLength >= 0);
+        }
+    }
+
+
+    void fire(length_t * const /* endingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
+        SimulationPort * const I = Input[0];
+        const auto ql = I->QueueLength;
+        assert (ql >= 0);
+        const auto r = (ql % BlockSize);
+        const auto released = ql - r;
+        I->QueueLength = r;
+        for (unsigned i = 0; i < Outputs; ++i) {
+            SimulationPort * const O = Output[i];
+            assert ((O->QueueLength % BlockSize) == 0);
+            O->QueueLength += released;
+        }
+    }
+
+
+private:
+    const unsigned BlockSize;
 };
 
 struct SimulationActor : public SimulationNode {
@@ -707,144 +767,6 @@ struct SimulationSinkActor final : public SimulationActor {
 
     }
 
-};
-
-#if 0
-
-struct InputBlockSizeActor final : public SimulationActor {
-
-    InputBlockSizeActor(const unsigned blockSize, SimulationAllocator & allocator)
-    : SimulationActor(1, 1, allocator)
-    , BlockSize(blockSize), PendingData(0), PendingStrides(0) { }
-
-
-    void demand(length_t * const /* pendingArray */, xoroshiro128 & rng) override {
-        assert (Inputs == 1 && Outputs == 1);
-        // round up the demand but deposit "added" items in the output port
-        SimulationPort * const I = Input[0];
-        assert (I->QueueLength >= 0);
-        SimulationPort * const O = Output[0];
-        // we need to satisfy the number of strides asked for by the output
-        const auto ql = O->QueueLength;
-        if (LLVM_LIKELY(ql < 0)) {
-            const length_t bs = BlockSize;
-            auto pending = PendingData + I->QueueLength;
-            length_t strides = PendingStrides;
-            auto remaining = -ql;
-            for (;;) {
-                length_t required = 0;
-                I->consume(required, rng);
-                I->commit(required);
-                pending += required;
-                ++strides;
-                if (pending >= bs) {
-                    pending -= bs;
-                    remaining -= strides;
-                    assert (pending < bs);
-                    do {
-                         O->produce(rng);
-                    } while (--strides);
-                    if (remaining <= 0) {
-                        break;
-                    }
-                }
-            }
-            PendingData = static_cast<int16_t>(pending);
-            PendingStrides = static_cast<uint32_t>(remaining);
-        }
-        assert (O->QueueLength >= 0);
-    }
-
-    // Blocksize actors consume as many units as they can but each time the amount ticks over
-    // the required blocking amount, we add in
-
-
-    void fire(length_t * const /* pendingArray */, xoroshiro128 & rng, uint64_t *& /* history */) override {
-        assert (Inputs == 1 && Outputs == 1);
-        SimulationPort * const I = Input[0];
-        SimulationPort * const O = Output[0];
-        const length_t bs = BlockSize;
-        length_t pending = PendingData;
-        assert (pending >= 0 && pending < bs);
-        unsigned strideCount = PendingStrides;
-        for (;;) {
-            length_t required = 0;
-            if (!I->consume(required, rng)) {
-                break;
-            }
-            I->commit(required);
-            ++strideCount;
-            pending += required;
-            if (pending >= bs) {
-                pending -= bs;
-                assert (pending < bs);
-                do {
-                     O->produce(rng);
-                } while (--strideCount);
-            }
-        }
-        assert (pending >= 0 && pending < bs);
-        PendingData = static_cast<int16_t>(pending);
-        PendingStrides = static_cast<uint32_t>(strideCount);
-    }
-
-private:
-    const uint16_t BlockSize;
-    int16_t PendingData;
-    uint32_t PendingStrides;
-};
-
-#endif
-
-struct BlockSizeActor final : public SimulationActor {
-
-    BlockSizeActor(const unsigned blockSize, SimulationAllocator & allocator)
-    : SimulationActor(1, 1, allocator)
-    , BlockSize(blockSize) { }
-
-
-    // have blocksize actors consume as many units as they can but each time the amount ticks over
-    // the required blocking amount, add one output? make the port a 1:1 one?
-
-    void demand(length_t * const /* pendingArray */, xoshiro256 & /* rng */) override HOT {
-        assert (Inputs == 1 && Outputs == 1);
-        // round up the demand but deposit "added" items in the output port
-        SimulationPort * const I = Input[0];
-        assert (I->QueueLength >= 0);
-        SimulationPort * const O = Output[0];
-        const auto ql = I->QueueLength + O->QueueLength;
-        if (LLVM_LIKELY(ql < 0)) {
-            const length_t bs = BlockSize;
-            const length_t n = -ql + bs - 1;
-            assert (n >= 0);
-            const auto m = n - (n % bs) + bs; // round up
-            assert (m >= -ql);
-            assert ((m % bs) == 0);
-            I->QueueLength = -m;
-            O->QueueLength = (m + ql);
-        } else {
-            I->QueueLength = 0;
-            O->QueueLength = ql;
-        }
-        assert ((I->QueueLength % BlockSize) == 0);
-        assert (O->QueueLength >= 0);
-    }
-
-    void fire(length_t * const /* pendingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
-        assert (Inputs == 1 && Outputs == 1);
-        SimulationPort * const I = Input[0];
-        const auto ql = I->QueueLength;
-        assert (ql >= 0);
-        SimulationPort * const O = Output[0];
-        assert ((O->QueueLength % BlockSize) == 0);
-        const auto r = (ql % BlockSize);
-        O->QueueLength += (ql - r);
-        assert ((O->QueueLength % BlockSize) == 0);
-        I->QueueLength = r;
-    }
-
-private:
-    const unsigned BlockSize;
 };
 
 using LinkingGraph = adjacency_list<vecS, vecS, undirectedS, no_property, Rational>;
@@ -1328,39 +1250,16 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                                 if (port == G[e]) {
                                     if (LLVM_UNLIKELY(u == streamSet)) {
                                         goto equivalent_port_exists;
-//                                        if (LLVM_LIKELY(blockSize == 0 || G[u].BlockSize == blockSize)) {
-//                                            goto equivalent_port_exists;
-//                                        } else {
-//                                            for (const auto f : make_iterator_range(out_edges(streamSet, G))) {
-//                                                const auto v = target(f, G);
-//                                                assert (v < numOfPartitions || G[v].BlockSize != 0);
-//                                                if (v >= numOfPartitions && G[v].BlockSize == blockSize) {
-//                                                    for (const auto g : make_iterator_range(out_edges(v, G))) {
-//                                                        assert (target(g, G) < numOfPartitions);
-//                                                        if (target(g, G) == partitionId) {
-//                                                            goto equivalent_port_exists;
-//                                                        }
-//                                                    }
-//                                                    add_edge(v, partitionId, makeBlockSizePartitionPort(), G);
-//                                                    goto equivalent_port_exists;
-//                                                }
-//                                            }
-//                                        }
                                     }
                                 }
                             }
                         }
                         assert (in_degree(streamSet, G) == 1);
-                        auto w = partitionId;
-//                        if (blockSize) {
-//                            w = add_vertex(blockSize, G);
-//                            add_edge(w, partitionId, makeBlockSizePartitionPort(), G);
-//                        }
-                        const auto e = add_edge(streamSet, w, port, G).first;
+                        const auto e = add_edge(streamSet, partitionId, port, G).first;
                         if (LLVM_UNLIKELY(rate.isPartialSum())) {
                             updatePartialSumProbabilityDistribution(e);
                         }
-                        assert (G[e] == makePartitionPort());
+                        assert ("sanity check" && G[e] == makePartitionPort());
                     } else { // is an output
                         assert (streamSetMap.find(portNode.StreamSet) == streamSetMap.end());
                         if (LLVM_UNLIKELY(rate.isRelative())) {
@@ -1384,23 +1283,13 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                                 if (port == G[e]) {
                                     streamSet = target(e, G);
                                     assert (in_degree(streamSet, G) == 1);
-                                    if (LLVM_UNLIKELY(blockSize == 0 || G[streamSet].BlockSize == blockSize)) {
+                                    if (LLVM_LIKELY(G[streamSet].BlockSize == blockSize)) {
                                         goto fuse_existing_streamset;
-                                    } else {
-                                        for (const auto f : make_iterator_range(out_edges(streamSet, G))) {
-                                            const auto v = target(f, G);
-                                            if (G[v].BlockSize == blockSize) {
-                                                streamSet = v;
-                                                assert (in_degree(streamSet, G) == 1);
-                                                goto fuse_existing_streamset;
-                                            }
-                                        }
-                                        goto make_blocksize_node_for_existing_streamset;
                                     }
                                 }
                             }
                         }
-                        streamSet = add_vertex(G);
+                        streamSet = add_vertex(blockSize, G);
                         BEGIN_SCOPED_REGION
                         const auto e = add_edge(partitionId, streamSet, makePartitionPort(), G).first;
                         if (LLVM_UNLIKELY(rate.isPartialSum())) {
@@ -1408,16 +1297,6 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                         }
                         assert ("sanity check" && G[e] == makePartitionPort());
                         END_SCOPED_REGION
-                        if (LLVM_UNLIKELY(blockSize != 0)) {
-make_blocksize_node_for_existing_streamset:
-                            assert (in_degree(streamSet, G) == 1);
-                            const auto blockSizeNode = add_vertex(blockSize, G);
-                            add_edge(streamSet, blockSizeNode, makeBlockSizePartitionPort(), G);
-                            streamSet = blockSizeNode;
-                        }
-                        if (binding.hasAttribute(AttrId::Deferred)) {
-                            #warning a deferred output ought to release data in periodic bursts
-                        }
 fuse_existing_streamset:
                         assert (in_degree(streamSet, G) == 1);
                         streamSetMap.emplace(std::make_pair(portNode.StreamSet, streamSet));
@@ -1528,13 +1407,98 @@ equivalent_port_exists:
 
     BEGIN_SCOPED_REGION
 
+    // Normalize purely fixed-rate streamset I/O rates by their GCD. Do not alter
+    // ports if they are influnced by a lookahead, delay or blocksize attribute.
+
+    for (auto u = numOfPartitions; u < nodeCount; ++u) {
+        if (LLVM_LIKELY(G[u].BlockSize == 0)) {
+            auto canNormalizePort = [&](const Graph::edge_descriptor e, const unsigned t) {
+                const PartitionPort & p = G[e];
+                return (p.Type == RateId::Fixed) && (p.Delay == 0) && t < numOfPartitions;
+            };
+
+            const auto input = in_edge(u, G);
+            if (canNormalizePort(input, source(input, G))) {
+                bool normalize = true;
+                for (const auto output : make_iterator_range(out_edges(u, G))) {
+                    if (!canNormalizePort(output, target(output, G))) {
+                        normalize = false;
+                        break;
+                    }
+                }
+                if (normalize) {
+                    PartitionPort & I = G[input];
+                    auto gcd = I.LowerBound;
+                    for (const auto output : make_iterator_range(out_edges(u, G))) {
+                        gcd = boost::gcd(gcd, G[output].LowerBound);
+                    }
+                    if (gcd != 1) {
+                        assert (I.LowerBound == I.UpperBound);
+                        I.LowerBound /= gcd;
+                        I.UpperBound = I.LowerBound;
+                        for (const auto output : make_iterator_range(out_edges(u, G))) {
+                            auto & O = G[output];
+                            assert (O.LowerBound == O.UpperBound);
+                            O.LowerBound /= gcd;
+                            O.UpperBound = O.LowerBound;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 repeat_graph_simplification:
 
-    bool anyGraphModification = false;
+    // TODO: just sum the delays?
+
+    // Contract out any duplicate streamsets revealed by the GCD normalization
+    for (auto u = 0UL; u < numOfPartitions; ++u) {
+        Graph::out_edge_iterator ei, ei_end;
+restart_contraction:
+        std::tie(ei, ei_end) = out_edges(u, G);
+        for (; ei != ei_end; ++ei) {
+            const PartitionPort & O = G[*ei];
+            if (O.Type == RateId::Fixed) {
+                for (auto ej = ei; ++ej != ei_end; ) {
+                    if (O == G[*ej]) { // if output rates match
+                        const auto a = target(*ei, G);
+                        assert (a >= numOfPartitions);
+                        const auto b = target(*ej, G);
+                        assert (b >= numOfPartitions);
+                        if (LLVM_LIKELY(G[a].BlockSize == G[b].BlockSize)) {
+                            Graph::out_edge_iterator eb, eb_end;
+                            std::tie(eb, eb_end) = out_edges(b, G);
+                            for (; eb != eb_end; ++eb) {
+                                const auto v = target(*eb, G);
+                                bool toAdd = true;
+                                Graph::out_edge_iterator ea, ea_end;
+                                std::tie(ea, ea_end) = out_edges(a, G);
+                                for (; ea != ea_end; ++ea) {
+                                    const auto w = target(*ea, G);
+                                    if (v == w && G[*ea] == G[*eb]) {
+                                        toAdd = false;
+                                        break;
+                                    }
+                                }
+                                if (toAdd) {
+                                    add_edge(a, v, G[*eb], G);
+                                }
+                            }
+                            clear_vertex(b, G);
+                            goto restart_contraction;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // If have multiple countable-rate inputs from the same streamset, we only really
     // care about the one with the largest delay. Similarly if we have multiple Fixed
     // inputs from the same partition, we need only keep the largest one.
+
+    bool anyGraphModification = false;
 
     for (unsigned u = 0; u < numOfPartitions; ++u) {
         Graph::in_edge_iterator ei, ei_end;
@@ -1590,137 +1554,6 @@ restart_port_merge:
         }
     }
 
-    // Normalize purely fixed-rate streamset I/O rates by their GCD. Do not alter
-    // ports if they are adjacent to a blocksize node.
-
-    for (auto u = numOfPartitions; u < nodeCount; ++u) {
-        if (G[u].BlockSize == 0) {
-            auto canNormalizePort = [&](const Graph::edge_descriptor e, const unsigned t) {
-                const PartitionPort & p = G[e];
-                return (p.Type == RateId::Fixed) && (p.Delay == 0) && t < numOfPartitions;
-            };
-
-            const auto input = in_edge(u, G);
-            if (canNormalizePort(input, source(input, G))) {
-                bool normalize = true;
-                for (const auto output : make_iterator_range(out_edges(u, G))) {
-                    if (!canNormalizePort(output, target(output, G))) {
-                        normalize = false;
-                        break;
-                    }
-                }
-                if (normalize) {
-                    PartitionPort & I = G[input];
-                    auto gcd = I.LowerBound;
-                    for (const auto output : make_iterator_range(out_edges(u, G))) {
-                        gcd = boost::gcd(gcd, G[output].LowerBound);
-                    }
-                    if (gcd != 1) {
-                        assert (I.LowerBound == I.UpperBound);
-                        I.LowerBound /= gcd;
-                        I.UpperBound = I.LowerBound;
-                        for (const auto output : make_iterator_range(out_edges(u, G))) {
-                            auto & O = G[output];
-                            assert (O.LowerBound == O.UpperBound);
-                            O.LowerBound /= gcd;
-                            O.UpperBound = O.LowerBound;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // TODO: just sum the delays?
-
-    // Contract out any duplicate streamsets revealed by the GCD normalization
-    for (auto u = 0UL; u < numOfPartitions; ++u) {
-        Graph::out_edge_iterator ei, ei_end;
-restart_contraction:
-        std::tie(ei, ei_end) = out_edges(u, G);
-        for (; ei != ei_end; ++ei) {
-            const PartitionPort & O = G[*ei];
-            if (O.Type == RateId::Fixed && O.Delay == 0) {
-                for (auto ej = ei; ++ej != ei_end; ) {
-                    if (O == G[*ej]) { // if output rates match
-                        const auto a = target(*ei, G);
-                        assert (a >= numOfPartitions);
-                        const auto b = target(*ej, G);
-                        assert (b >= numOfPartitions);
-                        Graph::out_edge_iterator eb, eb_end;
-                        std::tie(eb, eb_end) = out_edges(b, G);
-                        for (; eb != eb_end; ++eb) {
-                            const auto v = target(*eb, G);
-                            bool toAdd = true;
-                            Graph::out_edge_iterator ea, ea_end;
-                            std::tie(ea, ea_end) = out_edges(a, G);
-                            for (; ea != ea_end; ++ea) {
-                                const auto w = target(*ea, G);
-                                if (v == w && G[*ea] == G[*eb]) {
-                                    toAdd = false;
-                                    break;
-                                }
-                            }
-                            if (toAdd) {
-                                add_edge(a, v, G[*eb], G);
-                            }
-                        }
-                        anyGraphModification = true;
-                        clear_vertex(b, G);
-                        goto restart_contraction;
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply transitive-reduction-like pass to the graph on the Fixed input rates.
-    // This will remove any ports that are trivially guaranteed by some prior
-    // I/O relationship in the graph.
-
-    dynamic_bitset<> visited(nodeCount);
-
-    for (auto u = numOfPartitions; u < nodeCount; ++u) {
-restart_fixed_rate_transitive_reduction:
-        if (out_degree(u, G) > 1) {
-            Graph::out_edge_iterator ei, ei_end;
-            std::tie(ei, ei_end) = out_edges(u, G);
-            for (; ei != ei_end; ++ei) {
-                PartitionPort & A = G[*ei];
-                if (A.Type == RateId::Fixed) {
-                    visited.reset();
-                    std::function<void(Vertex)> check_dfs = [&](const Vertex u) {
-                        for (const auto e : make_iterator_range(out_edges(u, G))) {
-                            const auto v = target(e, G);
-                            if (!visited.test(v)) {
-                                visited.set(v);
-                                check_dfs(v);
-                            }
-                        }
-                    };
-                    check_dfs(target(*ei, G));
-                    assert (!visited.test(target(*ei, G)));
-
-                    bool changed = false;
-
-                    remove_out_edge_if(u, [&](Graph::edge_descriptor e) {
-                        if (visited.test(target(e, G))) {
-                            const PartitionPort & B = G[e];
-                            return (B.Type == RateId::Fixed && B.UpperBound == A.UpperBound && B.Delay == A.Delay);
-                        }
-                        return false;
-                    }, G);
-
-                    if (changed) {
-                        anyGraphModification = true;
-                        goto restart_fixed_rate_transitive_reduction;
-                    }
-
-                }
-            }
-        }
-    }
-
     if (anyGraphModification) {
         goto repeat_graph_simplification;
     }
@@ -1753,7 +1586,6 @@ restart_fixed_rate_transitive_reduction:
                     if (toAdd) {
                         add_edge(s, t, I, G);
                     }
-                    // anyGraphModification = true;
                 }
             }
         }
@@ -1978,12 +1810,14 @@ restart_fixed_rate_transitive_reduction:
                 sn = new (allocator) SimulationActor(inputs, outputs, allocator);
             }
             actorNodes.push_back(u);
-        } else if (G[u].BlockSize) {
-            assert (inputs == 1 && outputs == 1);
-            sn = new (allocator) BlockSizeActor(G[u].BlockSize, allocator);
         } else {
             assert (inputs == 1 && outputs > 0);
-            sn = new (allocator) SimulationFork(inputs, outputs, allocator);
+            const auto bs = G[u].BlockSize;
+            if (LLVM_LIKELY(bs == 0)) {
+                sn = new (allocator) SimulationFork(outputs, allocator);
+            } else {
+                sn = new (allocator) BlockSizedSimulationFork(bs, outputs, allocator);
+            }
         }
         nodes[i] = sn;
         unsigned inputIdx = 0;
@@ -2090,93 +1924,6 @@ restart_fixed_rate_transitive_reduction:
             find_immediate_consumers(u);
         }
     }
-
-#if 0
-
-    uint64_t minSourceStrideCount = std::numeric_limits<uint64_t>::max();
-
-    std::vector<SimulationActor *> actor(numOfPartitions, nullptr);
-
-    for (unsigned i = 0; i < m; ++i) {
-        const auto u = ordering[m - i - 1]; // forward topological ordering
-        if (u < numOfPartitions) {
-            SimulationActor * const A = reinterpret_cast<SimulationActor *>(nodes[i]);
-            assert (executedStrideCount[u] == 0);
-            executedStrideCount[u] = A->SumOfStrides;
-            minSourceStrideCount = std::min(minSourceStrideCount, A->SumOfStrides);
-            actor[u] = A;
-        }
-    }
-
-    for (unsigned u = 0; u < numOfPartitions; ++u) {
-
-        if (in_degree(u, G) == 0 && out_degree(u, G) != 0) {
-            assert (out_degree(u, G) != 0);
-            const auto sourceStrideCount = executedStrideCount[u];
-            assert (sourceStrideCount != 0);
-            SimulationActor * const A = actor[u];
-            assert (A);
-
-
-            const auto sourceNumOfStrides = A->SumOfStrides;
-
-            double ratio = 1.0;
-
-            for (const auto e : make_iterator_range(out_edges(u, G))) {
-                const auto v = target(e, G);
-                if (v < numOfPartitions) {
-                    const double r = ((double)sourceStrideCount) / ((double)executedStrideCount[u]);
-                    ratio = std::max(ratio, r);
-                } else {
-                    const SimulationPort * port = G[e].PortObject;
-                    assert (port);
-                    const double sourceExpected = port->expected();
-                    const double scaledSourceStride = sourceNumOfStrides * sourceExpected;
-
-                    std::function<void(Vertex)> find_immediate_consumers
-                            = [&](const Vertex v) {
-                        for (const auto f : make_iterator_range(out_edges(v, G))) {
-                            const auto w = target(f, G);
-                            if (w < numOfPartitions) {
-                                const SimulationActor * const B = actor[w];
-                                const SimulationPort * port = G[f].PortObject;
-                                const double targetExpected = port->expected();
-                                const double scaledTargetStride = B->SumOfStrides * sourceExpected;
-                                const double r = scaledSourceStride / scaledTargetStride;
-
-
-                            } else {
-                                find_immediate_consumers(w);
-                            }
-                        }
-                    };
-
-
-
-                }
-
-
-
-            }
-
-
-            minStrideCount = std::min<size_t>(executedStrideCount[u], minStrideCount);
-            std::function<void(Vertex)> find_immediate_consumers
-                    = [&](const Vertex u) {
-                for (const auto e : make_iterator_range(out_edges(u, G))) {
-                    const auto v = target(e, G);
-                    if (v < numOfPartitions) {
-                        assert (executedStrideCount[v] != 0);
-                        minStrideCount = std::min<size_t>(executedStrideCount[v], minStrideCount);
-                    } else {
-                        find_immediate_consumers(v);
-                    }
-                }
-            };
-        }
-    }
-
-#endif
 
     assert (minStrideCount != 0);
 
