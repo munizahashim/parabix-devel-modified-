@@ -190,6 +190,7 @@ public:
     JSONParserArr(
         const std::unique_ptr<KernelBuilder> & b,
         StreamSet * const lexIn,
+        StreamSet * const strMarker,
         StreamSet * const combinedLexs,
         StreamSet * const nestingDepth,
         StreamSet * const syntaxErr,
@@ -201,6 +202,7 @@ public:
                             std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
                          {
                             Binding{"lexIn", lexIn},
+                            Binding{"strMarker", strMarker},
                             Binding{"combinedLexs", combinedLexs, FixedRate(1), LookAhead(1)},
                             Binding{"ND", nestingDepth}
                          },
