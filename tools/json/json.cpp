@@ -188,6 +188,7 @@ jsonFunctionType json_parsing_gen(
         );
         P->CreateKernelCall<JSONParserArr>(
             lexStream,
+            stringMarker,
             combinedLexers,
             encDepth,
             syntaxArrErr,
