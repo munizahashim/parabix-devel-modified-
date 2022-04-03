@@ -618,9 +618,20 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
 
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
-
+    // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
+    // and combine them at the end?
     updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
-    releaseSynchronizationLock(b, mKernelId);
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, mKernelId);
+            Value * const currentSegNo = b->CreateLoad(waitingOnPtr);
+            Value * const check = b->CreateICmpUGE(currentSegNo, mNextSegNo);
+            b->CreateAssert(check, "%s. failed to set statefree sync lock; current %" PRIu64 " < expected %" PRIu64,
+                            mCurrentKernelName, currentSegNo, mNextSegNo);
+        }
+    } else {
+        releaseSynchronizationLock(b, mKernelId);
+    }
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
     #endif

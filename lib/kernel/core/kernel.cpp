@@ -392,6 +392,25 @@ found_non_empty_type:
 //    mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
 }
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasMutableSharedState
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool Kernel::hasSharedMutableState() const {
+    if (!mOutputScalars.empty()) {
+        return true;
+    }
+    for (const auto & scalar : mInternalScalars) {
+        assert (scalar.getValueType());
+        if (scalar.getScalarType() == ScalarType::Internal) {
+            if (LLVM_LIKELY(!scalar.getValueType()->isEmptyTy())) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addKernelDeclarations
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1386,10 +1405,15 @@ std::string Kernel::getDefaultFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-inline std::string annotateKernelNameWithDebugFlags(std::string && name) {
+inline std::string annotateKernelNameWithDebugFlags(Kernel::TypeId id, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
+    } else if (LLVM_UNLIKELY(id == Kernel::TypeId::Pipeline)) {
+        // TODO: look into cleaner method for this
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
+            buffer << "_EA";
+        }
     }
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         buffer << "_MP";
@@ -1423,7 +1447,7 @@ Kernel::Kernel(BuilderRef b,
 , mInputScalars(std::move(scalar_inputs))
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
-, mKernelName(annotateKernelNameWithDebugFlags(std::move(kernelName))) {
+, mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
 
 
 }

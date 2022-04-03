@@ -42,7 +42,9 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
                         clEnumVal(TraceProducedItemCounts, "Trace produced item count deltas over segments."),
                         clEnumVal(TraceUnconsumedItemCounts, "Trace unconsumed item counts over segments."),
-                        clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in generated IR."),
+
+                        clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
+                        clEnumVal(EnablePipelineAsserts, "Enable built-in Parabix framework asserts in generated pipeline IR."),
                         clEnumVal(EnableMProtect, "Use mprotect to cause a write fault when erroneously "
                                                   "overwriting kernel state / stream space."),
                         clEnumVal(EnableCycleCounter, "Count and report CPU cycles per kernel."),

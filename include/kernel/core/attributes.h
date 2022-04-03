@@ -279,7 +279,16 @@ struct Attribute {
 
         ExecuteStridesIndividually,
 
-        // Run the kernel in a lock step with number of strides bound by BoundNumberOfStrides per segment.
+        // When calling the DoSegment method for a kernel, this forces the pipeline to
+        // provide exactly one stride per call.
+
+        Statefree,
+
+        // A kernel is considered stateful if its a source kernel or contains non-Input
+        // scalars. This attribute will override the pipeline's decision.
+
+        // Note that that this does not guarantee that the pipeline compiler will mark
+        // this kernel as statefree if it is unsafe to do so.
 
         /** COUNT **/
 
@@ -516,6 +525,10 @@ inline Attribute RequiresNegatedPopCountArray() {
 
 inline Attribute ExecuteStridesIndividually() {
     return Attribute(Attribute::KindId::ExecuteStridesIndividually, 0);
+}
+
+inline Attribute Statefree() {
+    return Attribute(Attribute::KindId::Statefree, 0);
 }
 
 

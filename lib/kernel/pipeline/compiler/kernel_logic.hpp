@@ -320,52 +320,109 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
     return false;
 }
 
-#if 0
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyPipelineInputs
+ * @brief isCurrentKernelStatefree
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::identifyLocalPortIds(const unsigned kernelId) {
+bool PipelineCompiler::isCurrentKernelStatefree() const {
 
-    // Although this function simply just counts the number of local I/O ids,
-    // it does perform a sanity test in debug mode. If any of these assertions
-    // were to trigger, there is likely a serious problem in the analysis for
-    // any to occur. Verify how local port ids are being assigned and update the
-    // assertions only after proving its correct.
+    if (mNumOfThreads < 2) return false;
 
-    #ifndef NDEBUG
-    const auto numOfInputs = in_degree(kernelId, mBufferGraph);
-    BitVector inputs(numOfInputs + 1U);
-    #endif
-    mNumOfLocalInputPortIds = 0;
-    for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-        const BufferPort & br = mBufferGraph[e];
-        const auto id = br.LocalPortId;
-        #ifndef NDEBUG
-        assert ("local port id exceeded num of input ports?" && (id < numOfInputs));
-        inputs.set(id);
-        #endif
-        mNumOfLocalInputPortIds = std::max(mNumOfLocalInputPortIds, id);
+    const auto isMarkedStateFree = mKernel->hasAttribute(AttrId::Statefree);
+
+    errs() << mKernelId << ": " << mKernel->getName() << " ";
+
+    for (const Attribute & attr : mKernel->getAttributes()) {
+        switch (attr.getKind()) {
+            case AttrId::MayFatallyTerminate:
+            case AttrId::CanTerminateEarly:
+            case AttrId::MustExplicitlyTerminate:
+            case AttrId::InternallySynchronized:
+            case AttrId::SideEffecting:
+                errs() << " has stateful kernel attribute\n";
+                return false;
+            default: break;
+        }
     }
-    assert ("gap in local input port ids?" && (static_cast<int>(inputs.count()) == inputs.find_first_unset()));
 
-    #ifndef NDEBUG
-    const auto numOfOutputs = out_degree(kernelId, mBufferGraph);
-    BitVector outputs(numOfOutputs + 1U);
-    #endif
-    mNumOfLocalOutputPortIds = 0;
-    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-        const BufferPort & br = mBufferGraph[e];
-        const auto id = br.LocalPortId;
-        #ifndef NDEBUG
-        assert ("local port id exceeded num of output ports?" && (id < numOfOutputs));
-        outputs.set(id);
-        #endif
-        mNumOfLocalOutputPortIds = std::max(mNumOfLocalOutputPortIds, id);
+    if (mKernel->hasFamilyName()) {
+        errs() << " is family kernel\n";
+        return false;
     }
-    assert ("gap in local output port ids?" && (static_cast<int>(outputs.count()) == outputs.find_first_unset()));
 
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & p = mBufferGraph[e];
+        const Binding & b = p.Binding;
+        const ProcessingRate & r = b.getRate();
+
+        switch (r.getKind()) {
+            case ProcessingRate::KindId::Fixed:
+            case ProcessingRate::KindId::PartialSum:
+            case ProcessingRate::KindId::Greedy:
+                break;
+            default:
+                errs() << " non-countable input\n";
+                return false;
+        }
+
+        if (p.IsDeferred) {
+            errs() << " deferred input\n";
+            return false;
+        }
+        const auto streamSet = source(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (!bn.IsLinear) {
+            errs() << " non-linear input\n";
+            return false;
+        }
+    }
+
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & p = mBufferGraph[e];
+        const Binding & b = p.Binding;
+        const ProcessingRate & r = b.getRate();
+
+        switch (r.getKind()) {
+            case ProcessingRate::KindId::Fixed:
+                break;
+            case ProcessingRate::KindId::PartialSum:
+                // We permit a partial sum output rate if and only if the kernel
+                // was explicitly marked as statefree. Otherwise we cannot ensure
+                // that the portion of a buffer that demarcates two invocations
+                // will be correctly merged.
+                if (isMarkedStateFree) break;
+            default:
+                errs() << " non-fixed output\n";
+                return false;
+        }
+
+        if (p.IsManaged || p.IsShared || p.IsDeferred) {
+            errs() << " deferred or managed output\n";
+            return false;
+        }
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (!bn.IsLinear) {
+            errs() << " non-linear output\n";
+            return false;
+        }
+    }
+    if (LLVM_UNLIKELY(isMarkedStateFree)) {
+        errs() << " is explicitly statefree\n";
+        return true;
+    }
+    if (in_degree(mKernelId, mBufferGraph) == 0) {
+        errs() << " is source\n";
+        return false;
+    }
+
+    if (mKernel->hasSharedMutableState()) {
+        errs() << " is has shared mutable state\n";
+        return false;
+    }
+
+    errs() << " is statefree\n";
+    return true;
 }
-#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBufferVertex
@@ -440,6 +497,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mNumOfVirtualBaseAddresses = 0;
     mNumOfTruncatedInputBuffers = 0;
 
+    mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;
     mExhaustedPipelineInputPhi = nullptr;
     mExhaustedInputAtJumpPhi = nullptr;
@@ -481,6 +539,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedDeferredItemCount.reset(numOfInputs);
     mUpdatedProcessedPhi.reset(numOfInputs);
     mUpdatedProcessedDeferredPhi.reset(numOfInputs);
+    mConsumedItemCountsAtLoopExitPhi.reset(numOfInputs);
     mFullyProcessedItemCount.reset(numOfInputs);
 
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);

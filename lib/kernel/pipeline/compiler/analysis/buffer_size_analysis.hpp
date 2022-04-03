@@ -227,7 +227,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoshiro256 & rng) {
                     const auto j = count++;
                     assert (mapping[i] == -1U);
                     mapping[i] = j;
-                    weight[j] = w * THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
+                    weight[j] = w;
                 }
             }
         }

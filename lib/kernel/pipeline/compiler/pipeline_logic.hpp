@@ -113,10 +113,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
-        if (isRoot) { // || getKernel(i)->canSetTerminateSignal()
-            addTerminationProperties(b, i);
-            currentPartitionId = partitionId;
-        }
+        currentPartitionId = partitionId;
         addInternalKernelProperties(b, i, isRoot);
         addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
@@ -130,24 +127,31 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     #endif
 }
 
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned kernelId, const bool isRoot) {
-    const Kernel * const kernel = getKernel(kernelId);
+
+    mKernelId = kernelId;
+    mKernel = getKernel(kernelId);
+    mIsStatefree = isCurrentKernelStatefree();
+
     IntegerType * const sizeTy = b->getSizeTy();
 
-    // TODO: if we've proven we do not need synchronization then we've already proven that
-    // we can calculate the item count and num of strides from the input item counts.
-    // With the inclusion of InternallySynchronized attributes for PipelineKernels, this is
-    // no longer true and the test requires greater precision.
-
     const auto groupId = getCacheLineGroupId(kernelId);
+
+    if (isRoot) {
+        addTerminationProperties(b, kernelId);
+    }
 
     const auto name = makeKernelName(kernelId);
     if (RequiresSynchronization.test(kernelId)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX, groupId);
     }
+
+    addConsumerKernelProperties(b, kernelId);
+
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, br.Port);
@@ -155,6 +159,13 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
+        if (mIsStatefree) {
+            assert (!br.IsDeferred);
+            const auto streamSet = source(e, mBufferGraph);
+            if (edge(streamSet, kernelId, mConsumerGraph).second) {
+                mTarget->addThreadLocalScalar(sizeTy, prefix + THREAD_LOCAL_CONSUMED_ITEM_COUNT_SUFFIX, groupId);
+            }
+        }
     }
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
@@ -166,29 +177,27 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
     }
 
-    addConsumerKernelProperties(b, kernelId);
-
     addBufferHandlesToPipelineKernel(b, kernelId);
 
     addFamilyKernelProperties(b, kernelId);
 
-    if (LLVM_LIKELY(kernel->isStateful())) {
+    if (LLVM_LIKELY(mKernel->isStateful())) {
         Type * sharedStateTy = nullptr;
-        if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
             sharedStateTy = b->getVoidPtrTy();
         } else {
-            sharedStateTy = kernel->getSharedStateType();
+            sharedStateTy = mKernel->getSharedStateType();
         }
         mTarget->addInternalScalar(sharedStateTy, name, groupId);
     }
 
-    if (kernel->hasThreadLocal()) {
+    if (mKernel->hasThreadLocal()) {
         // we cannot statically allocate a "family" thread local object.
         Type * localStateTy = nullptr;
-        if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
             localStateTy = b->getVoidPtrTy();
         } else {
-            localStateTy = kernel->getThreadLocalStateType();
+            localStateTy = mKernel->getThreadLocalStateType();
         }
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }

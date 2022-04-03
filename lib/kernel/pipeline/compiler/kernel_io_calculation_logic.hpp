@@ -88,10 +88,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
-        auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
-        if (in_degree(mKernelId, mBufferGraph) != 0) {
-            numOfStrides *= THREAD_LOCAL_BUFFER_OVERSIZE_FACTOR;
-        }
+        const auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
@@ -616,7 +613,9 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
         ConstantInt * const i1_TRUE = b->getTrue();
 
-        BasicBlock * const lastTestExit = b->CreateBasicBlock("", mKernelLoopExit);
+        BasicBlock * const insertBefore = mKernelCompletionCheck->getNextNode();
+
+        BasicBlock * const lastTestExit = b->CreateBasicBlock("", insertBefore);
         PHINode * const enoughInputPhi = PHINode::Create(b->getInt1Ty(), 4, "", lastTestExit);
 
         bool firstTest = true;
@@ -636,8 +635,8 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
                 continue;
             }
 
-            Value * const processed = mAlreadyProcessedPhi[port.Port];
-            // Value * const processed = mProcessedItemCount[port.Port];
+            Value * const processed = mProcessedItemCount[port.Port]; // mAlreadyProcessedPhi[port.Port];
+
             Value * avail = getLocallyAvailableItemCount(b, port.Port);
 
             Value * const closed = isClosed(b, port.Port);
@@ -647,6 +646,12 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
                 Constant * const ADD = b->getSize(port.Add);
                 Value * const added = b->CreateSelect(closed, ADD, ZERO);
                 avail = b->CreateAdd(avail, added);
+            }
+
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                b->CreateAssert(b->CreateICmpUGE(avail, processed),
+                                "%s: avail %" PRIu64 " < processed %" PRIu64 "?",
+                                mCurrentKernelName, avail, processed);
             }
 
             Value * const remaining = b->CreateSub(avail, processed);
@@ -671,23 +676,12 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
             }
 
             if (useBranch) {
-                BasicBlock * const nextTest = b->CreateBasicBlock("", mKernelLoopExit);
+                BasicBlock * const nextTest = b->CreateBasicBlock("", insertBefore);
                 BasicBlock * const exitBlock = b->GetInsertBlock();
                 enoughInputPhi->addIncoming(b->getFalse(), exitBlock);
+                enoughInput = b->CreateAnd(enoughInput, hasEnough);
 
-                if (firstTest) {
-                    enoughInput = b->CreateAnd(enoughInput, hasEnough);
-                  //  Value * const supportsAnotherStride = b->CreateAnd(enoughInput, notAtSegmentLimit);
-                  //  b->CreateUnlikelyCondBr(supportsAnotherStride, nextTest, lastTestExit);
-                    b->CreateUnlikelyCondBr(enoughInput, nextTest, lastTestExit);
-                    firstTest = false;
-                } else {
-                    assert (enoughInput);
-                    enoughInput = b->CreateAnd(enoughInput, hasEnough);
-                    Value * const supportsAnotherStride = enoughInput;
-
-                    b->CreateLikelyCondBr(supportsAnotherStride, nextTest, lastTestExit);
-                }
+                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
                 b->SetInsertPoint(nextTest);
                 enoughInput = i1_TRUE;
             } else {
@@ -698,17 +692,16 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         b->CreateBr(lastTestExit);
 
         b->SetInsertPoint(lastTestExit);
-        Value * hasMore = enoughInputPhi;
-        if (LLVM_UNLIKELY(firstTest)) {
-            hasMore = notAtSegmentLimit;
-        } else {
-            hasMore = enoughInputPhi;
-        }
-        return hasMore;
+//        Value * hasMore = enoughInputPhi;
+//        if (LLVM_UNLIKELY(firstTest)) {
+//            hasMore = notAtSegmentLimit;
+//        } else {
+//            hasMore = enoughInputPhi;
+//        }
+//        return hasMore;
+        return enoughInputPhi;
     } else {
         //  (final segment OR up<max) AND NOT final stride
-
-
         return b->CreateAnd(b->CreateOr(mFinalPartitionSegment, notAtSegmentLimit), nonFinal);
    }
 
@@ -878,10 +871,43 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
 
+    Value * const mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
+
+    BasicBlock * afterCopyBackOrExpand = nullptr;
+
+    if (buffer->isLinear()) {
+        BasicBlock * const expand = b->CreateBasicBlock(prefix + "_mallocBuffer", mKernelLoopCall);
+        BasicBlock * const copyBack = b->CreateBasicBlock(prefix + "_copyBack", mKernelLoopCall);
+        afterCopyBackOrExpand = b->CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
+        b->CreateCondBr(mustExpand, expand, copyBack);
+
+        b->SetInsertPoint(copyBack);
+        buffer->linearCopyBack(b, produced, consumed, required);
+        b->CreateBr(afterCopyBackOrExpand);
+
+        b->SetInsertPoint(expand);
+    }
+
+    // If this kernel is statefree, we have a potential problem here. Another thread may be actively
+    // executing this kernel and writing data to the old buffer still but if we expand this buffer,
+    // we won't end up copying its "unwritten" data. Thus we need to wait for the other thread to
+    // finish processing before we can consider expanding the buffer.
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+
+
+    }
+
+    // We now have to check whether we had two successive buffer expansion that are still being
+    // actively read but now require a third
+
+
     Value * syncLock = nullptr;
     if (mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U)) {
         syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
-    }
+    }    \
+
+
+
 
     Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
 

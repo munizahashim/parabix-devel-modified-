@@ -34,6 +34,60 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
+
+
+
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+
+        // Suppose if the pipeline were run in single-threaded mode, it is logically on the
+        // k-th segment iteration. If this kernel is state free and the thread executing the
+        // (k+1)-th segment might write the consumed count before the k-th one. If yet another
+        // thread is currently invoking the producer of input streamset, it might end up
+        // reusing the data space that the k-th one is currently reading.
+
+        // To avoid this problem, each thread "hold backs" updating the consumed item count
+        // until that thread executes the same kernel again.
+
+        // At minimum, this kernel acquires a lock to calculate its current I/O state and
+        // releases it after it updates it. Since all N threads obey this rule, the data that
+        // this thread last consumed must be safe to release.
+
+        updateProcessedAndProducedItemCounts(b);
+        writeUpdatedItemCounts(b);
+        computeMinimumConsumedItemCounts(b);
+
+        BasicBlock * resumeKernelExecution = nullptr;
+
+        // If we can loop back to the entry, we assume that its to handle the final block.
+        if (mMayLoopToEntry) {
+
+            const auto prefix = makeKernelName(mKernelId);
+            BasicBlock * const releaseSyncLock =
+                b->CreateBasicBlock(prefix + "_releaseStatelessKernelSyncLock", mKernelCompletionCheck);
+            resumeKernelExecution =
+                b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
+
+            mHasMoreInput = hasMoreInput(b);
+
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, "* " + prefix + "_skipRelease = %" PRIu64, mHasMoreInput);
+            #endif
+
+            b->CreateUnlikelyCondBr(mHasMoreInput, resumeKernelExecution, releaseSyncLock);
+
+            b->SetInsertPoint(releaseSyncLock);
+        }
+        if (mIsPartitionRoot) {
+            writeTerminationSignal(b, mIsFinalInvocation);
+        }
+        releaseSynchronizationLock(b, mKernelId);
+        if (mMayLoopToEntry) {
+            b->CreateBr(resumeKernelExecution);
+
+            b->SetInsertPoint(resumeKernelExecution);
+        }
+    }
+
     Value * const beforeKernelCall = startCycleCounter(b);
 
     Value * doSegmentRetVal = nullptr;
@@ -64,7 +118,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         mTerminatedExplicitly = nullptr;
     }
 
-    updateProcessedAndProducedItemCounts(b);
+    if (LLVM_LIKELY(!mIsStatefree)) {
+        updateProcessedAndProducedItemCounts(b);
+    }
     readReturnedOutputVirtualBaseAddresses(b);
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
@@ -287,8 +343,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         }
     }
 
-
-
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto port = getOutput(mKernelId, StreamSetPort(PortType::Output, i));
         const BufferPort & rt = mBufferGraph[port];
@@ -399,7 +453,6 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                 report_fatal_error(out.str());
             }
         }
-
         mProcessedItemCount[inputPort] = processed; assert (processed);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -467,33 +520,33 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                     << " has an " << "output" << " rate that is not properly handled by the PipelineKernel";
                 report_fatal_error(out.str());
             }
-        }
-        #ifdef PRINT_DEBUG_MESSAGES
-        const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Output, i});
-        debugPrint(b, prefix + "_produced' = %" PRIu64, produced);
-        #endif
 
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            if (mReturnedProducedItemCountPtr[outputPort]) {
-                const auto port = getOutput(mKernelId, outputPort);
-                const auto streamSet = target(port, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_LIKELY(bn.isInternal() && bn.isOwned())) {
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Output, i});
+            debugPrint(b, prefix + "_produced' = %" PRIu64, produced);
+            #endif
 
-                    Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
-                    Value * const delta = b->CreateSub(produced, mAlreadyProducedPhi[outputPort]);
-                    Value * const withinCapacity = b->CreateICmpULE(delta, writable);
-                    const Binding & output = getOutputBinding(outputPort);
-                    b->CreateAssert(withinCapacity,
-                                    "%s.%s: reported produced item count delta (%" PRIu64 ") "
-                                    "exceeds writable items (%" PRIu64 ")",
-                                    mCurrentKernelName,
-                                    b->GetString(output.getName()),
-                                    delta, writable);
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (mReturnedProducedItemCountPtr[outputPort]) {
+                    const auto port = getOutput(mKernelId, outputPort);
+                    const auto streamSet = target(port, mBufferGraph);
+                    const BufferNode & bn = mBufferGraph[streamSet];
+                    if (LLVM_LIKELY(bn.isInternal() && bn.isOwned())) {
+
+                        Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
+                        Value * const delta = b->CreateSub(produced, mAlreadyProducedPhi[outputPort]);
+                        Value * const withinCapacity = b->CreateICmpULE(delta, writable);
+                        const Binding & output = getOutputBinding(outputPort);
+                        b->CreateAssert(withinCapacity,
+                                        "%s.%s: reported produced item count delta (%" PRIu64 ") "
+                                        "exceeds writable items (%" PRIu64 ")",
+                                        mCurrentKernelName,
+                                        b->GetString(output.getName()),
+                                        delta, writable);
+                    }
                 }
             }
         }
-
         mProducedItemCount[outputPort] = produced;
     }
 

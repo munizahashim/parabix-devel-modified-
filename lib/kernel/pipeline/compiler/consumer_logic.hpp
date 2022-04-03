@@ -215,7 +215,7 @@ inline void PipelineCompiler::initializeConsumedItemCount(BuilderRef b, const un
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief createConsumedPhiNodes
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::createConsumedPhiNodes(BuilderRef b) {
+inline void PipelineCompiler::createConsumedPhiNodesAtExit(BuilderRef b) {
     IntegerType * const sizeTy = b->getSizeTy();
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
@@ -226,9 +226,52 @@ inline void PipelineCompiler::createConsumedPhiNodes(BuilderRef b) {
                 const ConsumerEdge & c = mConsumerGraph[e];
                 const StreamSetPort port(PortType::Input, c.Port);
                 const auto prefix = makeBufferName(mKernelId, port);
-                PHINode * const consumedPhi = b->CreatePHI(sizeTy, 2, prefix + "_consumed");
+                PHINode * const consumedPhi = b->CreatePHI(sizeTy, 2, prefix + "_consumedAtExit");
                 assert (isFromCurrentFunction(b, cn.Consumed, false));
                 cn.PhiNode = consumedPhi;
+            }
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addConsumedPhiNodesToLoopExitForStatefreeKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineCompiler::addConsumedPhiNodesToLoopExitForStatefreeKernel(BuilderRef b) {
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+        IntegerType * const sizeTy = b->getSizeTy();
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
+            const ConsumerEdge & c = mConsumerGraph[e];
+            if (c.Flags & ConsumerEdge::UpdatePhi) {
+                const StreamSetPort port(PortType::Input, c.Port);
+                const auto prefix = makeBufferName(mKernelId, port);
+                PHINode * const consumedPhi = b->CreatePHI(sizeTy, 2, prefix + "_consumedAtLoopExit");
+                mConsumedItemCountsAtLoopExitPhi[port] = consumedPhi;
+                if (mKernelInsufficientInput) {
+                    const auto streamSet = source(e, mConsumerGraph);
+                    const ConsumerNode & cn = mConsumerGraph[streamSet];
+                    consumedPhi->addIncoming(cn.Consumed, mKernelInsufficientInput);
+                }
+            }
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateConsumedPhiNodesForStatefreeKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineCompiler::updateConsumedPhiNodesForStatefreeKernel(BuilderRef b) {
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+        IntegerType * const sizeTy = b->getSizeTy();
+        BasicBlock * const bb = b->GetInsertBlock();
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
+            const ConsumerEdge & c = mConsumerGraph[e];
+            if (c.Flags & ConsumerEdge::UpdatePhi) {
+                const StreamSetPort port(PortType::Input, c.Port);
+                PHINode * const consumedPhi = mConsumedItemCountsAtLoopExitPhi[port]; assert (consumedPhi);
+                const auto streamSet = source(e, mConsumerGraph);
+                const ConsumerNode & cn = mConsumerGraph[streamSet];
+                consumedPhi->addIncoming(cn.Consumed, bb);
             }
         }
     }
@@ -258,7 +301,16 @@ inline void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
         const ConsumerEdge & c = mConsumerGraph[e];
         if (c.Flags & ConsumerEdge::UpdatePhi) {
             const StreamSetPort port(PortType::Input, c.Port);
-            Value * processed = mFullyProcessedItemCount[port];
+            Value * processed = nullptr;
+            if (LLVM_UNLIKELY(mIsStatefree)) {
+                const auto prefix = makeBufferName(mKernelId, port);
+                Value * const ptr = getScalarFieldPtr(b.get(), prefix + THREAD_LOCAL_CONSUMED_ITEM_COUNT_SUFFIX);
+                processed = b->CreateLoad(ptr);
+                b->CreateStore(mProcessedItemCount[port], ptr);
+//                processed = b->getSize(0);
+            } else {
+                processed = mFullyProcessedItemCount[port];
+            }
             assert (isFromCurrentFunction(b, processed, false));
             // To support the lookbehind attribute, we need to withhold the items from
             // our consumed count and rely on the initial buffer underflow to access any
@@ -281,11 +333,43 @@ inline void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
             const auto producer = source(output, mBufferGraph);
             const auto prodPrefix = makeBufferName(producer, mBufferGraph[output].Port);
             cn.Consumed = b->CreateUMin(cn.Consumed, processed, prodPrefix + "_minConsumed");
-
             #ifdef PRINT_DEBUG_MESSAGES
             const auto consPrefix = makeBufferName(mKernelId, port);
             debugPrint(b, consPrefix + " -> " + prodPrefix + "_consumed' = %" PRIu64, cn.Consumed);
             #endif
+
+            // check to see if we've fully finished processing any stream
+            if (LLVM_UNLIKELY(mIsStatefree && (c.Flags & ConsumerEdge::WriteConsumedCount))) {
+                #ifdef PRINT_DEBUG_MESSAGES
+                const auto output = in_edge(streamSet, mBufferGraph);
+                const BufferPort & br = mBufferGraph[output];
+                const auto producer = source(output, mBufferGraph);
+                const auto prefix = makeBufferName(producer, br.Port);
+                debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, cn.Consumed);
+                #endif
+                setConsumedItemCount(b, streamSet, cn.Consumed, 0);
+            }
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateConsumedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineCompiler::updateConsumedItemCountsForStatelessKernels(BuilderRef b) {
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
+            const ConsumerEdge & c = mConsumerGraph[e];
+            if (c.Flags & ConsumerEdge::UpdatePhi) {
+                const auto streamSet = source(e, mConsumerGraph);
+                const ConsumerNode & cn = mConsumerGraph[streamSet];
+                if (LLVM_LIKELY(cn.PhiNode != nullptr)) {
+                    const StreamSetPort port(PortType::Input, c.Port);
+                    cn.PhiNode->addIncoming(mConsumedItemCountsAtLoopExitPhi[port], mKernelLoopExitPhiCatch);
+                    cn.Consumed = cn.PhiNode;
+                    cn.PhiNode = nullptr;
+                }
+            }
         }
     }
 }
@@ -294,6 +378,8 @@ inline void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
  * @brief writeFinalConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
+
+    assert (!mIsStatefree);
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
@@ -307,7 +393,7 @@ inline void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
             }
         }
         // check to see if we've fully finished processing any stream
-        if (c.Flags & ConsumerEdge::WriteConsumedCount) {
+        if (LLVM_UNLIKELY(c.Flags & ConsumerEdge::WriteConsumedCount)) {
             #ifdef PRINT_DEBUG_MESSAGES
             const auto output = in_edge(streamSet, mBufferGraph);
             const BufferPort & br = mBufferGraph[output];

@@ -80,17 +80,14 @@ const static std::string LOGICAL_SEGMENT_SUFFIX = ".LSN";
 
 const static std::string DEBUG_FD = ".DFd";
 
-const static std::string HYBRID_SYNCHRONIZATION_SUFFIX = ".HSS";
-
 const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
 const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
-const static std::string EXTERNAL_IO_PRIOR_ITEM_COUNT_SUFFIX = ".EP";
+const static std::string THREAD_LOCAL_CONSUMED_ITEM_COUNT_SUFFIX = ".TCN";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
-const static std::string DEBUG_CONSUMED_ITEM_COUNT_SUFFIX = ".DCON";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
@@ -350,8 +347,11 @@ public:
     void initializeConsumedItemCount(BuilderRef b, const unsigned kernelId, const StreamSetPort outputPort, Value * const produced);
     void initializePipelineInputConsumedPhiNodes(BuilderRef b);
     void readExternalConsumerItemCounts(BuilderRef b);
-    void createConsumedPhiNodes(BuilderRef b);
+    void createConsumedPhiNodesAtExit(BuilderRef b);
+    void addConsumedPhiNodesToLoopExitForStatefreeKernel(BuilderRef b);
+    void updateConsumedPhiNodesForStatefreeKernel(BuilderRef b) ;
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
+    void updateConsumedItemCountsForStatelessKernels(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
@@ -534,9 +534,11 @@ public:
 
     bool hasAtLeastOneNonGreedyInput() const;
 
+    bool isCurrentKernelStatefree() const;
+
 protected:
 
-    SimulationAllocator									mAllocator;
+    SimulationAllocator							mAllocator;
 
     const bool                       			CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
@@ -694,6 +696,8 @@ protected:
     PHINode *                                   mFixedRateFactorPhi = nullptr;
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
+    Value *                                     mHasMoreInput = nullptr;
+
     std::array<Value *, 2>                      mAnyClosed;
 
     BitVector                                   mHasPipelineInput;
@@ -711,6 +715,7 @@ protected:
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
+    bool                                        mIsStatefree = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;
@@ -732,6 +737,7 @@ protected:
     InputPortVector<Value *>                    mProcessedItemCount;
     InputPortVector<Value *>                    mProcessedDeferredItemCountPtr;
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
+    InputPortVector<PHINode *>                  mConsumedItemCountsAtLoopExitPhi; // exiting the kernel
     InputPortVector<PHINode *>                  mUpdatedProcessedPhi; // exiting the kernel
     InputPortVector<PHINode *>                  mUpdatedProcessedDeferredPhi;
     InputPortVector<Value *>                    mFullyProcessedItemCount; // *after* exiting the kernel
@@ -783,6 +789,7 @@ protected:
     Value *                                     mCurrentKernelName = nullptr;    
     FixedVector<Value *>                        mKernelName;
 
+
     #ifndef NDEBUG
     FunctionType *                              mKernelDoSegmentFunctionType = nullptr;
     #endif
@@ -806,17 +813,15 @@ inline PipelineCompiler::PipelineCompiler(BuilderRef b, PipelineKernel * const p
     // resolve it correctly and clang requires -O2 or better.
 }
 
+
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
-#ifdef FORCE_PIPELINE_ASSERTIONS
-, CheckAssertions(true)
-#else
-, CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts))
-#endif
+, CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
@@ -895,6 +900,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedPhi(P.MaxNumOfInputPorts, mAllocator)
+, mConsumedItemCountsAtLoopExitPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedDeferredPhi(P.MaxNumOfInputPorts, mAllocator)
 , mFullyProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
 

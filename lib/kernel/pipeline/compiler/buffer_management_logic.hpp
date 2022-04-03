@@ -400,12 +400,19 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort inputPort = br.Port;
-        b->CreateStore(mUpdatedProcessedPhi[inputPort], mProcessedItemCountPtr[inputPort]);
+        Value * updated = nullptr;
+        if (LLVM_UNLIKELY(mIsStatefree)) {
+            updated = mProcessedItemCount[inputPort];
+        } else {
+            updated = mUpdatedProcessedPhi[inputPort];
+        }
+        b->CreateStore(updated, mProcessedItemCountPtr[inputPort]);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, inputPort);
-        debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, mUpdatedProcessedPhi[inputPort]);
+        debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
+            assert (!mIsStatefree);
             b->CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_processed(deferred) = %" PRIu64, mUpdatedProcessedDeferredPhi[inputPort]);
@@ -416,12 +423,19 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort outputPort = br.Port;
-        b->CreateStore(mUpdatedProducedPhi[outputPort], mProducedItemCountPtr[outputPort]);
+        Value * updated = nullptr;
+        if (LLVM_UNLIKELY(mIsStatefree)) {
+            updated = mProducedItemCount[outputPort];
+        } else {
+            updated = mUpdatedProducedPhi[outputPort];
+        }
+        b->CreateStore(updated, mProducedItemCountPtr[outputPort]);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, outputPort);
-        debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, mUpdatedProducedPhi[outputPort]);
+        debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
+            assert (!mIsStatefree);
             b->CreateStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_produced(deferred) = %" PRIu64, mUpdatedProducedDeferredPhi[outputPort]);

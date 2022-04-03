@@ -442,6 +442,8 @@ protected:
 
     LLVM_READNONE bool isGreedy() const;
 
+    LLVM_READNONE bool hasSharedMutableState() const;
+
     virtual void addInternalProperties(BuilderRef) { }
 
     virtual void addAdditionalFunctions(BuilderRef) { }
