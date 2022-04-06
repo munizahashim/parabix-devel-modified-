@@ -325,6 +325,11 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isCurrentKernelStatefree() const {
 
+#ifdef DISABLE_REDUCED_SYNCHRONIZATION_FOR_STATELESS_KERNELS
+    return false;
+
+#else
+
     if (mNumOfThreads < 2) return false;
 
     const auto isMarkedStateFree = mKernel->hasAttribute(AttrId::Statefree);
@@ -422,6 +427,7 @@ bool PipelineCompiler::isCurrentKernelStatefree() const {
 
     errs() << " is statefree\n";
     return true;
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -496,6 +502,10 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mNumOfAddressableItemCount = 0;
     mNumOfVirtualBaseAddresses = 0;
     mNumOfTruncatedInputBuffers = 0;
+
+    mExecuteStridesIndividually = false;
+    mIsStatefree = false;
+    mHasDynamicOutputBuffers = false;
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;

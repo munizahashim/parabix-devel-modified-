@@ -97,7 +97,6 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readExternalConsumerItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -122,6 +121,10 @@ inline void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t streamSet) {
+
+    if (mInitialConsumedItemCount[streamSet]) {
+        return mInitialConsumedItemCount[streamSet];
+    }
 
     Value * itemCount = nullptr;
 

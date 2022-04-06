@@ -195,8 +195,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     readAvailableItemCounts(b);
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
-    readConsumedItemCounts(b);
-
+//    if (mNumOfThreads == 1) {
+//        readConsumedItemCounts(b);
+//    }
     prepareLinearThreadLocalOutputBuffers(b);
 
     incrementNumberOfSegmentsCounter(b);

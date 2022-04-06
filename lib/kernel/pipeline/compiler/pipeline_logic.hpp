@@ -106,6 +106,9 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         mTarget->addThreadLocalScalar(sizeTy, ZERO_EXTENDED_SPACE);
     }
 
+    mKernelId = 0;
+    mKernel = mTarget;
+    mIsStatefree = false;
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput);
     addConsumerKernelProperties(b, PipelineInput);
@@ -168,6 +171,8 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         }
     }
 
+    bool hasDynamicBuffer = false;
+
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, br.Port);
@@ -175,6 +180,13 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
+
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (isa<DynamicBuffer>(bn.Buffer)) {
+            hasDynamicBuffer = true;
+        }
+
     }
 
     addBufferHandlesToPipelineKernel(b, kernelId);
@@ -200,6 +212,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             localStateTy = mKernel->getThreadLocalStateType();
         }
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
+    }
+
+    if (LLVM_UNLIKELY(mIsStatefree && hasDynamicBuffer)) {
+        mTarget->addInternalScalar(sizeTy, name + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX, groupId);
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {

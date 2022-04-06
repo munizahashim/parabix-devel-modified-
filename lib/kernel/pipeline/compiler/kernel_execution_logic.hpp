@@ -69,10 +69,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
             mHasMoreInput = hasMoreInput(b);
 
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, "* " + prefix + "_skipRelease = %" PRIu64, mHasMoreInput);
-            #endif
-
             b->CreateUnlikelyCondBr(mHasMoreInput, resumeKernelExecution, releaseSyncLock);
 
             b->SetInsertPoint(releaseSyncLock);
@@ -118,7 +114,37 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         mTerminatedExplicitly = nullptr;
     }
 
-    if (LLVM_LIKELY(!mIsStatefree)) {
+    if (LLVM_UNLIKELY(mIsStatefree)) {
+        if (mHasDynamicOutputBuffers) {
+
+            // If we have dynamic output buffers, we may need to resize them. Because statefree kernels
+            // could have multiple simultaneous executions of this kernel, we cannot be sure that the
+            // data we need to copy to the new buffer has actually been written yet. While this thread
+            // does not necessarily need to be locked, it does need to inform the thread that is waiting
+            // for this one to be finished so that thread can safely expand the buffer(s). Unfortunetly,
+            // we cannot allow threads to arbitrarily release this lock or we'll eventually hit a
+            // deadlock scenario when an "older" thread updates after a "newer" one, preventing the
+            // "current" one from acquiring the lock.
+
+            const auto prefix = makeKernelName(mKernelId);
+            BasicBlock * const postInvocationWait = b->CreateBasicBlock(prefix + "_postInvocationWait", mKernelCompletionCheck);
+            BasicBlock * const postInvocation = b->CreateBasicBlock(prefix + "_postInvocation", mKernelCompletionCheck);
+
+            Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX);
+            if (mMayLoopToEntry) {
+                b->CreateUnlikelyCondBr(mHasMoreInput, postInvocation, postInvocationWait);
+            } else {
+                b->CreateBr(postInvocationWait);
+            }
+            b->SetInsertPoint(postInvocationWait);
+            Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, mSegNo, mNextSegNo,
+                                                           AtomicOrdering::Release, AtomicOrdering::Acquire);
+            Value * const success = b->CreateExtractValue(updated, { 1 });
+            b->CreateCondBr(success, postInvocation, postInvocationWait);
+
+            b->SetInsertPoint(postInvocation);
+        }
+    } else {
         updateProcessedAndProducedItemCounts(b);
     }
     readReturnedOutputVirtualBaseAddresses(b);
@@ -386,7 +412,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         }
 
         if (LLVM_UNLIKELY(managed)) {
-            addNextArg(mInitialConsumedItemCount[streamSet]);
+            addNextArg(readConsumedItemCount(b, streamSet));
         } else if (requiresItemCount(rt.Binding)) {
             addNextArg(mLinearOutputItemsPhi[rt.Port]);
         }

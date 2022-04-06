@@ -78,6 +78,8 @@ const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 #endif
 const static std::string LOGICAL_SEGMENT_SUFFIX = ".LSN";
 
+const static std::string POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX = ".SLSN";
+
 const static std::string DEBUG_FD = ".DFd";
 
 const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
@@ -107,6 +109,8 @@ const static std::string STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX = ".SPIC";
 const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
+
+const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 
 using ArgVec = Vec<Value *, 64>;
 
@@ -716,6 +720,7 @@ protected:
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mIsStatefree = false;
+    bool                                        mHasDynamicOutputBuffers = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;

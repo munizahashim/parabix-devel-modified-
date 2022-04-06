@@ -37,7 +37,16 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
             mTarget->addNonPersistentScalar(handleType, handleName);
             mTarget->addInternalScalar(buffer->getPointerType(), handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
+        // Although we'll end up wasting memory, we can avoid memleaks and the issue of multiple threads
+        // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
+        // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
+        // segment.
+        if (isa<DynamicBuffer>(buffer) && bn.isOwned()) {
+            assert (bn.Locality != BufferLocality::ThreadLocal);
+            mTarget->addThreadLocalScalar(b->getVoidPtrTy(), handleName + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
+        }
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -801,7 +810,8 @@ void PipelineCompiler::prepareLinearThreadLocalOutputBuffers(BuilderRef b) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             // purely threadlocal buffers are guaranteed to consume every produced
             // item each segment.
-            bn.Buffer->copyBackLinearOutputBuffer(b, produced);
+            assert (isa<StaticBuffer>(bn.Buffer));
+            bn.Buffer->linearCopyBack(b, produced, produced, nullptr);
         }
     }
 }

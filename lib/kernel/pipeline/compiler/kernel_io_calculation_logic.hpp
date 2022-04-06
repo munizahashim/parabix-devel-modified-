@@ -827,7 +827,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
+    if (bn.isExternal() || bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
         return;
     }
 
@@ -840,8 +840,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
 
-    BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_expandBuffer", mKernelLoopCall);
-    BasicBlock * const expanded = b->CreateBasicBlock(prefix + "_expandedBuffer", mKernelLoopCall);
+    BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
+    BasicBlock * const expanded = b->CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
     const auto beforeExpansion = mWritableOutputItems[outputPort.Number];
 
     Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion[WITH_OVERFLOW]);
@@ -863,22 +863,57 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         cycleCounterStart = b->CreateReadCycleCounter();
     }
 
-    // TODO: we need to calculate the total amount required assuming we process all input. This currently
-    // has a flaw in which if the input buffers had been expanded sufficiently yet processing had been
-    // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
-    // which could result in free'ing the "old" buffer twice.
+    Value * priorBufferPtr = nullptr;
+    if (isa<DynamicBuffer>(buffer)) {
+
+        // Attempt to delete any old buffer if one exists
+
+        priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
+        Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_releasing %" PRIx64 " from %" PRIx64, priorBuffer, priorBufferPtr);
+        #endif
+        b->CreateFree(priorBuffer);
+        b->CreateStore(ConstantPointerNull::get(cast<PointerType>(priorBuffer->getType())), priorBufferPtr);
+
+        // If this kernel is statefree, we have a potential problem here. Another thread may be actively
+        // executing this kernel and writing data but if we perform a copyback or expansion, we can't copy
+        // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
+        // we can proceed.
+
+        if (LLVM_UNLIKELY(mIsStatefree)) {
+            const auto name = makeKernelName(mKernelId);
+            Value * const waitingOnPtr = getScalarFieldPtr(b.get(), name + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX);
+            BasicBlock * const syncWait = b->CreateBasicBlock(prefix + "_statelessSyncWait", mKernelLoopCall);
+            BasicBlock * const syncAcquired = b->CreateBasicBlock(prefix + "_statelessSyncAcquired", mKernelLoopCall);
+            b->CreateBr(syncWait);
+
+            b->SetInsertPoint(syncWait);
+            Value * const released = b->CreateAtomicLoadAcquire(waitingOnPtr);
+            b->CreateCondBr(b->CreateICmpEQ(released, mSegNo), syncAcquired, syncWait);
+
+            b->SetInsertPoint(syncAcquired);
+        }
+
+        mHasDynamicOutputBuffers = true;
+    }
+
 
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
-    Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
+    Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
-    Value * const mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
-
-    BasicBlock * afterCopyBackOrExpand = nullptr;
+    BasicBlock * const afterCopyBackOrExpand = b->CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
     if (buffer->isLinear()) {
-        BasicBlock * const expand = b->CreateBasicBlock(prefix + "_mallocBuffer", mKernelLoopCall);
-        BasicBlock * const copyBack = b->CreateBasicBlock(prefix + "_copyBack", mKernelLoopCall);
-        afterCopyBackOrExpand = b->CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
+
+        Value * const mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
+        #endif
+
+        BasicBlock * const expand = b->CreateBasicBlock(prefix + "_expandBuffer", afterCopyBackOrExpand);
+        BasicBlock * const copyBack = b->CreateBasicBlock(prefix + "_copyBack", afterCopyBackOrExpand);
         b->CreateCondBr(mustExpand, expand, copyBack);
 
         b->SetInsertPoint(copyBack);
@@ -888,43 +923,30 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         b->SetInsertPoint(expand);
     }
 
-    // If this kernel is statefree, we have a potential problem here. Another thread may be actively
-    // executing this kernel and writing data to the old buffer still but if we expand this buffer,
-    // we won't end up copying its "unwritten" data. Thus we need to wait for the other thread to
-    // finish processing before we can consider expanding the buffer.
-    if (LLVM_UNLIKELY(mIsStatefree)) {
 
 
+    // TODO: we need to calculate the total amount required assuming we process all input. This currently
+    // has a flaw in which if the input buffers had been expanded sufficiently yet processing had been
+    // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
+    // which could result in free'ing the "old" buffer twice.
+
+    Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
+    if (isa<DynamicBuffer>(buffer)) {
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_storingPriorBuffer %" PRIx64 " in %" PRIx64, priorBuffer, priorBufferPtr);
+        #endif
+        b->CreateStore(priorBuffer, priorBufferPtr);
+        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+            recordBufferExpansionHistory(b, outputPort, buffer);
+        }
     }
+    b->CreateBr(afterCopyBackOrExpand);
 
-    // We now have to check whether we had two successive buffer expansion that are still being
-    // actively read but now require a third
-
-
-    Value * syncLock = nullptr;
-    if (mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U)) {
-        syncLock = getSynchronizationLockPtrForKernel(b, getLastConsumerOfStreamSet(streamSet));
-    }    \
-
-
-
-
-    Value * const mallocRequired = buffer->reserveCapacity(b, produced, consumed, required, syncLock, mSegNo, mNumOfThreads - 1);
-
+    b->SetInsertPoint(afterCopyBackOrExpand);
     updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
     #endif
-
-    if (LLVM_UNLIKELY(mTraceDynamicBuffers && isa<DynamicBuffer>(buffer))) {
-        BasicBlock * const recordHistory = b->CreateBasicBlock(prefix + "recordExpansion", mKernelLoopCall);
-        BasicBlock * const resumeAfterRecording = b->CreateBasicBlock(prefix + "_resumeAfterRecording", mKernelLoopCall);
-        b->CreateCondBr(mallocRequired, recordHistory, resumeAfterRecording);
-        b->SetInsertPoint(recordHistory);
-        recordBufferExpansionHistory(b, outputPort, buffer);
-        b->CreateBr(resumeAfterRecording);
-        b->SetInsertPoint(resumeAfterRecording);
-    }
 
     auto & afterExpansion = mWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;
@@ -1038,7 +1060,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     const BufferNode & bn = mBufferGraph[streamSet];
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
-    Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
+    Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, outputPort);
