@@ -97,55 +97,25 @@ jsonFunctionType json_parsing_gen(
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
 
-    // 1. Lexical analysis on basis stream
-    StreamSet * const lexStream = P->CreateStreamSet(14);
-    P->CreateKernelCall<PabloSourceKernel>(
-        parser,
-        jsonPabloSrc,
-        "ClassifyBytes",
-        Bindings { // Input Stream Bindings
-            Binding {"basis", u8basis}
-        },
-        Bindings { // Output Stream Bindings
-            Binding {"lex", lexStream}
-        }
-    );
-
-    // 2. Find string marker (without backslashes)
-    // 3. and make string span
+    // 1. Find string marker (without backslashes)
+    // 2. and make string span
     StreamSet * const stringMarker = P->CreateStreamSet(1);
     StreamSet * const stringSpan = P->CreateStreamSet(1);
     P->CreateKernelCall<JSONStringMarker>(
-        lexStream,
+        u8basis,
         stringMarker,
         stringSpan
     );
 
-    // 4. Mark end of keywords (true, false, null)
-    // Note: We mark the words later when we sanitize the input because
-    // lookahead only works on input streams
-    StreamSet * const keywordEndMarkers = P->CreateStreamSet(3);
-    P->CreateKernelCall<JSONKeywordEndMarker>(
+    // 3. Lexical analysis on basis stream
+    StreamSet * const lexStream = P->CreateStreamSet(12);
+    P->CreateKernelCall<JSONClassifyBytes>(
         u8basis,
-        lexStream,
         stringSpan,
-        keywordEndMarkers
+        lexStream
     );
 
-    // 5. Validate numbers
-    StreamSet * const numberLex = P->CreateStreamSet(1);
-    StreamSet * const numberSpan = P->CreateStreamSet(1);
-    StreamSet * const numberErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONNumberSpan>(
-        u8basis,
-        lexStream,
-        stringSpan,
-        numberLex,
-        numberSpan,
-        numberErr
-    );
-
-    // 6. Validate strings
+    // 4. Validate UTF8 strings
     StreamSet * const utf8Err = P->CreateStreamSet(1);
     P->CreateKernelCall<PabloSourceKernel>(
         parser,
@@ -158,6 +128,29 @@ jsonFunctionType json_parsing_gen(
         Bindings { // Output Stream Bindings
             Binding {"utf8Err", utf8Err, FixedRate(), Add1()}
         }
+    );
+
+    // 5. Mark end of keywords (true, false, null)
+    // Note: We mark the words later when we sanitize the input because
+    // lookahead only works on input streams
+    StreamSet * const keywordEndMarkers = P->CreateStreamSet(3);
+    P->CreateKernelCall<JSONKeywordEndMarker>(
+        u8basis,
+        lexStream,
+        keywordEndMarkers
+    );
+
+    // 6. Validate numbers
+    StreamSet * const numberLex = P->CreateStreamSet(1);
+    StreamSet * const numberSpan = P->CreateStreamSet(1);
+    StreamSet * const numberErr = P->CreateStreamSet(1);
+    P->CreateKernelCall<JSONNumberSpan>(
+        u8basis,
+        lexStream,
+        stringSpan,
+        numberLex,
+        numberSpan,
+        numberErr
     );
 
     // 7. Clean lexers (in case there's special chars inside string)
@@ -195,6 +188,7 @@ jsonFunctionType json_parsing_gen(
         );
         P->CreateKernelCall<JSONParserArr>(
             lexStream,
+            stringMarker,
             combinedLexers,
             encDepth,
             syntaxArrErr,
@@ -204,6 +198,7 @@ jsonFunctionType json_parsing_gen(
 
         P->CreateKernelCall<JSONParserObj>(
             lexStream,
+            stringMarker,
             combinedLexers,
             encDepth,
             syntaxObjErr,
@@ -212,7 +207,7 @@ jsonFunctionType json_parsing_gen(
         );
 
         // 10. Output error in case JSON is not valid
-        StreamSet * const Errors = P->CreateStreamSet(5, 1);
+        StreamSet * const Errors = P->CreateStreamSet(6, 1);
         // Important: make sure all the streams inside StreamsMerge have Add1, otherwise it fails
         P->CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxArrErr, syntaxObjErr},
