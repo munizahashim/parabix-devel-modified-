@@ -648,11 +648,12 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
                 avail = b->CreateAdd(avail, added);
             }
 
-            if (LLVM_UNLIKELY(CheckAssertions)) {
-                b->CreateAssert(b->CreateICmpUGE(avail, processed),
-                                "%s: avail %" PRIu64 " < processed %" PRIu64 "?",
-                                mCurrentKernelName, avail, processed);
-            }
+//            if (LLVM_UNLIKELY(CheckAssertions)) {
+//                b->CreateAssert(b->CreateICmpUGE(avail, processed),
+//                                "%s:%s avail %" PRIu64 " < processed %" PRIu64 "?",
+//                                mCurrentKernelName, b->GetString(port.Binding.get().getName()),
+//                                avail, processed);
+//            }
 
             Value * const remaining = b->CreateSub(avail, processed);
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
@@ -731,19 +732,6 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     Value * const available = getLocallyAvailableItemCount(b, inputPort);
 
     Value * const processed = mAlreadyProcessedPhi[inputPort];
-
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        if (out_degree(streamSet, mConsumerGraph) != 0) {
-//            Value * const consumed = readConsumedItemCount(b, streamSet);
-//            Value * const valid = b->CreateICmpULE(consumed, processed);
-//            const Binding & inputBinding = port.Binding;
-//            b->CreateAssert(valid,
-//                            "%s.%s: consumed count (%" PRIu64 ") exceeds processed count (%" PRIu64 ")",
-//                            mCurrentKernelName,
-//                            b->GetString(inputBinding.getName()),
-//                            consumed, processed);
-//        }
-//    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -881,21 +869,9 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
         // we can proceed.
 
-        if (LLVM_UNLIKELY(mIsStatefree)) {
-            const auto name = makeKernelName(mKernelId);
-            Value * const waitingOnPtr = getScalarFieldPtr(b.get(), name + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX);
-            BasicBlock * const syncWait = b->CreateBasicBlock(prefix + "_statelessSyncWait", mKernelLoopCall);
-            BasicBlock * const syncAcquired = b->CreateBasicBlock(prefix + "_statelessSyncAcquired", mKernelLoopCall);
-            b->CreateBr(syncWait);
-
-            b->SetInsertPoint(syncWait);
-            Value * const released = b->CreateAtomicLoadAcquire(waitingOnPtr);
-            b->CreateCondBr(b->CreateICmpEQ(released, mSegNo), syncAcquired, syncWait);
-
-            b->SetInsertPoint(syncAcquired);
+        if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
         }
-
-        mHasDynamicOutputBuffers = true;
     }
 
 

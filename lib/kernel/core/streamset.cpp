@@ -861,22 +861,32 @@ Value * DynamicBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value *
         const auto blockWidth = b->getBitBlockWidth();
         assert (is_pow2(blockWidth));
 
+        FixedArray<Value *, 2> indices;
+        indices[0] = b->getInt32(0);
+
         ConstantInt * const BLOCK_WIDTH = b->getSize(blockWidth);
 
         Value * const consumedChunks = b->CreateUDiv(consumed, BLOCK_WIDTH);
-        Value * const producedChunks = b->CreateCeilUDiv(produced, BLOCK_WIDTH);
-        Value * const requiredCapacity = b->CreateAdd(produced, required);
-        Value * const requiredChunks = b->CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
-        Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);
 
-        FixedArray<Value *, 2> indices;
-        indices[0] = b->getInt32(0);
-        indices[1] = b->getInt32(EffectiveCapacity);
-        Value * const capacityField = b->CreateInBoundsGEP(mHandle, indices);
-        Value * const capacity = b->CreateLoad(capacityField);
+        indices[1] = b->getInt32(BaseAddress);
+        Value * const virtualBaseField = b->CreateInBoundsGEP(mHandle, indices);
+        Value * const virtualBase = b->CreateLoad(virtualBaseField);
+        assert (virtualBase->getType()->getPointerElementType() == mType);
+        Value * startOfUsedBuffer = b->CreateInBoundsGEP(virtualBase, consumedChunks);
+        DataLayout DL(b->getModule());
+        Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
+        startOfUsedBuffer = b->CreatePtrToInt(startOfUsedBuffer, intPtrTy);
 
-        Value * const required = b->CreateSub(requiredChunks, consumedChunks);
-        return b->CreateICmpUGT(required, capacity);
+        indices[1] = b->getInt32(MallocedAddress);
+        Value * const mallocedAddressField = b->CreateInBoundsGEP(mHandle, indices);
+        Value * const mallocedAddress = b->CreateLoad(mallocedAddressField);
+        assert (virtualBase->getType()->getPointerElementType() == mType);
+        Value * const toWrite = b->CreateSub(b->CreateAdd(produced, required), consumed);
+        Value * const requiredChunks = b->CreateCeilUDiv(toWrite, BLOCK_WIDTH);
+        Value * endOfWrittenBuffer = b->CreateInBoundsGEP(mallocedAddress, requiredChunks);
+        endOfWrittenBuffer = b->CreatePtrToInt(endOfWrittenBuffer, intPtrTy);
+
+        return b->CreateICmpUGT(endOfWrittenBuffer, startOfUsedBuffer);
     } else { // Circular
         return b->getTrue();
     }

@@ -1507,7 +1507,7 @@ void PipelineCompiler::addUnconsumedItemCountProperties(BuilderRef b, unsigned k
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::recordUnconsumedItemCounts(BuilderRef b) const {
+void PipelineCompiler::recordUnconsumedItemCounts(BuilderRef b) {
     if (LLVM_UNLIKELY(TraceUnconsumedItemCounts)) {
         const auto n = out_degree(mKernelId, mBufferGraph);
         if (LLVM_UNLIKELY(n == 0)) {
@@ -1519,7 +1519,7 @@ void PipelineCompiler::recordUnconsumedItemCounts(BuilderRef b) const {
             const StreamSetPort port(PortType::Output, i);
             const auto streamSet = getOutputBufferVertex(port);
             current[i] = mInitiallyProducedItemCount[streamSet];
-            prior[i] = mInitialConsumedItemCount[streamSet];
+            prior[i] = readConsumedItemCount(b, streamSet);
         }
         recordItemCountDeltas(b, current, prior, STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX);
     }

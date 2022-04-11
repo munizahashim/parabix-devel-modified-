@@ -331,29 +331,20 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
  * @brief readProcessedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
+    const auto & suffix = mUsePreAndPostInvocationSynchronizationLocks ? INTERNAL_STATELESS_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto inputPort = br.Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
-        Value * const processed = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
-        mProcessedItemCountPtr[inputPort] = processed;
-        Value * itemCount = b->CreateLoad(processed);
+        Value * const processedPtr = b->getScalarFieldPtr(prefix + suffix);
+        mProcessedItemCountPtr[inputPort] = processedPtr;
+        Value * itemCount = b->CreateLoad(processedPtr);
         mInitiallyProcessedItemCount[inputPort] = itemCount;
         if (br.IsDeferred) {
             Value * const deferred = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             mProcessedDeferredItemCountPtr[inputPort] = deferred;
             itemCount = b->CreateLoad(deferred);
             mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
-        }
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            const auto streamSet = source(e, mBufferGraph);
-            const Binding & binding = getInputBinding(mKernelId, inputPort);
-            assert (mLocallyAvailableItems[streamSet]);
-            Value * valid = b->CreateICmpULE(itemCount, mLocallyAvailableItems[streamSet]);
-            b->CreateAssert(valid, "%s:%s processed count (%" PRIu64 ") "
-                                   "cannot be more than its avail count (%" PRIu64 ")",
-                            mCurrentKernelName,
-                            b->GetString(binding.getName()), processed, mLocallyAvailableItems[streamSet]);
         }
     }
 }
@@ -362,13 +353,13 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
  * @brief readProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
-
+    const auto & suffix = mUsePreAndPostInvocationSynchronizationLocks ? INTERNAL_STATELESS_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
         const auto prefix = makeBufferName(mKernelId, outputPort);
-        Value * const produced = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+        Value * const produced = b->getScalarFieldPtr(prefix + suffix);
         mProducedItemCountPtr[outputPort] = produced;
         Value * const itemCount = b->CreateLoad(produced);
         mInitiallyProducedItemCount[streamSet] = itemCount;
@@ -409,19 +400,23 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort inputPort = br.Port;
-        Value * updated = nullptr;
-        if (LLVM_UNLIKELY(mIsStatefree)) {
-            updated = mProcessedItemCount[inputPort];
+
+        Value * ptr = nullptr;
+        if (mUsePreAndPostInvocationSynchronizationLocks) {
+            const auto prefix = makeBufferName(mKernelId, inputPort);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {
-            updated = mUpdatedProcessedPhi[inputPort];
+            ptr = mProcessedItemCountPtr[inputPort];
         }
-        b->CreateStore(updated, mProcessedItemCountPtr[inputPort]);
+
+        Value * updated = mUpdatedProcessedPhi[inputPort];
+        b->CreateStore(updated, ptr);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, inputPort);
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
-            assert (!mIsStatefree);
+            assert (!mUsePreAndPostInvocationSynchronizationLocks);
             b->CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_processed(deferred) = %" PRIu64, mUpdatedProcessedDeferredPhi[inputPort]);
@@ -432,19 +427,23 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort outputPort = br.Port;
-        Value * updated = nullptr;
-        if (LLVM_UNLIKELY(mIsStatefree)) {
-            updated = mProducedItemCount[outputPort];
+
+        Value * ptr = nullptr;
+        if (mUsePreAndPostInvocationSynchronizationLocks) {
+            const auto prefix = makeBufferName(mKernelId, outputPort);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {
-            updated = mUpdatedProducedPhi[outputPort];
+            ptr = mProducedItemCountPtr[outputPort];
         }
-        b->CreateStore(updated, mProducedItemCountPtr[outputPort]);
+
+        Value * updated = mUpdatedProducedPhi[outputPort];
+        b->CreateStore(updated, ptr);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, outputPort);
         debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
-            assert (!mIsStatefree);
+            assert (!mUsePreAndPostInvocationSynchronizationLocks);
             b->CreateStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_produced(deferred) = %" PRIu64, mUpdatedProducedDeferredPhi[outputPort]);

@@ -218,7 +218,6 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoshiro256 & rng) {
                     #endif
                     assert (typeSize > 0);
                     const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
-
                     assert (c > 0);
                     const auto w = c * typeSize;
                     assert (w > 0);

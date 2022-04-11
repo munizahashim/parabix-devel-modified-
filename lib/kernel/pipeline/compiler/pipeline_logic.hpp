@@ -108,7 +108,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 
     mKernelId = 0;
     mKernel = mTarget;
-    mIsStatefree = false;
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput);
     addConsumerKernelProperties(b, PipelineInput);
@@ -138,8 +137,11 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
-    mIsStatefree = isCurrentKernelStatefree();
-
+    const auto isStateless = isCurrentKernelStatefree();
+    if (isStateless) {
+        mIsStatelessKernel.set(kernelId);
+    }
+    assert (mIsStatelessKernel.test(kernelId) == isStateless);
     IntegerType * const sizeTy = b->getSizeTy();
 
     const auto groupId = getCacheLineGroupId(kernelId);
@@ -149,10 +151,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     }
 
     const auto name = makeKernelName(kernelId);
-    if (RequiresSynchronization.test(kernelId)) {
-        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX, groupId);
+    if (mRequiresSynchronization.test(kernelId)) {
+        const auto syncLockType = isStateless ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
     }
-
     addConsumerKernelProperties(b, kernelId);
 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
@@ -162,16 +164,11 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (mIsStatefree) {
+        if (isStateless) {
             assert (!br.IsDeferred);
-            const auto streamSet = source(e, mBufferGraph);
-            if (edge(streamSet, kernelId, mConsumerGraph).second) {
-                mTarget->addThreadLocalScalar(sizeTy, prefix + THREAD_LOCAL_CONSUMED_ITEM_COUNT_SUFFIX, groupId);
-            }
+            mTarget->addInternalScalar(sizeTy, prefix + INTERNAL_STATELESS_ITEM_COUNT_SUFFIX, groupId);
         }
     }
-
-    bool hasDynamicBuffer = false;
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
@@ -180,13 +177,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<DynamicBuffer>(bn.Buffer)) {
-            hasDynamicBuffer = true;
+        if (isStateless) {
+            assert (!br.IsDeferred);
+            mTarget->addInternalScalar(sizeTy, prefix + INTERNAL_STATELESS_ITEM_COUNT_SUFFIX, groupId);
         }
-
     }
 
     addBufferHandlesToPipelineKernel(b, kernelId);
@@ -214,8 +208,8 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-    if (LLVM_UNLIKELY(mIsStatefree && hasDynamicBuffer)) {
-        mTarget->addInternalScalar(sizeTy, name + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX, groupId);
+    if (LLVM_UNLIKELY(mRequiresSynchronization.test(kernelId) && isStateless)) {
+        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
@@ -832,9 +826,9 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
                       DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            if (RequiresSynchronization.test(i)) {
-                const auto prefix = makeKernelName(i);
-                Value * const ptr = getScalarFieldPtr(b.get(), prefix + LOGICAL_SEGMENT_SUFFIX);
+            if (mRequiresSynchronization.test(i)) {
+                const auto type = mIsStatelessKernel.test(i) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+                Value * const ptr = getSynchronizationLockPtrForKernel(b, i, type);
                 Value * const segNo = b->CreateLoad(ptr);
                 mSegNo = b->CreateUMax(mSegNo, segNo);
             }

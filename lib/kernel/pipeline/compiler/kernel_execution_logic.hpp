@@ -35,26 +35,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
 
+    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
 
-
-    if (LLVM_UNLIKELY(mIsStatefree)) {
-
-        // Suppose if the pipeline were run in single-threaded mode, it is logically on the
-        // k-th segment iteration. If this kernel is state free and the thread executing the
-        // (k+1)-th segment might write the consumed count before the k-th one. If yet another
-        // thread is currently invoking the producer of input streamset, it might end up
-        // reusing the data space that the k-th one is currently reading.
-
-        // To avoid this problem, each thread "hold backs" updating the consumed item count
-        // until that thread executes the same kernel again.
-
-        // At minimum, this kernel acquires a lock to calculate its current I/O state and
-        // releases it after it updates it. Since all N threads obey this rule, the data that
-        // this thread last consumed must be safe to release.
-
-        updateProcessedAndProducedItemCounts(b);
-        writeUpdatedItemCounts(b);
-        computeMinimumConsumedItemCounts(b);
+        readAndUpdateInternalProcessedAndProducedItemCounts(b);
 
         BasicBlock * resumeKernelExecution = nullptr;
 
@@ -63,7 +46,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
             const auto prefix = makeKernelName(mKernelId);
             BasicBlock * const releaseSyncLock =
-                b->CreateBasicBlock(prefix + "_releaseStatelessKernelSyncLock", mKernelCompletionCheck);
+                b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
             resumeKernelExecution =
                 b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
 
@@ -76,7 +59,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         if (mIsPartitionRoot) {
             writeTerminationSignal(b, mIsFinalInvocation);
         }
-        releaseSynchronizationLock(b, mKernelId);
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
         if (mMayLoopToEntry) {
             b->CreateBr(resumeKernelExecution);
 
@@ -114,44 +97,16 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         mTerminatedExplicitly = nullptr;
     }
 
-    if (LLVM_UNLIKELY(mIsStatefree)) {
-        if (mHasDynamicOutputBuffers) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
+        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
+    }    
 
-            // If we have dynamic output buffers, we may need to resize them. Because statefree kernels
-            // could have multiple simultaneous executions of this kernel, we cannot be sure that the
-            // data we need to copy to the new buffer has actually been written yet. While this thread
-            // does not necessarily need to be locked, it does need to inform the thread that is waiting
-            // for this one to be finished so that thread can safely expand the buffer(s). Unfortunetly,
-            // we cannot allow threads to arbitrarily release this lock or we'll eventually hit a
-            // deadlock scenario when an "older" thread updates after a "newer" one, preventing the
-            // "current" one from acquiring the lock.
-
-            const auto prefix = makeKernelName(mKernelId);
-            BasicBlock * const postInvocationWait = b->CreateBasicBlock(prefix + "_postInvocationWait", mKernelCompletionCheck);
-            BasicBlock * const postInvocation = b->CreateBasicBlock(prefix + "_postInvocation", mKernelCompletionCheck);
-
-            Value * const waitingOnPtr = getScalarFieldPtr(b.get(), prefix + POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX);
-            if (mMayLoopToEntry) {
-                b->CreateUnlikelyCondBr(mHasMoreInput, postInvocation, postInvocationWait);
-            } else {
-                b->CreateBr(postInvocationWait);
-            }
-            b->SetInsertPoint(postInvocationWait);
-            Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, mSegNo, mNextSegNo,
-                                                           AtomicOrdering::Release, AtomicOrdering::Acquire);
-            Value * const success = b->CreateExtractValue(updated, { 1 });
-            b->CreateCondBr(success, postInvocation, postInvocationWait);
-
-            b->SetInsertPoint(postInvocation);
-        }
+    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     } else {
         updateProcessedAndProducedItemCounts(b);
     }
     readReturnedOutputVirtualBaseAddresses(b);
-
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
-    }
 
 }
 
@@ -574,6 +529,61 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             }
         }
         mProducedItemCount[outputPort] = produced;
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readAndUpdateInternalProcessedAndProducedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b) {
+
+    const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
+    const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
+
+    // calculate or read the item counts (assuming this kernel did not terminate)
+    for (unsigned i = 0; i < numOfInputs; ++i) {
+        const auto inputPort = StreamSetPort{PortType::Input, i};
+        const Binding & input = getInputBinding(inputPort);
+        const ProcessingRate & rate = input.getRate();
+        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
+            Value * const ptr = mProcessedItemCountPtr[inputPort];
+            Value * const processed = b->CreateAdd(mAlreadyProcessedPhi[inputPort], mLinearInputItemsPhi[inputPort]);
+            b->CreateStore(processed, ptr);
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, inputPort);
+            debugPrint(b, prefix + "_internal_processed = %" PRIu64, processed);
+            #endif
+            mProcessedItemCount[inputPort] = processed;
+        } else {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Kernel " << mKernel->getName() << ":" << input.getName()
+                << " has an internal " << "input" << " rate that is not properly handled by the PipelineKernel";
+            report_fatal_error(out.str());
+        }
+    }
+
+    for (unsigned i = 0; i < numOfOutputs; ++i) {
+        const auto outputPort = StreamSetPort{PortType::Output, i};
+        const Binding & output = getOutputBinding(outputPort);
+        const ProcessingRate & rate = output.getRate();
+        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
+            Value * const ptr = mProducedItemCountPtr[outputPort];
+            Value * const produced = b->CreateAdd(mAlreadyProducedPhi[outputPort], mLinearOutputItemsPhi[outputPort]);
+            b->CreateStore(produced, ptr);
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, outputPort);
+            debugPrint(b, prefix + "_internal_produced = %" PRIu64, produced);
+            #endif
+            mProducedItemCount[outputPort] = produced;
+        } else {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Kernel " << mKernel->getName() << ":" << output.getName()
+                << " has an internal " << "output" << " rate that is not properly handled by the PipelineKernel";
+            report_fatal_error(out.str());
+        }
     }
 
 }

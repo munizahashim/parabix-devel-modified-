@@ -321,21 +321,31 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief haNoGreedyInput
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::haNoGreedyInput() const {
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & bp = mBufferGraph[e];
+        const Binding & binding = bp.Binding;
+        if (binding.getRate().isGreedy()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief isCurrentKernelStatefree
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isCurrentKernelStatefree() const {
 
 #ifdef DISABLE_REDUCED_SYNCHRONIZATION_FOR_STATELESS_KERNELS
     return false;
-
 #else
 
     if (mNumOfThreads < 2) return false;
 
     const auto isMarkedStateFree = mKernel->hasAttribute(AttrId::Statefree);
-
-    errs() << mKernelId << ": " << mKernel->getName() << " ";
-
     for (const Attribute & attr : mKernel->getAttributes()) {
         switch (attr.getKind()) {
             case AttrId::MayFatallyTerminate:
@@ -343,14 +353,13 @@ bool PipelineCompiler::isCurrentKernelStatefree() const {
             case AttrId::MustExplicitlyTerminate:
             case AttrId::InternallySynchronized:
             case AttrId::SideEffecting:
-                errs() << " has stateful kernel attribute\n";
+            case AttrId::Family:
                 return false;
             default: break;
         }
     }
 
     if (mKernel->hasFamilyName()) {
-        errs() << " is family kernel\n";
         return false;
     }
 
@@ -358,25 +367,16 @@ bool PipelineCompiler::isCurrentKernelStatefree() const {
         const BufferPort & p = mBufferGraph[e];
         const Binding & b = p.Binding;
         const ProcessingRate & r = b.getRate();
-
         switch (r.getKind()) {
             case ProcessingRate::KindId::Fixed:
             case ProcessingRate::KindId::PartialSum:
             case ProcessingRate::KindId::Greedy:
                 break;
             default:
-                errs() << " non-countable input\n";
                 return false;
         }
 
         if (p.IsDeferred) {
-            errs() << " deferred input\n";
-            return false;
-        }
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (!bn.IsLinear) {
-            errs() << " non-linear input\n";
             return false;
         }
     }
@@ -396,36 +396,23 @@ bool PipelineCompiler::isCurrentKernelStatefree() const {
                 // will be correctly merged.
                 if (isMarkedStateFree) break;
             default:
-                errs() << " non-fixed output\n";
                 return false;
         }
 
         if (p.IsManaged || p.IsShared || p.IsDeferred) {
-            errs() << " deferred or managed output\n";
-            return false;
-        }
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (!bn.IsLinear) {
-            errs() << " non-linear output\n";
             return false;
         }
     }
     if (LLVM_UNLIKELY(isMarkedStateFree)) {
-        errs() << " is explicitly statefree\n";
         return true;
     }
     if (in_degree(mKernelId, mBufferGraph) == 0) {
-        errs() << " is source\n";
         return false;
     }
-
     if (mKernel->hasSharedMutableState()) {
-        errs() << " is has shared mutable state\n";
         return false;
     }
-
-    errs() << " is statefree\n";
+   // errs() << mKernelId << ": " << mKernel->getName() << " is statefree\n";
     return true;
 #endif
 }
@@ -504,8 +491,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mNumOfTruncatedInputBuffers = 0;
 
     mExecuteStridesIndividually = false;
-    mIsStatefree = false;
-    mHasDynamicOutputBuffers = false;
+    mUsePreAndPostInvocationSynchronizationLocks = false;
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;

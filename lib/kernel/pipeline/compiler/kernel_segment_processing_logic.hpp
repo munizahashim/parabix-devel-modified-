@@ -83,16 +83,18 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), mKernelId) != ActiveKernels.end());
     assert (KernelOnHybridThread.test(mKernelId) == mCompilingHybridThread);
 
+
+
     clearInternalStateForCurrentKernel();
+
+
     checkForPartitionEntry(b);
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
-
+    mUsePreAndPostInvocationSynchronizationLocks = mIsStatelessKernel.test(mKernelId);
     identifyPipelineInputs(mKernelId);
-
-    mIsStatefree = !mExecuteStridesIndividually && isCurrentKernelStatefree();
 
     mMayLoopToEntry = mExecuteStridesIndividually;
 
@@ -189,15 +191,12 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL / PARTITION ENTRY BLOCK
     /// -------------------------------------------------------------------------------------
 
-    verifyCurrentSynchronizationLock(b);
     checkIfKernelIsAlreadyTerminated(b);
 
     readAvailableItemCounts(b);
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
-//    if (mNumOfThreads == 1) {
-//        readConsumedItemCounts(b);
-//    }
+    readConsumedItemCounts(b);
     prepareLinearThreadLocalOutputBuffers(b);
 
     incrementNumberOfSegmentsCounter(b);
@@ -309,11 +308,10 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     informInputKernelsOfTermination(b);
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    if (LLVM_LIKELY(!mIsStatefree || mMayLoopToEntry)) {
+    if (LLVM_LIKELY(!mUsePreAndPostInvocationSynchronizationLocks || mMayLoopToEntry)) {
         writeTerminationSignal(b, mTerminatedSignalPhi);
     }
     updatePhisAfterTermination(b);
-    updateConsumedPhiNodesForStatefreeKernel(b);
     b->CreateBr(mKernelLoopExit);
 
     /// -------------------------------------------------------------------------------------
@@ -332,17 +330,13 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".loopExit = %" PRIu64, mSegNo);
     #endif
-    if (LLVM_LIKELY(!mIsStatefree)) {
-        writeUpdatedItemCounts(b);
-    }
+    writeUpdatedItemCounts(b);
     assert (mTerminatedAtLoopExitPhi);
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
     Value * const terminated = b->CreateICmpNE(mTerminatedAtLoopExitPhi, unterminated);
     computeFullyProcessedItemCounts(b, terminated);
-    if (LLVM_LIKELY(!mIsStatefree)) {
-        computeMinimumConsumedItemCounts(b);
-        writeLookAheadLogic(b);
-    }
+    computeMinimumConsumedItemCounts(b);
+    writeLookAheadLogic(b);
     computeFullyProducedItemCounts(b, terminated);
     replacePhiCatchWithCurrentBlock(b, mKernelLoopExitPhiCatch, mKernelExit);
     b->CreateBr(mKernelExit);
@@ -369,11 +363,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     b->SetInsertPoint(mKernelExit);
     recordFinalProducedItemCounts(b);
-    if (LLVM_UNLIKELY(mIsStatefree)) {
-        updateConsumedItemCountsForStatelessKernels(b);
-    } else {
-        writeConsumedItemCounts(b);
-    }
+    writeConsumedItemCounts(b);
     setCurrentTerminationSignal(b, mTerminatedAtExitPhi);
     if (mIsPartitionRoot) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
@@ -406,7 +396,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 
     if (LLVM_LIKELY(mMayLoopToEntry)) {
 
-        if (LLVM_LIKELY(!mIsStatefree)) {
+        if (LLVM_LIKELY(!mUsePreAndPostInvocationSynchronizationLocks)) {
             mHasMoreInput = hasMoreInput(b);
         }
 
@@ -491,7 +481,6 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     mTerminatedAtLoopExitPhi->addIncoming(terminationSignal, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(i1_TRUE, exitBlock);
     mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedInput, exitBlock);
-    updateConsumedPhiNodesForStatefreeKernel(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -660,7 +649,6 @@ inline void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
         mTotalNumOfStridesAtLoopExitPhi = nullptr;
         mFinalPartitionSegmentAtLoopExitPhi = nullptr;
     }
-    addConsumedPhiNodesToLoopExitForStatefreeKernel(b);
 }
 
 
@@ -675,7 +663,7 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
 
     b->SetInsertPoint(mKernelInsufficientInput);
 
-    if (LLVM_UNLIKELY(CheckAssertions && mIsStatefree && mMayLoopToEntry)) {
+    if (LLVM_UNLIKELY(CheckAssertions && mUsePreAndPostInvocationSynchronizationLocks && mMayLoopToEntry)) {
         b->CreateAssert(b->CreateNot(mExecutedAtLeastOnceAtLoopEntryPhi),
                         "%s: is a statefree kernel with an invalid loop again check",
                         mCurrentKernelName);

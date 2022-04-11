@@ -7,17 +7,21 @@
 
 #include <util/slab_allocator.h>
 
-#define HOT  __attribute__ ((hot))
-
 namespace kernel {
 
 namespace {
 
 // #define PRINT_SIMULATION_DEBUG_STATISTICS
 
-constexpr uint64_t DEMAND_ITERATIONS = 200;
+#define HOT  __attribute__ ((hot))
 
+#ifdef HAS_ADDRESS_SANITIZER
+constexpr uint64_t DEMAND_ITERATIONS = 1;
+constexpr uint64_t MAX_DATA_ITERATIONS =   1;
+#else
+constexpr uint64_t DEMAND_ITERATIONS = 200;
 constexpr uint64_t MAX_DATA_ITERATIONS =   100000;
+#endif
 
 constexpr long APPROXIMATE_TIMEOUT_SECONDS = 10;
 
@@ -28,17 +32,13 @@ using length_t = int64_t;
 using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
 
 struct UniformDistributionModel {
-    uint32_t next(xoshiro256 & rng) const {
+    uint32_t next(xoshiro256 & rng) const HOT {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
         return dst(rng);
     }
 
     uint32_t getMax() const {
         return mMax;
-    }
-
-    float getExpected() const {
-        return (mMin + mMax) * 0.5f;
     }
 
     UniformDistributionModel(const uint32_t min, const uint32_t max)
@@ -55,17 +55,13 @@ inline constexpr uint32_t clamp(const uint32_t x, const uint32_t min, const uint
 }
 
 struct GammaDistributionModel {
-    uint32_t next(xoshiro256 & rng) const {
+    uint32_t next(xoshiro256 & rng) const HOT {
         std::gamma_distribution<float> dst(mAlpha, mBeta);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
 
     uint32_t getMax() const {
         return mMax;
-    }
-
-    float getExpected() const {
-        return mAlpha * mBeta;
     }
 
     GammaDistributionModel(const float alpha, const float beta, const unsigned min, const unsigned max)
@@ -80,17 +76,13 @@ private:
 };
 
 struct NormalDistributionModel {
-    uint32_t next(xoshiro256 & rng) const {
+    uint32_t next(xoshiro256 & rng) const HOT {
         std::normal_distribution<float> dst(mMean, mStdDev);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
 
     uint32_t getMax() const {
         return mMax;
-    }
-
-    float getExpected() const {
-        return mMean;
     }
 
     NormalDistributionModel(const float mean, const float stddev, const unsigned min, const unsigned max)
@@ -105,7 +97,7 @@ private:
 };
 
 struct SkewNormalDistributionModel {
-    uint32_t next(xoshiro256 & rng) const {
+    uint32_t next(xoshiro256 & rng) const HOT {
         std::uniform_real_distribution<float> dst(0.0f, 1.0f);
         math::skew_normal_distribution<float> sk(mLocation, mScale, mShape);
         return clamp((uint32_t)(math::quantile(sk, dst(rng)) + 0.5f), mMin, mMax);
@@ -118,11 +110,6 @@ struct SkewNormalDistributionModel {
     SkewNormalDistributionModel(const float mean, const float stddev, const float skew, const unsigned min, const unsigned max)
     : mLocation(mean), mScale(stddev), mShape(skew), mMin(min), mMax(max) {
 
-    }
-
-    float getExpected() const {
-        constexpr float SQRT_2_OVER_PI = 0.79788456080286535587989211986876373695171726f;
-        return mLocation + (mScale * mShape * SQRT_2_OVER_PI) / std::sqrt(1.0f + (mShape * mShape));
     }
 
 private:
@@ -140,8 +127,6 @@ struct SimulationPort {
     virtual bool consume(length_t & pending, xoshiro256 & rng) const = 0;
 
     virtual void produce(xoshiro256 & rng) = 0;
-
-    virtual float expected() const = 0;
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
@@ -176,10 +161,6 @@ struct FixedPort final : public SimulationPort {
         QueueLength += mAmount;
     }
 
-    float expected() const override {
-        return (float)mAmount;
-    }
-
 private:
     const length_t mAmount;
 };
@@ -189,7 +170,7 @@ struct BoundedPort final : public SimulationPort {
 
     BoundedPort(DistributionModel m) : SimulationPort(),  Model(m) { }
 
-    bool consume(length_t & pending, xoshiro256 & rng) const override {
+    bool consume(length_t & pending, xoshiro256 & rng) const override HOT {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
         if (QueueLength < Model.getMax()) {
@@ -200,12 +181,8 @@ struct BoundedPort final : public SimulationPort {
         return true;
     }
 
-    void produce(xoshiro256 & rng) override {
+    void produce(xoshiro256 & rng) override HOT {
         QueueLength += Model.next(rng);
-    }
-
-    float expected() const override {
-        return Model.getExpected();
     }
 
 private:
@@ -217,7 +194,7 @@ struct BasePartialSumGenerator {
 
     friend struct PartialSumPort;
 
-    length_t readStepValue(const uint64_t start, const uint64_t end, xoshiro256 & rng) {
+    length_t readStepValue(const uint64_t start, const uint64_t end, xoshiro256 & rng) HOT {
 
         // Since PartialSum rates can have multiple ports referring to the same reference streamset, we store the
         // history of partial sum values in a circular buffer but silently drop entries after every user has read
@@ -271,7 +248,7 @@ struct BasePartialSumGenerator {
         return static_cast<length_t>(c) ;
     }
 
-    void updateReadPosition(const unsigned userId, const uint64_t position) {
+    void updateReadPosition(const unsigned userId, const uint64_t position) HOT {
         assert (userId < Users);
         UserReadPosition[userId] = position;
         auto min = position;
@@ -289,14 +266,14 @@ struct BasePartialSumGenerator {
     , HeadOffset(0)
     , HeadPosition(0)
     , TailOffset(0)
-    , Capacity(std::max<unsigned>(historyLength * 2, 32))
+    , Capacity(std::min<unsigned>(historyLength * 2, 32))
     , History(allocator.allocate<uint64_t>(Capacity))
     , UserReadPosition(allocator.allocate<uint64_t>(users))
     , Allocator(allocator) {
         assert (historyLength > 0);
     }
 
-    void initializeGenerator(xoshiro256 & rng) {
+    void initializeGenerator(xoshiro256 & rng) HOT {
         uint64_t partialSum = 0;
         History[0] = 0;
         for (unsigned i = 1; i < Capacity; ++i) {
@@ -315,9 +292,7 @@ struct BasePartialSumGenerator {
 
 protected:
 
-    virtual float expected() const = 0;
-
-    virtual uint32_t generateStepValue(xoshiro256 & rng) const = 0;
+    virtual uint32_t generateStepValue(xoshiro256 & rng) const HOT = 0;
 
 private:
     const unsigned Users;
@@ -347,14 +322,10 @@ struct PartialSumGenerator : public BasePartialSumGenerator {
 
 protected:
 
-    uint32_t generateStepValue(xoshiro256 & rng) const override {
+    uint32_t generateStepValue(xoshiro256 & rng) const override HOT {
         const auto r = Model.next(rng);
         assert (r <= Model.getMax());
         return r;
-    }
-
-    float expected() const override {
-        return Model.getExpected();
     }
 
 private:
@@ -373,7 +344,7 @@ struct PartialSumPort final : public SimulationPort {
         assert (step > 0);
     }
 
-    bool consume(length_t & pending, xoshiro256 & rng) const override {
+    bool consume(length_t & pending, xoshiro256 & rng) const override HOT {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         assert (m == PreviousValue || PreviousValue == -1U);
         pending = m;
@@ -383,7 +354,7 @@ struct PartialSumPort final : public SimulationPort {
         return (QueueLength >= m);
     }
 
-    void commit(const length_t pending) override {
+    void commit(const length_t pending) override HOT {
         QueueLength -= pending;
         Index += Step;
         #ifndef NDEBUG
@@ -392,15 +363,11 @@ struct PartialSumPort final : public SimulationPort {
         Generator.updateReadPosition(UserId, Index);
     }
 
-    void produce(xoshiro256 & rng) override {
+    void produce(xoshiro256 & rng) override HOT {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
         Index += Step;
         Generator.updateReadPosition(UserId, Index);
-    }
-
-    float expected() const override {
-        return Generator.expected();
     }
 
 private:
@@ -430,10 +397,6 @@ struct RelativePort final : public SimulationPort {
         QueueLength += m;
     }
 
-    float expected() const override {
-        return 0.0f;
-    }
-
 private:
     const length_t & BaseRateValue;
 };
@@ -456,10 +419,6 @@ struct GreedyPort final : public SimulationPort {
 
     void produce(xoshiro256 & /* rng */) override {
         llvm_unreachable("uncaught program error? greedy rate cannot be an output rate");
-    }
-
-    float expected() const override {
-        return 0.0f;
     }
 
 private:
@@ -848,6 +807,8 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
 
         }
 
+        PartitionPort(const PartitionPort &) = default;
+
         bool operator == (const PartitionPort & other) const {
             if (Type != other.Type) return false;
             if (UpperBound != other.UpperBound) return false;
@@ -917,18 +878,19 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
         const auto n = N.Kernels.size();
         assert (N.LinkedGroupId < numOfPartitions);
         assert (N.Repetitions.size() == n);
-        for (unsigned idx = 0; idx < n; ++idx) {
-            const auto kernelId = N.Kernels[idx];
+        for (unsigned kernelIdx = 0; kernelIdx < n; ++kernelIdx) {
+            const auto kernelId = N.Kernels[kernelIdx];
             assert (Relationships[kernelId].Type == RelationshipNode::IsKernel);
             const RelationshipNode & producerNode = Relationships[kernelId];
             const Kernel * const kernelObj = producerNode.Kernel;
-            const auto reps = N.Repetitions[idx] * kernelObj->getStride();
+            const auto kernelRepCount = N.Repetitions[kernelIdx];
+            const auto baseNumOfItems = kernelRepCount * kernelObj->getStride();
 
             if (LLVM_UNLIKELY(isa<PopCountKernel>(kernelObj))) {
                 const Binding & input = cast<PopCountKernel>(kernelObj)->getInputStreamSetBinding(0);
                 const ProcessingRate & rate = input.getRate();
                 assert (rate.isFixed());
-                const auto stepSize = rate.getRate() * reps;
+                const auto stepSize = rate.getRate() * baseNumOfItems;
                 assert (stepSize.denominator() == 1);
                 const unsigned k = stepSize.numerator();
                 const auto output = child(kernelId, Relationships);
@@ -1023,7 +985,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                             const Binding & refBinding = Relationships[ref].Binding;
                             const ProcessingRate & refRate = refBinding.getRate();
                             assert (refRate.isFixed());
-                            const auto R = refRate.getRate() * reps;
+                            const auto R = refRate.getRate() * baseNumOfItems;
                             assert (R.denominator() == 1);
                             const unsigned cap = R.numerator();
                             assert (cap > 0);
@@ -1135,7 +1097,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                                 break;
                             case AttrId::BlockSize:
                                 BEGIN_SCOPED_REGION
-                                const auto b = attr.amount() * N.Repetitions[idx];
+                                const auto b = attr.amount() * N.Repetitions[kernelIdx];
                                 assert (b.denominator() == 1);
                                 blockSize = b.numerator();
                                 END_SCOPED_REGION
@@ -1166,7 +1128,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                                 const Binding & refBinding = Relationships[ref].Binding;
                                 const ProcessingRate & refRate = refBinding.getRate();
                                 assert (refRate.getKind() == RateId::Fixed);
-                                const auto r = refRate.getRate() * reps;
+                                const auto r = refRate.getRate() * baseNumOfItems;
                                 assert (r.denominator() == 1);
                                 stepLength = r.numerator();
                                 const auto id = parent(ref, Relationships);
@@ -1178,24 +1140,23 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                     };
 
                     auto makePartitionPort = [&]() -> PartitionPort {
-                        auto kindId = rate.getKind();
                         unsigned lb = 0, ub = 0;
                         // auto distReps = reps;
                         switch (rate.getKind()) {
                             case RateId::Fixed:
                             case RateId::Bounded:
                                 BEGIN_SCOPED_REGION
-                                const auto a = reps * rate.getLowerBound();
+                                const auto a = baseNumOfItems * rate.getLowerBound();
                                 assert (a.denominator() == 1);
                                 lb = a.numerator();
-                                const auto b = reps * rate.getUpperBound();
+                                const auto b = baseNumOfItems * rate.getUpperBound();
                                 assert (b.denominator() == 1);
                                 ub = b.numerator();
                                 END_SCOPED_REGION
                                 break;
                             case RateId::PartialSum:
                                 BEGIN_SCOPED_REGION
-                                const auto distReps = (N.Repetitions[idx] * rate.getUpperBound());
+                                const auto distReps = (kernelRepCount * rate.getUpperBound());
                                 assert (distReps.denominator() == 1);
                                 assert (stepLength > 0);
                                 assert (refId > 0);
@@ -1210,12 +1171,12 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshir
                             default:
                                 llvm_unreachable("unhandled processing rate type in variable rate simulator");
                         }
-                        return PartitionPort{kindId, lb, ub, delay, refId, stepLength, reps, binding.getDistribution()};
+                        return PartitionPort{rate.getKind(), lb, ub, delay, refId, stepLength, baseNumOfItems, binding.getDistribution()};
                     };
 
-                    auto makeBlockSizePartitionPort = [&]() -> PartitionPort {
-                        return PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0, reps, UniformDistribution()};
-                    };
+//                    auto makeBlockSizePartitionPort = [&]() -> PartitionPort {
+//                        return PartitionPort{RateId::Fixed, blockSize, blockSize, 0, 0, 0, reps, UniformDistribution()};
+//                    };
 
                     auto updatePartialSumProbabilityDistribution = [&](const Graph::edge_descriptor e)  {
                         const auto f = partialSumMap.find(refId);
@@ -1574,18 +1535,15 @@ restart_port_merge:
                     const auto s = source(output, G);
                     const auto t = target(input, G);
                     assert (s != t);
-                    clear_vertex(u, G);
                     // if we already have an equivalent edge between these, ignore it.
-                    bool toAdd = true;
                     for (const auto f : make_iterator_range(out_edges(s, G))) {
                         if (target(f, G) == t && G[f] == I) {
-                            toAdd = false;
-                            break;
+                            goto equivalent_relationship_already_exists;
                         }
                     }
-                    if (toAdd) {
-                        add_edge(s, t, I, G);
-                    }
+                    add_edge(s, t, I, G);
+equivalent_relationship_already_exists:
+                    clear_vertex(u, G);
                 }
             }
         }
@@ -1619,7 +1577,7 @@ restart_port_merge:
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
-    auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) {
+    auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) HOT {
         PartitionPort & p = G[e];
         SimulationPort * port = nullptr;
 
@@ -1715,7 +1673,7 @@ restart_port_merge:
 
                     } else {
 
-                        auto makeProbDistributionModel = [&](const ProcessingRateProbabilityDistribution * const base)
+                        auto makeProbDistributionModel = [&](const ProcessingRateProbabilityDistribution * const base) HOT
                                 -> ProcessingRateProbabilityDistribution {
                             Rational reps{max, 1U};
                             if (base == nullptr) {
@@ -1778,6 +1736,10 @@ restart_port_merge:
         return port;
     };
 
+    #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
+    errs() << "BUILT NETWORK\n";
+    #endif
+
     SimulationAllocator allocator;
 
     SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(nodeCount);
@@ -1796,6 +1758,7 @@ restart_port_merge:
     for (unsigned i = 0; i != m; ++i) {
 
         const auto u = ordering[m - i - 1]; // forward topological ordering
+
         const auto inputs = in_degree(u, G);
         const auto outputs = out_degree(u, G);
         assert (inputs != 0 || outputs != 0);
@@ -1848,6 +1811,7 @@ restart_port_merge:
     #endif
 
     for (uint64_t r = 0; r < DEMAND_ITERATIONS; ++r) {
+
         for (auto i = m; i--; ) { // reverse topological ordering
             nodes[i]->demand(pendingArray, rng);
         }
@@ -1967,7 +1931,7 @@ restart_port_merge:
     uint64_t * current = segmentLength;
     for (unsigned i = 0; i < m; ++i) { // forward topological ordering
         assert (current >= segmentLength);
-        assert (current < (segmentLength + numOfActors));
+            assert (current < (segmentLength + numOfActors));
         nodes[i]->fire(pendingArray, rng, current);
     }
     assert (current >= segmentLength);

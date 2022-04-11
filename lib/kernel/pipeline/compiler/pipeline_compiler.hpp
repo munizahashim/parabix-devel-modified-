@@ -76,9 +76,12 @@ const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
 #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 #endif
-const static std::string LOGICAL_SEGMENT_SUFFIX = ".LSN";
 
-const static std::string POST_INVOCATION_LOGICAL_SEGMENT_SUFFIX = ".SLSN";
+#define SYNC_LOCK_FULL 0U
+#define SYNC_LOCK_PRE_INVOCATION 1U
+#define SYNC_LOCK_POST_INVOCATION 2U
+
+const static std::array<std::string, 3> LOGICAL_SEGMENT_SUFFIX = { ".LSN", ".LSNs", ".LSNt" };
 
 const static std::string DEBUG_FD = ".DFd";
 
@@ -86,8 +89,8 @@ const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
 const static std::string ITEM_COUNT_SUFFIX = ".IN";
+const static std::string INTERNAL_STATELESS_ITEM_COUNT_SUFFIX = ".ISN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
-const static std::string THREAD_LOCAL_CONSUMED_ITEM_COUNT_SUFFIX = ".TCN";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 
@@ -268,6 +271,7 @@ public:
     void writeKernelCall(BuilderRef b);
     ArgVec buildKernelCallArgumentList(BuilderRef b);
     void updateProcessedAndProducedItemCounts(BuilderRef b);
+    void readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b);
     void readReturnedOutputVirtualBaseAddresses(BuilderRef b) const;
     Value * addVirtualBaseAddressArg(BuilderRef b, const StreamSetBuffer * buffer, ArgVec & args);
 
@@ -352,10 +356,7 @@ public:
     void initializePipelineInputConsumedPhiNodes(BuilderRef b);
     void readExternalConsumerItemCounts(BuilderRef b);
     void createConsumedPhiNodesAtExit(BuilderRef b);
-    void addConsumedPhiNodesToLoopExitForStatefreeKernel(BuilderRef b);
-    void updateConsumedPhiNodesForStatefreeKernel(BuilderRef b) ;
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
-    void updateConsumedItemCountsForStatelessKernels(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
@@ -415,7 +416,7 @@ public:
     void printProducedItemCountDeltas(BuilderRef b) const;
 
     void addUnconsumedItemCountProperties(BuilderRef b, unsigned kernel) const;
-    void recordUnconsumedItemCounts(BuilderRef b) const;
+    void recordUnconsumedItemCounts(BuilderRef b);
     void printUnconsumedItemCounts(BuilderRef b) const;
 
     void addItemCountDeltaProperties(BuilderRef b, const unsigned kernel, const StringRef suffix) const;
@@ -444,10 +445,9 @@ public:
     void readFirstSegmentNumber(BuilderRef b);
     void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
-    void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId);
-    void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId);
-    void verifyCurrentSynchronizationLock(BuilderRef b) const;
-    Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId) const;
+    void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
+    void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
+    Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
 
     void acquireHybridThreadSynchronizationLock(BuilderRef b);
     void releaseHybridThreadSynchronizationLock(BuilderRef b);
@@ -537,6 +537,7 @@ public:
     void verifyBufferRelationships() const;
 
     bool hasAtLeastOneNonGreedyInput() const;
+    bool haNoGreedyInput() const;
 
     bool isCurrentKernelStatefree() const;
 
@@ -648,7 +649,8 @@ protected:
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
-    BitVector                                   RequiresSynchronization;
+    BitVector                                   mRequiresSynchronization;
+    BitVector                                   mIsStatelessKernel;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -719,8 +721,7 @@ protected:
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
-    bool                                        mIsStatefree = false;
-    bool                                        mHasDynamicOutputBuffers = false;
+    bool                                        mUsePreAndPostInvocationSynchronizationLocks = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;
@@ -878,7 +879,8 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
-, RequiresSynchronization(PipelineOutput + 1)
+, mRequiresSynchronization(PipelineOutput + 1)
+, mIsStatelessKernel(PipelineOutput + 1)
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 
@@ -904,8 +906,8 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
-, mUpdatedProcessedPhi(P.MaxNumOfInputPorts, mAllocator)
 , mConsumedItemCountsAtLoopExitPhi(P.MaxNumOfInputPorts, mAllocator)
+, mUpdatedProcessedPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedDeferredPhi(P.MaxNumOfInputPorts, mAllocator)
 , mFullyProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
 

@@ -862,12 +862,18 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
                 auto bufferSize = bn.RequiredCapacity * mult;
                 assert (bufferSize > 0);
+                #ifdef BUFFER_CAPACITY_MULTIPLIER
+                bufferSize *= BUFFER_CAPACITY_MULTIPLIER;
+                #endif
                 buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal || bn.CrossesHybridThreadBarrier) {
                     bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
                 }
+                #ifdef BUFFER_CAPACITY_MULTIPLIER
+                bufferSize *= BUFFER_CAPACITY_MULTIPLIER;
+                #endif
                 buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
         }
