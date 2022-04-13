@@ -94,6 +94,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
     mUsePreAndPostInvocationSynchronizationLocks = mIsStatelessKernel.test(mKernelId);
+    assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStatefree());
     identifyPipelineInputs(mKernelId);
 
     mMayLoopToEntry = mExecuteStridesIndividually;
@@ -168,7 +169,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (mayHaveInsufficientIO) {
         mKernelInsufficientInput = b->CreateBasicBlock(prefix + "_insufficientInput", mNextPartitionEntryPoint);
     }
-    if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
+    if (mIsPartitionRoot) {
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
         SmallVector<char, 256> tmp;
         raw_svector_ostream nm(tmp);
@@ -205,7 +206,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     detemineMaximumNumberOfStrides(b);
 
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
-    if (mIsPartitionRoot) { // || mKernelCanTerminateEarly
+    if (mIsPartitionRoot) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {
         b->CreateBr(mKernelLoopEntry);
@@ -304,12 +305,12 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
-
     informInputKernelsOfTermination(b);
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    if (LLVM_LIKELY(!mUsePreAndPostInvocationSynchronizationLocks || mMayLoopToEntry)) {
-        writeTerminationSignal(b, mTerminatedSignalPhi);
+    writeTerminationSignal(b, mTerminatedSignalPhi);
+    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
     }
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);

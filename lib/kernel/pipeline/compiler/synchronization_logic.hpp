@@ -141,6 +141,16 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
     #endif
 }
 
+LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
+    switch (type) {
+        case SYNC_LOCK_PRE_INVOCATION: return b->GetString("pre-invocation ");
+        case SYNC_LOCK_POST_INVOCATION: return b->GetString("post-invocation ");
+        case SYNC_LOCK_FULL: return b->GetString("");
+        default: llvm_unreachable("unknown sync lock?");
+    }
+    return nullptr;
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief acquireCurrentSegment
  *
@@ -148,22 +158,16 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type) {
-    #ifdef ONLY_DISABLE_INTER_KERNEL_LOCKS
-    if (type == SYNC_LOCK_POST_INVOCATION) return;
-    #endif
     if (LLVM_LIKELY(mRequiresSynchronization.test(kernelId))) {
 
         assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
-        auto ty = type;
-        #ifdef ONLY_DISABLE_INTER_KERNEL_LOCKS
-        if (type == SYNC_LOCK_PRE_INVOCATION) ty = SYNC_LOCK_POST_INVOCATION;
-        #endif
-        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx, ty);
+        Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx, type);
         #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + ": waiting for %" PRIu64 ", initially %" PRIu64, mSegNo, b->CreateLoad(waitingOnPtr));
+        debugPrint(b, prefix + ": waiting for %ssegment number %" PRIu64 ", initially %" PRIu64,
+                   __getSyncLockName(b, type), mSegNo, b->CreateAtomicLoadAcquire(waitingOnPtr));
         #endif
         BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
         BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
@@ -176,9 +180,9 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
             Value * const pendingOrReady = b->CreateICmpULE(currentSegNo, mSegNo);
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
-            out << "%s: logical segment number is %" PRIu64 " "
-                   "but was expected to be [0,%" PRIu64 "]";
-            b->CreateAssert(pendingOrReady, out.str(), mCurrentKernelName, currentSegNo, mSegNo);
+            out << "%s: acquired %ssegment number is %" PRIu64 " "
+                   "but was expected to be within [0,%" PRIu64 "]";
+            b->CreateAssert(pendingOrReady, out.str(), mKernelName[kernelId], __getSyncLockName(b, type), currentSegNo, mSegNo);
         }
         Value * const ready = b->CreateICmpEQ(mSegNo, currentSegNo);
         b->CreateLikelyCondBr(ready, acquired, acquire);
@@ -186,7 +190,7 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         b->SetInsertPoint(acquired);
 
         #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "# " + prefix + " acquired SegNo %" PRIu64, mSegNo);
+        debugPrint(b, "# " + prefix + " acquired %ssegment number %" PRIu64, __getSyncLockName(b, type), mSegNo);
         #endif
     }
 }
@@ -197,9 +201,6 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type) {
-    #ifdef ONLY_DISABLE_INTER_KERNEL_LOCKS
-    if (type == SYNC_LOCK_PRE_INVOCATION) return;
-    #endif
     const auto required = mRequiresSynchronization.test(kernelId);
     if (LLVM_LIKELY(required || mCompilingHybridThread || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
         const auto prefix = makeKernelName(kernelId);
@@ -212,14 +213,15 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
             Value * const success = b->CreateExtractValue(updated, { 1 });
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
-            out << "%s: logical segment number is %" PRIu64
+            out << "%s: released %ssegment number is %" PRIu64
                    " but was expected to be %" PRIu64;
-            b->CreateAssert(success, out.str(), mKernelName[kernelId], observed, mSegNo);
+            b->CreateAssert(success, out.str(), mKernelName[kernelId], __getSyncLockName(b, type), observed, mSegNo);
+
         } else {
             b->CreateAtomicStoreRelease(mNextSegNo, waitingOnPtr);
         }
         #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + ": released %" PRIu64, mSegNo);
+        debugPrint(b, prefix + ": released %ssegment number %" PRIu64, __getSyncLockName(b, type), mSegNo);
         #endif
     }
 }

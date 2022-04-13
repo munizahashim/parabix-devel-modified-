@@ -60,6 +60,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
         if (LLVM_UNLIKELY(bn.isExternal())) {
             assert (isFromCurrentFunction(b, buffer->getHandle()));
         } else if (bn.isNonThreadLocal() == nonLocal) {
+
             assert (bn.isInternal());
             const auto pe = in_edge(streamSet, mBufferGraph);
             const auto producer = source(pe, mBufferGraph);
@@ -68,7 +69,10 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
             Value * const handle = b->getScalarFieldPtr(handleName);
             assert (buffer->getHandle() == nullptr);
             buffer->setHandle(handle);
+
             if (bn.Locality == BufferLocality::ThreadLocal && mThreadLocalStreamSetBaseAddress) {
+
+
                 assert (RequiredThreadLocalStreamSetMemory > 0);
                 assert (isa<StaticBuffer>(buffer));
                 assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
@@ -405,6 +409,13 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         if (mUsePreAndPostInvocationSynchronizationLocks) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+            Value * const itemCount = b->CreateLoad(ptr);
+            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProcessedItemCount[inputPort]);
+            b->CreateAssert(v, "%s exit does not match", b->GetString(prefix));
+            }
+
         } else {
             ptr = mProcessedItemCountPtr[inputPort];
         }
@@ -432,6 +443,13 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         if (mUsePreAndPostInvocationSynchronizationLocks) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+            const auto streamSet = target(e, mBufferGraph);
+            Value * const itemCount = b->CreateLoad(ptr);
+            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProducedItemCount[streamSet]);
+            b->CreateAssert(v, "%s exit does not match", b->GetString(prefix));
+            }
         } else {
             ptr = mProducedItemCountPtr[outputPort];
         }

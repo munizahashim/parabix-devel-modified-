@@ -1,4 +1,5 @@
 #include <kernel/pipeline/pipeline_kernel.h>
+#include <toolchain/toolchain.h>
 
 // #define USE_2020_PIPELINE_COMPILER
 
@@ -238,6 +239,13 @@ void PipelineKernel::setOutputScalarAt(const unsigned i, Scalar * const value) {
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(BuilderRef b) const {
     return std::make_unique<PipelineCompiler>(b, const_cast<PipelineKernel *>(this));
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isCachable
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineKernel::isCachable() const {
+    return codegen::EnablePipelineObjectCache;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

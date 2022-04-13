@@ -648,13 +648,6 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
                 avail = b->CreateAdd(avail, added);
             }
 
-//            if (LLVM_UNLIKELY(CheckAssertions)) {
-//                b->CreateAssert(b->CreateICmpUGE(avail, processed),
-//                                "%s:%s avail %" PRIu64 " < processed %" PRIu64 "?",
-//                                mCurrentKernelName, b->GetString(port.Binding.get().getName()),
-//                                avail, processed);
-//            }
-
             Value * const remaining = b->CreateSub(avail, processed);
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
@@ -869,11 +862,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
         // we can proceed.
 
-        if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
-        }
     }
 
+    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
+    }
 
     Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
     Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);

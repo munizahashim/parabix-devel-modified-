@@ -289,8 +289,9 @@ Kernel * PipelineBuilder::makeKernel() {
 
     bool noFamilyKernels = true;
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        const Kernel * const k = mKernels[i];
-        noFamilyKernels &= !k->hasFamilyName();
+        Kernel * const k = mKernels[i];
+        k->ensureLoaded();
+        if (k->hasFamilyName()) noFamilyKernels = false;
         enumerateConsumerBindings(VertexType::Scalar, firstKernel + i, k->getInputScalarBindings());
         enumerateConsumerBindings(VertexType::StreamSet, firstKernel + i, k->getInputStreamSetBindings());
     }

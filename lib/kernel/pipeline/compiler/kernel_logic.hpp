@@ -337,84 +337,8 @@ bool PipelineCompiler::haNoGreedyInput() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isCurrentKernelStatefree
  ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isCurrentKernelStatefree() const {
-
-#ifdef DISABLE_REDUCED_SYNCHRONIZATION_FOR_STATELESS_KERNELS
-    return false;
-#else
-
-    if (mNumOfThreads < 2) return false;
-
-    const auto isMarkedStateFree = mKernel->hasAttribute(AttrId::Statefree);
-    for (const Attribute & attr : mKernel->getAttributes()) {
-        switch (attr.getKind()) {
-            case AttrId::MayFatallyTerminate:
-            case AttrId::CanTerminateEarly:
-            case AttrId::MustExplicitlyTerminate:
-            case AttrId::InternallySynchronized:
-            case AttrId::SideEffecting:
-            case AttrId::Family:
-                return false;
-            default: break;
-        }
-    }
-
-    if (mKernel->hasFamilyName()) {
-        return false;
-    }
-
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & p = mBufferGraph[e];
-        const Binding & b = p.Binding;
-        const ProcessingRate & r = b.getRate();
-        switch (r.getKind()) {
-            case ProcessingRate::KindId::Fixed:
-            case ProcessingRate::KindId::PartialSum:
-            case ProcessingRate::KindId::Greedy:
-                break;
-            default:
-                return false;
-        }
-
-        if (p.IsDeferred) {
-            return false;
-        }
-    }
-
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & p = mBufferGraph[e];
-        const Binding & b = p.Binding;
-        const ProcessingRate & r = b.getRate();
-
-        switch (r.getKind()) {
-            case ProcessingRate::KindId::Fixed:
-                break;
-            case ProcessingRate::KindId::PartialSum:
-                // We permit a partial sum output rate if and only if the kernel
-                // was explicitly marked as statefree. Otherwise we cannot ensure
-                // that the portion of a buffer that demarcates two invocations
-                // will be correctly merged.
-                if (isMarkedStateFree) break;
-            default:
-                return false;
-        }
-
-        if (p.IsManaged || p.IsShared || p.IsDeferred) {
-            return false;
-        }
-    }
-    if (LLVM_UNLIKELY(isMarkedStateFree)) {
-        return true;
-    }
-    if (in_degree(mKernelId, mBufferGraph) == 0) {
-        return false;
-    }
-    if (mKernel->hasSharedMutableState()) {
-        return false;
-    }
-   // errs() << mKernelId << ": " << mKernel->getName() << " is statefree\n";
-    return true;
-#endif
+inline bool PipelineCompiler::isCurrentKernelStatefree() const {
+    return isKernelStatefree(mKernelId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

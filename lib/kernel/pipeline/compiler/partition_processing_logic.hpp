@@ -461,7 +461,6 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
         assert (lastConsumer < PipelineOutput);
         assert (!KernelOnHybridThread.test(lastConsumer));
-
         const auto type = mIsStatelessKernel.test(lastConsumer) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, lastConsumer, type);
     }
@@ -498,6 +497,31 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
     b->SetInsertPoint(mKernelInitiallyTerminated);
 
     loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(b);
+
+    if (LLVM_UNLIKELY(CheckAssertions && mUsePreAndPostInvocationSynchronizationLocks)) {
+
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            const auto inputPort = br.Port;
+            const auto prefix = makeBufferName(mKernelId, inputPort);
+            Value * const processedPtr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            Value * const itemCount = b->CreateLoad(processedPtr);
+            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProcessedItemCount[inputPort]);
+            b->CreateAssert(v, "%s does not match", b->GetString(prefix));
+        }
+
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferPort & br = mBufferGraph[e];
+            const auto outputPort = br.Port;
+            const auto prefix = makeBufferName(mKernelId, outputPort);
+            Value * const ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            Value * const itemCount = b->CreateLoad(ptr);
+            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProducedItemCount[streamSet]);
+            b->CreateAssert(v, "%s does not match", b->GetString(prefix));
+        }
+    }
 
     if (mIsPartitionRoot) {
 
@@ -629,8 +653,7 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
     updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
-    const auto isStateless = mIsStatelessKernel.test(mKernelId);
-    const auto type = isStateless ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+    const auto type = mIsStatelessKernel.test(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type);
 
     #ifdef ENABLE_PAPI

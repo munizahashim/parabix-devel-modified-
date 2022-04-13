@@ -52,6 +52,7 @@ enum DebugFlags {
     DisableCacheAlignedKernelStructs,
     PrintPipelineGraph,
     PrintKernelSizes,
+    ForcePipelineRecompilation,
     DebugFlagSentinel
 };
 
@@ -84,6 +85,7 @@ extern unsigned TaskThreads;
 extern unsigned SegmentThreads;
 extern unsigned ScanBlocks;
 extern bool EnableObjectCache;
+extern bool EnablePipelineObjectCache;
 extern bool TraceObjectCache;
 extern unsigned GroupNum;
 extern std::string ProgramName;

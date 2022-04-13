@@ -58,7 +58,9 @@ public:
 
     bool hasSignature() const final { return true; }
 
-    bool externallyInitialized() const;
+    bool isCachable() const override;
+
+    bool externallyInitialized() const override;
 
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 

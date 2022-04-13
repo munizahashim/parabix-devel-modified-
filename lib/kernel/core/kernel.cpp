@@ -210,6 +210,7 @@ void Kernel::ensureLoaded() {
     if (LLVM_LIKELY(mGenerated)) {
         return;
     }
+    assert (mModule);
     SmallVector<char, 256> tmp;
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
@@ -372,14 +373,18 @@ found_non_empty_type:
             }
             #endif
 
+            assert (!st->isEmptyTy());
+            assert (getTypeSize(st) > 0);
+
             return st;
         };
 
         // NOTE: StructType::create always creates a new type even if an identical one exists.
         const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
         mSharedStateType = makeStructType(shared, strShared, sharedGroupCount > 1 && allowStructPadding);
-
+        assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
         mThreadLocalStateType = makeStructType(threadLocal, strThreadLocal, false);
+        assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
             errs() << "KERNEL: " << mKernelName
@@ -390,25 +395,6 @@ found_non_empty_type:
     }
 //    mSharedStateType = nullIfEmpty(mSharedStateType);
 //    mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasMutableSharedState
- ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasSharedMutableState() const {
-    if (!mOutputScalars.empty()) {
-        return true;
-    }
-    for (const auto & scalar : mInternalScalars) {
-        assert (scalar.getValueType());
-        if (scalar.getScalarType() == ScalarType::Internal) {
-            if (LLVM_LIKELY(!scalar.getValueType()->isEmptyTy())) {
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

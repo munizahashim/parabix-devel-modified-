@@ -391,6 +391,9 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             }
             out << "\\n";
         }
+        if (isKernelStatefree(kernel)) {
+            out << "<Statefree>\\n";
+        }
         if (kernelObj->canSetTerminateSignal()) {
             out << "<CanTerminateEarly>\\n";
         }

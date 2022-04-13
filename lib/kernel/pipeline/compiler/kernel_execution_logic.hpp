@@ -31,9 +31,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
-    #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
-    #endif
 
     if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
 
@@ -44,20 +41,20 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         // If we can loop back to the entry, we assume that its to handle the final block.
         if (mMayLoopToEntry) {
 
+            mHasMoreInput = hasMoreInput(b);
+
+            // if this works correctly, the only time we won't release the pre-invocation lock is when we're
+            // going to end up terminating.
+
+            Value * const waitToRelease = b->CreateOr(mHasMoreInput, b->CreateIsNotNull(mIsFinalInvocation));
             const auto prefix = makeKernelName(mKernelId);
             BasicBlock * const releaseSyncLock =
                 b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
             resumeKernelExecution =
                 b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
-
-            mHasMoreInput = hasMoreInput(b);
-
-            b->CreateUnlikelyCondBr(mHasMoreInput, resumeKernelExecution, releaseSyncLock);
+            b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
 
             b->SetInsertPoint(releaseSyncLock);
-        }
-        if (mIsPartitionRoot) {
-            writeTerminationSignal(b, mIsFinalInvocation);
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
         if (mMayLoopToEntry) {
@@ -67,8 +64,10 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         }
     }
 
+    #ifdef ENABLE_PAPI
+    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    #endif
     Value * const beforeKernelCall = startCycleCounter(b);
-
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
@@ -97,10 +96,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         mTerminatedExplicitly = nullptr;
     }
 
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
-    }    
-
     if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     } else {
@@ -108,6 +103,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     }
     readReturnedOutputVirtualBaseAddresses(b);
 
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
+        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -202,6 +200,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
     if (LLVM_LIKELY(mKernelSharedHandle)) {
         addNextArg(mKernelSharedHandle);
     }
+    assert (mKernelThreadLocalHandle == nullptr || !mKernelThreadLocalHandle->getType()->isEmptyTy());
     if (LLVM_UNLIKELY(mKernelThreadLocalHandle)) {
         addNextArg(mKernelThreadLocalHandle);
     }

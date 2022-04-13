@@ -331,6 +331,7 @@ public:
 
     LLVM_READNONE bool mayHaveNonLinearIO(const size_t kernel) const;
 
+    LLVM_READNONE bool isKernelStatefree(const size_t kernel) const;
 
 private:
 
@@ -661,6 +662,94 @@ bool PipelineCommonGraphFunctions::mayHaveNonLinearIO(const size_t kernel) const
         }
     }
     return false;
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isCurrentKernelStatefree
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCommonGraphFunctions::isKernelStatefree(const size_t kernel) const {
+
+    const Kernel * const kernelObj = getKernel(kernel);
+
+    assert (kernelObj->isGenerated());
+
+    bool isMarkedStateFree = false;
+
+    for (const Attribute & attr : kernelObj->getAttributes()) {
+        switch (attr.getKind()) {
+            case AttrId::MayFatallyTerminate:
+            case AttrId::CanTerminateEarly:
+            case AttrId::MustExplicitlyTerminate:
+            case AttrId::InternallySynchronized:
+            case AttrId::SideEffecting:
+            case AttrId::Family:
+                return false;
+            case AttrId::Statefree:
+                isMarkedStateFree = true;
+            default: break;
+        }
+    }
+
+    if (kernelObj->hasFamilyName()) {
+        return false;
+    }
+
+    for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraphRef))) {
+        const BufferPort & p = mBufferGraphRef[e];
+        const Binding & b = p.Binding;
+        const ProcessingRate & r = b.getRate();
+        switch (r.getKind()) {
+            case ProcessingRate::KindId::Fixed:
+            case ProcessingRate::KindId::PartialSum:
+            case ProcessingRate::KindId::Greedy:
+                break;
+            default:
+                return false;
+        }
+
+        if (p.IsDeferred) {
+            return false;
+        }
+    }
+
+    for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraphRef))) {
+        const BufferPort & p = mBufferGraphRef[e];
+        const Binding & b = p.Binding;
+        const ProcessingRate & r = b.getRate();
+
+        switch (r.getKind()) {
+            case ProcessingRate::KindId::Fixed:
+                break;
+            case ProcessingRate::KindId::PartialSum:
+                // We permit a partial sum output rate if and only if the kernel
+                // was explicitly marked as statefree. Otherwise we cannot ensure
+                // that the portion of a buffer that demarcates two invocations
+                // will be correctly merged.
+                if (isMarkedStateFree) break;
+            default:
+                return false;
+        }
+
+        if (p.IsDeferred || p.LookBehind) {
+            return false;
+        }
+    }
+    if (LLVM_UNLIKELY(isMarkedStateFree)) {
+        return true;
+    }
+    if (in_degree(kernel, mBufferGraphRef) == 0) {
+        return false;
+    }
+
+    StructType * const st = kernelObj->getSharedStateType();
+    if (st == nullptr) {
+        assert (kernelObj->getNumOfScalarInputs() == 0);
+        return true;
+    }
+    assert (st->getStructNumElements() >= kernelObj->getNumOfScalarInputs());
+    return st->getStructNumElements() == kernelObj->getNumOfScalarInputs();
+
 }
 
 }

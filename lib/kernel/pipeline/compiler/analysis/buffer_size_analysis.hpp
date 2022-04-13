@@ -288,6 +288,14 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoshiro256 & rng) {
 
         IntervalGraph C(count); // co-used interval graph
 
+        #ifdef PREVENT_THREAD_LOCAL_BUFFERS_FROM_SHARING_MEMORY
+        for (unsigned i = 1; i < count; ++i) {
+            for (unsigned j = 0; j < i; ++j) {
+                add_edge(j, i, C);
+            }
+        }
+        #else
+
         flat_set<unsigned> coused;
 
         for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
@@ -330,6 +338,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, xoshiro256 & rng) {
             }
             coused.clear();
         }
+        #endif
 
         BufferLayoutOptimizer BA(count, std::move(I), std::move(C), weight, rng);
         BA.runGA();
