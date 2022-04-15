@@ -137,7 +137,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
-    const auto isStateless = isCurrentKernelStatefree();
+    const auto isStateless = isKernelStateFree(kernelId);
     if (isStateless) {
         mIsStatelessKernel.set(kernelId);
     }
@@ -160,26 +160,22 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, br.Port);
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
-            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
-        }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (isStateless) {
-            assert (!br.IsDeferred);
-            mTarget->addInternalScalar(sizeTy, prefix + INTERNAL_STATELESS_ITEM_COUNT_SUFFIX, groupId);
+        if (LLVM_UNLIKELY(isStateless)) {
+            mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
+        } else if (LLVM_UNLIKELY(br.IsDeferred)) {
+            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, br.Port);
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
-            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
-        }
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (isStateless) {
-            assert (!br.IsDeferred);
-            mTarget->addInternalScalar(sizeTy, prefix + INTERNAL_STATELESS_ITEM_COUNT_SUFFIX, groupId);
+        if (LLVM_UNLIKELY(isStateless)) {
+            mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
+        } else if (LLVM_UNLIKELY(br.IsDeferred)) {
+            mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
 

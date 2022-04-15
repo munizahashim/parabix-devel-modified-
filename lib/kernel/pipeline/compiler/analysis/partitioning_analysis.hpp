@@ -644,11 +644,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             bool demarcateOutputs = (kernelObj == mPipelineKernel);
             bool useNewRateId = false;
             if (kernelObj != mPipelineKernel) {
-                // TODO: an internally synchronzied kernel with fixed rate I/O can be contained within a partition
-                // but cannot be the root of a non-isolated partition. To permit them to be roots, they'd need
-                // some way of informing the pipeline as to how many strides they executed or the pipeline
-                // would need to know to calculate it from its outputs. Rather than handling this complication,
-                // for now we simply prevent this case.
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
                         case AttrId::IsolateOnHybridThread:
@@ -656,6 +651,11 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                                 break;
                             }
                         case AttrId::InternallySynchronized:
+                            // although in some cases, an internally synchronized kernel does not need to be
+                            // isolated to its own partition, we must guarantee that the kernel does not
+                            // require multiple invocations to execute any full segment even in the case of
+                            // a final partial block. To avoid this complication for now, we always isolate
+                            // these kernels.
                             useNewRateId = true;
                         case AttrId::CanTerminateEarly:
                         case AttrId::MayFatallyTerminate:

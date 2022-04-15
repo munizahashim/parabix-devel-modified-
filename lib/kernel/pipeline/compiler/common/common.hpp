@@ -331,7 +331,7 @@ public:
 
     LLVM_READNONE bool mayHaveNonLinearIO(const size_t kernel) const;
 
-    LLVM_READNONE bool isKernelStatefree(const size_t kernel) const;
+    LLVM_READNONE bool isKernelStateFree(const size_t kernel) const;
 
 private:
 
@@ -664,17 +664,18 @@ bool PipelineCommonGraphFunctions::mayHaveNonLinearIO(const size_t kernel) const
     return false;
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isCurrentKernelStatefree
+ * @brief isKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCommonGraphFunctions::isKernelStatefree(const size_t kernel) const {
+bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const {
 
     const Kernel * const kernelObj = getKernel(kernel);
 
     assert (kernelObj->isGenerated());
 
-    bool isMarkedStateFree = false;
+    bool isExplicitlyMarkedAsStateFree = false;
+    bool hasOverridableAttribute = false;
+    bool hasForbiddenAttribute = false;
 
     for (const Attribute & attr : kernelObj->getAttributes()) {
         switch (attr.getKind()) {
@@ -682,16 +683,19 @@ bool PipelineCommonGraphFunctions::isKernelStatefree(const size_t kernel) const 
             case AttrId::CanTerminateEarly:
             case AttrId::MustExplicitlyTerminate:
             case AttrId::InternallySynchronized:
+                hasForbiddenAttribute = true;
+                break;
             case AttrId::SideEffecting:
-            case AttrId::Family:
-                return false;
+                hasOverridableAttribute = true;
+                break;
             case AttrId::Statefree:
-                isMarkedStateFree = true;
+                isExplicitlyMarkedAsStateFree = true;
+                break;
             default: break;
         }
     }
 
-    if (kernelObj->hasFamilyName()) {
+    if (hasForbiddenAttribute || kernelObj->hasFamilyName()) {
         return false;
     }
 
@@ -726,7 +730,7 @@ bool PipelineCommonGraphFunctions::isKernelStatefree(const size_t kernel) const 
                 // was explicitly marked as statefree. Otherwise we cannot ensure
                 // that the portion of a buffer that demarcates two invocations
                 // will be correctly merged.
-                if (isMarkedStateFree) break;
+                if (isExplicitlyMarkedAsStateFree) break;
             default:
                 return false;
         }
@@ -735,13 +739,12 @@ bool PipelineCommonGraphFunctions::isKernelStatefree(const size_t kernel) const 
             return false;
         }
     }
-    if (LLVM_UNLIKELY(isMarkedStateFree)) {
+    if (LLVM_UNLIKELY(isExplicitlyMarkedAsStateFree)) {
         return true;
     }
-    if (in_degree(kernel, mBufferGraphRef) == 0) {
+    if (LLVM_UNLIKELY(hasOverridableAttribute)) {
         return false;
     }
-
     StructType * const st = kernelObj->getSharedStateType();
     if (st == nullptr) {
         assert (kernelObj->getNumOfScalarInputs() == 0);

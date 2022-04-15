@@ -335,59 +335,59 @@ bool PipelineCompiler::haNoGreedyInput() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isCurrentKernelStatefree
+ * @brief isCurrentKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
-inline bool PipelineCompiler::isCurrentKernelStatefree() const {
-    return isKernelStatefree(mKernelId);
+inline bool PipelineCompiler::isCurrentKernelStateFree() const {
+    return PipelineCommonGraphFunctions::isKernelStateFree(mKernelId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBufferVertex
  ** ------------------------------------------------------------------------------------------------------------- */
 inline unsigned PipelineCompiler::getInputBufferVertex(const StreamSetPort inputPort) const {
-    return getInputBufferVertex(mKernelId, inputPort);
+    return PipelineCommonGraphFunctions::getInputBufferVertex(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
 inline StreamSetBuffer * PipelineCompiler::getInputBuffer(const StreamSetPort inputPort) const {
-    return getInputBuffer(mKernelId, inputPort);
+    return PipelineCommonGraphFunctions::getInputBuffer(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBinding
  ** ------------------------------------------------------------------------------------------------------------- */
 inline const Binding & PipelineCompiler::getInputBinding(const StreamSetPort inputPort) const {
-    return getInputBinding(mKernelId, inputPort);
+    return PipelineCommonGraphFunctions::getInputBinding(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBufferVertex
  ** ------------------------------------------------------------------------------------------------------------- */
 inline unsigned PipelineCompiler::getOutputBufferVertex(const StreamSetPort outputPort) const {
-    return getOutputBufferVertex(mKernelId, outputPort);
+    return PipelineCommonGraphFunctions::getOutputBufferVertex(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBinding
  ** ------------------------------------------------------------------------------------------------------------- */
 inline const Binding & PipelineCompiler::getOutputBinding(const StreamSetPort outputPort) const {
-    return getOutputBinding(mKernelId, outputPort);
+    return PipelineCommonGraphFunctions::getOutputBinding(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
 inline StreamSetBuffer * PipelineCompiler::getOutputBuffer(const StreamSetPort outputPort) const {
-    return getOutputBuffer(mKernelId, outputPort);
+    return PipelineCommonGraphFunctions::getOutputBuffer(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getBinding
  ** ------------------------------------------------------------------------------------------------------------- */
 inline const Binding & PipelineCompiler::getBinding(const StreamSetPort port) const {
-    return getBinding(mKernelId, port);
+    return PipelineCommonGraphFunctions::getBinding(mKernelId, port);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -415,6 +415,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mNumOfTruncatedInputBuffers = 0;
 
     mExecuteStridesIndividually = false;
+    mCurrentKernelIsStateFree = false;
     mUsePreAndPostInvocationSynchronizationLocks = false;
 
     mHasMoreInput = nullptr;

@@ -93,37 +93,34 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
-    mUsePreAndPostInvocationSynchronizationLocks = mIsStatelessKernel.test(mKernelId);
-    assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStatefree());
+    mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
+    mUsePreAndPostInvocationSynchronizationLocks = mKernelIsInternallySynchronized || mCurrentKernelIsStateFree;
+    assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     identifyPipelineInputs(mKernelId);
 
-    mMayLoopToEntry = mExecuteStridesIndividually;
-
-    bool mayHaveInsufficientIO = false;
+    mIsBounded = isBounded();
+    mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
+    mCheckInputChannels = false;
+    for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[input];
+        if (port.CanModifySegmentLength) {
+            mCheckInputChannels = true;
+            break;
+        }
+    }
+    bool mayHaveInsufficientIO = mCheckInputChannels;
+    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[output];
+        if (port.CanModifySegmentLength) {
+            mayHaveInsufficientIO = true;
+            break;
+        }
+    }
 
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        mIsBounded = false;
-        mHasExplicitFinalPartialStride = false;
-        mCheckInputChannels = mExecuteStridesIndividually;
+        mMayLoopToEntry = false;
     } else {
-        mIsBounded = isBounded();
-        mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
-        mCheckInputChannels = false;
-        for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-            const BufferPort & port = mBufferGraph[input];
-            if (port.CanModifySegmentLength) {
-                mCheckInputChannels = true;
-                break;
-            }
-        }
-        mayHaveInsufficientIO = mCheckInputChannels;
-        for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const BufferPort & port = mBufferGraph[output];
-            if (port.CanModifySegmentLength) {
-                mayHaveInsufficientIO = true;
-                break;
-            }
-        }
+        mMayLoopToEntry = mExecuteStridesIndividually;
         if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
             mMayLoopToEntry = true;
         }
@@ -131,7 +128,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
             mMayLoopToEntry = true;
         }
     }
-
     mNextPartitionEntryPoint = getPartitionExitPoint(b);
     assert (mNextPartitionEntryPoint);
 
@@ -160,10 +156,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     mKernelLoopEntry = b->CreateBasicBlock(prefix + "_loopEntry", mNextPartitionEntryPoint);
-    mKernelCheckOutputSpace = nullptr;
-    if (!mKernelIsInternallySynchronized) {
-        mKernelCheckOutputSpace = b->CreateBasicBlock(prefix + "_checkOutputSpace", mNextPartitionEntryPoint);
-    }
+    mKernelCheckOutputSpace = b->CreateBasicBlock(prefix + "_checkOutputSpace", mNextPartitionEntryPoint);
     mKernelLoopCall = b->CreateBasicBlock(prefix + "_executeKernel", mNextPartitionEntryPoint);
     mKernelCompletionCheck = b->CreateBasicBlock(prefix + "_normalCompletionCheck", mNextPartitionEntryPoint);
     if (mayHaveInsufficientIO) {
@@ -219,9 +212,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     // Set up some PHI nodes early to simplify accumulating their incoming values.
     initializeKernelLoopEntryPhis(b);
-    if (!mKernelIsInternallySynchronized) {
-        initializeKernelCheckOutputSpacePhis(b);
-    }
+    initializeKernelCheckOutputSpacePhis(b);
     if (mIsPartitionRoot) {
         initializeJumpToNextUsefulPartitionPhis(b);
     }
@@ -237,13 +228,8 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     b->SetInsertPoint(mKernelLoopEntry);
-    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        mUpdatedNumOfStrides = mMaximumNumOfStrides;
-        mIsFinalInvocation = checkIfInputIsExhausted(b, InputExhaustionReturnType::Disjunction);
-    } else {
-        determineNumOfLinearStrides(b);
-        mIsFinalInvocation = mIsFinalInvocationPhi;
-    }
+    determineNumOfLinearStrides(b);
+    mIsFinalInvocation = mIsFinalInvocationPhi;
 
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
@@ -432,14 +418,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
         b->SetInsertPoint(isFinalCheck);
     }
 
-    Value * terminationSignal = nullptr;
-    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
-        Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
-        terminationSignal = b->CreateSelect(mIsFinalInvocation, completed, unterminated);
-    } else {
-        terminationSignal = mIsFinalInvocationPhi;
-    }
+    Value * terminationSignal = mIsFinalInvocationPhi;
 
     assert (terminationSignal);
 

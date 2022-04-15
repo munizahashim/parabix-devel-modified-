@@ -89,7 +89,7 @@ const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
 const static std::string ITEM_COUNT_SUFFIX = ".IN";
-const static std::string INTERNAL_STATELESS_ITEM_COUNT_SUFFIX = ".ISN";
+const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
@@ -539,7 +539,7 @@ public:
     bool hasAtLeastOneNonGreedyInput() const;
     bool haNoGreedyInput() const;
 
-    bool isCurrentKernelStatefree() const;
+    bool isCurrentKernelStateFree() const;
 
 protected:
 
@@ -721,6 +721,7 @@ protected:
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
+    bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mUsePreAndPostInvocationSynchronizationLocks = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;

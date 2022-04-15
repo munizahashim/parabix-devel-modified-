@@ -100,21 +100,6 @@ bool Kernel::hasFixedRateInput() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isGreedy
- ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::isGreedy() const {
-    const auto n = getNumOfStreamInputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & input = getInputStreamSetBinding(i);
-        const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(!rate.isGreedy())) {
-            return false;
-        }
-    }
-    return (n > 0);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief canSetTerminateSignal
  ** ------------------------------------------------------------------------------------------------------------ */
 bool Kernel::canSetTerminateSignal() const {
@@ -674,32 +659,18 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
 
     std::vector<Type *> fields;
     fields.reserve(4 + 3 * (n + m));
-
-    const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
-    const auto greedy = isGreedy();
-
     if (LLVM_LIKELY(isStateful())) {
         fields.push_back(getSharedStateType()->getPointerTo());  // handle
     }
     if (LLVM_UNLIKELY(hasThreadLocal())) {
         fields.push_back(getThreadLocalStateType()->getPointerTo());  // handle
     }
-
-    // NOTE: although we could pass fixed rate item counts by numOfStrides + fixedRateFactor,
-    // that would require the outer pipeline to actually reason about the current state of
-    // this kernel. We want to avoid that and simply treat invoking an internally synchronized
-    // kernel as a "function call" and allow this kernel to update its own internal state.
-
-    if (LLVM_LIKELY(internallySynchronized || greedy)) {
-        if (internallySynchronized) {
-            fields.push_back(sizeTy); // external SegNo
-        }
-        fields.push_back(b->getInt1Ty()); // isFinal
-    } else {
-        fields.push_back(sizeTy); // numOfStrides
-        if (hasFixedRateInput()) {
-            fields.push_back(sizeTy); // fixed rate factor
-        }
+    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+        fields.push_back(sizeTy); // external SegNo
+    }
+    fields.push_back(sizeTy); // numOfStrides
+    if (LLVM_LIKELY(hasFixedRateInput())) {
+        fields.push_back(sizeTy); // fixed rate factor
     }
 
     PointerType * const voidPtrTy = b->getVoidPtrTy();
@@ -709,14 +680,14 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
         // virtual base input address
         fields.push_back(voidPtrTy);
         // processed input items
-        if (internallySynchronized || isAddressable(input)) {
+        if (isAddressable(input)) {
             fields.push_back(sizePtrTy); // updatable
         } else if (isCountable(input)) {
             fields.push_back(sizeTy); // constant
         }
 
         // accessible input items
-        if (internallySynchronized || requiresItemCount(input)) {
+        if (requiresItemCount(input)) {
             fields.push_back(sizeTy);
         }
     }
@@ -727,7 +698,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
         const Binding & output = mOutputStreamSets[i];
 
         const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
-        const auto isLocal = internallySynchronized || Kernel::isLocalBuffer(output, false);
+        const auto isLocal = Kernel::isLocalBuffer(output, false);
 
         // shared dynamic buffer handle or virtual base output address
         if (LLVM_UNLIKELY(isShared)) {
@@ -741,11 +712,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
         // produced output items
-        if (internallySynchronized || hasTerminationSignal || isAddressable(output)) {
-            // NOTE: if this kernel is an internally synchronized kernel, we pass a pointer in for
-            // it to update. However, it should not update a shared memory address as multiple threads
-            // could update it simultaneously, leading to degenerate (or potentially incorrect)
-            // behaviour in the outer kernel.
+        if (hasTerminationSignal || isAddressable(output)) {
             fields.push_back(sizePtrTy); // updatable
         } else if (isCountable(output)) {
             fields.push_back(sizeTy); // constant
@@ -802,27 +769,21 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("threadLocal");
         }
-        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
-        const auto greedy = isGreedy();
-        if (LLVM_UNLIKELY(internallySynchronized || greedy)) {
-            if (internallySynchronized) {
-                setNextArgName("segNo");
-            }
-            setNextArgName("isFinal");
-        } else {
-            setNextArgName("numOfStrides");
-            if (hasFixedRateInput()) {
-                setNextArgName("fixedRateFactor");
-            }
+        if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+            setNextArgName("segNo");
+        }
+        setNextArgName("numOfStrides");
+        if (hasFixedRateInput()) {
+            setNextArgName("fixedRateFactor");
         }
 
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {
             const Binding & input = mInputStreamSets[i];
             setNextArgName(input.getName());
-            if (LLVM_LIKELY(internallySynchronized || isAddressable(input) || isCountable(input))) {
+            if (LLVM_LIKELY(isAddressable(input) || isCountable(input))) {
                 setNextArgName(input.getName() + "_processed");
             }
-            if (internallySynchronized || requiresItemCount(input)) {
+            if (requiresItemCount(input)) {
                 setNextArgName(input.getName() + "_accessible");
             }
         }
@@ -832,11 +793,10 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         for (unsigned i = 0; i < mOutputStreamSets.size(); ++i) {
             const Binding & output = mOutputStreamSets[i];
             setNextArgName(output.getName());
-            if (LLVM_LIKELY(internallySynchronized || hasTerminationSignal || isAddressable(output) || isCountable(output))) {
+            if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            const auto isLocal = internallySynchronized || isLocalBuffer(output);
-            if (LLVM_UNLIKELY(isLocal)) {
+            if (LLVM_UNLIKELY(isLocalBuffer(output) || output.hasAttribute(AttrId::SharedManagedBuffer))) {
                 setNextArgName(output.getName() + "_consumed");
             } else if (requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");

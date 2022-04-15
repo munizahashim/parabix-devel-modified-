@@ -335,7 +335,7 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
  * @brief readProcessedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
-    const auto & suffix = mUsePreAndPostInvocationSynchronizationLocks ? INTERNAL_STATELESS_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
+    const auto & suffix = mCurrentKernelIsStateFree ? STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto inputPort = br.Port;
@@ -357,7 +357,7 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
  * @brief readProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
-    const auto & suffix = mUsePreAndPostInvocationSynchronizationLocks ? INTERNAL_STATELESS_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
+    const auto & suffix = mCurrentKernelIsStateFree ? STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferPort & br = mBufferGraph[e];
@@ -397,16 +397,12 @@ void PipelineCompiler::setLocallyAvailableItemCount(BuilderRef /* b */, const St
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 
-    if (mKernelIsInternallySynchronized) {
-        return;
-    }
-
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort inputPort = br.Port;
 
         Value * ptr = nullptr;
-        if (mUsePreAndPostInvocationSynchronizationLocks) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
 
@@ -427,7 +423,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
-            assert (!mUsePreAndPostInvocationSynchronizationLocks);
+            assert (!mCurrentKernelIsStateFree);
             b->CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_processed(deferred) = %" PRIu64, mUpdatedProcessedDeferredPhi[inputPort]);
@@ -440,7 +436,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const StreamSetPort outputPort = br.Port;
 
         Value * ptr = nullptr;
-        if (mUsePreAndPostInvocationSynchronizationLocks) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
 
@@ -461,7 +457,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, updated);
         #endif
         if (br.IsDeferred) {
-            assert (!mUsePreAndPostInvocationSynchronizationLocks);
+            assert (!mCurrentKernelIsStateFree);
             b->CreateStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_produced(deferred) = %" PRIu64, mUpdatedProducedDeferredPhi[outputPort]);
@@ -477,12 +473,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
-        Value * fullyProduced = nullptr;
-        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-            fullyProduced = mProducedItemCount[outputPort];
-        } else {
-            fullyProduced = mFullyProducedItemCount[outputPort];
-        }
+        Value * const fullyProduced = mFullyProducedItemCount[outputPort];
 
         #ifdef PRINT_DEBUG_MESSAGES
         SmallVector<char, 256> tmp;

@@ -371,7 +371,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
 
         assert (kernelObj);
 
-        const auto explicitFinalPartialStride = kernelObj->requiresExplicitPartialFinalStride();
         const auto nonLinear = mayHaveNonLinearIO(kernel);
 
         const auto borders = nonLinear ? '2' : '1';
@@ -391,28 +390,19 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             }
             out << "\\n";
         }
-        if (isKernelStatefree(kernel)) {
-            out << "<Statefree>\\n";
+        if (isKernelStateFree(kernel)) {
+            out << "<StateFree>\\n";
+        }
+        if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
+            out << "<InternallySynchronized>\\n";
         }
         if (kernelObj->canSetTerminateSignal()) {
             out << "<CanTerminateEarly>\\n";
         }
-#if 0
-        if (firstKernelInPartition) {
-            if (mTerminationCheck[currentPartition]) {
-                out << " T:";
-                if (mTerminationCheck[currentPartition] & TerminationCheckFlag::Soft) {
-                    out << 'S';
-                }
-                if (mTerminationCheck[currentPartition] & TerminationCheckFlag::Hard) {
-                    out << 'H';
-                }
-            }
-        }
-#endif
+
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
         #ifndef USE_SIMPLE_BUFFER_GRAPH
-        if (explicitFinalPartialStride) {
+        if (kernelObj->requiresExplicitPartialFinalStride()) {
             out << ",color=\"blue\"";
         }
         #endif

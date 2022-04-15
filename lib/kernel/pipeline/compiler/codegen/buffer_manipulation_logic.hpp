@@ -432,8 +432,6 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * produced = nullptr;
         if (LLVM_UNLIKELY(bn.OutputItemCountId != streamSet)) {
             produced = mLocallyAvailableItems[bn.OutputItemCountId];
-        } else if (mKernelIsInternallySynchronized) {
-            produced = mProducedItemCount[port];
         } else {
             produced = mProducedAtTermination[port];
         }

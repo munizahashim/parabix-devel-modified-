@@ -141,6 +141,8 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
     #endif
 }
 
+namespace  {
+
 LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
     switch (type) {
         case SYNC_LOCK_PRE_INVOCATION: return b->GetString("pre-invocation ");
@@ -149,6 +151,8 @@ LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
         default: llvm_unreachable("unknown sync lock?");
     }
     return nullptr;
+}
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

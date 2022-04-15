@@ -648,7 +648,7 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
                 avail = b->CreateAdd(avail, added);
             }
 
-            Value * const remaining = b->CreateSub(avail, processed);
+            Value * const remaining = b->CreateSub(avail, processed, "remaining");
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
 
@@ -857,12 +857,14 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         b->CreateFree(priorBuffer);
         b->CreateStore(ConstantPointerNull::get(cast<PointerType>(priorBuffer->getType())), priorBufferPtr);
 
-        // If this kernel is statefree, we have a potential problem here. Another thread may be actively
-        // executing this kernel and writing data but if we perform a copyback or expansion, we can't copy
-        // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
-        // we can proceed.
-
     }
+
+    // If this kernel is statefree, we have a potential problem here. Another thread may be actively
+    // executing this kernel and writing data but if we perform a copyback or expansion, we can't copy
+    // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
+    // we can proceed.
+
+    // TODO: can we determine which locks will always dominate another?
 
     if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
@@ -891,8 +893,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
         b->SetInsertPoint(expand);
     }
-
-
 
     // TODO: we need to calculate the total amount required assuming we process all input. This currently
     // has a flaw in which if the input buffers had been expanded sufficiently yet processing had been

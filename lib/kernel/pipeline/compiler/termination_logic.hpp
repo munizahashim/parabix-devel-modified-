@@ -209,11 +209,8 @@ void PipelineCompiler::writeTerminationSignal(BuilderRef b, Value * const signal
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(BuilderRef b) {
 
-    auto isCountableType = [this](const Value * const ptr, const Binding & binding) {
-        if (ptr == nullptr || mKernelIsInternallySynchronized) {
-            return false;
-        }
-        return isCountable(binding);
+    auto isCountableType = [](const Value * const ptr, const Binding & binding) {
+        return ptr ? isCountable(binding) : false;
     };
 
     const auto numOfOutputs = numOfStreamOutputs(mKernelId);
