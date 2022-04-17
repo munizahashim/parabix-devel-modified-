@@ -1,4 +1,4 @@
-Error parsing array at line 0 column 24 starting in:
+illegal keyword at line 0 column 19 starting in:
 
-, {"right": wrong}]
+wrong, {"right": wrong}]
 
