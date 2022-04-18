@@ -6,11 +6,17 @@
 #include <kernel/core/idisa_target.h>
 
 #include <toolchain/toolchain.h>
+#include <idisa/idisa_i64_builder.h>
+#ifdef PARABIX_ARM_TARGET
 #include <idisa/idisa_arm_builder.h>
+#endif
+#ifdef PARABIX_X86_TARGET
 #include <idisa/idisa_sse_builder.h>
 #include <idisa/idisa_avx_builder.h>
-#include <idisa/idisa_i64_builder.h>
+#endif
+#ifdef PARABIX_NVPTX_TARGET
 #include <idisa/idisa_nvptx_builder.h>
+#endif
 #include <llvm/IR/Module.h>
 #include <llvm/ADT/Triple.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -84,9 +90,15 @@ bool AVX512BW_available() {
 namespace IDISA {
 
 KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
+#ifdef PARABIX_ARM_TARGET
+    if (LLVM_LIKELY(codegen::BlockSize == 0)) {  // No BlockSize override: use processor SIMD width
+        codegen::BlockSize = 128;
+    }
+    if (ARM_available()) return new KernelBuilderImpl<IDISA_ARM_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+#endif
+#ifdef PARABIX_X86_TARGET
     const auto hostCPUFeatures = getHostCPUFeatures();
     if (LLVM_LIKELY(codegen::BlockSize == 0)) {  // No BlockSize override: use processor SIMD width
-
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
         if (hostCPUFeatures.hasAVX512F) codegen::BlockSize = 512;
         else
@@ -105,7 +117,6 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
         }
     }
 #endif
-    if (ARM_available()) return new KernelBuilderImpl<IDISA_ARM_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
     if (codegen::BlockSize >= 256) {
         // AVX2 or AVX builders can only be used for BlockSize multiples of 256
         if (hostCPUFeatures.hasAVX2) {
@@ -113,15 +124,16 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
         } else if (hostCPUFeatures.hasAVX) {
             return new KernelBuilderImpl<IDISA_AVX_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
         }
-    } else if (codegen::BlockSize == 64) {
-        return new KernelBuilderImpl<IDISA_I64_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
-    }
     if (SSSE3_available()) return new KernelBuilderImpl<IDISA_SSSE3_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
     return new KernelBuilderImpl<IDISA_SSE2_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
 }
-#ifdef CUDA_ENABLED
+#endif
+#ifdef PARABIX_NVPTX_TARGET
 KernelBuilder * GetIDISA_GPU_Builder(llvm::LLVMContext & C) {
     return new KernelBuilderImpl<IDISA_NVPTX20_Builder>(C, 64 * 64, 64);
 }
 #endif
+    codegen::BlockSize = 64;
+    return new KernelBuilderImpl<IDISA_I64_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+}
 }

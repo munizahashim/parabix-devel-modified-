@@ -3,6 +3,18 @@
 
 # module: idisa
 
+if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64") 
+parabix_add_module(
+NAME
+    idisa
+SRC
+    idisa_builder.cpp
+    idisa_i64_builder.cpp
+    idisa_arm_builder.cpp
+DEPS
+    codegen
+)
+else()
 parabix_add_module(
 NAME
     idisa
@@ -12,7 +24,7 @@ SRC
     idisa_i64_builder.cpp
     # idisa_nvptx_builder.cpp
     idisa_sse_builder.cpp
-    idisa_arm_builder.cpp
 DEPS
     codegen
 )
+endif()
