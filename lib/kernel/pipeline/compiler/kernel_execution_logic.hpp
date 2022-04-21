@@ -34,9 +34,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
 
-        if (LLVM_LIKELY(mCurrentKernelIsStateFree)) {
-            readAndUpdateInternalProcessedAndProducedItemCounts(b);
-        }
+        readAndUpdateInternalProcessedAndProducedItemCounts(b);
 
         BasicBlock * resumeKernelExecution = nullptr;
 
@@ -162,7 +160,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             argTy->print(out);
             out << " but got ";
             arg->getType()->print(out);
-            throw std::runtime_error(out.str().str());
+            report_fatal_error(out.str().str());
         }
         #endif
         args.push_back(arg);
@@ -211,6 +209,17 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
     }
     assert (mKernelThreadLocalHandle == nullptr || !mKernelThreadLocalHandle->getType()->isEmptyTy());
     if (LLVM_UNLIKELY(mKernelThreadLocalHandle)) {
+        assert (mKernelThreadLocalHandle->getType()->getPointerElementType() == mKernel->getThreadLocalStateType());
+        if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
+            ConstantInt * i32_ZERO = b->getInt32(0);
+            FixedArray<Value *, 3> offset;
+            offset[0] = i32_ZERO;
+            offset[1] = i32_ZERO;
+            offset[2] = i32_ZERO;
+            Value * const branchTypePtr = b->CreateGEP(mKernelThreadLocalHandle, offset);
+            assert (branchTypePtr->getType()->getPointerElementType() == mOptimizationBranchSelectedBranch->getType());
+            b->CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
+        }
         addNextArg(mKernelThreadLocalHandle);
     }
     if (mKernelIsInternallySynchronized) {
@@ -228,9 +237,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         const BufferPort & rt = mBufferGraph[port];
 
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
-
-            const auto streamSet = source(port, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
 
             Value * processed = nullptr;
             if (rt.IsDeferred) {
@@ -275,11 +281,13 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         Value * produced = mAlreadyProducedPhi[rt.Port];
 
         if (LLVM_UNLIKELY(rt.IsShared)) {
+            b->CreateAssert(buffer->getHandle(), "handle?");
             addNextArg(b->CreatePointerCast(buffer->getHandle(), voidPtrTy));
         } else if (LLVM_UNLIKELY(rt.IsManaged)) {
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = addVirtualBaseAddressArg(buffer);
         } else {
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal, bn.isNonThreadLocal(), true);
+            b->CreateAssert(vba, "vba?");
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 
@@ -466,12 +474,6 @@ void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(Build
             debugPrint(b, prefix + "_internal_processed = %" PRIu64, processed);
             #endif
             mProcessedItemCount[inputPort] = processed;
-        } else {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << "Kernel " << mKernel->getName() << ":" << input.getName()
-                << " has an internal " << "input" << " rate that is not properly handled by the PipelineKernel";
-            report_fatal_error(out.str());
         }
     }
 
@@ -488,12 +490,6 @@ void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(Build
             debugPrint(b, prefix + "_internal_produced = %" PRIu64, produced);
             #endif
             mProducedItemCount[outputPort] = produced;
-        } else {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << "Kernel " << mKernel->getName() << ":" << output.getName()
-                << " has an internal " << "output" << " rate that is not properly handled by the PipelineKernel";
-            report_fatal_error(out.str());
         }
     }
 

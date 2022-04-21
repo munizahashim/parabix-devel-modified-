@@ -258,9 +258,6 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
         if (bn.isUnowned()) {
             out << 'U';
         }
-        if (bn.isExternal()) {
-            out << 'P';
-        }
         if (bn.IsLinear) {
             out << 'L';
         }

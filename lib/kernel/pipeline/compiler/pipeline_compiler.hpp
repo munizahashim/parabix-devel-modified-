@@ -3,6 +3,7 @@
 
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/core/kernel_compiler.h>
+#include <kernel/pipeline/optimizationbranch.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -85,6 +86,8 @@ const static std::array<std::string, 3> LOGICAL_SEGMENT_SUFFIX = { ".LSN", ".LSN
 
 const static std::string DEBUG_FD = ".DFd";
 
+const static std::array<std::string, 2> OPT_BR_INFIX = { ".0", ".1" };
+
 const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
@@ -93,6 +96,8 @@ const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
+
+
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
@@ -270,6 +275,7 @@ public:
 
     void writeKernelCall(BuilderRef b);
     ArgVec buildKernelCallArgumentList(BuilderRef b);
+    ArgVec buildKernelCallArgumentList(BuilderRef b, const Kernel * const kernelObj);
     void updateProcessedAndProducedItemCounts(BuilderRef b);
     void readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b);
     void readReturnedOutputVirtualBaseAddresses(BuilderRef b) const;
@@ -367,7 +373,7 @@ public:
 
 // buffer management codegen functions
 
-    void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index);
+    void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index, const unsigned groupId);
     void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
     void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
     void releaseOwnedBuffers(BuilderRef b, const bool nonLocal);
@@ -434,7 +440,6 @@ public:
 
     bool isBounded() const;
     bool requiresExplicitFinalStride() const ;
-    bool mayLoopBackToEntry() const;
     void identifyPipelineInputs(const unsigned kernelId);
     void identifyLocalPortIds(const unsigned kernelId);
     bool hasExternalIO(const size_t kernel) const;
@@ -455,13 +460,19 @@ public:
 
 // family functions
 
-    void addFamilyKernelProperties(BuilderRef b, const unsigned index) const;
+    void addFamilyKernelProperties(BuilderRef b, const unsigned kernelId, const unsigned groupId) const;
 
     void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const override;
 
 // thread local functions
 
     Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
+
+// optimization branch functions
+    void initializeOptimizationBranch();
+    bool isEitherOptimizationBranchKernelInternallySynchronized() const;
+    Value * checkOptimizationBranchSpanLength(BuilderRef b, Value * const numOfLinearStrides);
+    void writeOptimizationBranchKernelCall(BuilderRef b);
 
 // papi instrumentation functions
 #ifdef ENABLE_PAPI
@@ -497,7 +508,7 @@ public:
     Value * getFamilyFunctionFromKernelState(BuilderRef b, Type * const type, const std::string &suffix) const;
     Value * callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const;
     Value * getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
-    Value * callKernelInitializeThreadLocalFunction(BuilderRef b, Value * handle) const;
+    void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
     Value * getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
     Value * getKernelDoSegmentFunction(BuilderRef b) const;
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
@@ -534,10 +545,9 @@ public:
 
     void clearInternalStateForCurrentKernel();
     void initializeKernelAssertions(BuilderRef b);
-    void verifyBufferRelationships() const;
+  //  void verifyBufferRelationships() const;
 
     bool hasAtLeastOneNonGreedyInput() const;
-    bool haNoGreedyInput() const;
 
     bool isCurrentKernelStateFree() const;
 
@@ -678,6 +688,10 @@ protected:
     PartitionPhiNodeTable                       mPartitionTerminationSignalPhi;
     FixedVector<PHINode *>                      mPartitionPipelineProgressPhi;
 
+    // optimization branch
+    PHINode *                                   mOptimizationBranchScanStatePhi = nullptr;
+    PHINode *                                   mOptimizationBranchSelectedBranch = nullptr;
+
     // kernel state
     Value *                                     mInitialTerminationSignal = nullptr;
     Value *                                     mInitiallyTerminated = nullptr;
@@ -703,11 +717,8 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
-
     std::array<Value *, 2>                      mAnyClosed;
-
     BitVector                                   mHasPipelineInput;
-
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
     Value *                                     mBranchToLoopExit = nullptr;
@@ -718,6 +729,7 @@ protected:
     bool                                        mKernelCanTerminateEarly = false;
     bool                                        mHasExplicitFinalPartialStride = false;
     bool                                        mIsPartitionRoot = false;
+    bool                                        mIsOptimizationBranch = false;
     bool                                        mMayLoopToEntry = false;
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
@@ -1006,6 +1018,7 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
 #include "synchronization_logic.hpp"
 #include "debug_messages.hpp"
 #include "codegen/buffer_manipulation_logic.hpp"
+#include "codegen/optimization_branch_logic.hpp"
 #include "pipeline_optimization_logic.hpp"
 #include "papi_instrumentation_logic.hpp"
 

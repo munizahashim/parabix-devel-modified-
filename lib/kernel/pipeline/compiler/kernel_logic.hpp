@@ -21,7 +21,7 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     }
     mKernelThreadLocalHandle = nullptr;
     if (mKernel->hasThreadLocal() && allowThreadLocal) {
-        mKernelThreadLocalHandle = b->CreateLoad(getThreadLocalHandlePtr(b, mKernelId));
+        mKernelThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId);
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
@@ -165,9 +165,10 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
     const auto prefix = makeKernelName(kernelIndex);
     Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
     if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
-        PointerType * const localStateTy = kernel->getThreadLocalStateType()->getPointerTo();
-        handle = b->CreatePointerCast(handle, localStateTy->getPointerTo());
+        StructType * const localStateTy = kernel->getThreadLocalStateType();
+        handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
     }
+    assert (handle->getType()->isPointerTy());
     return handle;
 }
 
@@ -240,38 +241,6 @@ bool PipelineCompiler::requiresExplicitFinalStride() const {
     return false;
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief mayLoopBackToEntry
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::mayLoopBackToEntry() const {
-    assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.IsLinear) continue;
-        const BufferPort & br = mBufferGraph[e];
-        const Binding & binding = br.Binding;
-        const ProcessingRate & rate = binding.getRate();
-
-        // If the greedy rate does not have a positive lower bound,
-        // we cannot test whether we're finished.
-
-        // NOTE: having a greedy rate requires that all I/O for this
-        // kernel is linear. Thus this case should be reported as an
-        // error but is left with the check for now.
-
-        if (LLVM_UNLIKELY(rate.isGreedy())) {
-            if (rate.getLowerBound() == Rational{0, 1}) {
-                continue;
-            }
-        }
-
-        return true;
-    }
-    return false;
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyPipelineInputs
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -318,20 +287,6 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
         }
     }
     return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief haNoGreedyInput
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::haNoGreedyInput() const {
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & bp = mBufferGraph[e];
-        const Binding & binding = bp.Binding;
-        if (binding.getRate().isGreedy()) {
-            return false;
-        }
-    }
-    return true;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

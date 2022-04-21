@@ -52,10 +52,7 @@ const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
     if (LLVM_UNLIKELY(output.hasAttribute(AttrId::ManagedBuffer) || output.getRate().isUnknown())) {
         return true;
     }
-    if (LLVM_UNLIKELY(output.hasAttribute(AttrId::SharedManagedBuffer))) {
-        return includeShared;
-    }
-    return false;
+    return includeShared && output.hasAttribute(AttrId::SharedManagedBuffer);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -378,8 +375,6 @@ found_non_empty_type:
         }
 
     }
-//    mSharedStateType = nullIfEmpty(mSharedStateType);
-//    mThreadLocalStateType = nullIfEmpty(mThreadLocalStateType);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -484,10 +479,16 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
         func = m->getFunction(funcName);
         if (LLVM_LIKELY(func == nullptr)) {
 
-            SmallVector<Type *, 1> params;
+//            FixedArray<Type *, 2> params;
+//            PointerType * const voidPtrTy = b->getVoidPtrTy();
+//            params[0] = voidPtrTy;
+//            params[1] = voidPtrTy;
+
+            SmallVector<Type *, 2> params;
             if (LLVM_LIKELY(isStateful())) {
                 params.push_back(getSharedStateType()->getPointerTo());
             }
+            params.push_back(getThreadLocalStateType()->getPointerTo());
             PointerType * const retTy = getThreadLocalStateType()->getPointerTo();
             FunctionType * const funcType = FunctionType::get(retTy, params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
@@ -504,6 +505,8 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
                 arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
                 setNextArgName("shared");
             }
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+            setNextArgName("threadlocal");
             assert (arg == func->arg_end());
         }
         assert (func);
@@ -685,7 +688,6 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
         } else if (isCountable(input)) {
             fields.push_back(sizeTy); // constant
         }
-
         // accessible input items
         if (requiresItemCount(input)) {
             fields.push_back(sizeTy);
@@ -796,7 +798,7 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output) || output.hasAttribute(AttrId::SharedManagedBuffer))) {
+            if (LLVM_UNLIKELY(isLocalBuffer(output))) {
                 setNextArgName(output.getName() + "_consumed");
             } else if (requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");
@@ -1023,7 +1025,12 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     }
     Value * threadLocalHandle = nullptr;
     if (hasThreadLocal()) {
-        threadLocalHandle = initializeThreadLocalInstance(b, sharedHandle);
+        SmallVector<Value *, 2> args;
+        if (sharedHandle) {
+            args.push_back(sharedHandle);
+        }
+        args.push_back(ConstantPointerNull::get(getThreadLocalStateType()->getPointerTo()));
+        threadLocalHandle = initializeThreadLocalInstance(b, args);
         segmentArgs[suppliedArgCount++] = threadLocalHandle;
     }
     Value * const ONE = b->getSize(1);
@@ -1053,14 +1060,9 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         }
     }
 
-    #ifdef NDEBUG
-    const bool ea = true;
-    #else
-    const bool ea = codegen::DebugOptionIsSet(codegen::EnableAsserts);
-    #endif
-
     PHINode * successPhi = nullptr;
-    if (LLVM_UNLIKELY(ea)) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) ||
+                      codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
         BasicBlock * const handleCatch = b->CreateBasicBlock("");
         BasicBlock * const handleDeallocation = b->CreateBasicBlock("");
 
@@ -1143,17 +1145,12 @@ void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * Kernel::initializeThreadLocalInstance(BuilderRef b, Value * const handle) const {
+Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
     Value * instance = nullptr;
     if (hasThreadLocal()) {
+        assert (args.size() == (isStateful() ? 2 : 1));
         Function * const init = getInitializeThreadLocalFunction(b);
-        if (handle) {
-            FixedArray<Value *, 1> args;
-            args[0] = handle;
-            instance = b->CreateCall(init->getFunctionType(), init, args);
-        } else {
-            instance = b->CreateCall(init->getFunctionType(), init, {});
-        }
+        instance = b->CreateCall(init->getFunctionType(), init, args);
     }
     return instance;
 }

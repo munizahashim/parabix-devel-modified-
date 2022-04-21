@@ -82,21 +82,35 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), mKernelId) != ActiveKernels.end());
     assert (KernelOnHybridThread.test(mKernelId) == mCompilingHybridThread);
-
-
-
     clearInternalStateForCurrentKernel();
-
-
     checkForPartitionEntry(b);
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
-    mUsePreAndPostInvocationSynchronizationLocks = mKernelIsInternallySynchronized || mCurrentKernelIsStateFree;
+    if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
+        mUsePreAndPostInvocationSynchronizationLocks = true;
+    } else if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mIsOptimizationBranch)) {
+
+        // Internally synchronized doesn't necessarily require countable input if all
+        // I/O is addressable and the responsibility of the inner kernel.
+
+        bool hasAllCountableInput = true;
+        for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & port = mBufferGraph[input];
+            if (LLVM_UNLIKELY(!isCountable(port.Binding))) {
+                hasAllCountableInput = false;
+                break;
+            }
+        }
+        mUsePreAndPostInvocationSynchronizationLocks = hasAllCountableInput;
+    }
+
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     identifyPipelineInputs(mKernelId);
+
 
     mIsBounded = isBounded();
     mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
@@ -117,10 +131,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         }
     }
 
-    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-        mMayLoopToEntry = false;
-    } else {
-        mMayLoopToEntry = mExecuteStridesIndividually;
+    mMayLoopToEntry = mExecuteStridesIndividually || mIsOptimizationBranch;
+
+    if (LLVM_LIKELY(!mKernelIsInternallySynchronized)) {
         if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
             mMayLoopToEntry = true;
         }
@@ -387,28 +400,37 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
             mHasMoreInput = hasMoreInput(b);
         }
 
+        assert (mHasMoreInput);
+
         BasicBlock * const exitBlockAfterLoopAgainTest = b->GetInsertBlock();
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const auto port = mBufferGraph[e].Port;
+            assert (mProcessedItemCount[port]);
             mAlreadyProcessedPhi[port]->addIncoming(mProcessedItemCount[port], exitBlockAfterLoopAgainTest);
             if (mAlreadyProcessedDeferredPhi[port]) {
+                assert (mProcessedDeferredItemCount[port]);
                 mAlreadyProcessedDeferredPhi[port]->addIncoming(mProcessedDeferredItemCount[port], exitBlockAfterLoopAgainTest);
             }
         }
 
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto port = mBufferGraph[e].Port;
+            assert (mProducedItemCount[port]);
             mAlreadyProducedPhi[port]->addIncoming(mProducedItemCount[port], exitBlockAfterLoopAgainTest);
             if (mAlreadyProducedDeferredPhi[port]) {
+                assert (mProducedDeferredItemCount[port]);
                 mAlreadyProducedDeferredPhi[port]->addIncoming(mProducedDeferredItemCount[port], exitBlockAfterLoopAgainTest);
             }
         }
 
         mAlreadyProgressedPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
-        if (mMayLoopToEntry) {
-            mExecutedAtLeastOnceAtLoopEntryPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
-            mCurrentNumOfStridesAtLoopEntryPhi->addIncoming(mUpdatedNumOfStrides, exitBlockAfterLoopAgainTest);
+        mExecutedAtLeastOnceAtLoopEntryPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
+        mCurrentNumOfStridesAtLoopEntryPhi->addIncoming(mUpdatedNumOfStrides, exitBlockAfterLoopAgainTest);
+
+        if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
+            assert (mOptimizationBranchSelectedBranch);
+            mOptimizationBranchScanStatePhi->addIncoming(mOptimizationBranchSelectedBranch, exitBlockAfterLoopAgainTest);
         }
 
         const auto prefix = makeKernelName(mKernelId);
@@ -427,6 +449,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     // update KernelTerminated phi nodes
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
+        assert (mProducedItemCount[port]);
         mProducedAtTerminationPhi[port]->addIncoming(mProducedItemCount[port], exitBlock);
     }
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
@@ -518,6 +541,10 @@ inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
     } else {
         mExecutedAtLeastOnceAtLoopEntryPhi = nullptr;
         mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
+    }
+    if (mIsOptimizationBranch) {
+        mOptimizationBranchScanStatePhi = b->CreatePHI(boolTy, 2, prefix + "_optBrScanState");
+        mOptimizationBranchScanStatePhi->addIncoming(b->getFalse(), mKernelLoopStart);
     }
 
 }

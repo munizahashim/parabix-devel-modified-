@@ -17,8 +17,6 @@ using namespace llvm;
 using namespace boost;
 using namespace boost::container;
 
-#define PRINT_DEBUG_MESSAGES
-
 namespace kernel {
 
 using BindingRef = RefWrapper<Binding>;
@@ -35,17 +33,16 @@ struct RelationshipRef {
     RelationshipRef(const unsigned index, StringRef name, const kernel::Binding & binding) : Index(index), Name(name), Binding(binding) { }
 };
 
+const static std::string CONTROL_CODE = "C";
 const static std::string SHARED_PREFIX = "S";
 const static std::string THREAD_LOCAL_PREFIX = "T";
 
-const static std::string ALL_ZERO_EXTERNAL_SEGMENT_NUMBER = "AE";
-const static std::string NON_ZERO_EXTERNAL_SEGMENT_NUMBER = "NE";
+const static std::string EXTERNAL_SEGMENT_NUMBER = "E";
 
 const static std::string ALL_ZERO_INTERNAL_SEGMENT_NUMBER = "AI";
-const static std::string NON_ZERO_INTERNAL_SEGMENT_NUMBER = "NI";
 
-const static std::string SPAN_BUFFER = "SpanBuffer";
-const static std::string SPAN_CAPACITY = "SpanCapacity";
+const static std::string ALL_ZERO_INTERNAL_INFLIGHT_COUNT = "AC";
+const static std::string NON_ZERO_INTERNAL_INFLIGHT_COUNT = "NC";
 
 using RelationshipGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, RelationshipRef>;
 
@@ -116,17 +113,11 @@ private:
 
     const Binding & getOutputBinding(const Kernel * const kernel, const RelationshipType type, const unsigned i) const;
 
-    void generateStreamSetBranchMethod(BuilderRef b);
+    void executeBranch(BuilderRef b, const unsigned branchType);
 
-    void findBranchDemarcations(BuilderRef b);
+    Value * enterBranch(BuilderRef b, const unsigned branchType) const;
 
-    void executeBranches(BuilderRef b);
-
-    void executeBranch(BuilderRef b, const unsigned branchType, Value * const firstIndex, Value * const lastIndex, Value * noMore);
-
-    void enterBranch(BuilderRef b, const unsigned branchType, Value * const noMore) const;
-
-    void exitBranch(BuilderRef b, const unsigned branchType, Value * const noMore) const;
+    void exitBranch(BuilderRef b, const unsigned branchType) const;
 
     Value * calculateAccessibleOrWritableItems(BuilderRef b, const Kernel * const kernel, const Binding & binding, Value * const first, Value * const last, Value * const defaultValue) const;
 
@@ -145,30 +136,11 @@ private:
 
     const std::array<const Kernel *, 4> mBranches;
 
-//    const CompilerArray                 mBranchCompiler;
-
     Value *                             mFirstBranchPath = nullptr;
     PHINode *                           mBranchDemarcationArray = nullptr;
     Value *                             mBranchDemarcationCount = nullptr;
 
-    Value *                             mNumOfBranchStrides = nullptr;
-
-    std::array<Value *, 3>              mExternalSegmentNumber;
-    std::array<Value *, 3>              mInternalSegmentNumber;
-
     PHINode *                           mTerminatedPhi = nullptr;
-
-//    SmallVector<Value *, 16>            mBaseInputAddress;
-//    SmallVector<Value *, 16>            mBranchProcessedInputItemPtr;
-//    SmallVector<Value *, 16>            mBranchProcessedInputItems;
-//    SmallVector<Value *, 16>            mAccessibleInputItems;
-//    SmallVector<Value *, 16>            mPopCountRateArray;
-//    SmallVector<Value *, 16>            mNegatedPopCountRateArray;
-
-//    SmallVector<Value *, 16>            mBaseOutputAddress;
-//    SmallVector<Value *, 16>            mBranchProducedOutputItemPtr;
-//    SmallVector<Value *, 16>            mProducedOutputItems;
-//    SmallVector<Value *, 16>            mBranchWritableOutputItems;
 
     #ifdef PRINT_DEBUG_MESSAGES
     Value *                             mThreadId = nullptr;
@@ -331,9 +303,22 @@ RelationshipGraph OptimizationBranchCompiler::makeRelationshipGraph(const Relati
  * @brief generateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
+
+    // 0 or 1 value to allow the pipeline to tell this kernel what branch to take
+    mTarget->addThreadLocalScalar(b->getInt1Ty(), CONTROL_CODE);
+
+    IntegerType * const sizeTy = b->getSizeTy();
+
+    mTarget->addInternalScalar(sizeTy, EXTERNAL_SEGMENT_NUMBER, 0);
+
+    mTarget->addInternalScalar(sizeTy, ALL_ZERO_INTERNAL_SEGMENT_NUMBER, 0);
+
+    mTarget->addInternalScalar(sizeTy, ALL_ZERO_INTERNAL_INFLIGHT_COUNT, 1);
+
+    mTarget->addInternalScalar(sizeTy, NON_ZERO_INTERNAL_INFLIGHT_COUNT, 2);
+
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
-        const Kernel * const kernel = mBranches[i];
-        if (LLVM_UNLIKELY(kernel == nullptr)) continue;
+        const Kernel * const kernel = mBranches[i]; assert (kernel);
 
         if (LLVM_LIKELY(kernel->isStateful())) {
             Type * handlePtrType = nullptr;
@@ -342,7 +327,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
             } else {
                 handlePtrType = kernel->getSharedStateType()->getPointerTo();
             }
-            mTarget->addInternalScalar(handlePtrType, SHARED_PREFIX + std::to_string(i));
+            mTarget->addInternalScalar(handlePtrType, SHARED_PREFIX + std::to_string(i), i + 2);
         }
 
         if (kernel->hasThreadLocal()) {
@@ -440,9 +425,9 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
     const auto n = mTarget->getNumOfStreamOutputs();
     for (unsigned i = 0; i != n; ++i) {
         const Binding & output = mTarget->getOutputStreamSetBinding(i);
-        auto & buffer = mStreamSetOutputBuffers[i];
-        assert (buffer->getHandle());
         if (LLVM_LIKELY(Kernel::isLocalBuffer(output, false))) {
+            auto & buffer = mStreamSetOutputBuffers[i];
+            assert (buffer->getHandle());
             buffer->allocateBuffer(b, expectedNumOfStrides);
         }
     }
@@ -453,17 +438,20 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
-        const Kernel * const kernel = mBranches[i];
-        if (kernel && kernel->hasThreadLocal()) {
-            Value * const handle = kernel->initializeThreadLocalInstance(b, loadSharedHandle(b, i));
+        const Kernel * const kernel = mBranches[i]; assert (kernel);
+        if (kernel->hasThreadLocal()) {
+
+            SmallVector<Value *, 2> args;
+            Value * const shared = loadSharedHandle(b, i);
+            if (shared) {
+                args.push_back(shared);
+            }
+            args.push_back(ConstantPointerNull::get(kernel->getThreadLocalStateType()->getPointerTo()));
+
+            Value * const handle = kernel->initializeThreadLocalInstance(b, args);
             b->setScalarField(THREAD_LOCAL_PREFIX + std::to_string(i), handle);
         }
     }
-    Constant * const defaultSize = b->getSize(32);
-    Value * bufferPtr = b->getScalarFieldPtr(SPAN_BUFFER);
-    Value * capacityPtr = b->getScalarFieldPtr(SPAN_CAPACITY);
-    b->CreateStore(b->CreatePageAlignedMalloc(b->getSizeTy(), defaultSize), bufferPtr);
-    b->CreateStore(defaultSize, capacityPtr);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -508,11 +496,41 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
-    if (LLVM_LIKELY(isa<StreamSet>(mCondition))) {
-        generateStreamSetBranchMethod(b);
-    } else {
 
+
+    IntegerType * const sizeTy = b->getSizeTy();
+    Constant * const ZERO = b->getSize(0);
+    Constant * const ONE = b->getSize(1);
+
+    BasicBlock * const entry = b->GetInsertBlock();
+
+    Value * const selectedBranch = b->getScalarField(CONTROL_CODE);
+
+    BasicBlock * const optimizationBranch = b->CreateBasicBlock("optimizationBranch");
+    BasicBlock * const normalBranch = b->CreateBasicBlock("normalBranchInvoke");
+    BasicBlock * const exitLoop = b->CreateBasicBlock("exitLoop");
+    b->CreateCondBr(selectedBranch, normalBranch, optimizationBranch);
+
+    b->SetInsertPoint(exitLoop);
+    if (canSetTerminateSignal()) {
+        mTerminatedPhi = b->CreatePHI(b->getInt1Ty(), 2);
+    } else {
+        mTerminatedPhi = nullptr;
     }
+
+    b->SetInsertPoint(optimizationBranch);
+    executeBranch(b, ALL_ZERO_BRANCH);
+    b->CreateBr(exitLoop);
+
+    b->SetInsertPoint(normalBranch);
+    executeBranch(b, NON_ZERO_BRANCH);
+    b->CreateBr(exitLoop);
+
+    b->SetInsertPoint(exitLoop);
+    if (mTerminatedPhi) {
+        b->CreateStore(mTerminatedPhi, getTerminationSignalPtr());
+    }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -523,243 +541,9 @@ inline const RelationshipRef & getConditionRef(const RelationshipGraph & G) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief generateStreamSetBranchMethod
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void OptimizationBranchCompiler::generateStreamSetBranchMethod(BuilderRef b) {
-
-//    #ifdef PRINT_DEBUG_MESSAGES
-//    if (codegen::SegmentThreads > 1) {
-//        mThreadId = b->CreatePThreadSelf();
-//    }
-//    #endif
-
-    findBranchDemarcations(b);
-    // Two threads could be simultaneously calculating the spans and the later one
-    // may finish first. So first we lock here to ensure that the one that finishes
-    // first is first in the logical (i.e., single-threaded) sequence of branch calls.
-    executeBranches(b);
-}
-
-
-inline bool isConstantOne(const Value * const value) {
-    return (isa<ConstantInt>(value) && cast<ConstantInt>(value)->isOne());
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief findConditionDemarcations
- ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::findBranchDemarcations(BuilderRef b) {
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    IntegerType * const boolTy = b->getInt1Ty();
-
-    Constant * const ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-    UndefValue * const unknownState = UndefValue::get(boolTy);
-
-    Constant * const BLOCKS_PER_STRIDE = b->getSize(mTarget->getStride() / b->getBitBlockWidth());
-    VectorType * const bitBlockTy = b->getBitBlockType();
-
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const resizeSpan = b->CreateBasicBlock("resizeSpan");
-    BasicBlock * const summarizeDemarcations = b->CreateBasicBlock("summarizeDemarcations");
-    BasicBlock * const checkCondition = b->CreateBasicBlock("checkCondition");
-    BasicBlock * const addDemarcation = b->CreateBasicBlock("addDemarcation");
-    BasicBlock * const processStrides = b->CreateBasicBlock("processStrides");
-
-
-    const RelationshipRef & condRef = getConditionRef(mStreamSetGraph);
-    const StreamSetBuffer * const condBuffer = getInputStreamSetBuffer(condRef.Index);
-
-    Value * const numOfConditionStreams = condBuffer->getStreamSetCount(b);
-    Value * const numOfConditionBlocks = b->CreateMul(numOfConditionStreams, BLOCKS_PER_STRIDE);
-
-    // Store the base pointer to our condition stream prior to iterating through it incase
-    // one of the pipeline branches uses the stream internally and we update the processed
-    // item count.
-    Value * const basePtr = b->CreatePointerCast(b->getInputStreamBlockPtr(condRef.Name, ZERO, ZERO), bitBlockTy->getPointerTo());
-
-    Value * const spanCapacityPtr = b->getScalarFieldPtr(SPAN_CAPACITY);
-    Value * const spanCapacity = b->CreateLoad(spanCapacityPtr);
-    Value * const spanBufferPtr = b->getScalarFieldPtr(SPAN_BUFFER);
-    Value * const initialSpanBuffer = b->CreateLoad(spanBufferPtr);
-
-    Value * const accessible = getAccessibleInputItems(condRef.Name);
-    const Binding & binding = condRef.Binding;
-    const auto condRate = binding.getRate().getLowerBound() * mTarget->getStride();
-    Value * const numOfStrides = b->CreateUDivRational(accessible, condRate);
-    Value * const largeEnough = b->CreateICmpULT(numOfStrides, spanCapacity);
-    b->CreateLikelyCondBr(largeEnough, summarizeDemarcations, resizeSpan);
-
-    b->SetInsertPoint(resizeSpan);
-    Value * const newSpanCapacity = b->CreateRoundUp(numOfStrides, spanCapacity);
-    b->CreateStore(newSpanCapacity, spanCapacityPtr);
-    Value * const newSpanBuffer = b->CreateRealloc(sizeTy, initialSpanBuffer, newSpanCapacity);
-    assert (newSpanBuffer->getType() == initialSpanBuffer->getType());
-    b->CreateStore(newSpanBuffer, spanBufferPtr);
-    b->CreateBr(summarizeDemarcations);
-
-    b->SetInsertPoint(summarizeDemarcations);
-    PHINode * const spanBuffer = b->CreatePHI(initialSpanBuffer->getType(), 4, "spanBuffer");
-    spanBuffer->addIncoming(initialSpanBuffer, entry);
-    spanBuffer->addIncoming(newSpanBuffer, resizeSpan);
-    mBranchDemarcationArray = spanBuffer;
-    PHINode * const spanIndex = b->CreatePHI(sizeTy, 4, "spanIndex");
-    spanIndex->addIncoming(ZERO, entry);
-    spanIndex->addIncoming(ZERO, resizeSpan);
-    PHINode * const strideIndex = b->CreatePHI(sizeTy, 4, "lastStride");
-    strideIndex->addIncoming(ZERO, entry);
-    strideIndex->addIncoming(ZERO, resizeSpan);
-    PHINode * const currentState = b->CreatePHI(boolTy, 4);
-    currentState->addIncoming(unknownState, entry);
-    currentState->addIncoming(unknownState, resizeSpan);
-
-    Value * condition = nullptr;
-    if (isConstantOne(numOfConditionBlocks)) {
-        condition = b->CreateBlockAlignedLoad(basePtr, strideIndex);
-        b->CreateBr(checkCondition);
-    } else { // OR together every condition block in this stride
-        BasicBlock * const combineCondition = b->CreateBasicBlock("combineCondition", addDemarcation);
-        b->CreateBr(combineCondition);
-
-        b->SetInsertPoint(combineCondition);
-        PHINode * const iteration = b->CreatePHI(sizeTy, 2);
-        iteration->addIncoming(ZERO, summarizeDemarcations);
-        PHINode * const accumulated = b->CreatePHI(bitBlockTy, 2);
-        accumulated->addIncoming(Constant::getNullValue(bitBlockTy), summarizeDemarcations);
-        Value * offset = b->CreateMul(strideIndex, BLOCKS_PER_STRIDE);
-        offset = b->CreateAdd(offset, iteration);
-        condition = b->CreateBlockAlignedLoad(basePtr, offset);
-        condition = b->CreateOr(condition, accumulated);
-        accumulated->addIncoming(condition, combineCondition);
-        Value * const nextIteration = b->CreateAdd(iteration, ONE);
-        Value * const more = b->CreateICmpNE(nextIteration, numOfConditionBlocks);
-        iteration->addIncoming(nextIteration, b->GetInsertBlock());
-        b->CreateCondBr(more, combineCondition, checkCondition);
-
-    }
-    b->SetInsertPoint(checkCondition);
-    // Check the merged value of our condition block(s); if it differs from
-    // the prior value or this is our last stride, then process the strides.
-    // Note, however, initially state is "indeterminate" so we silently
-    // ignore the first stride unless it is also our last.
-    Value * const nextState = b->bitblock_any(condition);
-    Value * const sameState = b->CreateICmpEQ(nextState, currentState);
-    Value * const firstStride = b->CreateICmpEQ(strideIndex, ZERO);
-    Value * const attemptToExtendSpan = b->CreateOr(sameState, firstStride);
-    Value * const nextStrideIndex = b->CreateAdd(strideIndex, ONE);
-    Value * const notLastStride = b->CreateICmpULT(nextStrideIndex, numOfStrides);
-    Value * const checkNextStride = b->CreateAnd(attemptToExtendSpan, notLastStride);
-
-    BasicBlock * const checkConditionExit = b->GetInsertBlock();
-    spanBuffer->addIncoming(spanBuffer, checkConditionExit);
-    spanIndex->addIncoming(spanIndex, checkConditionExit);
-    strideIndex->addIncoming(nextStrideIndex, checkConditionExit);
-    currentState->addIncoming(nextState, checkConditionExit);
-    b->CreateLikelyCondBr(checkNextStride, summarizeDemarcations, addDemarcation);
-
-    // Add the demarcation
-    b->SetInsertPoint(addDemarcation);
-    b->CreateStore(strideIndex, b->CreateGEP(spanBuffer, spanIndex));
-    Value * const nextSpanIndex = b->CreateAdd(spanIndex, ONE);
-    spanBuffer->addIncoming(spanBuffer, addDemarcation);
-    spanIndex->addIncoming(nextSpanIndex, addDemarcation);
-    strideIndex->addIncoming(nextStrideIndex, addDemarcation);
-    currentState->addIncoming(nextState, addDemarcation);
-    b->CreateLikelyCondBr(notLastStride, summarizeDemarcations, processStrides);
-
-    b->SetInsertPoint(processStrides);
-    // State is initially "indeterminate" during our first stride; however if (and only if)
-    // the first stride is also the last stride, then we'll end up adding a demarcation rather
-    // than inspecting the second stride to see if we can continue the span.
-    Value * const finalSelectedBranch = b->CreateSelect(firstStride, nextState, currentState);
-    // We want to calculate the first branch choice from the last. Since we know we've added
-    // spanIndex+1 path changes, we can "rewind" the state by XOR'ing the final state
-    // spanIndex times, which is equivalent to:
-    Value * const branchChanges = b->CreateTrunc(b->CreateAnd(spanIndex, ONE), boolTy);
-    mFirstBranchPath = b->CreateXor(finalSelectedBranch, branchChanges);
-    // When we reach the last (but not necessarily final) stride of this kernel,
-    // we will either "append" the final stride to the current run or add one
-    // additional demarcation based on whether we left the loop attempting
-    // to extend the span.
-    Value * finalSpanIndex = b->CreateSelect(attemptToExtendSpan, spanIndex, nextSpanIndex);
-    b->CreateStore(numOfStrides, b->CreateGEP(spanBuffer, finalSpanIndex));
-    mBranchDemarcationCount = b->CreateAdd(finalSpanIndex, ONE);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief generateStreamSetBranchMethod
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void OptimizationBranchCompiler::executeBranches(BuilderRef b) {
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    Constant * const ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-
-    mExternalSegmentNumber[ALL_ZERO_BRANCH] = b->getScalarFieldPtr(ALL_ZERO_EXTERNAL_SEGMENT_NUMBER);
-    mExternalSegmentNumber[NON_ZERO_BRANCH] = b->getScalarFieldPtr(NON_ZERO_EXTERNAL_SEGMENT_NUMBER);
-
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const allZeroBranch = b->CreateBasicBlock("allZeroBranch");
-    BasicBlock * const nonZeroBranch = b->CreateBasicBlock("nonZeroBranch");
-    BasicBlock * const exitLoop = b->CreateBasicBlock("exitLoop");
-    b->CreateCondBr(mFirstBranchPath, nonZeroBranch, allZeroBranch);
-
-    b->SetInsertPoint(exitLoop);
-    mTerminatedPhi = nullptr;
-    if (canSetTerminateSignal()) {
-        mTerminatedPhi = b->CreatePHI(b->getInt1Ty(), 2);
-    }
-    b->SetInsertPoint(allZeroBranch);
-    PHINode * const allZeroFirstIndex = b->CreatePHI(sizeTy, 2);
-    allZeroFirstIndex->addIncoming(ZERO, entry);
-    PHINode * const allZeroSpanIndex = b->CreatePHI(sizeTy, 2);
-    allZeroSpanIndex->addIncoming(ZERO, entry);
-    mInternalSegmentNumber[ALL_ZERO_BRANCH] = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_SEGMENT_NUMBER);
-    Value * const allZeroLastIndex = b->CreateLoad(b->CreateGEP(mBranchDemarcationArray, allZeroSpanIndex));
-    Value * const nextNonZeroSpanIndex = b->CreateAdd(allZeroSpanIndex, ONE);
-    Value * const allZeroNoMore = b->CreateICmpEQ(nextNonZeroSpanIndex, mBranchDemarcationCount);
-    executeBranch(b, ALL_ZERO_BRANCH, allZeroFirstIndex, allZeroLastIndex, allZeroNoMore);
-    BasicBlock * const allZeroBranchExit = b->GetInsertBlock();
-    b->CreateCondBr(allZeroNoMore, exitLoop, nonZeroBranch);
-
-    nonZeroBranch->moveAfter(allZeroBranchExit);
-
-    b->SetInsertPoint(nonZeroBranch);
-    PHINode * const nonZeroFirstIndex = b->CreatePHI(sizeTy, 2);
-    nonZeroFirstIndex->addIncoming(ZERO, entry);
-    PHINode * const nonZeroSpanIndex = b->CreatePHI(sizeTy, 2);
-    nonZeroSpanIndex->addIncoming(ZERO, entry);
-    mInternalSegmentNumber[NON_ZERO_BRANCH] = b->getScalarFieldPtr(NON_ZERO_INTERNAL_SEGMENT_NUMBER);
-    Value * const nonZeroLastIndex = b->CreateLoad(b->CreateGEP(mBranchDemarcationArray, nonZeroSpanIndex));
-    Value * const nextAllZeroSpanIndex = b->CreateAdd(nonZeroSpanIndex, ONE);
-    Value * const nonZeroNoMore = b->CreateICmpEQ(nextAllZeroSpanIndex, mBranchDemarcationCount);
-    executeBranch(b, NON_ZERO_BRANCH, nonZeroFirstIndex, nonZeroLastIndex, nonZeroNoMore);
-    BasicBlock * const nonZeroBranchExit = b->GetInsertBlock();
-    b->CreateCondBr(nonZeroNoMore, exitLoop, allZeroBranch);
-
-    allZeroFirstIndex->addIncoming(nonZeroLastIndex, nonZeroBranchExit);
-    nonZeroFirstIndex->addIncoming(allZeroLastIndex, allZeroBranchExit);
-
-    allZeroSpanIndex->addIncoming(nextAllZeroSpanIndex, nonZeroBranchExit);
-    nonZeroSpanIndex->addIncoming(nextNonZeroSpanIndex, allZeroBranchExit);
-
-    exitLoop->moveAfter(nonZeroBranch);
-
-    b->SetInsertPoint(exitLoop);
-    if (mTerminatedPhi) {
-        b->CreateStore(mTerminatedPhi, getTerminationSignalPtr());
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief callKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::executeBranch(BuilderRef b,
-                                               const unsigned branchType,
-                                               Value * const firstIndex,
-                                               Value * const lastIndex,
-                                               Value * const noMore) {
+void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned branchType) {
 
     const Kernel * const kernel = mBranches[branchType];
 
@@ -767,301 +551,115 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b,
         report_fatal_error("empty branch not supported yet.");
     }
 
-    enterBranch(b, branchType, noMore);
-
-    Value * const handle = loadSharedHandle(b, branchType);
-    Value * const isFinal = b->CreateAnd(mIsFinal, noMore);
-    mNumOfBranchStrides = b->CreateSub(lastIndex, firstIndex);
-
-    #ifdef PRINT_DEBUG_MESSAGES
-    Value * const kernelName = b->GetString(kernel->getName());
-    debugPrint(b, "Execute Branch %s (%" PRIx64 "): numOfStrides=%" PRIu64,
-               kernelName, handle, mNumOfBranchStrides);
-    #endif
+    Value * const segNo = enterBranch(b, branchType);
 
     Function * const doSegment = kernel->getDoSegmentFunction(b);
     SmallVector<Value *, 64> args;
     args.reserve(doSegment->arg_size());
 
     auto addNextArg = [&](Value * arg) {
-#ifndef NDEBUG
+        #ifndef NDEBUG
         FunctionType * const funcType = cast<FunctionType>(doSegment->getType()->getPointerElementType());
-
         assert ("null argument" && arg);
         assert ("too many arguments?" && args.size() < funcType->getNumParams());
         assert ("invalid argument type" && (funcType->getParamType(args.size()) == arg->getType()));
-#endif
+        #endif
         args.push_back(arg);
     };
 
-    if (handle) {
-        addNextArg(handle);
+    if (kernel->isStateful()) {
+        addNextArg(loadSharedHandle(b, branchType));
     }
     if (kernel->hasThreadLocal()) {
         addNextArg(loadThreadLocalHandle(b, branchType));
     }
-
-    Value * const segNo = b->CreateLoad(mInternalSegmentNumber[branchType]);
-    Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(1));
-    b->CreateStore(nextSegNo, mInternalSegmentNumber[branchType]);
-
-    addNextArg(segNo);
-    addNextArg(isFinal);
+    if (kernel->hasAttribute(AttrId::InternallySynchronized)) {
+        addNextArg(segNo);
+    }
+    addNextArg(mRawNumOfStrides);
+    if (kernel->hasFixedRateInput()) {
+        addNextArg(mFixedRateFactor);
+    }
 
     PointerType * const voidPtrTy = b->getVoidPtrTy();
 
     for (const auto e : make_iterator_range(in_edges(branchType, mStreamSetGraph))) {
         const RelationshipRef & host = mStreamSetGraph[e];
         const RelationshipRef & path = mStreamSetGraph[parent(e, mStreamSetGraph)];
-        const StreamSetBuffer * const buffer = getInputStreamSetBuffer(host.Index);
+        const auto & buffer = mStreamSetInputBuffers[host.Index];
         addNextArg(b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
         const Binding & input = kernel->getInputStreamSetBinding(path.Index);
-        addNextArg(mProcessedInputItemPtr[host.Index]);
-
-        Value * accessible = getAccessibleInputItems(path.Index);
-        Value * const provided = calculateAccessibleOrWritableItems(b, kernel, input, firstIndex, lastIndex, accessible);
-        accessible = b->CreateSelect(isFinal, accessible, provided);
-
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "%s.%s_accessible=%" PRIu64,
-                   kernelName, b->GetString(input.getName()), accessible);
-        #endif
-        addNextArg(accessible);
+        Value * processed = mProcessedInputItemPtr[host.Index];
+        if (isAddressable(input)) {
+            addNextArg(processed);
+        } else if (isCountable(input)) {
+            addNextArg(b->CreateLoad(processed));
+        }
+        if (LLVM_UNLIKELY(requiresItemCount(input))) {
+            addNextArg(getAccessibleInputItems(host.Index));
+        }
     }
 
     PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
 
+    const auto canTerminate = kernel->canSetTerminateSignal();
+
     for (const auto e : make_iterator_range(out_edges(branchType, mStreamSetGraph))) {
         const RelationshipRef & host = mStreamSetGraph[e];
         const auto & buffer = mStreamSetOutputBuffers[host.Index];
-
         const RelationshipRef & path = mStreamSetGraph[child(e, mStreamSetGraph)];
         const Binding & output = kernel->getOutputStreamSetBinding(path.Index);
         const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
+        const auto isLocal =  Kernel::isLocalBuffer(output, false);
 
-        if (LLVM_LIKELY(isShared)) {
-            const auto & hostOutput = mTarget->getOutputStreamSetBinding(host.Index);
-            bool hostIsNotSharedOrManaged = true;
-            for (const Attribute & attr : hostOutput.getAttributes()) {
-                switch (attr.getKind()) {
-                    case AttrId::ManagedBuffer:
-                    case AttrId::SharedManagedBuffer:
-                        hostIsNotSharedOrManaged = false;
-                    default: break;
-                }
-            }
-            if (LLVM_UNLIKELY(hostIsNotSharedOrManaged)) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << "Output " << getName() << '.' << hostOutput.getName() << " must be a ManagedBuffer"
-                       " or SharedManagedBuffer for " << kernel->getName() << '.' << output.getName() <<
-                       " to be a SharedManagedBuffer.";
-                report_fatal_error(out.str());
-            }
-        }
-
-        Value * handle = nullptr;
+        /// ----------------------------------------------------
+        /// logical buffer base address
+        /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isShared)) {
-            handle = b->CreatePointerCast(buffer->getHandle(), voidPtrTy, output.getName() + ".handle");
+            Value * const handle = buffer->getHandle();
+            addNextArg(b->CreatePointerCast(handle, buffer->getHandlePointerType(b)));
+        } else if (LLVM_UNLIKELY(isLocal)) {
+            addNextArg(mUpdatableOutputBaseVirtualAddressPtr[path.Index]);
         } else {
-            // If an output is a managed buffer, the address is stored within the state instead
-            // of being passed in through the function call.
-            handle = mUpdatableOutputBaseVirtualAddressPtr[host.Index]; assert (handle);
-            handle = b->CreatePointerCast(handle, voidPtrPtrTy);
+            Value * const vba = buffer->getBaseAddress(b);
+            addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 
-        addNextArg(handle);
-        addNextArg(mProducedOutputItemPtr[host.Index]);
-        addNextArg(mConsumedOutputItems[host.Index]);
+        /// ----------------------------------------------------
+        /// produced item count
+        /// ----------------------------------------------------
+        Value * produced = mProducedOutputItemPtr[host.Index];
+        if (LLVM_LIKELY(canTerminate || isAddressable(output))) {
+            addNextArg(produced);
+        } else if (LLVM_LIKELY(isCountable(output))) {
+            addNextArg(b->CreateLoad(produced));
+        }
+
+        /// ----------------------------------------------------
+        /// writable / consumed item count
+        /// ----------------------------------------------------
+        if (isShared || isLocal) {
+            addNextArg(mConsumedOutputItems[host.Index]);
+        } else if (requiresItemCount(output)) {
+            addNextArg(mWritableOutputItems[host.Index]);
+        }
     }
 
     Value * const terminated = b->CreateCall(doSegment->getFunctionType(), doSegment, args);
 
-    // TODO: if either of these kernels "share" an output scalar, copy the scalar value from the
-    // branch we took to the state of the branch we avoided. This requires that the branch pipeline
-    // exposes them.
-
-    BasicBlock * const incrementItemCounts = b->CreateBasicBlock("incrementItemCounts");
-    BasicBlock * const kernelExit = b->CreateBasicBlock("kernelExit");
-    if (kernel->canSetTerminateSignal()) {
-        b->CreateUnlikelyCondBr(terminated, kernelExit, incrementItemCounts);
-    } else {
-        b->CreateBr(incrementItemCounts);
-    }
-
-    b->SetInsertPoint(incrementItemCounts);
-
-//    for (const auto e : make_iterator_range(in_edges(branchType, mStreamSetGraph))) {
-//        const RelationshipRef & host = mStreamSetGraph[e];
-//        const RelationshipRef & path = mStreamSetGraph[parent(e, mStreamSetGraph)];
-//        Value * processed = nullptr;
-//        const Binding & input = kernel->getInputStreamSetBinding(path.Index);
-//        if (internallySynchronized || isAddressable(input)) {
-//            processed = b->CreateLoad(mBranchProcessedInputItemPtr[path.Index]);
-//        } else if (isCountable(input)) {
-//            Value * const initiallyProcessed = mBranchProcessedInputItems[path.Index];
-//            processed = b->CreateAdd(initiallyProcessed, mAccessibleInputItems[path.Index]);
-//        }
-//        b->CreateStore(processed, mUpdatableProcessedInputItemPtr[host.Index]);
-//    }
-
-//    for (const auto e : make_iterator_range(out_edges(branchType, mStreamSetGraph))) {
-//        const RelationshipRef & host = mStreamSetGraph[e];
-//        const RelationshipRef & path = mStreamSetGraph[child(e, mStreamSetGraph)];
-
-//        Value * produced = nullptr;
-//        const Binding & output = kernel->getOutputStreamSetBinding(path.Index);
-//        if (internallySynchronized || isAddressable(output)) {
-//            produced = b->CreateLoad(mBranchProducedOutputItemPtr[path.Index]);
-//        } else if (isCountable(output)) {
-//            Value * const initiallyProduced = mProducedOutputItems[path.Index];
-//            produced = b->CreateAdd(initiallyProduced, mBranchWritableOutputItems[path.Index]);
-//        }
-//        b->CreateStore(produced, mUpdatableProducedOutputItemPtr[host.Index]);
-//    }
+    exitBranch(b, branchType);
 
     if (mTerminatedPhi) {
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        if (kernel->canSetTerminateSignal()) {
-            mTerminatedPhi->addIncoming(terminated, exitBlock);
-        } else {
-            mTerminatedPhi->addIncoming(b->getFalse(), exitBlock);
-        }
+        Value * const termSignal = canTerminate ? terminated : b->getFalse();
+        mTerminatedPhi->addIncoming(termSignal, b->GetInsertBlock());
     }
-    b->CreateBr(kernelExit);
 
-    b->SetInsertPoint(kernelExit);
-
-    exitBranch(b, branchType, noMore);
 }
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief calculateFinalItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * OptimizationBranchCompiler::calculateFinalOutputItemCounts(BuilderRef b, Value * const isFinal, const unsigned branchType) {
-
-    using Rational = ProcessingRate::Rational;
-
-    const Kernel * const kernel = mBranches[branchType];
-
-    // Record the writable item counts but when determining the number of Fixed writable items calculate:
-
-    //   CEILING(PRINCIPAL_OR_MIN(Accessible Item Count / Fixed Input Rate) * Fixed Output Rate)
-
-    Rational rateLCM(1);
-    bool noPrincipalStream = true;
-    bool hasFixedRateInput = false;
-    for (const auto & e : make_iterator_range(in_edges(branchType, mStreamSetGraph))) {
-        const RelationshipRef & path = mStreamSetGraph[parent(e, mStreamSetGraph)];
-        const Binding & input = kernel->getInputStreamSetBinding(path.Index);
-        const ProcessingRate & rate = input.getRate();
-        if (rate.isFixed()) {
-            if (LLVM_UNLIKELY(input.hasAttribute(AttrId::Principal))) {
-                rateLCM = rate.getRate();
-                noPrincipalStream = false;
-                break;
-            }
-            rateLCM = lcm(rateLCM, rate.getRate());
-            hasFixedRateInput = true;
-        }
-    }
-
-    Value * minScaledInverseOfAccessibleInput = nullptr;
-
-    if (hasFixedRateInput) {
-
-        BasicBlock * const entry = b->GetInsertBlock();
-        BasicBlock * const calculateFinalItemCounts = b->CreateBasicBlock("calculateFinalItemCounts");
-        BasicBlock * const executeKernel = b->CreateBasicBlock("executeKernel");
-
-        b->CreateUnlikelyCondBr(isFinal, calculateFinalItemCounts, executeKernel);
-
-        b->SetInsertPoint(calculateFinalItemCounts);
-        for (const auto e : make_iterator_range(in_edges(branchType, mStreamSetGraph))) {
-            const RelationshipRef & path = mStreamSetGraph[parent(e, mStreamSetGraph)];
-            const Binding & input = kernel->getInputStreamSetBinding(path.Index);
-            const ProcessingRate & rate = input.getRate();
-            if (rate.isFixed() && (noPrincipalStream || input.hasAttribute(AttrId::Principal))) {
-                Value * const scaledInverseOfAccessibleInput =
-                    b->CreateMulRational(mAccessibleInputItems[path.Index], rateLCM / rate.getRate());
-                minScaledInverseOfAccessibleInput =
-                    b->CreateUMin(minScaledInverseOfAccessibleInput, scaledInverseOfAccessibleInput);
-            }
-        }
-
-        assert (minScaledInverseOfAccessibleInput);
-
-        const auto numOfOutputs = out_degree(branchType, mStreamSetGraph);
-        SmallVector<Value *, 16> pendingOutputItems(numOfOutputs, nullptr);
-        for (const auto e : make_iterator_range(out_edges(branchType, mStreamSetGraph))) {
-            const RelationshipRef & path = mStreamSetGraph[child(e, mStreamSetGraph)];
-            const Binding & output = kernel->getOutputStreamSetBinding(path.Index);
-            const ProcessingRate & rate = output.getRate();
-            if (rate.isFixed()) {
-                pendingOutputItems[path.Index] = b->CreateCeilUDivRational(minScaledInverseOfAccessibleInput, rateLCM / rate.getUpperBound());
-            }
-        }
-        b->CreateBr(executeKernel);
-
-        IntegerType * const sizeTy = b->getSizeTy();
-
-        b->SetInsertPoint(executeKernel);
-//        for (unsigned i = 0; i < numOfOutputs; ++i) {
-//            if (pendingOutputItems[i]) {
-//                PHINode * const writable = b->CreatePHI(sizeTy, 2);
-//                writable->addIncoming(mBranchWritableOutputItems[i], entry);
-//                writable->addIncoming(pendingOutputItems[i], calculateFinalItemCounts);
-//                mBranchWritableOutputItems[i] = writable;
-//            }
-//        }
-        PHINode * const minScaledInverseOfAccessibleInputPhi = b->CreatePHI(sizeTy, 2);
-        minScaledInverseOfAccessibleInputPhi->addIncoming(b->getSize(0), entry);
-        minScaledInverseOfAccessibleInputPhi->addIncoming(minScaledInverseOfAccessibleInput, calculateFinalItemCounts);
-        minScaledInverseOfAccessibleInput = minScaledInverseOfAccessibleInputPhi;
-    }
-
-    return minScaledInverseOfAccessibleInput;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief calculateAccessibleOrWritableItems
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * OptimizationBranchCompiler::calculateAccessibleOrWritableItems(BuilderRef b,
-                                                                       const Kernel * const kernel, const Binding & binding,
-                                                                       Value * const first, Value * const last,
-                                                                       Value * const defaultValue) const {
-    const ProcessingRate & rate = binding.getRate();
-    if (LLVM_LIKELY(rate.isFixed() || rate.isBounded())) {
-        Constant * const strideLength = b->getSize(ceiling(rate.getUpperBound() * kernel->getStride()));
-        return b->CreateMul(mNumOfBranchStrides, strideLength);
-    } else if (rate.isPopCount() || rate.isNegatedPopCount()) {
-        const auto refPort = getStreamPort(rate.getReference());
-        assert (refPort.Type == PortType::Input);
-        Value * array = nullptr;
-        if (rate.isNegatedPopCount()) {
-            array = mNegatedPopCountRateArray[refPort.Number];
-        } else {
-            array = mPopCountRateArray[refPort.Number];
-        }
-        Constant * const ONE = b->getSize(1);
-        Value * const currentIndex = b->CreateSub(last, ONE);
-        Value * const currentSum = b->CreateLoad(b->CreateGEP(array, currentIndex));
-        Value * const priorIndex = b->CreateSub(first, ONE);
-        Value * const priorSum = b->CreateLoad(b->CreateGEP(array, priorIndex));
-        return b->CreateSub(currentSum, priorSum);
-    }
-    return defaultValue;
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief enterBranch
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branchType, Value * const noMore) const {
-
-    assert (mExternalSegmentNumber[branchType]);
-    assert (mExternalSegmentNumber[OTHER_BRANCH(branchType)]);
+Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branchType) const {
 
     const Kernel * const kernel = mBranches[branchType];
     const auto prefix = kernel->getName();
@@ -1070,58 +668,89 @@ void OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branch
     BasicBlock * const acquire = b->CreateBasicBlock(concat(prefix, "_acquire", tmp));
     BasicBlock * const acquired = b->CreateBasicBlock(concat(prefix, "_acquired", tmp));
 
+    Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
+
     b->CreateBr(acquire);
 
     b->SetInsertPoint(acquire);
-    Value * const currentSegNo = b->CreateAtomicLoadAcquire(mExternalSegmentNumber[branchType]);
+    Value * const currentSegNo = b->CreateAtomicLoadAcquire(externalSegNoPtr);
     Value * const ready = b->CreateICmpEQ(getExternalSegNo(), currentSegNo);
     b->CreateLikelyCondBr(ready, acquired, acquire);
 
     b->SetInsertPoint(acquired);
-    // If this kernel is internally synchronized and there are no more strides after this,
-    // we can immediately release the lock *of the current branch* and rely on the its
-    // synchronization for safety. The other branch must wait for this kernel to finish.
+    // While the branched kernels may be internally synchronized, they do not share
+    // any synchronization betwee them. To avoid complications, we can only permit
+    // one branch type to execute at a given moment.
+    Value * otherBranchCountPtr = nullptr;
+    if (branchType == ALL_ZERO_BRANCH) {
+        otherBranchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+    } else {
+        otherBranchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+    }
 
-    BasicBlock * const releaseCurrentLock = b->CreateBasicBlock(concat(prefix, "_releaseCurrentLock", tmp));
+
+    BasicBlock * const checkAlternateBranch = b->CreateBasicBlock(concat(prefix, "_checkAlternateBranch", tmp));
     BasicBlock * const executeKernel = b->CreateBasicBlock(concat(prefix, "_executeKernel", tmp));
 
-    Constant * const ONE = b->getSize(1);
+    b->CreateBr(checkAlternateBranch);
 
-    b->CreateCondBr(noMore, releaseCurrentLock, executeKernel);
-
-    b->SetInsertPoint(releaseCurrentLock);
-    Value * const nextSegNo = b->CreateAdd(currentSegNo, ONE);
-    b->CreateAtomicStoreRelease(nextSegNo, mExternalSegmentNumber[branchType]);
-    b->CreateBr(executeKernel);
+    b->SetInsertPoint(checkAlternateBranch);
+    Value * const currentCount = b->CreateAtomicLoadAcquire(otherBranchCountPtr);
+    Value * const safe = b->CreateICmpEQ(currentCount, b->getSize(0));
+    b->CreateCondBr(safe, executeKernel, checkAlternateBranch);
 
     b->SetInsertPoint(executeKernel);
+    // We're still protected by the outer sync lock so an atomic add is not required here.
+
+    Value * const sz_ONE = b->getSize(1);
+
+    Value * branchCountPtr = nullptr;
+    if (branchType == ALL_ZERO_BRANCH) {
+        branchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+    } else {
+        branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+    }
+
+    Value * const nextCount = b->CreateAdd(b->CreateLoad(branchCountPtr), sz_ONE);
+    b->CreateStore(nextCount, branchCountPtr);
+
+    Value * const intSegNoPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_SEGMENT_NUMBER);
+    Value * intSegNo = b->CreateLoad(intSegNoPtr);
+    if (branchType == ALL_ZERO_BRANCH) {
+        b->CreateStore(b->CreateAdd(intSegNo, sz_ONE), intSegNoPtr);
+    } else {
+        intSegNo = b->CreateSub(getExternalSegNo(), intSegNo);
+    }
+
+    if (LLVM_LIKELY(kernel->hasAttribute(AttrId::InternallySynchronized))) {
+        Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
+        b->CreateAtomicStoreRelease(released, externalSegNoPtr);
+    }
+    return intSegNo;
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief exitBranch
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchType, Value * const noMore) const {
-    // decrement the "number of active threads" count for this branch
-    Constant * const ONE = b->getSize(1);
+void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchType) const {
+    // decrement the number of active threads count for this branch
+    Constant * const sz_ONE = b->getSize(1);
 
-    const Kernel * const kernel = mBranches[branchType];
-    const auto prefix = kernel->getName();
+    Value * branchCountPtr = nullptr;
+    if (branchType == ALL_ZERO_BRANCH) {
+        branchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+    } else {
+        branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+    }
+    b->CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
 
-    SmallVector<char, 256> tmp;
-    BasicBlock * const releaseLock = b->CreateBasicBlock(concat(prefix, "_releaseLock", tmp));
-    BasicBlock * const exitBranch = b->CreateBasicBlock(concat(prefix, "_exitBranch", tmp));
+    if (LLVM_UNLIKELY(!mBranches[branchType]->hasAttribute(AttrId::InternallySynchronized))) {
+        Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
+        Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
+        b->CreateAtomicStoreRelease(released, externalSegNoPtr);
+    }
 
-    b->CreateCondBr(noMore, releaseLock, exitBranch);
-    // If there are no more strides then once we finish executing the kernel, we can release the
-    // synchronization lock of the other branch as we now no longer have to worry data corruption
-    // due to multiple unsynchronized writers.
-    b->SetInsertPoint(releaseLock);
-    Value * const currentSegNo = getExternalSegNo();
-    Value * const nextSegNo = b->CreateAdd(currentSegNo, ONE);
-    b->CreateAtomicStoreRelease(nextSegNo, mExternalSegmentNumber[OTHER_BRANCH(branchType)]);
-    b->CreateBr(exitBranch);
-
-    b->SetInsertPoint(exitBranch);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1143,7 +772,6 @@ inline Value * OptimizationBranchCompiler::getInputScalar(BuilderRef b, const un
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
-    b->CreateFree(b->getScalarField(SPAN_BUFFER));
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i];
         if (kernel->hasThreadLocal()) {
@@ -1244,54 +872,12 @@ inline std::array<const Kernel *, 4> makeBranches(const OptimizationBranch * con
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief makeBranchCompilers
- ** ------------------------------------------------------------------------------------------------------------- */
-inline CompilerArray makeBranchCompilers(BuilderRef b, const OptimizationBranch * const branch) {
-    CompilerArray branches;
-    branches[BRANCH_INPUT] = nullptr;
-    branches[ALL_ZERO_BRANCH] = branch->getAllZeroKernel()->instantiateKernelCompiler(b);
-    branches[NON_ZERO_BRANCH] = branch->getNonZeroKernel()->instantiateKernelCompiler(b);
-    branches[BRANCH_OUTPUT] = nullptr;
-    return branches;
-}
-
-#ifdef PRINT_DEBUG_MESSAGES
-
-template <typename ... Args>
-BOOST_NOINLINE void OptimizationBranchCompiler::debugPrint(BuilderRef b, Twine format, Args ...args) const {
-    SmallVector<char, 512> tmp;
-    raw_svector_ostream out(tmp);
-    if (mThreadId) {
-        out << "%016" PRIx64 "  ";
-    }
-    out << format << "\n";
-
-    SmallVector<Value *, 8> argVals(2);
-    argVals[0] = b->getInt32(STDERR_FILENO);
-    argVals[1] = b->GetString(out.str());
-    if (mThreadId) {
-        argVals.push_back(mThreadId);
-    }
-    argVals.append(std::initializer_list<llvm::Value *>{std::forward<Args>(args)...});
-    #ifndef NDEBUG
-    for (Value * arg : argVals) {
-        assert ("null argument given to debugPrint" && arg);
-    }
-    #endif
-    Function * printFn = b->GetDprintf();
-    b->CreateCall(printFn->getFunctionType(), printFn, argVals);
-}
-
-#endif
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 OptimizationBranchCompiler::OptimizationBranchCompiler(BuilderRef b, OptimizationBranch * const branch) noexcept
 : KernelCompiler(branch)
 , mCondition(branch->getCondition())
 , mBranches(makeBranches(branch))
-//, mBranchCompiler(makeBranchCompilers(b, branch))
 , mStreamSetGraph(makeRelationshipGraph(RelationshipType::StreamSet))
 , mScalarGraph(makeRelationshipGraph(RelationshipType::Scalar)) {
 

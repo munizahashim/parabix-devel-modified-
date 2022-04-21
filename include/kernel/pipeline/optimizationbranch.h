@@ -7,11 +7,13 @@ namespace llvm { class Value; }
 
 namespace kernel {
 
+class PipelineCompiler;
 class OptimizationBranchCompiler;
 
 class OptimizationBranch final : public Kernel {
     friend class OptimizationBranchBuilder;
     friend class OptimizationBranchCompiler;
+    friend class PipelineCompiler;
 public:
 
     static bool classof(const Kernel * const k) {

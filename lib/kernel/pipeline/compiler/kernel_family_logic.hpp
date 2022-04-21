@@ -8,16 +8,15 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addFamilyKernelProperties(BuilderRef b, const unsigned kernelId) const {
-    const Kernel * const kernel = getKernel(kernelId);
-    if (LLVM_LIKELY(kernel->hasFamilyName())) {
-
-        const auto groupId = getCacheLineGroupId(kernelId);
+void PipelineCompiler::addFamilyKernelProperties(BuilderRef b,
+                                                 const unsigned kernelId,
+                                                 const unsigned groupId) const {
+    if (LLVM_UNLIKELY(mKernel->hasFamilyName())) {
 
         PointerType * const voidPtrTy = b->getVoidPtrTy();
         const auto prefix = makeKernelName(kernelId);
-        const auto tl = kernel->hasThreadLocal();
-        const auto ai = kernel->allocatesInternalStreamSets();
+        const auto tl = mKernel->hasThreadLocal();
+        const auto ai = mKernel->allocatesInternalStreamSets();
         if (ai) {
             mTarget->addInternalScalar(voidPtrTy, prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, groupId);
         }
@@ -157,15 +156,30 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInitializationThreadLocalFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::callKernelInitializeThreadLocalFunction(BuilderRef b, Value * handle) const {
+ void PipelineCompiler::callKernelInitializeThreadLocalFunction(BuilderRef b) const {
     Function * const init = mKernel->getInitializeThreadLocalFunction(b);
     Value * func = init;
     if (mKernel->hasFamilyName()) {
-        func = getFamilyFunctionFromKernelState(b, init->getType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, init->getFunctionType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
     }
-    FixedArray<Value *, 1> args;
-    args[0] = handle;
-    return b->CreateCall(init->getFunctionType(), func, args);
+    SmallVector<Value *, 2> args;
+    if (mKernelSharedHandle) {
+        args.push_back(mKernelSharedHandle);
+
+    }
+    const auto prefix = makeKernelName(mKernelId);
+    Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
+    if (mKernel->externallyInitialized()) {
+        PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
+        args.push_back(ConstantPointerNull::getNullValue(ptrTy));
+    } else {
+        args.push_back(threadLocal);
+    }
+
+    Value * const retVal = b->CreateCall(init->getFunctionType(), func, args);
+    if (mKernel->externallyInitialized()) {
+        b->CreateStore(b->CreatePointerCast(retVal, b->getVoidPtrTy()), threadLocal);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

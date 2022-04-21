@@ -223,10 +223,26 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
-        mThreadLocalHandle = b->CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
+
+        StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
+        Value * const providedState = b->CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
+        BasicBlock * const allocThreadLocal = BasicBlock::Create(b->getContext(), "allocThreadLocalState", mCurrentMethod);
+        BasicBlock * const initThreadLocal = BasicBlock::Create(b->getContext(), "initThreadLocalState", mCurrentMethod);
+        b->CreateCondBr(b->CreateIsNull(providedState), allocThreadLocal, initThreadLocal);
+
+        b->SetInsertPoint(allocThreadLocal);
+        Value * const allocedState = b->CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
+        assert (providedState->getType() == allocedState->getType());
+        b->CreateBr(initThreadLocal);
+
+        b->SetInsertPoint(initThreadLocal);
+        PHINode * const threadLocal = b->CreatePHI(providedState->getType(), 2);
+        threadLocal->addIncoming(providedState, mEntryPoint);
+        threadLocal->addIncoming(allocedState, allocThreadLocal);
+        mThreadLocalHandle = threadLocal;
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
         mTarget->generateInitializeThreadLocalMethod(b);
-        b->CreateRet(mThreadLocalHandle);
+        b->CreateRet(threadLocal);
         clearInternalStateAfterCodeGen();
     }
 }
@@ -371,9 +387,9 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     if (mTarget->hasAttribute(AttrId::InternallySynchronized)) {
         mExternalSegNo = nextArg();
     }
-    mNumOfStrides = nextArg();
-    mIsFinal = b->CreateIsNull(mNumOfStrides);
-    mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mNumOfStrides);
+    mRawNumOfStrides = nextArg();
+    mIsFinal = b->CreateIsNull(mRawNumOfStrides);
+    mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
 
     Rational fixedRateLCM{0};
     mFixedRateFactor = nullptr;
@@ -1273,14 +1289,14 @@ StreamSetPort KernelCompiler::getStreamPort(const StringRef name) const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getScalarValuePtr
+ * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * /* b */, const StringRef name) const {
     assert (this);
     if (LLVM_UNLIKELY(mScalarFieldMap.empty())) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);
-        out << "Scalar map for " << getName() << " was not initialized prior to calling getScalarValuePtr";
+        out << "Scalar map for " << getName() << " was not initialized prior to calling getScalarFieldPtr";
         report_fatal_error(out.str());
     } else {
         const auto f = mScalarFieldMap.find(name);

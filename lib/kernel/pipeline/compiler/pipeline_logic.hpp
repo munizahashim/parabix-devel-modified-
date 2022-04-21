@@ -59,9 +59,7 @@ inline void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
         Kernel * const kernel = const_cast<Kernel *>(getKernel(i));
         if (LLVM_LIKELY(kernel->isGenerated())) {
             kernel->ensureLoaded();
-            continue;
-        }
-        if (kernel->getInitializeFunction(b, false)) {
+        } else if (kernel->getInitializeFunction(b, false)) {
             kernel->loadCachedKernel(b);
         } else {
             kernel->setModule(mTarget->getModule());
@@ -109,7 +107,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     mKernelId = 0;
     mKernel = mTarget;
     auto currentPartitionId = -1U;
-    addBufferHandlesToPipelineKernel(b, PipelineInput);
+    addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         // Is this the start of a new partition?
@@ -142,6 +140,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mIsStatelessKernel.set(kernelId);
     }
     assert (mIsStatelessKernel.test(kernelId) == isStateless);
+
     IntegerType * const sizeTy = b->getSizeTy();
 
     const auto groupId = getCacheLineGroupId(kernelId);
@@ -166,6 +165,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         } else if (LLVM_UNLIKELY(br.IsDeferred)) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
+
     }
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
@@ -179,9 +179,9 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         }
     }
 
-    addBufferHandlesToPipelineKernel(b, kernelId);
+    addBufferHandlesToPipelineKernel(b, kernelId, groupId);
 
-    addFamilyKernelProperties(b, kernelId);
+    addFamilyKernelProperties(b, kernelId, groupId);
 
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Type * sharedStateTy = nullptr;
@@ -370,8 +370,7 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
         if (kernel->hasThreadLocal()) {
             setActiveKernel(b, i, true);
             assert (mKernel == kernel);
-            Value * const handle = callKernelInitializeThreadLocalFunction(b, mKernelSharedHandle);
-            b->CreateStore(handle, getThreadLocalHandlePtr(b, i));
+            callKernelInitializeThreadLocalFunction(b);
         }
     }
     ActiveKernels.clear();
@@ -402,7 +401,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     initializeKernelAssertions(b);
-    verifyBufferRelationships();
+    // verifyBufferRelationships();
     mScalarValue.reset(FirstKernel, LastScalar);
     readPipelineIOItemCounts(b);
     if (LLVM_UNLIKELY(mNumOfThreads == 0)) {
@@ -596,7 +595,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     const auto firstThreadedSegNo = hybridThreadFunc ? 0U : 1U;
     for (unsigned i = 0; i != numOfAdditionalThreads; ++i) {
         if (mTarget->hasThreadLocal()) {
-            threadLocal[i] = mTarget->initializeThreadLocalInstance(b, initialSharedState);
+
+            SmallVector<Value *, 2> args;
+            if (initialSharedState) {
+                args.push_back(initialSharedState);
+            }
+            args.push_back(ConstantPointerNull::get(mTarget->getThreadLocalStateType()->getPointerTo()));
+
+            threadLocal[i] = mTarget->initializeThreadLocalInstance(b, args);
             assert (isFromCurrentFunction(b, threadLocal[i]));
             if (LLVM_LIKELY(mTarget->allocatesInternalStreamSets())) {
                 Function * const allocInternal = mTarget->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
@@ -1043,7 +1049,7 @@ void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
     b->LinkFunction("__pipeline_pin_current_thread_to_cpu",
                     __pipeline_pin_current_thread_to_cpu);
 }
-
+#if 0
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief verifyBufferRelationships
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1151,6 +1157,7 @@ void PipelineCompiler::verifyBufferRelationships() const {
 
 }
 
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeForAllKernels

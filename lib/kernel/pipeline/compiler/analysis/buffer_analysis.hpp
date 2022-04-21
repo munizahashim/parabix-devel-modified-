@@ -441,10 +441,9 @@ void PipelineAnalysis::identifyOwnedBuffers() {
     // fill in any known managed buffers
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         const Kernel * const kernelObj = getKernel(kernel);
-        const auto internallySynchronized = kernelObj->hasAttribute(AttrId::InternallySynchronized);
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
-            if (LLVM_UNLIKELY(internallySynchronized || rate.IsManaged)) {
+            if (LLVM_UNLIKELY(rate.IsManaged)) {
                 const auto streamSet = target(e, mBufferGraph);
                 BufferNode & bn = mBufferGraph[streamSet];
                 // Every managed buffer is considered linear to the pipeline

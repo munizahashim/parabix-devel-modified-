@@ -166,16 +166,19 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
 
-    Value * numOfOutputLinearStrides = numOfLinearStrides;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (port.CanModifySegmentLength) {
-            Value * const strides = getNumOfWritableStrides(b, port, numOfOutputLinearStrides);
-            numOfOutputLinearStrides = b->CreateUMin(numOfOutputLinearStrides, strides);
+            Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
+            numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
         }
     }
 
-    numOfLinearStrides = calculateTransferableItemCounts(b, numOfOutputLinearStrides); // numOfLinearStrides
+    if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
+        numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
+    }
+
+    numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides); // numOfLinearStrides
 
     mNumOfLinearStrides = numOfLinearStrides;
 

@@ -10,9 +10,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addHandlesToPipelineKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId) {
-
-    const auto groupId = getCacheLineGroupId(kernelId);
+inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId, const unsigned groupId) {
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
@@ -23,19 +21,19 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
         }
         assert (parent(streamSet, mBufferGraph) != PipelineInput);
         const BufferPort & rd = mBufferGraph[e];
-        const auto handleName = makeBufferName(kernelId, rd.Port);
+        const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
         Type * const handleType = buffer->getHandleType(b);
 
         // We automatically assign the buffer memory according to the buffer start position
         if (bn.Locality == BufferLocality::ThreadLocal) {
             assert (bn.isOwned());
-            mTarget->addNonPersistentScalar(handleType, handleName);
+            mTarget->addNonPersistentScalar(handleType, prefix);
         } else if (LLVM_LIKELY(bn.isOwned())) {
-            mTarget->addInternalScalar(handleType, handleName, groupId);
+            mTarget->addInternalScalar(handleType, prefix, groupId);
         } else {
-            mTarget->addNonPersistentScalar(handleType, handleName);
-            mTarget->addInternalScalar(buffer->getPointerType(), handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
+            mTarget->addNonPersistentScalar(handleType, prefix);
+            mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
         // Although we'll end up wasting memory, we can avoid memleaks and the issue of multiple threads
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
@@ -43,7 +41,7 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
         // segment.
         if (isa<DynamicBuffer>(buffer) && bn.isOwned()) {
             assert (bn.Locality != BufferLocality::ThreadLocal);
-            mTarget->addThreadLocalScalar(b->getVoidPtrTy(), handleName + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
+            mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
     }
 
@@ -118,6 +116,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
     // num of strides it should expect to perform
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
+
         if (LLVM_UNLIKELY(kernelObj->allocatesInternalStreamSets())) {
             if (nonLocal || kernelObj->hasThreadLocal()) {
                 setActiveKernel(b, i, !nonLocal);
@@ -142,8 +141,6 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                 b->CreateCall(funcType, func, params);
             }
         }
-
-        mKernelId = 0;
 
         // and allocate any output buffers
         for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
@@ -179,31 +176,6 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                        buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
             #endif
 
-//            if (LLVM_UNLIKELY(CheckAssertions)) {
-//                DataLayout DL(b->getModule());
-//                Value * const mAddr = buffer->getMallocAddress(b);
-//                Type * const intPtrTy = DL.getIntPtrType(mAddr->getType());
-//                Value * const mAddrInt = b->CreatePtrToInt(mAddr, intPtrTy);
-
-//                const BufferPort & rd = mBufferGraph[e];
-//                const auto prefix = makeBufferName(i, rd.Port);
-
-//                Constant * const prefixName = b->GetString(prefix);
-
-//                Constant * const cacheAlign = ConstantInt::get(intPtrTy, b->getCacheAlignment());
-//                Constant * const blockAlign = ConstantInt::get(intPtrTy, b->getBitBlockWidth() / 8);
-
-//                b->CreateAssertZero(b->CreateURem(mAddrInt, cacheAlign),
-//                                    "%s: malloc addr 0x%" PRIx64 " is not cache-aligned", prefixName, mAddrInt);
-
-
-//                Value * const mOverInt = b->CreatePtrToInt(buffer->getOverflowAddress(b), intPtrTy);
-
-//                b->CreateAssertZero(b->CreateURem(mOverInt, blockAlign),
-//                                    "%s: overflow addr 0x%" PRIx64 " is not block-aligned", prefixName, mOverInt);
-//            }
-
-
         }
     }
 }
@@ -225,16 +197,17 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
         assert (isFromCurrentFunction(b, buffer->getHandle(), false));
         buffer->releaseBuffer(b);
 
-        // TODO: TraceDynamicBuffers needs to be fixed to permit thread local buffers.
+        if (isa<DynamicBuffer>(buffer) && bn.isOwned()) {
 
-        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-            if (isa<DynamicBuffer>(buffer)) {
+            const auto pe = in_edge(streamSet, mBufferGraph);
+            const auto p = source(pe, mBufferGraph);
+            const BufferPort & rd = mBufferGraph[pe];
+            assert (rd.Port.Type == PortType::Output);
+            const auto prefix = makeBufferName(p, rd.Port);
 
-                const auto pe = in_edge(streamSet, mBufferGraph);
-                const auto p = source(pe, mBufferGraph);
-                const BufferPort & rd = mBufferGraph[pe];
-                const auto prefix = makeBufferName(p, rd.Port);
-
+            if (!nonLocal) {
+                b->CreateFree(b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS));
+            } else if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
                 Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                 Constant * const ZERO = b->getInt32(0);
                 b->CreateFree(b->CreateLoad(b->CreateInBoundsGEP(traceData, {ZERO, ZERO})));
@@ -494,35 +467,34 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readReturnedOutputVirtualBaseAddresses
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) const {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        // owned or external buffers do not have a mutable vba
-        if (LLVM_LIKELY(bn.isOwned() || bn.isExternal())) {
-            continue;
-        }
-        assert (bn.Locality != BufferLocality::ThreadLocal);
         const BufferPort & rd = mBufferGraph[e];
-        const StreamSetPort port(rd.Port.Type, rd.Port.Number);
-        Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
-        Value * vba = b->CreateLoad(ptr);
-        StreamSetBuffer * const buffer = bn.Buffer;
-        vba = b->CreatePointerCast(vba, buffer->getPointerType());
-        buffer->setBaseAddress(b.get(), vba);
-        buffer->setCapacity(b.get(), mProducedItemCount[port]);
-        const auto handleName = makeBufferName(mKernelId, port);
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "%s_updatedVirtualBaseAddress = 0x%" PRIx64, b->GetString(handleName), buffer->getBaseAddress(b));
-        #endif
-        b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
+        assert (rd.Port.Type == PortType::Output);
+        const StreamSetPort port(PortType::Output, rd.Port.Number);
+        if (rd.IsManaged) {
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            assert (bn.Locality != BufferLocality::ThreadLocal);
+            Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
+            Value * vba = b->CreateLoad(ptr);
+            StreamSetBuffer * const buffer = bn.Buffer;
+            vba = b->CreatePointerCast(vba, buffer->getPointerType());
+            buffer->setBaseAddress(b.get(), vba);
+            buffer->setCapacity(b.get(), mProducedItemCount[port]);
+            const auto handleName = makeBufferName(mKernelId, port);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, "%s_updatedVirtualBaseAddress = 0x%" PRIx64, b->GetString(handleName), buffer->getBaseAddress(b));
+            #endif
+            b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
+        } else {
+            assert (mReturnedOutputVirtualBaseAddressPtr[port] == nullptr);
+        }
     }
 }
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadLastGoodVirtualBaseAddressesOfUnownedBuffers

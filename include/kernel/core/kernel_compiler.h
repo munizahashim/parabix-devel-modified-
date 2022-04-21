@@ -413,6 +413,7 @@ protected:
 
     llvm::Value *                   mTerminationSignalPtr = nullptr;
     llvm::Value *                   mIsFinal = nullptr;
+    llvm::Value *                   mRawNumOfStrides = nullptr;
     llvm::Value *                   mNumOfStrides = nullptr;
     llvm::Value *                   mFixedRateFactor = nullptr;
     llvm::Value *                   mExternalSegNo = nullptr;
