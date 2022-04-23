@@ -7,6 +7,7 @@ parabix_add_module(
 NAME
     re.analysis
 SRC
+    capture-ref.cpp
     cc_sequence_search.cpp
     collect_ccs.cpp
     nullable.cpp
