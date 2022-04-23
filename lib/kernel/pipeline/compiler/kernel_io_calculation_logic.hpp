@@ -178,7 +178,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
 
-    numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides); // numOfLinearStrides
+    numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
 
     mNumOfLinearStrides = numOfLinearStrides;
 

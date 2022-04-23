@@ -84,6 +84,8 @@ const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 
 const static std::array<std::string, 3> LOGICAL_SEGMENT_SUFFIX = { ".LSN", ".LSNs", ".LSNt" };
 
+const static std::string INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX = ".ISS";
+
 const static std::string DEBUG_FD = ".DFd";
 
 const static std::array<std::string, 2> OPT_BR_INFIX = { ".0", ".1" };
@@ -690,7 +692,7 @@ protected:
 
     // optimization branch
     PHINode *                                   mOptimizationBranchScanStatePhi = nullptr;
-    PHINode *                                   mOptimizationBranchSelectedBranch = nullptr;
+    Value *                                     mOptimizationBranchSelectedBranch = nullptr;
 
     // kernel state
     Value *                                     mInitialTerminationSignal = nullptr;

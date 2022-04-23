@@ -183,6 +183,11 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     addFamilyKernelProperties(b, kernelId, groupId);
 
+    if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::InternallySynchronized))) {
+        #warning only needed if its possible to loop back
+        mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);
+    }
+
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Type * sharedStateTy = nullptr;
         if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {

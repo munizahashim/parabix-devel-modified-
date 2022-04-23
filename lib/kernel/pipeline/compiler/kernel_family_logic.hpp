@@ -160,7 +160,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     Function * const init = mKernel->getInitializeThreadLocalFunction(b);
     Value * func = init;
     if (mKernel->hasFamilyName()) {
-        func = getFamilyFunctionFromKernelState(b, init->getFunctionType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, init->getType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
     }
     SmallVector<Value *, 2> args;
     if (mKernelSharedHandle) {

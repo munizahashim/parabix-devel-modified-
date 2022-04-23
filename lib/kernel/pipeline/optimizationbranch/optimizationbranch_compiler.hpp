@@ -39,7 +39,7 @@ const static std::string THREAD_LOCAL_PREFIX = "T";
 
 const static std::string EXTERNAL_SEGMENT_NUMBER = "E";
 
-const static std::string ALL_ZERO_INTERNAL_SEGMENT_NUMBER = "AI";
+const static std::string ALL_ZERO_PATH_TAKEN_COUNT = "AI";
 
 const static std::string ALL_ZERO_INTERNAL_INFLIGHT_COUNT = "AC";
 const static std::string NON_ZERO_INTERNAL_INFLIGHT_COUNT = "NC";
@@ -311,7 +311,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 
     mTarget->addInternalScalar(sizeTy, EXTERNAL_SEGMENT_NUMBER, 0);
 
-    mTarget->addInternalScalar(sizeTy, ALL_ZERO_INTERNAL_SEGMENT_NUMBER, 0);
+    mTarget->addInternalScalar(sizeTy, ALL_ZERO_PATH_TAKEN_COUNT, 0);
 
     mTarget->addInternalScalar(sizeTy, ALL_ZERO_INTERNAL_INFLIGHT_COUNT, 1);
 
@@ -509,6 +509,10 @@ void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
     BasicBlock * const optimizationBranch = b->CreateBasicBlock("optimizationBranch");
     BasicBlock * const normalBranch = b->CreateBasicBlock("normalBranchInvoke");
     BasicBlock * const exitLoop = b->CreateBasicBlock("exitLoop");
+
+    b->CallPrintInt("selectedBranch", selectedBranch);
+    b->CallPrintInt("extSegNo", getExternalSegNo());
+
     b->CreateCondBr(selectedBranch, normalBranch, optimizationBranch);
 
     b->SetInsertPoint(exitLoop);
@@ -669,11 +673,12 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
     BasicBlock * const acquired = b->CreateBasicBlock(concat(prefix, "_acquired", tmp));
 
     Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
-
+    b->CallPrintInt("currentSegNo" + std::to_string(branchType), getExternalSegNo());
     b->CreateBr(acquire);
 
     b->SetInsertPoint(acquire);
     Value * const currentSegNo = b->CreateAtomicLoadAcquire(externalSegNoPtr);
+    b->CallPrintInt("currentSegNo" + std::to_string(branchType), currentSegNo);
     Value * const ready = b->CreateICmpEQ(getExternalSegNo(), currentSegNo);
     b->CreateLikelyCondBr(ready, acquired, acquire);
 
@@ -696,6 +701,7 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
 
     b->SetInsertPoint(checkAlternateBranch);
     Value * const currentCount = b->CreateAtomicLoadAcquire(otherBranchCountPtr);
+    b->CallPrintInt("otherBranchCount" + std::to_string(branchType), currentCount);
     Value * const safe = b->CreateICmpEQ(currentCount, b->getSize(0));
     b->CreateCondBr(safe, executeKernel, checkAlternateBranch);
 
@@ -710,17 +716,18 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
     } else {
         branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
-
     Value * const nextCount = b->CreateAdd(b->CreateLoad(branchCountPtr), sz_ONE);
     b->CreateStore(nextCount, branchCountPtr);
 
-    Value * const intSegNoPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_SEGMENT_NUMBER);
+    Value * const intSegNoPtr = b->getScalarFieldPtr(ALL_ZERO_PATH_TAKEN_COUNT);
     Value * intSegNo = b->CreateLoad(intSegNoPtr);
     if (branchType == ALL_ZERO_BRANCH) {
         b->CreateStore(b->CreateAdd(intSegNo, sz_ONE), intSegNoPtr);
     } else {
         intSegNo = b->CreateSub(getExternalSegNo(), intSegNo);
     }
+
+    b->CallPrintInt("intSegNo" + std::to_string(branchType), intSegNo);
 
     if (LLVM_LIKELY(kernel->hasAttribute(AttrId::InternallySynchronized))) {
         Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
@@ -743,9 +750,10 @@ void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchT
     } else {
         branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
-    b->CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
-
-    if (LLVM_UNLIKELY(!mBranches[branchType]->hasAttribute(AttrId::InternallySynchronized))) {
+    if (LLVM_LIKELY(mBranches[branchType]->hasAttribute(AttrId::InternallySynchronized))) {
+        b->CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
+    } else {
+        b->CreateStore(b->CreateSub(b->CreateLoad(branchCountPtr), sz_ONE), branchCountPtr);
         Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
         Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
