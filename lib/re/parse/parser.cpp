@@ -268,7 +268,7 @@ RE * RE_Parser::parse_back_reference() {
     if (f != mCaptureMap.end()) {
         Capture * captured = f->second.first;
         unsigned instanceCount = f->second.second;
-        llvm::errs() << "instanceCount:" << instanceCount << "\n";
+        //llvm::errs() << "instanceCount:" << instanceCount << "\n";
         RE * ref = makeReference(backref, captured, instanceCount);
         f->second = std::make_pair(captured, instanceCount+1);
         return ref;
