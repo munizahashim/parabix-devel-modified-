@@ -52,8 +52,9 @@ FixedVectorType * IDISA_Builder::fwVectorType(const unsigned fw) {
 
 Value * IDISA_Builder::fwCast(const unsigned fw, Value * const a) {
     unsigned vecWidth = getVectorBitWidth(a);
-    if (a->getType()->getScalarSizeInBits() == fw) return a;
-    return CreateBitCast(a, FixedVectorType::get(getIntNTy(fw), vecWidth / fw));
+    Type * vecTy = FixedVectorType::get(getIntNTy(fw), vecWidth / fw);
+    if (a->getType() == vecTy) return a;
+    return CreateBitCast(a, vecTy);
 }
 
 void IDISA_Builder::UnsupportedFieldWidthError(const unsigned fw, std::string op_name) {
