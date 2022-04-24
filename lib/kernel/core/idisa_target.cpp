@@ -124,16 +124,19 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
         } else if (hostCPUFeatures.hasAVX) {
             return new KernelBuilderImpl<IDISA_AVX_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
         }
+    }
     if (SSSE3_available()) return new KernelBuilderImpl<IDISA_SSSE3_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
     return new KernelBuilderImpl<IDISA_SSE2_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
-}
+#else
+    llvm::errs() << "No PARABIX_X86_TARGET!\n";
 #endif
+    llvm::errs() << "BlockSize 64 default!\n";
+    codegen::BlockSize = 64;
+    return new KernelBuilderImpl<IDISA_I64_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+}
 #ifdef PARABIX_NVPTX_TARGET
 KernelBuilder * GetIDISA_GPU_Builder(llvm::LLVMContext & C) {
     return new KernelBuilderImpl<IDISA_NVPTX20_Builder>(C, 64 * 64, 64);
 }
 #endif
-    codegen::BlockSize = 64;
-    return new KernelBuilderImpl<IDISA_I64_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
-}
 }
