@@ -210,23 +210,3 @@ void postproc_validateObjectsAndArrays(const uint8_t * ptr, const uint8_t * line
         postproc_reportError(postproc_getLineAndColumnInfo("JSON has been already processed", ptr, lineBegin, lineNum));
     }
 }
-
-void postproc_errorStreamsCallback(const uint8_t * ptr, const uint8_t * lineBegin, const uint8_t * /*lineEnd*/, uint64_t lineNum, uint8_t code) {
-    const uint8_t KEYWORD_CODE = 0x1;
-    const uint8_t UTF8_CODE = 0x2;
-    const uint8_t NUMBER_CODE = 0x4;
-    const uint8_t EXTRA_CODE = 0x8;
-
-    if (code == KEYWORD_CODE) {
-        postproc_reportError(postproc_getLineAndColumnInfo("illegal keyword", ptr, lineBegin, lineNum));
-    } else if (code == UTF8_CODE) {
-        postproc_reportError(postproc_getLineAndColumnInfo("illegal utf8 char", ptr, lineBegin, lineNum));
-    } else if (code == NUMBER_CODE) {
-        postproc_reportError(postproc_getLineAndColumnInfo("illegal number", ptr, lineBegin, lineNum));
-    } else if (code == EXTRA_CODE) {
-        postproc_reportError(postproc_getLineAndColumnInfo("illegal char in json", ptr, lineBegin, lineNum));
-    } else {
-        postproc_reportError("Unprocessed error stream");
-    }
-    fprintf(stderr, "\n");
-}
