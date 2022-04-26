@@ -365,11 +365,18 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
                 Value * const fatalError = b->CreateICmpEQ(mTerminatedAtLoopExitPhi, fatal);
                 Value * const valid = b->CreateOr(fullyConsumed, fatalError);
 
+                Constant * withOrWithout = nullptr;
+                if (mMayLoopToEntry) {
+                    withOrWithout = b->GetString("with");
+                } else {
+                    withOrWithout = b->GetString("without");
+                }
+
                 b->CreateAssert(valid,
                                 "%s.%s: local available item count (%" PRId64 ") does not match "
-                                "its consumed item count (%" PRId64 ")",
+                                "its consumed item count (%" PRId64 ") in kernel %s loop back support",
                                 mCurrentKernelName, bindingName,
-                                produced, consumed);
+                                produced, consumed, withOrWithout);
             }
 
         }

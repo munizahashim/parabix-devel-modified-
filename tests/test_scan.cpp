@@ -156,14 +156,14 @@ TEST_CASE(one_per_line, one_per_line_markers, one_per_line_linebreaks, one_per_l
 }
 
 RUN_TESTS(
-    CASE(tiny_scan),
-    CASE(no_bits),
-    CASE(long_scan),
+ //   CASE(tiny_scan),
+//    CASE(no_bits),
+//    CASE(long_scan),
     CASE(scan_index_integration),
-    CASE(simple_line_span),
-    CASE(text_line_span),
-    CASE(long_spans),
-    CASE(filter_spans),
-    CASE(filter_no_spans),
-    CASE(one_per_line),
+//    CASE(simple_line_span),
+//    CASE(text_line_span),
+//    CASE(long_spans),
+//    CASE(filter_spans),
+//    CASE(filter_no_spans),
+//    CASE(one_per_line),
 )

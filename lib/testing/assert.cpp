@@ -73,7 +73,10 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
     if (FW != 1) {
         blockOffset = b->CreateAdd(strideNo, initialOffset);
     }
+
     for (uint32_t i = 0; i < COUNT; ++i) {
+
+
         Value * lhs;
         Value * rhs;
         if (FW == 1) {
@@ -83,6 +86,7 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
             lhs = b->loadInputStreamPack("lhs", b->getInt32(i), blockOffset);
             rhs = b->loadInputStreamPack("rhs", b->getInt32(i), blockOffset);
         }
+
         // Perform vector comparison lhs != rhs.
         // Result will be a vector of all zeros if lhs == rhs
         Value * const vComp = b->CreateICmpNE(lhs, rhs);

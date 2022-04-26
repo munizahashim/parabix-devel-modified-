@@ -528,7 +528,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     reset(mInitiallyProducedOutputItems, numOfOutputs);    
     reset(mWritableOutputItems, numOfOutputs);
     reset(mConsumedOutputItems, numOfOutputs);
-    reset(mUpdatableProducedOutputItemPtr, numOfOutputs);
     reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
 
     const auto canTerminate = canSetTerminateSignal();
@@ -578,26 +577,29 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         const ProcessingRate & rate = output.getRate();
         Value * produced = nullptr;
         if (LLVM_LIKELY(canTerminate || isAddressable(output))) {
-            mUpdatableProducedOutputItemPtr[i] = nextArg();
-            produced = b->CreateLoad(mUpdatableProducedOutputItemPtr[i]);
-        } else if (LLVM_LIKELY(isCountable(output))) {
-            produced = nextArg();
-        } else { // isRelative
-            // For now, if something is produced at a relative rate to another stream in a kernel that
-            // may terminate, its final item count is inherited from its reference stream and cannot
-            // be set independently. Should they be independent at early termination?
-            const auto port = getStreamPort(rate.getReference());
-            assert (port.Type == PortType::Input || (port.Type == PortType::Output && port.Number < i));
-            const auto & items = (port.Type == PortType::Input) ? mProcessedInputItemPtr : mProducedOutputItemPtr;
-            Value * const ref = b->CreateLoad(items[port.Number]);
-            produced = b->CreateMulRational(ref, rate.getRate());
+            mProducedOutputItemPtr[i] = nextArg();
+            produced = b->CreateLoad(mProducedOutputItemPtr[i]);
+        } else {
+            if (LLVM_LIKELY(isCountable(output))) {
+                produced = nextArg();
+            } else { // isRelative
+                // For now, if something is produced at a relative rate to another stream in a kernel that
+                // may terminate, its final item count is inherited from its reference stream and cannot
+                // be set independently. Should they be independent at early termination?
+                const auto port = getStreamPort(rate.getReference());
+                assert (port.Type == PortType::Input || (port.Type == PortType::Output && port.Number < i));
+                const auto & items = (port.Type == PortType::Input) ? mProcessedInputItemPtr : mProducedOutputItemPtr;
+                Value * const ref = b->CreateLoad(items[port.Number]);
+                produced = b->CreateMulRational(ref, rate.getRate());
+            }
+            AllocaInst * const producedItems = b->CreateAllocaAtEntryPoint(sizeTy);
+            b->CreateStore(produced, producedItems);
+            mProducedOutputItemPtr[i] = producedItems;
         }
         assert (produced);
         assert (produced->getType() == sizeTy);
         mInitiallyProducedOutputItems[i] = produced;
-        AllocaInst * const producedItems = b->CreateAllocaAtEntryPoint(sizeTy);
-        b->CreateStore(produced, producedItems);
-        mProducedOutputItemPtr[i] = producedItems;
+
         /// ----------------------------------------------------
         /// writable / consumed item count
         /// ----------------------------------------------------
@@ -809,18 +811,14 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
             Value * produced = mInitiallyProducedOutputItems[i];
             // TODO: will LLVM optimizations replace the following with the already loaded value?
             // If not, re-loading it here may reduce register pressure / compilation time.
-            if (mUpdatableProducedOutputItemPtr[i]) {
-                produced = b->CreateLoad(mUpdatableProducedOutputItemPtr[i]);
+            if (mProducedOutputItemPtr[i]) {
+                produced = b->CreateLoad(mProducedOutputItemPtr[i]);
             }
             Value * const blockIndex = b->CreateLShr(produced, LOG_2_BLOCK_WIDTH);
             Value * vba = buffer->getStreamLogicalBasePtr(b.get(), baseAddress, ZERO, blockIndex);
             vba = b->CreatePointerCast(vba, b->getVoidPtrTy());
 
             b->CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
-        }
-        if (mUpdatableProducedOutputItemPtr[i]) {
-            Value * const items = b->CreateLoad(mProducedOutputItemPtr[i]);
-            b->CreateStore(items, mUpdatableProducedOutputItemPtr[i]);
         }
     }
 
@@ -843,7 +841,7 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
     const auto numOfOutputs = getNumOfStreamOutputs();
 
     std::vector<Value *> S;
-    S.resize(8 + numOfInputs * 4 + numOfOutputs * 6);
+    S.resize(8 + numOfInputs * 4 + numOfOutputs * 5);
 
     auto o = S.begin();
 
@@ -874,7 +872,6 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
     copy(mInitiallyProducedOutputItems, numOfOutputs);
     copy(mWritableOutputItems, numOfOutputs);
     copy(mConsumedOutputItems, numOfOutputs);
-    copy(mUpdatableProducedOutputItemPtr, numOfOutputs);
     copy(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
 
     assert (o == S.end());
@@ -921,7 +918,6 @@ void KernelCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
     revert(mInitiallyProducedOutputItems, numOfOutputs);
     revert(mWritableOutputItems, numOfOutputs);
     revert(mConsumedOutputItems, numOfOutputs);
-    revert(mUpdatableProducedOutputItemPtr, numOfOutputs);
     revert(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
 
     assert (o == S.end());

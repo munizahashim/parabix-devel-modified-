@@ -42,7 +42,7 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         const Binding & input = br.Binding;
         Value * const fullyProcessed = truncateBlockSize(b, input, processed, terminated);
         mFullyProcessedItemCount[port] = fullyProcessed;
-        if (CheckAssertions) {
+        if (LLVM_UNLIKELY(CheckAssertions)) {
             const auto streamSet = source(e, mBufferGraph);
             const auto producer = parent(streamSet, mBufferGraph);
             if (mCurrentPartitionId == KernelPartitionId[producer]) {
@@ -55,11 +55,18 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
                 Value * const valid = b->CreateOr(fullyConsumed, fatalError);
                 Constant * const bindingName = b->GetString(input.getName());
 
+                Constant * withOrWithout = nullptr;
+                if (mMayLoopToEntry) {
+                    withOrWithout = b->GetString("with");
+                } else {
+                    withOrWithout = b->GetString("without");
+                }
+
                 b->CreateAssert(valid,
                                 "%s.%s: local available item count (%" PRId64 ") does not match "
-                                "its processed item count (%" PRId64 ")",
+                                "its processed item count (%" PRId64 ") in kernel %s loop back support",
                                 mCurrentKernelName, bindingName,
-                                produced, processed);
+                                produced, processed, withOrWithout);
             }
         }
     }

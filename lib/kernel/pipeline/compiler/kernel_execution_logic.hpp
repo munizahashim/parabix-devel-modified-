@@ -177,12 +177,20 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             return ptr;
         }
         if (forceAddressability || isAddressable(binding)) {
-            if (LLVM_UNLIKELY(mNumOfAddressableItemCount == mAddressableItemCountPtr.size())) {
-                auto aic = b->CreateAllocaAtEntryPoint(b->getSizeTy());
-                mAddressableItemCountPtr.push_back(aic);
+            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+                if (port.Port.Type == PortType::Input) {
+                    ptr = mProcessedItemCountPtr[port.Port];
+                } else {
+                    ptr = mProducedItemCountPtr[port.Port];
+                }
+            } else {
+                if (LLVM_UNLIKELY(mNumOfAddressableItemCount == mAddressableItemCountPtr.size())) {
+                    auto aic = b->CreateAllocaAtEntryPoint(b->getSizeTy());
+                    mAddressableItemCountPtr.push_back(aic);
+                }
+                ptr = mAddressableItemCountPtr[mNumOfAddressableItemCount++];
+                b->CreateStore(itemCount, ptr);
             }
-            ptr = mAddressableItemCountPtr[mNumOfAddressableItemCount++];
-            b->CreateStore(itemCount, ptr);
             addNextArg(ptr);
         } else if (isCountable(binding)) {
             addNextArg(itemCount);

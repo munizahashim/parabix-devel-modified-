@@ -371,9 +371,9 @@ public:
 
     std::vector<llvm::Value *> getDoSegmentProperties(BuilderRef b) const;
 
-    void setDoSegmentProperties(BuilderRef b, const llvm::ArrayRef<llvm::Value *> args);
+    virtual void setDoSegmentProperties(BuilderRef b, const llvm::ArrayRef<llvm::Value *> args);
 
-    void callGenerateDoSegmentMethod(BuilderRef b);
+    virtual void callGenerateDoSegmentMethod(BuilderRef b);
 
     void callGenerateFinalizeThreadLocalMethod(BuilderRef b);
 
@@ -428,7 +428,6 @@ protected:
 
     Vec<llvm::Value *>              mProducedOutputItemPtr;
     Vec<llvm::Value *>              mUpdatableOutputBaseVirtualAddressPtr;
-    Vec<llvm::Value *>              mUpdatableProducedOutputItemPtr;
     Vec<llvm::Value *>              mInitiallyProducedOutputItems;
 
     Vec<llvm::Value *>              mWritableOutputItems;

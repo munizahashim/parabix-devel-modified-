@@ -668,7 +668,9 @@ bool PipelineCommonGraphFunctions::mayHaveNonLinearIO(const size_t kernel) const
  * @brief isKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const {
-
+#ifdef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
+    return false;
+#else
     const Kernel * const kernelObj = getKernel(kernel);
 
     assert (kernelObj->isGenerated());
@@ -752,7 +754,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
     }
     assert (st->getStructNumElements() >= kernelObj->getNumOfScalarInputs());
     return st->getStructNumElements() == kernelObj->getNumOfScalarInputs();
-
+#endif
 }
 
 }

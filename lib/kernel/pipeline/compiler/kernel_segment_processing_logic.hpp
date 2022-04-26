@@ -90,6 +90,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
+    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
         mUsePreAndPostInvocationSynchronizationLocks = true;
     } else if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mIsOptimizationBranch)) {
@@ -107,7 +108,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         }
         mUsePreAndPostInvocationSynchronizationLocks = hasAllCountableInput;
     }
-
+    #endif
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     identifyPipelineInputs(mKernelId);
 
@@ -132,7 +133,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     }
 
     mMayLoopToEntry = mExecuteStridesIndividually || mIsOptimizationBranch;
-
     if (LLVM_LIKELY(!mKernelIsInternallySynchronized)) {
         if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
             mMayLoopToEntry = true;
@@ -430,7 +430,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 
         if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
             assert (mOptimizationBranchSelectedBranch);
-            mOptimizationBranchScanStatePhi->addIncoming(mOptimizationBranchSelectedBranch, exitBlockAfterLoopAgainTest);
+            mOptimizationBranchPriorScanStatePhi->addIncoming(mOptimizationBranchSelectedBranch, exitBlockAfterLoopAgainTest);
         }
 
         const auto prefix = makeKernelName(mKernelId);
@@ -543,10 +543,9 @@ inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
         mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     }
     if (mIsOptimizationBranch) {
-        mOptimizationBranchScanStatePhi = b->CreatePHI(boolTy, 2, prefix + "_optBrScanState");
-        mOptimizationBranchScanStatePhi->addIncoming(b->getFalse(), mKernelLoopStart);
+        mOptimizationBranchPriorScanStatePhi = b->CreatePHI(boolTy, 2, prefix + "_optBrScanState");
+        mOptimizationBranchPriorScanStatePhi->addIncoming(b->getFalse(), mKernelLoopStart);
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

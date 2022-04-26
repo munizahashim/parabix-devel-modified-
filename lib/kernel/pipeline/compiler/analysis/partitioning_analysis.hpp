@@ -606,21 +606,21 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         assert (V.none());
     }
 
-    unsigned nextRateId = 0;
-    for (auto i = 0UL, l = num_vertices(initial); i < l; ++i) {
+    const auto l = num_vertices(initial);
+
+    for (unsigned i = 0; i < l; ++i) {
         const auto & P = initial[i];
         for (const auto u : P.Kernels) {
             assert (u < mapping.size());
             assert (Relationships[u].Type == RelationshipNode::IsKernel);
             const auto j = mapping[u];
             assert (j < m);
-            const auto k = P.LinkedGroupId;
-            assert (k <= l);
-            nextRateId = std::max(nextRateId, k + 1U);
-            G[j].set(k);
+            assert (P.LinkedGroupId <= l);
+            G[j].set(P.LinkedGroupId);
         }
     }
 
+    auto nextRateId = l;
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -641,8 +641,9 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             assert (V.any() || kernelObj == mPipelineKernel);
 
             // Check whether this (internal) kernel could terminate early
-            bool demarcateOutputs = (kernelObj == mPipelineKernel);
-            bool useNewRateId = false;
+            bool useNewRateId = (in_degree(i, G) == 0);
+            bool demarcateOutputs = (kernelObj == mPipelineKernel) || useNewRateId;
+
             if (kernelObj != mPipelineKernel) {
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
@@ -667,11 +668,13 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             }
 
             if (useNewRateId) {
+                assert (!V.test(nextRateId));
                 V.set(nextRateId++);
             }
 
             unsigned demarcationId = 0;
             if (LLVM_UNLIKELY(demarcateOutputs)) {
+                assert (!V.test(nextRateId));
                 demarcationId = nextRateId++;
             }
 
@@ -680,6 +683,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                 BitSet & O = G[target(e, G)];
                 O |= V;
                 if (LLVM_UNLIKELY(demarcateOutputs)) {
+                    assert (!O.test(demarcationId));
                     O.set(demarcationId);
                 }
             }

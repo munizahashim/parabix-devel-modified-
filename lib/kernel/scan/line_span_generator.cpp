@@ -53,7 +53,7 @@ LineSpanFilterKernel::LineSpanFilterKernel(BuilderRef b, StreamSet * lineNumbers
 
 void LineSpanFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     Type * const i64 = b->getInt64Ty();
-//    Value * const i64_ZERO = b->getInt64(0);
+    Value * const i64_ZERO = b->getInt64(0);
     Value * const i64_ONE = b->getInt64(1);
 
    // TODO: REVISIT: this kernel does not read numOfStreams?
@@ -68,15 +68,11 @@ void LineSpanFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
     Value * const ic_SpansProcessedCount = b->getProcessedItemCount("spans");
     Value * const ic_AvailableLineNumbers = b->getAvailableItemCount("lineNumbers");
     Value * const ic_AvailableSpans = b->getAvailableItemCount("spans");
-
-//    Value * const noAvailableLineNumbers = b->CreateICmpEQ(ic_AvailableLineNumbers, i64_ZERO);
-//    Value * const noAvailableSpans = b->CreateICmpEQ(ic_AvailableSpans, i64_ZERO);
-//    Value * const noAvailableStreams = b->CreateOr(noAvailableLineNumbers, noAvailableSpans);
-//    Value * const shouldExit = b->CreateOr(noAvailableStreams, b->isFinal());
-
-//    b->CreateUnlikelyCondBr(shouldExit, block_Exit, block_PreProcess);
-
-    b->CreateBr(block_PreProcess);
+    Value * const noAvailableLineNumbers = b->CreateICmpEQ(ic_AvailableLineNumbers, i64_ZERO);
+    Value * const noAvailableSpans = b->CreateICmpEQ(ic_AvailableSpans, i64_ZERO);
+    Value * const noAvailableStreams = b->CreateOr(noAvailableLineNumbers, noAvailableSpans);
+    Value * const shouldExit = b->CreateOr(noAvailableStreams, b->isFinal());
+    b->CreateUnlikelyCondBr(shouldExit, block_Exit, block_PreProcess);
 
     auto GenerateContinueCheck = [&](Value * lnIdx, Value * spanIdx) -> Value * {
         Value * const areMoreLineNumbers = b->CreateICmpULT(lnIdx, ic_AvailableLineNumbers);
@@ -96,9 +92,9 @@ void LineSpanFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
     b->CreateCondBr(b->CreateICmpEQ(lineNumVal, spanIndex), block_UseSpan, block_SkipSpan);
 
     b->SetInsertPoint(block_UseSpan);
-    //Value * const startVal = b->CreateLoad(b->getRawInputPointer("spans", i64_ZERO, spanIndex));
+    Value * const startVal = b->CreateLoad(b->getRawInputPointer("spans", i64_ZERO, spanIndex));
     Value * const endVal = b->CreateLoad(b->getRawInputPointer("spans", i64_ONE, spanIndex));
-    //b->CreateStore(startVal, b->getRawOutputPointer("output", i64_ZERO, lineNumberIndex));
+    b->CreateStore(startVal, b->getRawOutputPointer("output", i64_ZERO, lineNumberIndex));
     b->CreateStore(endVal, b->getRawOutputPointer("output", i64_ONE, lineNumberIndex));
     b->setProducedItemCount("output", b->CreateAdd(lineNumberIndex, i64_ONE));
     Value * const nextLineNumberIndex = b->CreateAdd(lineNumberIndex, i64_ONE);
@@ -116,5 +112,6 @@ void LineSpanFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
 
     b->SetInsertPoint(block_Exit);
 }
+
 
 } // namespace kernel

@@ -509,10 +509,6 @@ void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
     BasicBlock * const optimizationBranch = b->CreateBasicBlock("optimizationBranch");
     BasicBlock * const normalBranch = b->CreateBasicBlock("normalBranchInvoke");
     BasicBlock * const exitLoop = b->CreateBasicBlock("exitLoop");
-
-    b->CallPrintInt("selectedBranch", selectedBranch);
-    b->CallPrintInt("extSegNo", getExternalSegNo());
-
     b->CreateCondBr(selectedBranch, normalBranch, optimizationBranch);
 
     b->SetInsertPoint(exitLoop);
@@ -673,12 +669,10 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
     BasicBlock * const acquired = b->CreateBasicBlock(concat(prefix, "_acquired", tmp));
 
     Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
-    b->CallPrintInt("currentSegNo" + std::to_string(branchType), getExternalSegNo());
     b->CreateBr(acquire);
 
     b->SetInsertPoint(acquire);
     Value * const currentSegNo = b->CreateAtomicLoadAcquire(externalSegNoPtr);
-    b->CallPrintInt("currentSegNo" + std::to_string(branchType), currentSegNo);
     Value * const ready = b->CreateICmpEQ(getExternalSegNo(), currentSegNo);
     b->CreateLikelyCondBr(ready, acquired, acquire);
 
@@ -692,8 +686,6 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
     } else {
         otherBranchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
-
-
     BasicBlock * const checkAlternateBranch = b->CreateBasicBlock(concat(prefix, "_checkAlternateBranch", tmp));
     BasicBlock * const executeKernel = b->CreateBasicBlock(concat(prefix, "_executeKernel", tmp));
 
@@ -701,7 +693,9 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
 
     b->SetInsertPoint(checkAlternateBranch);
     Value * const currentCount = b->CreateAtomicLoadAcquire(otherBranchCountPtr);
-    b->CallPrintInt("otherBranchCount" + std::to_string(branchType), currentCount);
+    if (codegen::DebugOptionIsSet(codegen::EnableAsserts)) {
+        b->CreateAssert(b->CreateICmpULE(currentCount, b->getSize(4)), "other branch bad");
+    }
     Value * const safe = b->CreateICmpEQ(currentCount, b->getSize(0));
     b->CreateCondBr(safe, executeKernel, checkAlternateBranch);
 
@@ -727,8 +721,6 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
         intSegNo = b->CreateSub(getExternalSegNo(), intSegNo);
     }
 
-    b->CallPrintInt("intSegNo" + std::to_string(branchType), intSegNo);
-
     if (LLVM_LIKELY(kernel->hasAttribute(AttrId::InternallySynchronized))) {
         Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
@@ -752,6 +744,10 @@ void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchT
     }
     if (LLVM_LIKELY(mBranches[branchType]->hasAttribute(AttrId::InternallySynchronized))) {
         b->CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
+        if (codegen::DebugOptionIsSet(codegen::EnableAsserts)) {
+            Value * const c = b->CreateAtomicLoadAcquire(branchCountPtr);
+            b->CreateAssert(b->CreateICmpULE(c, b->getSize(4)), "released branch bad");
+        }
     } else {
         b->CreateStore(b->CreateSub(b->CreateLoad(branchCountPtr), sz_ONE), branchCountPtr);
         Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);

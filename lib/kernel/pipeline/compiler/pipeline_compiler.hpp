@@ -99,8 +99,6 @@ const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 
-
-
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
 #ifdef ENABLE_PAPI
@@ -471,10 +469,8 @@ public:
     Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
 
 // optimization branch functions
-    void initializeOptimizationBranch();
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
     Value * checkOptimizationBranchSpanLength(BuilderRef b, Value * const numOfLinearStrides);
-    void writeOptimizationBranchKernelCall(BuilderRef b);
 
 // papi instrumentation functions
 #ifdef ENABLE_PAPI
@@ -691,7 +687,7 @@ protected:
     FixedVector<PHINode *>                      mPartitionPipelineProgressPhi;
 
     // optimization branch
-    PHINode *                                   mOptimizationBranchScanStatePhi = nullptr;
+    PHINode *                                   mOptimizationBranchPriorScanStatePhi = nullptr;
     Value *                                     mOptimizationBranchSelectedBranch = nullptr;
 
     // kernel state
