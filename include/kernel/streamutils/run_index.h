@@ -37,29 +37,6 @@ private:
     Numbering mNumbering;
 };
 
-
-class AccumRunIndex : public pablo::PabloKernel {
-public:
-    AccumRunIndex(BuilderRef b,
-               unsigned numSym, StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * accumRunIndex, StreamSet * accumOverflow = nullptr);
-    void generatePabloMethod() override;
-private:
-    unsigned mIndexCount;
-    bool mOverflow;
-    unsigned mOffset;
-};
-
-class AccumRunIndexNew : public pablo::PabloKernel {
-public:
-    AccumRunIndexNew(BuilderRef b,
-               unsigned numSym, StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, StreamSet * phraseRunIndex, StreamSet * phraseOverflow = nullptr);
-    void generatePabloMethod() override;
-private:
-    unsigned mIndexCount;
-    unsigned mNumSym;
-    bool mOverflow;
-};
-
 }
 
 #endif // RUN_INDEX_H

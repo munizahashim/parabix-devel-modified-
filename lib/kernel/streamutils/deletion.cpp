@@ -15,6 +15,7 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 
+
 using namespace llvm;
 
 inline size_t ceil_udiv(const size_t n, const size_t m) {
@@ -24,6 +25,7 @@ inline size_t ceil_udiv(const size_t n, const size_t m) {
 namespace kernel {
 
 using BuilderRef = Kernel::BuilderRef;
+
 
 void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
@@ -1259,7 +1261,7 @@ void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(BuilderRef kb, V
 //    kb->setProducedItemCount("outputSwizzle0", kb->CreateAdd(pendingOffset, outputProduced));
 }
 
-constexpr unsigned MIN_STREAMS_TO_SWIZZLE = 4;
+const unsigned MIN_STREAMS_TO_SWIZZLE = 4;
 
 FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
                                          SelectOperation const & maskOp,

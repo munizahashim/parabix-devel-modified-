@@ -34,7 +34,7 @@ enum class StreamExpandOptimization {None, NullCheck};
 
     SpreadByMask employs two kernels in sequence:  StreamExpandKernel followed by
     FieldDepositKernel.
- 
+
  */
 void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
@@ -135,7 +135,7 @@ private:
  using M_i to the each of the k elements in the i-th input (swizzled) stream.
 
  CONCEPTUAL VIEW OF INPUT STREAM SET                    ACTUAL LAYOUT OF INPUT STREAM SET
- 
+
  STREAM 0  abcde...  fg......  hijklm..  nopqrst.     SWIZZLE 0  abcde...  uvwxy...  OPQRS...  89abc...
  STREAM 1  uvwxy...  zA......  BCDEFG..  HIJKLMN.     SWIZZLE 1  fg......  zA......  TU......  de......
  STREAM 2  OPQRS...  TU......  VWXYZ0..  1234567.     SWIZZLE 2  hijklm..  BCDEFG..  VWXYZ0..  fghijk..
