@@ -28,7 +28,7 @@ using namespace llvm;
 
 namespace re {
     
-using CaptureMap = std::map<std::string, std::pair<RE *, unsigned>>;
+using CaptureMap = std::map<std::string, std::pair<Capture *, unsigned>>;
 
 class ReverseTransformer : public RE_Transformer {
 public:
@@ -37,33 +37,33 @@ public:
         std::string cname = c->getName();
         auto f = mCaptureMap.find(cname);
         if (f != mCaptureMap.end()) {
-            RE * captured = f->second.first;
+            Capture * captured = f->second.first;
             unsigned instanceCount = f->second.second;
-            RE * ref = makeReference(cast<Capture>(captured)->getName(), captured, instanceCount);
+            RE * ref = makeReference(captured->getName(), captured, instanceCount);
             f->second = std::make_pair(captured, instanceCount+1);
             return ref;
         }
         else {
             std::string newName = "\\" + std::to_string(mCaptureMap.size() + 1);
-            RE * capture = makeCapture(newName, transform(c->getCapturedRE()));
+            Capture * capture = makeCapture(newName, transform(c->getCapturedRE()));
             mCaptureMap.emplace(cname, std::make_pair(capture, 0));
             return capture;
         }
     }
     RE * transformReference(Reference * r) override {
         std::string cname = r->getName();
-        auto referent = r->getCapture();
+        Capture * referent = r->getCapture();
         auto f = mCaptureMap.find(cname);
         if (f != mCaptureMap.end()) {
-            RE * captured = f->second.first;
+            Capture * captured = f->second.first;
             unsigned instanceCount = f->second.second;
-            RE * ref = makeReference(cname, captured, instanceCount);
+            Reference * ref = makeReference(cname, captured, instanceCount);
             f->second = std::make_pair(captured, instanceCount+1);
             return ref;
         }
         else {
             std::string newName = "\\" + std::to_string(mCaptureMap.size() + 1);
-            RE * capture = makeCapture(newName, transform(cast<Capture>(referent)->getCapturedRE()));
+            Capture * capture = makeCapture(newName, transform(referent->getCapturedRE()));
             mCaptureMap.emplace(cname, std::make_pair(capture, 0));
             return capture;
         }

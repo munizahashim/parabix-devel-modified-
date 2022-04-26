@@ -201,7 +201,7 @@ private:
     RE * mCapturedRE;
 };
 
-inline RE * makeCapture(std::string name, RE * captured) {
+inline Capture * makeCapture(std::string name, RE * captured) {
     return Capture::Create(name, captured);
 }
 
@@ -210,25 +210,25 @@ public:
     std::string getName() const  {
         return std::string(mName, mNameLength);
     }
-    RE * getCapture() const {return mCapture;}
+    Capture * getCapture() const {return mCapture;}
     unsigned getInstance() const {return mInstance;}
-    static Reference * Create(std::string name, RE * capture, unsigned instance) {
+    static Reference * Create(std::string name, Capture * capture, unsigned instance) {
         return new Reference(name.c_str(), name.length(), capture, instance);
     }
     RE_SUBTYPE(Reference)
 private:
-    Reference(const char * name, const length_t nameLength, RE * capture, unsigned instance): RE(ClassTypeId::Reference)
+    Reference(const char * name, const length_t nameLength, Capture * capture, unsigned instance): RE(ClassTypeId::Reference)
     , mNameLength(nameLength)
     , mName(replicateString(name, nameLength))
     , mCapture(capture)
     , mInstance(instance) {}
     const length_t mNameLength;
     const char * const mName;
-    RE * mCapture;
+    Capture * mCapture;
     unsigned mInstance;
 };
 
-inline RE * makeReference(std::string name, RE * capture, unsigned instance){
+inline Reference * makeReference(std::string name, Capture * capture, unsigned instance){
     return Reference::Create(name, capture, instance);
 }
 

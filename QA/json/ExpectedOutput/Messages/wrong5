@@ -1,4 +1,4 @@
-Error parsing array at line 0 column 24 starting in:
+Error parsing object at line 0 column 20 starting in:
 
-, {"right": wrong}]
+rong, {"right": wrong}]
 

@@ -131,6 +131,15 @@ protected:
     void generatePabloMethod() override;
 };
 
+class FixedDistanceMatchesKernel : public pablo::PabloKernel {
+public:
+    FixedDistanceMatchesKernel(BuilderRef b, StreamSet * Basis, StreamSet * ToCheck, StreamSet * Matches, unsigned distance);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mMatchDistance;
+};
+
 class AbortOnNull final : public MultiBlockKernel {
 public:
     AbortOnNull(BuilderRef, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);

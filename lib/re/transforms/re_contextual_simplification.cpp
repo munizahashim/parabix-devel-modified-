@@ -338,7 +338,7 @@ ContextMatchCursor ctxt_match(RE * re, Assertion::Kind kind, ContextMatchCursor 
         ContextMatchCursor submatch = ctxt_match(def, kind, cursor);
         return submatch;
     } else if (Reference * r = dyn_cast<Reference>(re)) {
-        RE * capture = r->getCapture();
+        Capture * capture = r->getCapture();
         ContextMatchCursor submatch = ctxt_match(capture, kind, cursor);
         if (isEmptySet(submatch.rslt)) return submatch;
         return ContextMatchCursor{submatch.ctxt, re};

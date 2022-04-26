@@ -233,16 +233,22 @@ jsonFunctionType json_parsing_gen(
         StreamSet * collapsedLex;
         StreamSet * const symbols = su::Select(P, combinedLexers, 0);
         if (ToCSVFlag) {
-            StreamSet * allLex = P->CreateStreamSet(5, 1);
+            StreamSet * allLex = P->CreateStreamSet(8, 1);
             P->CreateKernelCall<StreamsMerge>(
-                    std::vector<StreamSet *>{symbols, stringMarker, keywordEndMarkers, numberLex, stringSpan},
+                    std::vector<StreamSet *>{
+                        symbols, stringMarker, keywordEndMarkers, numberLex, stringSpan,
+                        extraErr, utf8Err, numberErr
+                    },
                     allLex
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            StreamSet * allLex = P->CreateStreamSet(4, 1);
+            StreamSet * allLex = P->CreateStreamSet(7, 1);
             P->CreateKernelCall<StreamsMerge>(
-                std::vector<StreamSet *>{symbols, stringMarker, keywordEndMarkers, numberLex},
+                std::vector<StreamSet *>{
+                    symbols, stringMarker, keywordEndMarkers, numberLex,
+                    extraErr, utf8Err, numberErr
+                },
                 allLex
             );
             collapsedLex = su::Collapse(P, allLex);
@@ -254,7 +260,6 @@ jsonFunctionType json_parsing_gen(
         auto normalCsv2JsonFn = SCAN_CALLBACK(json2csv_validateObjectsAndArrays);
         auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
         auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
-        auto normalErrFn = SCAN_CALLBACK(postproc_errorStreamsCallback);
 
         auto const LineBreaks = P->CreateStreamSet(1);
         P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
@@ -263,24 +268,10 @@ jsonFunctionType json_parsing_gen(
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
         StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
 
-        // 9.1.2 Validate objects and arrays
+        // 10 Validate objects and arrays and output error in case JSON is not valid
         auto fn = ToCSVFlag ? normalCsv2JsonFn : normalJsonFn;
         auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
         scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
-
-        StreamSet * const Errors = P->CreateStreamSet(3, 1);
-        P->CreateKernelCall<StreamsMerge>(
-            std::vector<StreamSet *>{extraErr, utf8Err, numberErr},
-            Errors
-        );
-
-        // 9.1.3 Prepare error StreamSets
-        StreamSet * const Errs = su::Collapse(P, Errors);
-        StreamSet * const ErrIndices = scan::ToIndices(P, Errs);
-        StreamSet * const Codes = su::Multiplex(P, Errs);
-
-        // 10. Output error in case JSON is not valid
-        scan::Reader(P, driver, normalErrFn, codeUnitStream, { ErrIndices, Spans }, { LineNumbers, Codes });
     }
 
     return reinterpret_cast<jsonFunctionType>(P->compile());

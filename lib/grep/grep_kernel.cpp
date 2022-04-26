@@ -490,6 +490,32 @@ PopcountKernel::PopcountKernel (BuilderRef iBuilder, StreamSet * const toCount, 
 
 }
 
+void FixedDistanceMatchesKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    auto Basis = getInputStreamSet("Basis");
+    auto ToCheck = getInputStreamSet("ToCheck")[0];
+    Var * const mismatch = pb.createVar("mismatch", pb.createZeroes());
+    auto it = pb.createScope();
+    pb.createIf(ToCheck, it);
+    PabloAST * differ = it.createZeroes();
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        PabloAST * basis_bits_i = Basis[i];
+        PabloAST * advanced = it.createAdvance(basis_bits_i, mMatchDistance);
+        differ = it.createOr(differ, it.createXor(basis_bits_i, advanced));
+    }
+    it.createAssign(mismatch, differ);
+    Var * const MatchVar = getOutputStreamVar("Matches");
+    pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "Matches"));
+}
+
+FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (BuilderRef b, StreamSet * Basis, StreamSet * ToCheck, StreamSet * Matches, unsigned distance)
+: PabloKernel(b, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1",
+// inputs
+{Binding{"Basis", Basis} ,Binding{"ToCheck", ToCheck}},
+// output
+{Binding{"Matches", Matches}}), mMatchDistance(distance) {
+
+}
 
 void AbortOnNull::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     Module * const m = b->getModule();
