@@ -42,7 +42,7 @@ void JSONStringMarker::generatePabloMethod() {
     // paper does S = B & ~(B << 1)
     PabloAST * notB = pb.createNot(B);
     PabloAST * S = pb.createAnd(B, pb.createAdvance(notB, 1));
-
+    
     // paper does S & E, but we advanced notB by 1, so it became S & O
     PabloAST * ES = pb.createAnd(S, O);
     // we don't have add, so we will have to use ScanThru on ES
@@ -327,12 +327,12 @@ void JSONParserArr::generatePabloMethod() {
     PabloAST * firstValue = pb.createScanTo(begin, valueAtZero);
     PabloAST * nonNestedValue = pb.createScanTo(pb.createAdvance(firstValue, 1), anyToken);
     PabloAST * errValue = pb.createScanThru(pb.createAdvance(nonNestedValue, 1), stopAtEOF);
-
+    
     // If we have any symbol, we cannot have any value at depth 0
     PabloAST * firstSymbol = pb.createScanTo(begin, symbols);
     PabloAST * valueAtZeroAfterSymbol = pb.createScanTo(pb.createAdvance(firstSymbol, 1), valueAtZero);
     PabloAST * errSymbol = pb.createScanThru(pb.createAdvance(valueAtZeroAfterSymbol, 1), stopAtEOF);
-
+    
     // EOFbit is always at depth 0, otherwise we have unmatched parens
     PabloAST * errEOF = pb.createAnd(EOFbit, otherND);
     PabloAST * errSimpleValue = pb.createOr3(errValue, errSymbol, errEOF);
