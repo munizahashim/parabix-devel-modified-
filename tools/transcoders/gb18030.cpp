@@ -10,7 +10,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/GB_18030_data.h>
-#include <pablo/bixnum/utf8gen.h>
+#include <kernel/unicode/utf8gen.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/p2s_kernel.h>

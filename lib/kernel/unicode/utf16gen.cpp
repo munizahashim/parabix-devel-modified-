@@ -4,7 +4,7 @@
  *  icgrep is a trademark of International Characters.
  */
 
-#include <pablo/bixnum/utf16gen.h>
+#include <kernel/unicode/utf16gen.h>
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/LLVMContext.h>
