@@ -41,16 +41,6 @@ unsigned EncodingInfo::maxSymbolLength() const {
     return maxSoFar;
 }
 
-unsigned EncodingInfo::minSymbolLength() const {
-    unsigned minSoFar = UINT_MAX;
-    for (unsigned i = 0; i < byLength.size(); i++) {
-        if (byLength[i].lo < minSoFar) {
-            minSoFar = byLength[i].hi;
-        }
-    }
-    return minSoFar;
-}
-
 unsigned EncodingInfo::maxEncodingBytes() const {
     unsigned enc_bytes = 0;
     for (auto g : byLength) {
@@ -75,54 +65,6 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
     unsigned suffix_bits_avail = (g.encoding_bytes - 1) * 7;
     unsigned hash_ext_bits = g.hash_bits + g.length_extension_bits;
     return suffix_bits_avail < hash_ext_bits ? hash_ext_bits - suffix_bits_avail : 0;
-}
-
-unsigned EncodingInfo::prefixLengthMaskBits(unsigned lgth) const {
-    unsigned groupNo = getLengthGroupNo(lgth);
-    auto g = byLength[groupNo];
-    switch(groupNo) {
-        case 0: return g.encoding_bytes + 1;
-        case 1: return g.encoding_bytes + 1;
-        case 2: return g.encoding_bytes;
-        case 3: return 1;
-        case 4: return 0;
-        default: return 0;
-    }
-}
-
-unsigned EncodingInfo::lastSuffixBase(unsigned groupNo) const {
-    if(groupNo > 2) {
-        return 128;
-    }
-    return 0;
-}
-
-unsigned EncodingInfo::lastSuffixHashBits(unsigned numSym, unsigned groupNo) const {
-    if (numSym > 0 && groupNo > 2) {
-        return 6;
-    }
-    return 7;
-}
-
-unsigned EncodingInfo::getSubtableSize(unsigned groupNo) const {
-    auto g = byLength[groupNo];
-    unsigned subtables = 1;
-    if ((g.hi - g.lo) < 4) {
-        subtables = 5;
-    }
-    return subtables * (1UL << (g.hash_bits + g.encoding_bytes)) * g.hi;
-}
- 
-unsigned EncodingInfo::tableSizeBits(unsigned groupNo) const {
-    auto g = byLength[groupNo];
-    switch(groupNo) {
-        case 0: return 13;
-        case 1: return 14;
-        case 2: return 14;
-        case 3: return 15;
-        case 4: return 17;
-        default: return 0;
-    }
 }
 
 WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
@@ -269,129 +211,6 @@ void ZTF_Symbols::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("symbolRuns"), pb.getInteger(0)), runs);
 }
 
-ZTF_Phrases::ZTF_Phrases(BuilderRef kb,
-                StreamSet * basisBits,
-                StreamSet * wordChar,
-                StreamSet * phraseRuns)
-: PabloKernel(kb, "ZTF_Phrases",
-            {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
-             Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
-            {Binding{"phraseRuns", phraseRuns}}) { }
-
-void ZTF_Phrases::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
-    pablo::PabloAST * wordChar = getInputStreamSet("wordChar")[0];
-
-    // Find start bytes of word characters.
-    PabloAST * ASCII = ccc.compileCC(re::makeCC(0x0, 0x7F));
-    PabloAST * prefix2 = ccc.compileCC(re::makeCC(0xC2, 0xDF));
-    PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
-    PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4));
-    PabloAST * wc1 = pb.createAnd(ASCII, wordChar);
-    // valid UTF-8 codepoints
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix2, pb.createLookahead(wordChar, 1)));
-    wc1 = pb.createOr(wc1, pb.createAnd3(prefix3, pb.createLookahead(wordChar, 1), pb.createLookahead(wordChar, 2)));
-    wc1 = pb.createOr(wc1, pb.createAnd3(prefix4, pb.createLookahead(wordChar, 2), pb.createLookahead(wordChar, 3)));
-    //
-    // ZTF Code symbols
-    PabloAST * multiSymSfx = ccc.compileCC(re::makeCC(0x80, 0xBF));
-    PabloAST * multiSymPfx = ccc.compileCC(re::makeCC(0xE0, 0xFF));
-    PabloAST * anyPfx = ccc.compileCC(re::makeCC(0xC0, 0xFF));
-    PabloAST * pfx1 = ccc.compileCC(re::makeCC(0xC0, 0xDF));
-    PabloAST * pfx2 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
-    PabloAST * pfx3 = ccc.compileCC(re::makeCC(0xF0, 0xFF));
-
-    /// TODO: F8-FF can have any suffix except multi-byte pfx byte
-    PabloAST * ZTF_sym = pb.createAnd(pb.createAdvance(anyPfx, 1), ASCII); // // PFX 00-7F
-
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(ZTF_sym, 1), multiSymSfx)); // PFX 00-7F 80-BF
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(pfx2, 2), ASCII)); // PFX 00-7F 00-7F
-
-    PabloAST * multiSymPfx3 = pb.createAnd(pb.createAdvance(pfx3, 2), ASCII);
-    ZTF_sym = pb.createOr(ZTF_sym, multiSymPfx3); // PFX 00-7F 00-7F
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(multiSymPfx3, 1), multiSymSfx)); // PFX 00-7F 00-7F 80-BF
-    ZTF_sym = pb.createOr(ZTF_sym, pb.createAnd(pb.createAdvance(multiSymPfx3, 1), ASCII));
-
-    PabloAST * ZTF_prefix = pb.createAnd(anyPfx, pb.createNot(pb.createLookahead(basis[7], 1)));
-
-    // Filter out ZTF code symbols from word characters.
-    wc1 = pb.createAnd(wc1, pb.createNot(ZTF_sym));
-
-    PabloAST * wordStart = pb.createAnd(pb.createNot(pb.createAdvance(wordChar, 1)), wc1, "wordStart");
-    // Nulls, Linefeeds and ZTF_symbols are also treated as symbol starts.
-    PabloAST * LF = ccc.compileCC(re::makeByte(0x0A));
-    PabloAST * Null = ccc.compileCC(re::makeByte(0x0));
-    PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
-    PabloAST * symStart = pb.createOr3(wordStart, ZTF_prefix, pb.createOr3(LF, Null, fileStart));
-
-   // The next character after a ZTF symbol or a line feed also starts a new symbol.
-    symStart = pb.createOr3(symStart, pb.createAdvance(ZTF_prefix, 1), pb.createAdvance(pb.createOr(ZTF_sym, LF), 1), "symStart");
-
-    // runs are the bytes after a start symbol until the next symStart byte.
-    pablo::PabloAST * runs = pb.createInFile(pb.createNot(symStart));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("phraseRuns"), pb.getInteger(0)), runs);
-}
-
-PhraseRunSeq::PhraseRunSeq(BuilderRef kb,
-                 StreamSet * phraseRuns,
-                 StreamSet * phraseRunSeq,
-                 unsigned numSyms,
-                 unsigned seqNum)
-: pablo::PabloKernel(kb, "PhraseRunSeq" + std::to_string(numSyms) + "seq" + std::to_string(seqNum),
-                        {Binding{"phraseRuns", phraseRuns, FixedRate(1), LookAhead(1)}},
-                        {Binding{"phraseRunSeq", phraseRunSeq}}), mNumSyms(numSyms),  mSeqNum(seqNum) { }
-
-void PhraseRunSeq::generatePabloMethod() {
-    //llvm::errs() << "mSeqNum " << mSeqNum << "\n";
-    PabloBuilder pb(getEntryScope());
-    PabloAST * runs = getInputStreamSet("phraseRuns")[0];
-    PabloAST * phraseStart = pb.createZeroes();
-    if (mNumSyms > 1) {
-        phraseStart = pb.createOr(phraseStart, pb.createEveryNth(pb.createNot(runs), pb.getInteger(mNumSyms)));
-    }
-    else {
-        phraseStart = pb.createOr(phraseStart, pb.createNot(runs));
-    }
-    if (mSeqNum > 0) {
-        phraseStart = pb.createIndexedAdvance(phraseStart, pb.createNot(runs), mSeqNum);
-    }
-    PabloAST * ZTF_phrases = pb.createInFile(pb.createNot(phraseStart));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("phraseRunSeq"), pb.getInteger(0)), ZTF_phrases);
-}
-
-PhraseRunSeqTemp::PhraseRunSeqTemp(BuilderRef kb,
-                 StreamSet * phraseRuns,
-                 StreamSet * phraseRunSeq,
-                 StreamSet * compSeqRuns,
-                 unsigned numSyms,
-                 unsigned seqNum)
-: pablo::PabloKernel(kb, "PhraseRunSeqTemp" + std::to_string(numSyms) + std::to_string(seqNum),
-                        {Binding{"phraseRuns", phraseRuns, FixedRate(1), LookAhead(1)},
-                         Binding{"compSeqRuns", compSeqRuns, FixedRate(1), LookAhead(1)}},
-                        {Binding{"phraseRunSeq", phraseRunSeq}}), mNumSyms(numSyms),  mSeqNum(seqNum) { }
-
-void PhraseRunSeqTemp::generatePabloMethod() {
-    //llvm::errs() << "mSeqNum " << mSeqNum << "\n";
-    PabloBuilder pb(getEntryScope());
-    PabloAST * runs = getInputStreamSet("phraseRuns")[0];
-    PabloAST * compSeqRuns = getInputStreamSet("compSeqRuns")[0];
-    PabloAST * phraseStart = pb.createZeroes();
-    if (mNumSyms > 1) {
-        phraseStart = pb.createOr(phraseStart, pb.createEveryNth(pb.createNot(runs), pb.getInteger(mNumSyms)));
-    }
-    else {
-        phraseStart = pb.createOr(phraseStart, pb.createNot(runs));
-    }
-    if (mSeqNum > 0) {
-        phraseStart = pb.createIndexedAdvance(phraseStart, pb.createNot(runs), mSeqNum);
-    }
-    PabloAST * ZTF_phrases = pb.createInFile(pb.createNot(phraseStart));
-    ZTF_phrases = pb.createAnd(ZTF_phrases, compSeqRuns);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("phraseRunSeq"), pb.getInteger(0)), ZTF_phrases);
-}
-
 ZTF_SymbolEncoder::ZTF_SymbolEncoder(BuilderRef b,
                       EncodingInfo & encodingScheme,
                       StreamSet * const basis,
@@ -496,13 +315,12 @@ LengthGroupSelector::LengthGroupSelector(BuilderRef b,
                            StreamSet * symbolRun,
                            StreamSet * const lengthBixNum,
                            StreamSet * overflow,
-                           StreamSet * selected,
-                           unsigned offset)
+                           StreamSet * selected)
 : PabloKernel(b, "LengthGroupSelector" + LengthSelectorSuffix(encodingScheme, groupNo, lengthBixNum),
               {Binding{"symbolRun", symbolRun, FixedRate(), LookAhead(1)},
                   Binding{"lengthBixNum", lengthBixNum},
                   Binding{"overflow", overflow}},
-              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo), mOffset(offset) { }
+              {Binding{"selected", selected}}), mEncodingScheme(encodingScheme), mGroupNo(groupNo) { }
 
 void LengthGroupSelector::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
@@ -514,13 +332,16 @@ void LengthGroupSelector::generatePabloMethod() {
     runFinal = pb.createAnd(runFinal, pb.createNot(overflow));
     Var * groupStreamVar = getOutputStreamVar("selected");
     LengthGroupInfo groupInfo = mEncodingScheme.byLength[mGroupNo];
-    unsigned offset = mOffset;
+    // Run index codes count from 0 on the 2nd byte of a symbol.
+    // So the length is 2 more than the bixnum.
+    unsigned offset = 2;
     unsigned lo = groupInfo.lo;
     unsigned hi = groupInfo.hi;
     std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
     PabloAST * groupStream = pb.createAnd3(bnc.UGE(lengthBixNum, lo - offset), bnc.ULE(lengthBixNum, hi - offset), runFinal, groupName);
     pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
 }
+
 
 LengthSorter::LengthSorter(BuilderRef b,
                            EncodingInfo & encodingScheme,

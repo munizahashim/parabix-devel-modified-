@@ -31,14 +31,8 @@ public:
 public:
     unsigned getLengthGroupNo(unsigned lgth) const;
     unsigned maxSymbolLength() const;
-    unsigned minSymbolLength() const;
     unsigned maxEncodingBytes() const;
     unsigned prefixLengthOffset(unsigned lgth) const;
-    unsigned prefixLengthMaskBits(unsigned lgth) const;
-    unsigned lastSuffixBase(unsigned groupNo) const;
-    unsigned lastSuffixHashBits(unsigned numSym, unsigned groupNo) const;
-    unsigned getSubtableSize(unsigned groupNo) const;
-    unsigned tableSizeBits(unsigned groupNo) const;
     std::string uniqueSuffix() const;
 };
 
@@ -101,49 +95,6 @@ protected:
     void generatePabloMethod() override;
 };
 
-// Modifed ZTF_Symbols: handles multi-byte ciphertext.
-// Modified suffix ranges for codeword with prefix range 0xF8-0xFF
-class ZTF_Phrases : public pablo::PabloKernel {
-public:
-    ZTF_Phrases(BuilderRef kb,
-                StreamSet * basisBits,
-                StreamSet * wordChar,
-                StreamSet * phraseRuns);
-protected:
-    void generatePabloMethod() override;
-};
-
-// Generate i-th phraseRunSeq stream with n-syms for the given phraseRuns.
-// Start position of first n-sym sequence is indicated by the seqNum.
-// symbol sequence continuation bits are marked with 1 bits.
-// Each 0 bit represents a start of a new symbol.
-class PhraseRunSeq : public pablo::PabloKernel {
-public:
-    PhraseRunSeq(BuilderRef kb,
-                 StreamSet * phraseRuns,
-                 StreamSet * phraseRunSeq,
-                 unsigned numSyms,
-                 unsigned seqNum);
-protected:
-    void generatePabloMethod() override;
-    unsigned mNumSyms;
-    unsigned mSeqNum;
-};
-
-class PhraseRunSeqTemp : public pablo::PabloKernel {
-public:
-    PhraseRunSeqTemp(BuilderRef kb,
-                 StreamSet * phraseRuns,
-                 StreamSet * PhraseRunSeq,
-                 StreamSet * compSeqRuns,
-                 unsigned numSyms,
-                 unsigned seqNum);
-protected:
-    void generatePabloMethod() override;
-    unsigned mNumSyms;
-    unsigned mSeqNum;
-};
-
 // Given parsed symbol runs, produce a stream marking end positions only.
 class ZTF_SymbolEnds : public pablo::PabloKernel {
 public:
@@ -178,13 +129,11 @@ public:
                     unsigned groupNo,
                  StreamSet * symbolRun, StreamSet * const lengthBixNum,
                  StreamSet * overflow,
-                 StreamSet * selected,
-                 unsigned offset = 2);
+                 StreamSet * selected);
 protected:
     void generatePabloMethod() override;
     EncodingInfo & mEncodingScheme;
     unsigned mGroupNo;
-    unsigned mOffset;
 };
 
 class LengthSorter final: public pablo::PabloKernel {
