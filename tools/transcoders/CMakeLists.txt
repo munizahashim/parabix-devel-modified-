@@ -14,6 +14,7 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     kernel.util
 )
 
@@ -39,11 +40,11 @@ NAME
 SRC
     u32u8.cpp
 DEPS
-    pablo.bixnum
     kernel.basis
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
 )
@@ -54,11 +55,11 @@ NAME
 SRC
     u32u16.cpp
 DEPS
-    pablo.bixnum
     kernel.basis
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
 )

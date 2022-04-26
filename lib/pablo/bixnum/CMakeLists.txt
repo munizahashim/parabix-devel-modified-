@@ -8,8 +8,6 @@ NAME
     pablo.bixnum
 SRC
     bixnum.cpp
-    utf8gen.cpp
-    utf16gen.cpp
 DEPS
     re.cc
 )
