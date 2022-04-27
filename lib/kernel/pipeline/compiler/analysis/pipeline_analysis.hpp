@@ -27,7 +27,7 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 //        std::random_device rd;
 //        xoroshiro128 rng(rd);
 
-        xoshiro256 rng;
+        pipeline_random_engine rng;
 
 //        const auto graphSeed = 2081280305;
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
@@ -156,15 +156,15 @@ private:
 
     // scheduling analysis
 
-    void schedulePartitionedProgram(PartitionGraph & P, xoshiro256 & rng);
+    void schedulePartitionedProgram(PartitionGraph & P, pipeline_random_engine & rng);
 
-    void analyzeDataflowWithinPartitions(PartitionGraph & P, xoshiro256 & rng) const;
+    void analyzeDataflowWithinPartitions(PartitionGraph & P, pipeline_random_engine & rng) const;
 
     SchedulingGraph makeIntraPartitionSchedulingGraph(const PartitionGraph & P, const unsigned currentPartitionId) const;
 
     PartitionDependencyGraph makePartitionDependencyGraph(const unsigned numOfKernels, const SchedulingGraph & S) const;
 
-    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, xoshiro256 & rng) const;
+    OrderingDAWG scheduleProgramGraph(const PartitionGraph & P, pipeline_random_engine & rng) const;
 
     OrderingDAWG assembleFullSchedule(const PartitionGraph & P, const OrderingDAWG & partial) const;
 
@@ -181,7 +181,7 @@ private:
 
     void determineBufferSize(BuilderRef b);
 
-    void determineBufferLayout(BuilderRef b, xoshiro256 & rng);
+    void determineBufferLayout(BuilderRef b, pipeline_random_engine & rng);
 
     void identifyOwnedBuffers();
 
@@ -201,7 +201,7 @@ private:
 
     // dataflow analysis functions
     void computeIntraPartitionRepetitionVectors(PartitionGraph & P);
-    void estimateInterPartitionDataflow(PartitionGraph & P, xoshiro256 & rng);
+    void estimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
     void computeMinimumExpectedDataflow(PartitionGraph & P);
 

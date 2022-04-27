@@ -32,7 +32,7 @@ using length_t = int64_t;
 using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
 
 struct UniformDistributionModel {
-    uint32_t next(xoshiro256 & rng) const HOT {
+    uint32_t next(pipeline_random_engine & rng) const HOT {
         std::uniform_int_distribution<uint32_t> dst(mMin, mMax);
         return dst(rng);
     }
@@ -55,7 +55,7 @@ inline constexpr uint32_t clamp(const uint32_t x, const uint32_t min, const uint
 }
 
 struct GammaDistributionModel {
-    uint32_t next(xoshiro256 & rng) const HOT {
+    uint32_t next(pipeline_random_engine & rng) const HOT {
         std::gamma_distribution<float> dst(mAlpha, mBeta);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
@@ -76,7 +76,7 @@ private:
 };
 
 struct NormalDistributionModel {
-    uint32_t next(xoshiro256 & rng) const HOT {
+    uint32_t next(pipeline_random_engine & rng) const HOT {
         std::normal_distribution<float> dst(mMean, mStdDev);
         return clamp((uint32_t)(dst(rng) + 0.5f), mMin, mMax);
     }
@@ -97,7 +97,7 @@ private:
 };
 
 struct SkewNormalDistributionModel {
-    uint32_t next(xoshiro256 & rng) const HOT {
+    uint32_t next(pipeline_random_engine & rng) const HOT {
         std::uniform_real_distribution<float> dst(0.0f, 1.0f);
         math::skew_normal_distribution<float> sk(mLocation, mScale, mShape);
         return clamp((uint32_t)(math::quantile(sk, dst(rng)) + 0.5f), mMin, mMax);
@@ -124,9 +124,9 @@ struct SimulationPort {
 
     length_t QueueLength;
 
-    virtual bool consume(length_t & pending, xoshiro256 & rng) const = 0;
+    virtual bool consume(length_t & pending, pipeline_random_engine & rng) const = 0;
 
-    virtual void produce(xoshiro256 & rng) = 0;
+    virtual void produce(pipeline_random_engine & rng) = 0;
 
     virtual void commit(const length_t pending) {
         QueueLength -= pending;
@@ -152,12 +152,12 @@ struct FixedPort final : public SimulationPort {
     : SimulationPort()
     ,  mAmount(amount) { }
 
-    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
+    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
         pending = mAmount;
         return (QueueLength >= mAmount) ;
     }
 
-    void produce(xoshiro256 & /* rng */) override {
+    void produce(pipeline_random_engine & /* rng */) override {
         QueueLength += mAmount;
     }
 
@@ -170,7 +170,7 @@ struct BoundedPort final : public SimulationPort {
 
     BoundedPort(DistributionModel m) : SimulationPort(),  Model(m) { }
 
-    bool consume(length_t & pending, xoshiro256 & rng) const override HOT {
+    bool consume(length_t & pending, pipeline_random_engine & rng) const override HOT {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
         if (QueueLength < Model.getMax()) {
@@ -181,7 +181,7 @@ struct BoundedPort final : public SimulationPort {
         return true;
     }
 
-    void produce(xoshiro256 & rng) override HOT {
+    void produce(pipeline_random_engine & rng) override HOT {
         QueueLength += Model.next(rng);
     }
 
@@ -194,7 +194,7 @@ struct BasePartialSumGenerator {
 
     friend struct PartialSumPort;
 
-    length_t readStepValue(const uint64_t start, const uint64_t end, xoshiro256 & rng) HOT {
+    length_t readStepValue(const uint64_t start, const uint64_t end, pipeline_random_engine & rng) HOT {
 
         // Since PartialSum rates can have multiple ports referring to the same reference streamset, we store the
         // history of partial sum values in a circular buffer but silently drop entries after every user has read
@@ -273,7 +273,7 @@ struct BasePartialSumGenerator {
         assert (historyLength > 0);
     }
 
-    void initializeGenerator(xoshiro256 & rng) HOT {
+    void initializeGenerator(pipeline_random_engine & rng) HOT {
         uint64_t partialSum = 0;
         History[0] = 0;
         for (unsigned i = 1; i < Capacity; ++i) {
@@ -292,7 +292,7 @@ struct BasePartialSumGenerator {
 
 protected:
 
-    virtual uint32_t generateStepValue(xoshiro256 & rng) const HOT = 0;
+    virtual uint32_t generateStepValue(pipeline_random_engine & rng) const HOT = 0;
 
 private:
     const unsigned Users;
@@ -322,7 +322,7 @@ struct PartialSumGenerator : public BasePartialSumGenerator {
 
 protected:
 
-    uint32_t generateStepValue(xoshiro256 & rng) const override HOT {
+    uint32_t generateStepValue(pipeline_random_engine & rng) const override HOT {
         const auto r = Model.next(rng);
         assert (r <= Model.getMax());
         return r;
@@ -344,7 +344,7 @@ struct PartialSumPort final : public SimulationPort {
         assert (step > 0);
     }
 
-    bool consume(length_t & pending, xoshiro256 & rng) const override HOT {
+    bool consume(length_t & pending, pipeline_random_engine & rng) const override HOT {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         assert (m == PreviousValue || PreviousValue == -1U);
         pending = m;
@@ -363,7 +363,7 @@ struct PartialSumPort final : public SimulationPort {
         Generator.updateReadPosition(UserId, Index);
     }
 
-    void produce(xoshiro256 & rng) override HOT {
+    void produce(pipeline_random_engine & rng) override HOT {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         QueueLength += m;
         Index += Step;
@@ -387,12 +387,12 @@ struct RelativePort final : public SimulationPort {
     : SimulationPort()
     , BaseRateValue(baseRateValue){ }
 
-    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
+    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
         pending = BaseRateValue;
         return (QueueLength >= BaseRateValue);
     }
 
-    void produce(xoshiro256 & /* rng */) override {
+    void produce(pipeline_random_engine & /* rng */) override {
         const auto m = BaseRateValue;
         QueueLength += m;
     }
@@ -407,7 +407,7 @@ struct GreedyPort final : public SimulationPort {
     : SimulationPort()
     , LowerBound(min){ }
 
-    bool consume(length_t & pending, xoshiro256 & /* rng */) const override {
+    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
         if (QueueLength < LowerBound || QueueLength == 0) {
             pending = LowerBound;
             return false;
@@ -417,7 +417,7 @@ struct GreedyPort final : public SimulationPort {
         return true;
     }
 
-    void produce(xoshiro256 & /* rng */) override {
+    void produce(pipeline_random_engine & /* rng */) override {
         llvm_unreachable("uncaught program error? greedy rate cannot be an output rate");
     }
 
@@ -431,9 +431,9 @@ struct SimulationNode {
     const unsigned Inputs;
     const unsigned Outputs;
 
-    virtual void demand(length_t * const pendingArray, xoshiro256 & rng) = 0;
+    virtual void demand(length_t * const pendingArray, pipeline_random_engine & rng) = 0;
 
-    virtual void fire(length_t * const pendingArray, xoshiro256 & rng, uint64_t *& history) = 0;
+    virtual void fire(length_t * const pendingArray, pipeline_random_engine & rng, uint64_t *& history) = 0;
 
     void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
@@ -459,7 +459,7 @@ struct SimulationFork final : public SimulationNode {
 
     }
 
-    void demand(length_t * const /* endingArray */, xoshiro256 & /* rng */) override HOT {
+    void demand(length_t * const /* endingArray */, pipeline_random_engine & /* rng */) override HOT {
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         length_t demand = 0;
@@ -477,7 +477,7 @@ struct SimulationFork final : public SimulationNode {
         }
     }
 
-    void fire(length_t * const /* endingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
+    void fire(length_t * const /* endingArray */, pipeline_random_engine & /* rng */, uint64_t *& /* history */) override HOT {
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         I->QueueLength = 0;
@@ -499,7 +499,7 @@ struct BlockSizedSimulationFork final : public SimulationNode {
     // have blocksize actors consume as many units as they can but each time the amount ticks over
     // the required blocking amount, add one output? make the port a 1:1 one?
 
-    void demand(length_t * const /* endingArray */, xoshiro256 & /* rng */) override HOT {
+    void demand(length_t * const /* endingArray */, pipeline_random_engine & /* rng */) override HOT {
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         length_t demand = 0;
@@ -531,7 +531,7 @@ struct BlockSizedSimulationFork final : public SimulationNode {
     }
 
 
-    void fire(length_t * const /* endingArray */, xoshiro256 & /* rng */, uint64_t *& /* history */) override HOT {
+    void fire(length_t * const /* endingArray */, pipeline_random_engine & /* rng */, uint64_t *& /* history */) override HOT {
         SimulationPort * const I = Input[0];
         const auto ql = I->QueueLength;
         assert (ql >= 0);
@@ -559,7 +559,7 @@ struct SimulationActor : public SimulationNode {
 
     }
 
-    void demand(length_t * const pendingArray, xoshiro256 & rng) override HOT {
+    void demand(length_t * const pendingArray, pipeline_random_engine & rng) override HOT {
         uint64_t greedyStrides = 0;
         assert (Inputs > 0 && Outputs > 0);
         // Greedily consume any input on the incoming channels
@@ -610,7 +610,7 @@ no_more_pending_input:
         SumOfStridesSquared += (totalStrides * totalStrides);
     }
 
-    void fire(length_t * const pendingArray, xoshiro256 & rng, uint64_t *& history) override HOT {
+    void fire(length_t * const pendingArray, pipeline_random_engine & rng, uint64_t *& history) override HOT {
         uint64_t strides = 0;
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
@@ -652,7 +652,7 @@ struct SimulationSourceActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const /* pendingArray */, xoshiro256 & rng) override HOT {
+    void demand(length_t * const /* pendingArray */, pipeline_random_engine & rng) override HOT {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -677,7 +677,7 @@ struct SimulationSourceActor final : public SimulationActor {
         #endif
     }
 
-    void fire(length_t * const /* pendingArray */, xoshiro256 & rng, uint64_t *& history) override HOT {
+    void fire(length_t * const /* pendingArray */, pipeline_random_engine & rng, uint64_t *& history) override HOT {
         for (auto r = RequiredIterations; r--; ){
             for (unsigned i = 0; i < Outputs; ++i) {
                 Output[i]->produce(rng);
@@ -699,7 +699,7 @@ struct SimulationSinkActor final : public SimulationActor {
 
     }
 
-    void demand(length_t * const pendingArray, xoshiro256 & rng) override HOT {
+    void demand(length_t * const pendingArray, pipeline_random_engine & rng) override HOT {
         // In a demand-driven system, a sink actor must always require at least
         // one iteration to enforce the demands on the preceding network.
 
@@ -753,7 +753,7 @@ struct CliqueLambdaDispatcher {
  * Since we're only interested in modelling the steady state with an infinite input stream, we ignore attributes
  * such as Add and ZeroExtend but do consider Delay, LookAhead, and BlockSize.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, xoshiro256 & rng) {
+void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng) {
 
     struct PortNode {
         unsigned Binding;

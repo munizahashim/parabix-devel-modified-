@@ -1,11 +1,13 @@
 #ifndef XORSHIFT128_HPP
 #define XORSHIFT128_HPP
 
+#if 0
+
 #include <random>
 #include <array>
 
 
-class xoshiro256 {
+class xoroshiro128 {
 
     static inline uint64_t rotl(const uint64_t x, int k) {
         return (x << k) | (x >> (64 - k));
@@ -18,14 +20,14 @@ public:
 
     static constexpr result_type (min)() { return 0; }
     static constexpr result_type (max)() { return UINT32_MAX; }
-    friend bool operator==(xoshiro256 const &, xoshiro256 const &);
-    friend bool operator!=(xoshiro256 const &, xoshiro256 const &);
+    friend bool operator==(xoroshiro128 const &, xoroshiro128 const &);
+    friend bool operator!=(xoroshiro128 const &, xoroshiro128 const &);
 
-    xoshiro256() : _state({ 0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c }) {
+    xoroshiro128() : _state({ 0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c }) {
 
     }
 
-    explicit xoshiro256(std::random_device &rd) {
+    explicit xoroshiro128(std::random_device &rd) {
         seed(rd);
     }
 
@@ -56,14 +58,15 @@ private:
     state_type _state;
 };
 
-bool operator==(xoshiro256 const &lhs, xoshiro256 const &rhs)
+bool operator==(xoroshiro128 const &lhs, xoroshiro128 const &rhs)
 {
     return lhs._state == rhs._state;
 }
-bool operator!=(xoshiro256 const &lhs, xoshiro256 const &rhs)
+bool operator!=(xoroshiro128 const &lhs, xoroshiro128 const &rhs)
 {
     return lhs._state != rhs._state;
 }
 
+#endif
 
 #endif // XORSHIFT128_HPP

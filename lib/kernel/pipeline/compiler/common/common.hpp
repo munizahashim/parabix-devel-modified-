@@ -21,6 +21,8 @@ using Vec = SmallVector<T, n>;
 
 using SimulationAllocator = SlabAllocator<>;
 
+using pipeline_random_engine = std::default_random_engine;
+
 // Many of the topological orderings of the graphs are simply
 // a reverse traversal through the nodes of the graph.
 // This class is just a small optimization for such orderings.
