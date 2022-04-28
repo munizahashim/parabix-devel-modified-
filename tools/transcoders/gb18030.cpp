@@ -24,6 +24,7 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/boolean.h>
 #include <pablo/pablo_kernel.h>
+#include <toolchain/toolchain.h>
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <pablo/pe_zeroes.h>
@@ -562,7 +563,7 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    Selected_S2P(P, ByteStream, BasisBits);
 
     GB_18030_IndexingKind indexing = (encodingBits == 16) ? GB_18030_IndexingKind::UTF16 : GB_18030_IndexingKind::Codepoint;
 

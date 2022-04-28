@@ -338,13 +338,7 @@ void GrepEngine::initRE(re::RE * re) {
 StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, StreamSet * ByteStream) {
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
-        if (PabloTransposition) {
-            P->CreateKernelCall<S2P_PabloKernel>(ByteStream, BasisBits);
-        } else if (SplitTransposition) {
-            Staged_S2P(P, ByteStream, BasisBits);
-        } else {
-            P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-        }
+        Selected_S2P(P, ByteStream, BasisBits);
         return BasisBits;
     }
     else return ByteStream;
@@ -804,7 +798,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         //E->CreateKernelCall<DebugDisplayKernel>("FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
-        if (SplitTransposition) {
+        if (codegen::SplitTransposition) {
             Staged_S2P(E, Filtered, FilteredBasis);
         } else {
             E->CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);

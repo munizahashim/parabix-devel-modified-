@@ -14,6 +14,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <toolchain/toolchain.h>
 
 using namespace llvm;
 
@@ -373,6 +374,18 @@ void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
     }
     P->AssertEqualLength(BasisBits, ByteStream);
 }
+
+void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
+                StreamSet * ByteStream, StreamSet * BasisBits) {
+    if (codegen::PabloTransposition) {
+        P->CreateKernelCall<S2P_PabloKernel>(ByteStream, BasisBits);
+    } else if (codegen::SplitTransposition) {
+        Staged_S2P(P, ByteStream, BasisBits);
+    } else {
+        P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    }
+}
+
 
 S2P_i21_3xi8::S2P_i21_3xi8(BuilderRef b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
 : MultiBlockKernel(b, "s2p_i21_3xi8",
