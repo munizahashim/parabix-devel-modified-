@@ -64,6 +64,8 @@ bool SSSE3_available() {
 }
 
 bool BMI2_available() {
+    // FIXME: Workaround to prevent this from returning true on AVX2 machines even when the SSE builder is made
+    if (codegen::BlockSize < 256) return false;
     StringMap<bool> features;
     if (sys::getHostCPUFeatures(features)) {
         return features.lookup("bmi2");

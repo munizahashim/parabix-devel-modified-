@@ -816,7 +816,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         }
     }
 
-
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         const auto n = mTarget->isStateful() ? 2 : 1;
         SmallVector<Value *, 2> args(n);
@@ -873,9 +872,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     initializeForAllKernels();
-
-
-
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
 
         // get the last segment # used by any kernel in case any reports require it.

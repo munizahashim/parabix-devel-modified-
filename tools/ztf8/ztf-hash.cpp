@@ -205,17 +205,17 @@ int main(int argc, char *argv[]) {
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
+        ztfHashFunctionType func = nullptr;
+        if (Decompression) {
+            func = ztfHash_decompression_gen(pxDriver);
+        } else {
+            func = ztfHash_compression_gen(pxDriver);
+        }
         #ifdef REPORT_PAPI_TESTS
         papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
         jitExecution.start();
         #endif
-        if (Decompression) {
-            auto ztfHashDecompressionFunction = ztfHash_decompression_gen(pxDriver);
-            ztfHashDecompressionFunction(fd);
-        } else {
-            auto ztfHashCompressionFunction = ztfHash_compression_gen(pxDriver);
-            ztfHashCompressionFunction(fd);
-        }
+        func(fd);
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);

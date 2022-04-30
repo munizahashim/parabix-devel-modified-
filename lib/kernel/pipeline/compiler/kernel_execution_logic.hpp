@@ -177,20 +177,20 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             return ptr;
         }
         if (forceAddressability || isAddressable(binding)) {
-            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-                if (port.Port.Type == PortType::Input) {
-                    ptr = mProcessedItemCountPtr[port.Port];
-                } else {
-                    ptr = mProducedItemCountPtr[port.Port];
-                }
-            } else {
+//            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+//                if (port.Port.Type == PortType::Input) {
+//                    ptr = mProcessedItemCountPtr[port.Port];
+//                } else {
+//                    ptr = mProducedItemCountPtr[port.Port];
+//                }
+//            } else {
                 if (LLVM_UNLIKELY(mNumOfAddressableItemCount == mAddressableItemCountPtr.size())) {
                     auto aic = b->CreateAllocaAtEntryPoint(b->getSizeTy());
                     mAddressableItemCountPtr.push_back(aic);
                 }
                 ptr = mAddressableItemCountPtr[mNumOfAddressableItemCount++];
                 b->CreateStore(itemCount, ptr);
-            }
+//            }
             addNextArg(ptr);
         } else if (isCountable(binding)) {
             addNextArg(itemCount);
@@ -198,18 +198,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         return ptr;
     };
 
-    auto addVirtualBaseAddressArg = [&](const StreamSetBuffer * buffer) {
-        PointerType * const voidPtrTy = b->getVoidPtrTy();
-        if (LLVM_UNLIKELY(mNumOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
-            auto vba = b->CreateAllocaAtEntryPoint(voidPtrTy);
-            mVirtualBaseAddressPtr.push_back(vba);
-        }
-        Value * ptr = mVirtualBaseAddressPtr[mNumOfVirtualBaseAddresses++];
-        ptr = b->CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
-        b->CreateStore(buffer->getBaseAddress(b.get()), ptr);
-        addNextArg(b->CreatePointerCast(ptr, voidPtrTy->getPointerTo()));
-        return ptr;
-    };
 
     args.reserve(4 + (numOfInputs + numOfOutputs) * 4);
     if (LLVM_LIKELY(mKernelSharedHandle)) {
@@ -263,9 +251,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             }
             assert (processed);
 
-            Value * addr = mInputVirtualBaseAddressPhi[rt.Port];
-            assert (addr);
-
+            Value * const addr = mInputVirtualBaseAddressPhi[rt.Port]; assert (addr);
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
 
             mReturnedProcessedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.IsDeferred, processed);
@@ -282,7 +268,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         }
     }
 
-    Value * const isFinal = b->CreateIsNotNull(mIsFinalInvocation);
+    PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto port = getOutput(mKernelId, StreamSetPort(PortType::Output, i));
@@ -298,13 +284,22 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         Value * produced = mAlreadyProducedPhi[rt.Port];
 
         if (LLVM_UNLIKELY(rt.IsShared)) {
-            b->CreateAssert(buffer->getHandle(), "handle?");
+            if (CheckAssertions) {
+                b->CreateAssert(buffer->getHandle(), "handle?");
+            }
             addNextArg(b->CreatePointerCast(buffer->getHandle(), voidPtrTy));
         } else if (LLVM_UNLIKELY(rt.IsManaged)) {
-            mReturnedOutputVirtualBaseAddressPtr[rt.Port] = addVirtualBaseAddressArg(buffer);
+            if (LLVM_UNLIKELY(mNumOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
+                auto vba = b->CreateAllocaAtEntryPoint(voidPtrTy);
+                mVirtualBaseAddressPtr.push_back(vba);
+            }
+            Value * ptr = mVirtualBaseAddressPtr[mNumOfVirtualBaseAddresses++];
+            ptr = b->CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
+            b->CreateStore(buffer->getBaseAddress(b.get()), ptr);
+            addNextArg(b->CreatePointerCast(ptr, voidPtrPtrTy));
+            mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
         } else {
-            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, isFinal, bn.isNonThreadLocal(), true);
-            b->CreateAssert(vba, "vba?");
+            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 

@@ -70,7 +70,6 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
 
             if (bn.Locality == BufferLocality::ThreadLocal && mThreadLocalStreamSetBaseAddress) {
 
-
                 assert (RequiredThreadLocalStreamSetMemory > 0);
                 assert (isa<StaticBuffer>(buffer));
                 assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
@@ -81,15 +80,19 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                     Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
                     Value * const intPtrVal = b->CreatePtrToInt(baseAddress, intPtrTy);
 
+                    Constant * const bindingName = b->GetString(rd.Binding.get().getName());
+//                    b->CreateAssert(intPtrVal, "%s.%s: thread-local base addresss cannot be null",
+//                                    mCurrentKernelName, bindingName);
+
                     Value * const align = b->getSize(b->getCacheAlignment());
                     Value * const offset = b->CreateURem(intPtrVal, align);
                     Value * const valid = b->CreateIsNull(offset);
-                    SmallVector<char, 256> tmp;
-                    raw_svector_ostream out(tmp);
-                    out << "%s: thread local buffer 0x%" PRIx64 " "
-                           "is not cache aligned (%" PRIu64 ")";
-                    b->CreateAssert(valid, out.str(), mCurrentKernelName, intPtrVal, align);
+
+                    b->CreateAssert(valid, "%s.%s: thread local buffer 0x%" PRIx64 " "
+                                           "is not cache aligned (%" PRIu64 ")",
+                                    mCurrentKernelName, bindingName, intPtrVal, align);
                 }
+
                 const auto baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
                 assert (baseCapacity > 0);
                 Value * const capacity = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(baseCapacity));
@@ -384,7 +387,6 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort inputPort = br.Port;
         const Binding & binding = br.Binding;
-        const ProcessingRate & rate = binding.getRate();
 
         if (br.IsDeferred || isAddressable(binding)) {
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
@@ -422,7 +424,6 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort outputPort = br.Port;
         const Binding & binding = br.Binding;
-        const ProcessingRate & rate = binding.getRate();
 
         if (br.IsDeferred || isAddressable(binding)) {
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
@@ -502,6 +503,10 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) cons
             StreamSetBuffer * const buffer = bn.Buffer;
             vba = b->CreatePointerCast(vba, buffer->getPointerType());
             buffer->setBaseAddress(b.get(), vba);
+//            if (CheckAssertions) {
+//                b->CreateAssert(vba, "%s.%s returned virtual base addresss cannot be null",
+//                                mCurrentKernelName, b->GetString(rd.Binding.get().getName()));
+//            }
             buffer->setCapacity(b.get(), mProducedItemCount[port]);
             const auto handleName = makeBufferName(mKernelId, port);
             #ifdef PRINT_DEBUG_MESSAGES
@@ -531,6 +536,10 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderR
         Value * const vba = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
         StreamSetBuffer * const buffer = bn.Buffer;
         buffer->setBaseAddress(b.get(), vba);
+//        if (CheckAssertions) {
+//            b->CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",
+//                            mCurrentKernelName, b->GetString(rd.Binding.get().getName()));
+//        }
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "%s_loadPriorVirtualBaseAddress = 0x%" PRIx64, b->GetString(handleName), buffer->getBaseAddress(b));
         #endif
@@ -823,7 +832,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
                                                 const BufferPort & rateData,
                                                 const BufferNode & bufferNode,
                                                 Value * position,
-                                                Value * isFinal,
                                                 const bool prefetch,
                                                 const bool write) const {
 
@@ -844,12 +852,12 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     PointerType * const bufferType = buffer->getPointerType();
     Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-        const Binding & binding = rateData.Binding;
-        b->CreateAssert(baseAddress, "%s.%s: baseAddress cannot be null",
-                        mCurrentKernelName,
-                        b->GetString(binding.getName()));
-    }
+//    if (LLVM_UNLIKELY(CheckAssertions)) {
+//        const Binding & binding = rateData.Binding;
+//        b->CreateAssert(baseAddress, "%s.%s: baseAddress cannot be null",
+//                        mCurrentKernelName,
+//                        b->GetString(binding.getName()));
+//    }
 
     Value * const address = buffer->getStreamLogicalBasePtr(b, baseAddress, ZERO, blockIndex);
     Value * const addr = b->CreatePointerCast(address, bufferType);
@@ -921,7 +929,7 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
             bn.Buffer->setBaseAddress(b.get(), vba);
         }
 
-        Value * addr = getVirtualBaseAddress(b, inputPort, bn, processed, nullptr, bn.isNonThreadLocal(), false);
+        Value * addr = getVirtualBaseAddress(b, inputPort, bn, processed, bn.isNonThreadLocal(), false);
         baseAddresses[inputPort.Port.Number] = addr;
     }
 }
