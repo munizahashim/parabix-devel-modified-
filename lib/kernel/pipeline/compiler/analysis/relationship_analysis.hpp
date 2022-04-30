@@ -296,9 +296,10 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         calculateSegmentLengthBounds(in, origPartitionId, out);
 
         // renumber the partitions to reflect the selected ordering
-        #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
+        #ifdef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
+        ++outputPartitionId;
+        #else
         if (origPartitionId != inputPartitionId) {
-        #endif
             inputPartitionId = origPartitionId;
             const PartitionData & P = partitionGraph[origPartitionId];
             const auto groupId = P.LinkedGroupId;
@@ -306,8 +307,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
                 ++outputPartitionId;
                 currentGroupId = groupId;
             }
-            // errs() << "Partition " << inputPartitionId << " -> " << outputPartitionId << "\n";
-        #ifndef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
         }
         #endif
         KernelPartitionId[out] = outputPartitionId;

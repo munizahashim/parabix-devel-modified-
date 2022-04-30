@@ -14,6 +14,7 @@ struct ProcessingRateProbabilityDistribution {
         Uniform
         , Gamma
         , Normal
+        , Maximum
     };
 
     DistributionTypeId getTypeId() const {
@@ -68,6 +69,7 @@ protected:
     friend ProcessingRateProbabilityDistribution GammaDistribution(const float alpha, const float beta);
     friend ProcessingRateProbabilityDistribution NormalDistribution(const float mean, const float stddev);
     friend ProcessingRateProbabilityDistribution SkewNormalDistribution(const float mean, const float stddev, const float skewness);
+    friend ProcessingRateProbabilityDistribution MaximumDistribution();
 
     ProcessingRateProbabilityDistribution(const DistributionTypeId typeId = DistributionTypeId::Uniform,
                                           const float a = 0, const float b = 0, const float c = 0)
@@ -95,6 +97,10 @@ inline ProcessingRateProbabilityDistribution NormalDistribution(const float mean
 
 inline ProcessingRateProbabilityDistribution SkewNormalDistribution(const float mean, const float stddev, const float skewness) {
     return ProcessingRateProbabilityDistribution(ProcessingRateProbabilityDistribution::DistributionTypeId::Normal, mean, stddev, skewness);
+}
+
+inline ProcessingRateProbabilityDistribution MaximumDistribution() {
+    return ProcessingRateProbabilityDistribution(ProcessingRateProbabilityDistribution::DistributionTypeId::Maximum, 0.0f, 0.0f, 0);
 }
 
 }

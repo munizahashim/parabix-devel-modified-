@@ -253,6 +253,7 @@ void PipelineCompiler::determinePartitionStrideRateScalingFactor() {
         l = boost::lcm(l, StrideStepLength[i]);
         g = boost::gcd(g, StrideStepLength[i]);
     }
+    assert (l > 0 && g > 0);
     // If a kernel within this partition has a min/max stride value that is greater
     // than the min/max stride of the partition root then when the root kernel
     // executes its final block, its partial stride may actually require the other

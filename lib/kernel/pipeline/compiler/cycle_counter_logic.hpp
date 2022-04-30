@@ -158,7 +158,7 @@ StreamSetPort PipelineCompiler::selectPrincipleCycleCountBinding(const unsigned 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief __print_pipeline_PAPI_report
+ * @brief __print_pipeline_cycle_counter_report
  ** ------------------------------------------------------------------------------------------------------------- */
 namespace {
 extern "C"
@@ -1203,11 +1203,12 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kernelId, Value * totalStrides) const {
+void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kernelId, Value * const totalStrides) const {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         // NOTE: this records only the change to attempt to reduce the memory usage of this log.
         assert (KernelPartitionId[kernelId - 1] != KernelPartitionId[kernelId]);
         const auto prefix = makeKernelName(kernelId);
+
         Value * const toUpdate = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
 
         Module * const m = b->getModule();
@@ -1273,7 +1274,19 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             b->CreateStore(segNo, b->CreateGEP(traceLogPhi, {traceLength , ZERO}));
             b->CreateStore(numOfStrides, b->CreateGEP(traceLogPhi, {traceLength , ONE}));
             b->CreateStore(numOfStrides, lastNumOfStridesField);
-            b->CreateStore(b->CreateAdd(traceLength, b->getSize(1)), traceLengthField);
+            Value * const newTraceLength = b->CreateAdd(traceLength, b->getSize(1));
+            b->CreateStore(newTraceLength, traceLengthField);
+
+//            FixedArray<Value *, 6> argVals;
+//            argVals[0] = b->getInt32(STDERR_FILENO);
+//            argVals[1] = b->GetString("ptr %" PRIx64 "  traceLen: %" PRIu64 " numStrides: %" PRIu64 " segNo: %" PRIu64 "\n");
+//            argVals[2] = b->CreatePtrToInt(traceData, b->getInt64Ty());
+//            argVals[3] = traceLength;
+//            argVals[4] = numOfStrides;
+//            argVals[5] = segNo;
+//            Function * Dprintf = b->GetDprintf();
+//            b->CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
+
             b->CreateBr(exit);
 
             b->SetInsertPoint(exit);
@@ -1282,12 +1295,30 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             b->restoreIP(ip);
         }
 
+
         FixedArray<Value *, 3> args;
         args[0] = toUpdate;
         args[1] = mSegNo;
         args[2] = totalStrides;
-
         b->CreateCall(updateSegmentsPerStrideTrace, args);
+
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief concludeStridesPerSegmentRecording
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::concludeStridesPerSegmentRecording(BuilderRef b) const {
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+        auto currentPartitionId = KernelPartitionId[PipelineInput];
+        Constant * const sz_ZERO = b->getSize(0);
+        for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
+            const auto partitionId = KernelPartitionId[kernelId];
+            if (partitionId != currentPartitionId) {
+                currentPartitionId = partitionId;
+                recordStridesPerSegment(b, kernelId, sz_ZERO);
+            }
+        }
     }
 }
 
@@ -1389,8 +1420,6 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
             currentValue[i]->addIncoming(SZ_ZERO, loopEntry);
         }
 
-        Value * notDone = b->getFalse();
-
         for (unsigned i = 0; i < (PartitionCount - 2); ++i) {
             const auto prefix = makeKernelName(partitionRootIds[i]);
 
@@ -1399,7 +1428,6 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
             BasicBlock * const update = b->CreateBasicBlock();
             BasicBlock * const next = b->CreateBasicBlock();
             Value * const notEndOfTrace = b->CreateICmpNE(currentIndex[i], traceLengthArray[i]);
-            notDone = b->CreateOr(notDone, notEndOfTrace);
             b->CreateLikelyCondBr(notEndOfTrace, check, next);
 
             b->SetInsertPoint(check);
@@ -1435,10 +1463,13 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
         BasicBlock * const loopExit = b->CreateBasicBlock("reportStridesPerSegmentExit");
         BasicBlock * const loopEnd = b->GetInsertBlock();
         segNo->addIncoming(b->CreateAdd(segNo, SZ_ONE), loopEnd);
+
         for (unsigned i = 0; i < (PartitionCount - 2); ++i) {
             currentIndex[i]->addIncoming(updatedIndex[i], loopEnd);
             currentValue[i]->addIncoming(updatedValue[i], loopEnd);
         }
+
+        Value * const notDone = b->CreateICmpULT(segNo, mSegNo);
 
         b->CreateLikelyCondBr(notDone, loopStart, loopExit);
 

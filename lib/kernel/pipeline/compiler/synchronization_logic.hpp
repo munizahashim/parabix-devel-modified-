@@ -64,10 +64,6 @@ void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
 
         if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
             for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-                const Kernel * const kernelObj = getKernel(kernel);
-                if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
-                    continue;
-                }
                 if (KernelOnHybridThread.test(kernel)) {
                     continue;
                 }

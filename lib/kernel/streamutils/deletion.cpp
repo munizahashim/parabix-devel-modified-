@@ -302,9 +302,9 @@ StreamCompressKernel::StreamCompressKernel(BuilderRef b
                                            , StreamSet * compressedOutput
                                            , const unsigned FieldWidth)
 : MultiBlockKernel(b, "streamCompress" + std::to_string(FieldWidth) + "_" + std::to_string(source->getNumElements()),
-{Binding{"extractionMask", extractionMask, FixedRate(), Principal()},
-    Binding{"sourceStreamSet", source, FixedRate(), ZeroExtended()}},
-{Binding{"compressedOutput", compressedOutput, PopcountOf("extractionMask"), EmptyWriteOverflow()}},
+{Bind("extractionMask", extractionMask, Principal()),
+ Bind("sourceStreamSet", source, ZeroExtended())},
+{Bind("compressedOutput", compressedOutput, PopcountOf("extractionMask"), EmptyWriteOverflow(), MaximumDistribution())},
 {}, {}, {})
 , mFW(FieldWidth)
 , mStreamCount(source->getNumElements()) {

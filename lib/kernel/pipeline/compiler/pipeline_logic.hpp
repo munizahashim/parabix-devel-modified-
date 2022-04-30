@@ -150,10 +150,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     }
 
     const auto name = makeKernelName(kernelId);
-    if (mRequiresSynchronization.test(kernelId)) {
-        const auto syncLockType = isStateless ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
-    }
+
+    const auto syncLockType = isStateless ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+
     addConsumerKernelProperties(b, kernelId);
 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
@@ -217,7 +217,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-    if (LLVM_UNLIKELY(mRequiresSynchronization.test(kernelId) && isStateless)) {
+    if (LLVM_UNLIKELY(isStateless)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
@@ -283,14 +283,6 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
     mScalarValue.reset(FirstKernel, LastScalar);
 
     initializeKernelAssertions(b);
-
-//    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-//        const Kernel * const kernel = getKernel(i);
-//        if (LLVM_LIKELY(kernel->isStateful() && !kernel->externallyInitialized())) {
-//            Value * const handle = kernel->createInstance(b);
-//            b->setScalarField(makeKernelName(i), handle);
-//        }
-//    }
 
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
@@ -443,6 +435,12 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
         executeKernel(b);
     }
     end(b);
+    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
+        concludeStridesPerSegmentRecording(b);
+        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
+        b->CreateStore(mSegNo, ptr);
+    }
     ActiveKernels.clear();
     ActivePartitions.clear();
 }
@@ -603,6 +601,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     SmallVector<Value *, 8> threadState(numOfAdditionalThreads);
     SmallVector<Value *, 8> threadLocal(numOfAdditionalThreads);
 
+    DataLayout DL(b->getModule());
+    Type * const intPtrTy = DL.getIntPtrType(voidPtrTy);
+    PointerType * const intPtrPtrTy = intPtrTy->getPointerTo();
+
     Value * const processThreadId = b->CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
     // start the normal threads
     const auto firstThreadedSegNo = hybridThreadFunc ? 0U : 1U;
@@ -654,7 +656,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     Function * const mainFunc = hybridThreadFunc ? hybridThreadFunc : fixedDataThreadFunc;
 
-    b->CreateCall(mainFunc->getFunctionType(), mainFunc, b->CreatePointerCast(processState, voidPtrTy));
+    Value * const mainThreadRetVal = b->CreateCall(mainFunc->getFunctionType(), mainFunc, b->CreatePointerCast(processState, voidPtrTy));
 
     // store where we'll resume compiling the DoSegment method
     const auto resumePoint = b->saveIP();
@@ -662,6 +664,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     BitVector isInputFromAlternateThread(LastStreamSet + 1U);
     BitVector requiresTerminationSignalFromAlternateThread(PartitionCount);
+
+    const auto anyDebugOptionIsSet = codegen::AnyDebugOptionIsSet();
 
     // -------------------------------------------------------------------------------------------------------------------------
     // MAKE PIPELINE THREAD
@@ -757,15 +761,21 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         // only call pthread_exit() within spawned threads; otherwise it'll be equivalent to calling exit() within the process
         exitThread = b->CreateBasicBlock("ExitThread");
         exitFunction = b->CreateBasicBlock("ExitProcessFunction");
+        Value * retVal = nullptr;
+        if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
+            retVal = b->CreateIntToPtr(b->CreateZExt(mSegNo, intPtrTy), voidPtrTy);
+        } else {
+            retVal = nullVoidPtrVal;
+        }
         b->CreateCondBr(isProcessThread(b, threadStruct), exitFunction, exitThread);
         b->SetInsertPoint(exitThread);
         #ifdef ENABLE_PAPI
         unregisterPAPIThread(b);
         #endif
-        b->CreateCall(pthreadExitFn->getFunctionType(), pthreadExitFn, nullVoidPtrVal);
+        b->CreateCall(pthreadExitFn->getFunctionType(), pthreadExitFn, retVal);
         b->CreateBr(exitFunction);
         b->SetInsertPoint(exitFunction);
-        b->CreateRet(nullVoidPtrVal);
+        b->CreateRet(retVal);
     };
 
     makeThreadFunction(fixedDataThreadFunc, false);
@@ -784,6 +794,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (isFromCurrentFunction(b, initialSharedState));
     assert (isFromCurrentFunction(b, initialThreadLocal));
 
+    if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
+        mSegNo = b->CreatePtrToInt(mainThreadRetVal, intPtrTy);
+    } else {
+        mSegNo = nullptr;
+    }
+
     // wait for all other threads to complete
     AllocaInst * const status = b->CreateAlloca(voidPtrTy);
 
@@ -793,7 +809,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         pthreadJoinArgs[0] = threadId;
         pthreadJoinArgs[1] = status;
         b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
+        // calculate the last segment # used by any kernel in case any reports require it.
+        if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
+            Value * const retVal = b->CreatePointerCast(status, intPtrPtrTy);
+            mSegNo = b->CreateUMax(mSegNo, b->CreateLoad(retVal));
+        }
     }
+
 
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         const auto n = mTarget->isStateful() ? 2 : 1;
@@ -806,6 +828,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             mTarget->finalizeThreadLocalInstance(b, args);
         }
     }
+
     if (PipelineHasTerminationSignal) {
         assert (initialTerminationSignalPtr);
         assert (mCurrentThreadTerminationSignalPtr);
@@ -828,6 +851,21 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
     destroyStateObject(b, processState);
     restoreDoSegmentState(storedState);
+
+    assert (getHandle() == initialSharedState);
+    assert (getThreadLocalHandle() == initialThreadLocal);
+
+    initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
+
+    if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
+        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
+        assert (isFromCurrentFunction(b, ptr));
+        b->CreateStore(mSegNo, ptr);
+        concludeStridesPerSegmentRecording(b);
+    }
+
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -835,30 +873,30 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     initializeForAllKernels();
-    mScalarValue.reset(FirstKernel, LastScalar);
-    // calculate the last segment # used by any kernel in case any reports require it.
-    mSegNo = nullptr;
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO) ||
-                      DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-        for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            if (mRequiresSynchronization.test(i)) {
-                const auto type = mIsStatelessKernel.test(i) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-                Value * const ptr = getSynchronizationLockPtrForKernel(b, i, type);
-                Value * const segNo = b->CreateLoad(ptr);
-                mSegNo = b->CreateUMax(mSegNo, segNo);
-            }
-        }
+
+
+
+    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
+
+        // get the last segment # used by any kernel in case any reports require it.
+        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
+        mSegNo = b->CreateLoad(ptr);
+
+
+        printOptionalCycleCounter(b);
+        #ifdef ENABLE_PAPI
+        printPAPIReportIfRequested(b);
+        #endif
+        printOptionalBlockingIOStatistics(b);
+        printOptionalBlockedIOPerSegment(b);
+        printOptionalBufferExpansionHistory(b);
+        printOptionalStridesPerSegment(b);
+        printProducedItemCountDeltas(b);
+        printUnconsumedItemCounts(b);
     }
-    printOptionalCycleCounter(b);
-    #ifdef ENABLE_PAPI
-    printPAPIReportIfRequested(b);
-    #endif
-    printOptionalBlockingIOStatistics(b);
-    printOptionalBlockedIOPerSegment(b);
-    printOptionalBufferExpansionHistory(b);
-    printOptionalStridesPerSegment(b);
-    printProducedItemCountDeltas(b);
-    printUnconsumedItemCounts(b);
+
+    mScalarValue.reset(FirstKernel, LastScalar);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, false);
         SmallVector<Value *, 1> params;

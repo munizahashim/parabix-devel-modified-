@@ -376,6 +376,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     if (mIsPartitionRoot) {
         assert (mTotalNumOfStridesAtExitPhi);
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
+
         assert (mFinalPartitionSegmentAtExitPhi);
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
     }
@@ -454,7 +455,6 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     }
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
 
-    // if (mTotalNumOfStridesAtLoopExitPhi) {
     if (mIsPartitionRoot) {
         assert (mUpdatedNumOfStrides);
         Value * const updatedNumOfStrides = b->CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
@@ -937,7 +937,6 @@ void PipelineCompiler::end(BuilderRef b) {
         Value * const retVal = b->CreateSelect(mPipelineProgress, unterminated, terminated);
         b->setTerminationSignal(retVal);
     }
-
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;
 }

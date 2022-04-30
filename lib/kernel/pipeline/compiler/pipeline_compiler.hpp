@@ -413,7 +413,8 @@ public:
     void printOptionalBufferExpansionHistory(BuilderRef b);
 
     void initializeStridesPerSegment(BuilderRef b) const;
-    void recordStridesPerSegment(BuilderRef b, unsigned kernelId, Value * totalStrides) const;
+    void recordStridesPerSegment(BuilderRef b, unsigned kernelId, Value * const totalStrides) const;
+    void concludeStridesPerSegmentRecording(BuilderRef b) const;
     void printOptionalStridesPerSegment(BuilderRef b) const;
     void printOptionalBlockedIOPerSegment(BuilderRef b) const;
 

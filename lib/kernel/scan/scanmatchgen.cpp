@@ -705,7 +705,7 @@ MatchCoordinatesKernel::MatchCoordinatesKernel(BuilderRef b,
 // inputs
 {Binding{"matchResult", Matches}, Binding{"lineBreak", LineBreakStream, FixedRate(1), ZeroExtended()}},
 // outputs
-{Binding{"Coordinates", Coordinates, PopcountOf("matchResult")}},
+{Bind("Coordinates", Coordinates, PopcountOf("matchResult"), MaximumDistribution())},
 // input scalars
 {},
 // output scalars

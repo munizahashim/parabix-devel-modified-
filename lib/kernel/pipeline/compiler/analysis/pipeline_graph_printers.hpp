@@ -522,12 +522,15 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
                     << ","
                     << llvm::format("%0.2f", D.getStdDev()) << "]";
                 break;
-          case DistId::Gamma:
-            out << " [Dist: " << "Gamma "
-                << llvm::format("%0.2f", D.getAlpha())
-                << ","
-                << llvm::format("%0.2f", D.getBeta()) << "]";
-            break;
+            case DistId::Gamma:
+                out << " [Dist: " << "Gamma "
+                    << llvm::format("%0.2f", D.getAlpha())
+                    << ","
+                    << llvm::format("%0.2f", D.getBeta()) << "]";
+                break;
+            case DistId::Maximum:
+                out << "[Dist: " << "Max" << "]";
+                break;
         }
 
         if (port.LookBehind) {

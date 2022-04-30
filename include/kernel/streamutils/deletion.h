@@ -154,7 +154,7 @@ public:
     FilterByMaskKernel(BuilderRef b,
                         SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
                         unsigned fieldWidth = 64,
-                        ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
+                        ProcessingRateProbabilityDistribution insertionProbabilityDistribution = MaximumDistribution());
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
 private:

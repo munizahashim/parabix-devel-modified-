@@ -41,7 +41,7 @@ void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                   unsigned streamOffset = 0,
                   StreamExpandOptimization opt = StreamExpandOptimization::None,
                   unsigned expansionFieldWidth = 64,
-                  ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution());
+                  ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
 
 inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,

@@ -120,11 +120,29 @@ private:
     const uint32_t mMax;
 };
 
+struct MaximumDistributionModel {
+    uint32_t next(pipeline_random_engine & /* rng */) const HOT {
+        return mMax;
+    }
+
+    uint32_t getMax() const {
+        return mMax;
+    }
+
+    MaximumDistributionModel(const unsigned max)
+    : mMax(max) {
+
+    }
+
+private:
+    const uint32_t mMax;
+};
+
 struct SimulationPort {
 
     length_t QueueLength;
 
-    virtual bool consume(length_t & pending, pipeline_random_engine & rng) const = 0;
+    virtual bool consume(length_t & pending, uint64_t strides, pipeline_random_engine & rng) const = 0;
 
     virtual void produce(pipeline_random_engine & rng) = 0;
 
@@ -152,7 +170,7 @@ struct FixedPort final : public SimulationPort {
     : SimulationPort()
     ,  mAmount(amount) { }
 
-    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
+    bool consume(length_t & pending, uint64_t /* strides */, pipeline_random_engine & /* rng */) const override {
         pending = mAmount;
         return (QueueLength >= mAmount) ;
     }
@@ -170,7 +188,7 @@ struct BoundedPort final : public SimulationPort {
 
     BoundedPort(DistributionModel m) : SimulationPort(),  Model(m) { }
 
-    bool consume(length_t & pending, pipeline_random_engine & rng) const override HOT {
+    bool consume(length_t & pending, uint64_t /* strides */, pipeline_random_engine & rng) const override HOT {
         // The pipeline does not know how many tokens are required
         // of the streamset until after it invokes the kernel.
         if (QueueLength < Model.getMax()) {
@@ -344,7 +362,7 @@ struct PartialSumPort final : public SimulationPort {
         assert (step > 0);
     }
 
-    bool consume(length_t & pending, pipeline_random_engine & rng) const override HOT {
+    bool consume(length_t & pending, uint64_t /* strides */, pipeline_random_engine & rng) const override HOT {
         const auto m = Generator.readStepValue(Index, Index + Step, rng);
         assert (m == PreviousValue || PreviousValue == -1U);
         pending = m;
@@ -387,7 +405,7 @@ struct RelativePort final : public SimulationPort {
     : SimulationPort()
     , BaseRateValue(baseRateValue){ }
 
-    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
+    bool consume(length_t & pending, uint64_t /* strides */, pipeline_random_engine & /* rng */) const override {
         pending = BaseRateValue;
         return (QueueLength >= BaseRateValue);
     }
@@ -407,8 +425,8 @@ struct GreedyPort final : public SimulationPort {
     : SimulationPort()
     , LowerBound(min){ }
 
-    bool consume(length_t & pending, pipeline_random_engine & /* rng */) const override {
-        if (QueueLength < LowerBound || QueueLength == 0) {
+    bool consume(length_t & pending, uint64_t strides, pipeline_random_engine & /* rng */) const override {
+        if (QueueLength < LowerBound || (QueueLength == 0 && strides == 0)) {
             pending = LowerBound;
             return false;
         } else {
@@ -566,7 +584,7 @@ struct SimulationActor : public SimulationNode {
         for (;;) {
             // can't remove any items until we determine we can execute a full stride
             for (unsigned i = 0; i < Inputs; ++i) {
-                if (!Input[i]->consume(pendingArray[i], rng)) {
+                if (!Input[i]->consume(pendingArray[i], greedyStrides, rng)) {
                     goto no_more_pending_input;
                 }
             }
@@ -596,16 +614,17 @@ no_more_pending_input:
         }
 
         // Demand enough input to satisfy the output channels
+        uint64_t totalStrides = greedyStrides;
         if (demandStrides) {
             for (unsigned i = 0; i < Inputs; ++i) {
                 SimulationPort * const I = Input[i];
                 for (auto d = demandStrides; d--; ) {
-                    I->consume(pendingArray[i], rng);
+                    I->consume(pendingArray[i], totalStrides++, rng);
                     I->commit(pendingArray[i]);
                 }
             }
         }
-        const auto totalStrides = greedyStrides + demandStrides;
+
         SumOfStrides += totalStrides;
         SumOfStridesSquared += (totalStrides * totalStrides);
     }
@@ -616,7 +635,7 @@ no_more_pending_input:
             // can't remove any items until we determine we can execute a full stride
             for (unsigned i = 0; i < Inputs; ++i) {
                 SimulationPort * const I = Input[i];
-                if (!I->consume(pendingArray[i], rng)) {
+                if (!I->consume(pendingArray[i], strides, rng)) {
                     SumOfStrides += strides;
                     SumOfStridesSquared += (strides * strides);
                     *history++ = strides;
@@ -708,7 +727,7 @@ struct SimulationSinkActor final : public SimulationActor {
         for (;;) {
             bool hasEnough = true;
             for (unsigned i = 0; i < Inputs; ++i) {
-                hasEnough &= Input[i]->consume(pendingArray[i], rng);
+                hasEnough &= Input[i]->consume(pendingArray[i], strides, rng);
             }
             if (LLVM_UNLIKELY(!hasEnough && strides > 0)) {
                 break;
@@ -1598,6 +1617,8 @@ equivalent_relationship_already_exists:
                     const auto stddev = ((double)(base.getStdDev()) * (double)reps.numerator()) / ((double)reps.denominator());
                     return SkewNormalDistribution((float)mean, (float)stddev, base.getSkew());
                     END_SCOPED_REGION
+                case DistId::Maximum:
+                     return MaximumDistribution();
                 default:
                     llvm_unreachable("unknown distribution model type?");
             }
@@ -1631,6 +1652,9 @@ equivalent_relationship_already_exists:
                         } else {
                             port = MAKE_BP(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), p.LowerBound, p.UpperBound);
                         }
+                        break;
+                    case DistId::Maximum:
+                        port = MAKE_BP(MaximumDistributionModel, p.UpperBound);
                         break;
                 }
                 END_SCOPED_REGION
@@ -1667,6 +1691,9 @@ equivalent_relationship_already_exists:
                                     port = MAKE_BP(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), 0, max);
                                 }
                                 break;
+                            case DistId::Maximum:
+                                port = MAKE_BP(MaximumDistributionModel, max);
+                                break;
                         }
 
                         goto make_port;
@@ -1698,6 +1725,9 @@ equivalent_relationship_already_exists:
                                 } else {
                                     gen = MAKE_PSG(SkewNormalDistributionModel, df.getMean(), df.getStdDev(), df.getSkew(), 0, max);
                                 }
+                                break;
+                            case DistId::Maximum:
+                                gen = MAKE_PSG(MaximumDistributionModel, max);
                                 break;
                         }
                         gen->initializeGenerator(rng);
@@ -1936,6 +1966,8 @@ equivalent_relationship_already_exists:
     }
     assert (current >= segmentLength);
     assert (current == (segmentLength + numOfActors));
+
+    #ifndef DISABLE_LINKED_PARTITIONS
     // if at every timestep, the number of strides that two partition nodes execute
     // are aligned (i.e., identical or one is a constant multiple of the other)
     // then these partitions are linked with at least 1.0 - 1/(2^n) probability
@@ -1958,6 +1990,7 @@ equivalent_relationship_already_exists:
             }
         }
     }
+    #endif
 
     #ifdef PRINT_SIMULATION_DEBUG_STATISTICS
     printGraph(L, errs(), "L0");
@@ -1982,6 +2015,8 @@ equivalent_relationship_already_exists:
         }
         assert (current >= segmentLength);
         assert (current == (segmentLength + numOfActors));
+
+        #ifndef DISABLE_LINKED_PARTITIONS
         // update the linked partition graph; we expect this graph
         // to be very sparse after a few iterations and not likely
         // to change afterwards.
@@ -1993,6 +2028,7 @@ equivalent_relationship_already_exists:
             assert (i < j);
             return (b == 0) || Rational{a, b} != L[e];
         }, L);
+        #endif
 
         ++dataRounds;
 
