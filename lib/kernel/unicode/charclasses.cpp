@@ -65,15 +65,9 @@ llvm::StringRef CharClassesKernel::getSignature() const {
 
 void CharClassesKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::unique_ptr<cc::CC_Compiler> ccc;
-    if (mUseDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
-    } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
-    }
     unsigned n = mCCs.size();
 
-    UCD::UCDCompiler unicodeCompiler(*ccc.get(), pb);
+    UCD::UCDCompiler unicodeCompiler(getInput(0), pb);
     std::vector<Var *> mpx;
     for (unsigned i = 0; i < n; i++) {
         mpx.push_back(pb.createVar("mpx_basis" + std::to_string(i), pb.createZeroes()));

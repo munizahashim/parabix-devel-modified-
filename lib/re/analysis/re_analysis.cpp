@@ -10,7 +10,7 @@
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
 #include <unicode/core/unicode_set.h>
-#include <unicode/utf/UTF.h>
+#include <unicode/utf/utf_encoder.h>
 
 #include <util/small_flat_set.hpp>
 
@@ -197,8 +197,9 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         if (isa<cc::CodeUnitAlphabet>(alphabet)) return std::make_pair(1, 1);
         if (indexAlphabet == alphabet) return std::make_pair(1, 1);
         if ((indexAlphabet == &cc::UTF8) && (alphabet == &cc::Unicode)) {
-            return std::make_pair(UTF<8>::encoded_length(lo_codepoint(cc->front())),
-                                  UTF<8>::encoded_length(hi_codepoint(cc->back())));
+            UTF_Encoder UTF8_Encoder(8);
+            return std::make_pair(UTF8_Encoder.encoded_length(lo_codepoint(cc->front())),
+                                  UTF8_Encoder.encoded_length(hi_codepoint(cc->back())));
         }
         return std::make_pair(1, INT_MAX);
     } else if (isa<Any>(re)) {
@@ -330,8 +331,9 @@ struct FixedUTF8Validator : public RE_Validator {
             alphabet = a->getSourceAlphabet();
         }
         if (alphabet == &cc::Unicode) {
-            auto min_lgth = UTF<8>::encoded_length(lo_codepoint(cc->front()));
-            auto max_lgth = UTF<8>::encoded_length(hi_codepoint(cc->back()));
+            UTF_Encoder UTF8_Encoder(8);
+            auto min_lgth = UTF8_Encoder.encoded_length(lo_codepoint(cc->front()));
+            auto max_lgth = UTF8_Encoder.encoded_length(hi_codepoint(cc->back()));
             return min_lgth == max_lgth;
         }
         return (alphabet == &cc::UTF8) || (alphabet == &cc::Byte);

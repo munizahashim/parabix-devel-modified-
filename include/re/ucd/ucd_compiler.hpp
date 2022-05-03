@@ -2,7 +2,7 @@
 #define UCDCOMPILER_HPP
 
 #include <unicode/core/UCD_Config.h>
-
+#include <unicode/utf/utf_encoder.h>
 #include <vector>
 #include <boost/container/flat_map.hpp>
 
@@ -16,6 +16,7 @@ namespace re {
 }
 
 namespace pablo {
+    class PabloBlock;
     class PabloBuilder;
     class PabloAST;
     class Var;
@@ -43,7 +44,7 @@ public:
     enum class IfHierarchy {None, Default};
     using NameMap = boost::container::flat_map<re::Name *, PabloAST *>;
 
-    UCDCompiler(cc::CC_Compiler & ccCompiler, PabloBuilder & pb);
+    UCDCompiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
 
     void addTarget(pablo::Var * theVar, re::CC * theCC);
 
@@ -67,7 +68,7 @@ protected:
 
     PabloAST * makePrefix(const codepoint_t cp, const unsigned byte_no, PabloBuilder & builder, PabloAST * prefix);
 
-    static RangeList byteDefinitions(const RangeList & list, const unsigned byte_no, bool isUTF_16);
+    RangeList byteDefinitions(const RangeList & list, const unsigned byte_no);
 
     template <typename RangeListOrUnicodeSet>
     static RangeList rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi);
@@ -79,8 +80,11 @@ protected:
     static RangeList innerRanges(const RangeList & list);
 
 private:
-    cc::CC_Compiler &       mCodeUnitCompiler;
-    PabloBuilder &          mPb;
+    UTF_Encoder             mEncoder;
+    pablo::PabloBuilder &   mPb;
+    unsigned                mLookAhead;
+    PabloAST *              mMask;
+    std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
     PabloAST *              mSuffixVar;
     TargetMap               mTarget;
     ValueMap                mTargetValue;

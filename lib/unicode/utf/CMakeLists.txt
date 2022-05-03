@@ -7,8 +7,7 @@ parabix_add_module(
 NAME
     unicode.utf
 SRC
-    utf8_encoder.cpp
-    utf16_encoder.cpp
+    utf_encoder.cpp
 DEPS
     unicode.core
 )

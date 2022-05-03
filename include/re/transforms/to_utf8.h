@@ -7,6 +7,7 @@
 #ifndef TO_UTF8_H
 #define TO_UTF8_H
 
+#include <unicode/utf/utf_encoder.h>
 #include <re/adt/adt.h>
 #include <re/transforms/re_transformer.h>
 
@@ -36,6 +37,11 @@ public:
 protected:
     RE * transformAny(Any * a) override;
     RE * transformCC(CC * cc) override;
+    RE * rangeCodeUnits(codepoint_t lo, codepoint_t hi, unsigned index, const unsigned lgth);
+    RE * rangeToUTF8(codepoint_t lo, codepoint_t hi);
+
+private:
+    UTF_Encoder mEncoder;
 };
 
 RE * toUTF8(RE * r, bool convertName = false);

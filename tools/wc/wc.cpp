@@ -218,7 +218,7 @@ void WordCountKernel::generatePabloMethod() {
         WS_prop = UCD::linkAndResolve(WS_prop);
         re::CC * WS_CC = cast<re::CC>(cast<PropertyExpression>(WS_prop)->getResolvedRE());
         Var * WS = pb.createVar("space");
-        UCD::UCDCompiler unicodeCompiler(*ccc.get(), pb);
+        UCD::UCDCompiler unicodeCompiler(getInput(0), pb);
         unicodeCompiler.addTarget(WS, WS_CC);
         unicodeCompiler.compile();
         //PabloAST * WS = ccc->compileCC(re::makeCC(re::re::makeByte(0x09, 0x0D), re::re::makeByte(0x20)));

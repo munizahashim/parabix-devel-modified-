@@ -46,13 +46,13 @@
 #include <re/adt/re_utility.h>
 #include <re/adt/printer_re.h>
 #include <re/alphabet/alphabet.h>
+#include <re/analysis/re_analysis.h>
+#include <re/analysis/re_name_gather.h>
+#include <re/analysis/collect_ccs.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/multiplex_CCs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
-#include <re/analysis/re_analysis.h>
-#include <re/analysis/re_name_gather.h>
-#include <re/analysis/collect_ccs.h>
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/name_intro.h>
