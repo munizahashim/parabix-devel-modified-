@@ -234,8 +234,8 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
             target = sequenceGenerator(std::move(rangeIntersect(ranges, lo, mid)), code_unit, builder, target, prefix);
             target = sequenceGenerator(std::move(rangeIntersect(ranges, mid + 1, hi)), code_unit, builder, target, prefix);
         } else if (min == code_unit) {
-            // We have a single byte remaining to match for all code points in this CC.
-            // Use the byte class compiler to generate matches for these codepoints.
+            // We have a single code unit remaining to match for all code points in this CC.
+            // Use the character class compiler to generate matches for these codepoints.
             PabloAST * var = mCodeUnitCompiler->compileCC(makeCC(byteDefinitions(ranges, code_unit), &Byte), builder);
             PabloAST * prior = makePrefix(lo, code_unit, builder, prefix);
             if (code_unit <= 1) {
@@ -269,7 +269,7 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
                         }
                         target = builder.createOrAnd(target, mSuffixVar, builder.createAdvance(var, 1));
                     }
-                } else { // lbyte == hbyte
+                } else { // lo_unit == hi_unit
                     PabloAST * var = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
                     if (code_unit > 1) {
                         var = builder.createAnd(builder.createAdvance(prefix ? prefix : var, 1), var);
@@ -309,12 +309,6 @@ PabloAST * UCDCompiler::ifTestCompiler(const codepoint_t lo, const codepoint_t h
     const bool at_hi_boundary = (hi == 0x10FFFF || mEncoder.nthCodeUnit(hi + 1, code_unit) != hi_unit);
 
     if (at_lo_boundary && at_hi_boundary) {
-        if (true) {
-            if (lo_unit != hi_unit) {
-            if (lo == 0x80) lo_unit = 0xC0;
-            if (hi == 0x10FFFF) hi_unit = 0xFF;
-            }
-        }
         PabloAST * cc = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
         target = builder.createAnd(cc, target);
     } else if (lo_unit == hi_unit) {
