@@ -237,23 +237,6 @@ PabloAST * Parabix_CC_Compiler::LE_Range(const unsigned N, const unsigned n, Pab
     }
 }
 
-PabloAST * Parabix_CC_Compiler::createUCDSequence(const unsigned byte_no, PabloAST * target, PabloAST * var, PabloAST * prefix, PabloBuilder & builder) {
-    if (byte_no > 1) {
-        var = builder.createAnd(var, builder.createAdvance(prefix, 1));
-    }
-    return builder.createOr(target, var);
-}
-
-PabloAST * Parabix_CC_Compiler::createUCDSequence(const unsigned byte_no, const unsigned len, PabloAST * target, PabloAST * var, PabloAST * prefix, PabloAST * suffix, PabloBuilder & builder) {
-    if (byte_no > 1) {
-        var = builder.createAnd(builder.createAdvance(prefix, 1), var);
-    }
-    for (unsigned i = byte_no; i != len; ++i) {
-        var = builder.createAnd(suffix, builder.createAdvance(var, 1));
-    }
-    return builder.createOr(target, var);
-}
-
 PabloAST * compileCCfromCodeUnitStream(const CC * cc, PabloAST * codeUnitStream, PabloBuilder & pb) {
     const Alphabet * a = cc->getAlphabet();
     if (!isa<CodeUnitAlphabet>(a)) {
@@ -613,21 +596,6 @@ PabloAST * Parabix_Ternary_CC_Compiler::joinTerms(std::vector<PabloAST *> terms,
     } else {
         return terms.front();
     }
-}
-
-PabloAST * Parabix_Ternary_CC_Compiler::createUCDSequence(const unsigned byte_no, PabloAST * target, PabloAST * var, PabloAST * prefix, PabloBuilder & builder) {
-    if (byte_no <= 1) return builder.createOr(target, var);
-    else return builder.createOrAnd(target, var, builder.createAdvance(prefix, 1));
-}
-
-PabloAST * Parabix_Ternary_CC_Compiler::createUCDSequence(const unsigned byte_no, const unsigned len, PabloAST * target, PabloAST * var, PabloAST * prefix, PabloAST * suffix, PabloBuilder & builder) {
-    if (byte_no > 1) {
-        var = builder.createAnd(builder.createAdvance(prefix, 1), var);
-    }
-    for (unsigned i = byte_no; i != len - 1; ++i) {
-        var = builder.createAnd(suffix, builder.createAdvance(var, 1));
-    }
-    return builder.createOrAnd(target, suffix, builder.createAdvance(var, 1));
 }
 
 } // end of namespace cc
