@@ -242,9 +242,9 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
 
         const auto syncLock = mCompilingHybridThread ? FixedDataSyncLock : HybridSyncLock;
         assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
-
         assert (FirstKernel <= syncLock && syncLock <= LastKernel);
-        Value * const otherThread = getSynchronizationLockPtrForKernel(b, syncLock, SYNC_LOCK_FULL);
+        const auto type = mIsStatelessKernel.test(syncLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        Value * const otherThread = getSynchronizationLockPtrForKernel(b, syncLock, type);
         b->CreateBr(waiting);
 
         b->SetInsertPoint(waiting);
