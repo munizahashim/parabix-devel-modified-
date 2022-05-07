@@ -1,4 +1,4 @@
-#include <re/ucd/ucd_compiler.hpp>
+#include <unicode/utf/utf_compiler.h>
 
 #include <array>
 #include <llvm/Support/ErrorHandling.h>
@@ -21,10 +21,10 @@ using namespace pablo;
 using namespace llvm;
 using namespace boost::container;
 
-namespace UCD {
+namespace UTF {
 
 
-const UCDCompiler::RangeList UCDCompiler::defaultIfHierachy = {
+const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
     // Non-ASCII
     {0x80, 0x10FFFF},
     // Two-byte sequences
@@ -111,20 +111,20 @@ const UCDCompiler::RangeList UCDCompiler::defaultIfHierachy = {
 
     {0x10000, 0x10FFFF}};
 
-const UCDCompiler::RangeList UCDCompiler::noIfHierachy = {{0x80, 0x10FFFF}};
+const UTF_Compiler::RangeList UTF_Compiler::noIfHierachy = {{0x80, 0x10FFFF}};
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateRange
  ** ------------------------------------------------------------------------------------------------------------- */
-void UCDCompiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry) {
+void UTF_Compiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry) {
     // Pregenerate the suffix var outside of the if ranges. The DCE pass will either eliminate it if it's not used or the
     // code sinking pass will move appropriately into an inner if block.
     if (mMask) {
         auto nested = entry.createScope();
         entry.createIf(mMask, nested);
-        generateRange(ifRanges, 0, UNICODE_MAX, nested);
+        generateRange(ifRanges, 0, UCD::UNICODE_MAX, nested);
     } else {
-        generateRange(ifRanges, 0, UNICODE_MAX, entry);
+        generateRange(ifRanges, 0, UCD::UNICODE_MAX, entry);
     }
 }
 
@@ -132,7 +132,7 @@ void UCDCompiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry
  * @brief generateRange
  * @param ifRangeList
  ** ------------------------------------------------------------------------------------------------------------- */
-void UCDCompiler::generateRange(const RangeList & ifRanges, const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+void UTF_Compiler::generateRange(const RangeList & ifRanges, const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
 
     // Codepoints in unenclosed ranges will be computed unconditionally.
     // Generate them first so that computed subexpressions may be shared
@@ -191,7 +191,7 @@ void UCDCompiler::generateRange(const RangeList & ifRanges, const codepoint_t lo
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateSubRanges
  ** ------------------------------------------------------------------------------------------------------------- */
-void UCDCompiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+void UTF_Compiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
     for (auto & t : mTargetValue) {
         const auto range = rangeIntersect(*t.first, lo, hi);
         PabloAST * target = t.second;
@@ -215,7 +215,7 @@ void UCDCompiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi, 
  * Generate remaining code to match UTF-8 code sequences within the codepoint set cpset, assuming that the code
  * matching the sequences up to byte number code_unit have been generated.
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
+PabloAST * UTF_Compiler::sequenceGenerator(const RangeList && ranges, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
 
     if (LLVM_LIKELY(ranges.size() > 0)) {
 
@@ -289,21 +289,21 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief sequenceGenerator
  ** ------------------------------------------------------------------------------------------------------------- */
-inline PabloAST * UCDCompiler::sequenceGenerator(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
+inline PabloAST * UTF_Compiler::sequenceGenerator(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
     return sequenceGenerator({{ lo, hi }}, code_unit, builder, target, prefix);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ifTestCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-inline PabloAST * UCDCompiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+inline PabloAST * UTF_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
     return ifTestCompiler(lo, hi, 1, builder, builder.createOnes());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ifTestCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UCDCompiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target) {
+PabloAST * UTF_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target) {
 
     codepoint_t lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
     codepoint_t hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
@@ -339,7 +339,7 @@ PabloAST * UCDCompiler::ifTestCompiler(const codepoint_t lo, const codepoint_t h
  *
  * Ensure the sequence of preceding bytes is defined, up to, but not including the given code_unit
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UCDCompiler::makePrefix(const codepoint_t cp, const unsigned code_unit, PabloBuilder & builder, PabloAST * prefix) {
+PabloAST * UTF_Compiler::makePrefix(const codepoint_t cp, const unsigned code_unit, PabloBuilder & builder, PabloAST * prefix) {
     assert (code_unit >= 1 && code_unit <= 4);
     assert (code_unit == 1 || prefix != nullptr);
     for (unsigned i = 1; i != code_unit; ++i) {
@@ -360,7 +360,7 @@ PabloAST * UCDCompiler::makePrefix(const codepoint_t cp, const unsigned code_uni
  *
  * Ensure the sequence of preceding bytes is defined, up to, but not including the given code_unit
  ** ------------------------------------------------------------------------------------------------------------- */
-UCDCompiler::RangeList UCDCompiler::byteDefinitions(const RangeList & list, const unsigned code_unit) {
+UTF_Compiler::RangeList UTF_Compiler::byteDefinitions(const RangeList & list, const unsigned code_unit) {
     RangeList result;
     result.reserve(list.size());
     for (const auto & i : list) {
@@ -376,7 +376,7 @@ UCDCompiler::RangeList UCDCompiler::byteDefinitions(const RangeList & list, cons
  * @param hi
  ** ------------------------------------------------------------------------------------------------------------- */
 template <typename RangeListOrUnicodeSet>
-UCDCompiler::RangeList UCDCompiler::rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi) {
+UTF_Compiler::RangeList UTF_Compiler::rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi) {
     RangeList result;
     for (const auto & i : list) {
         if ((lo_codepoint(i) <= hi) && (hi_codepoint(i) >= lo)) {
@@ -392,7 +392,7 @@ UCDCompiler::RangeList UCDCompiler::rangeIntersect(const RangeListOrUnicodeSet &
  * @param lo
  * @param hi
  ** ------------------------------------------------------------------------------------------------------------- */
-UCDCompiler::RangeList UCDCompiler::rangeGaps(const RangeList & list, const codepoint_t lo, const codepoint_t hi) {
+UTF_Compiler::RangeList UTF_Compiler::rangeGaps(const RangeList & list, const codepoint_t lo, const codepoint_t hi) {
     RangeList gaps;
     if (LLVM_LIKELY(lo < hi)) {
         if (LLVM_UNLIKELY(list.empty())) {
@@ -418,7 +418,7 @@ UCDCompiler::RangeList UCDCompiler::rangeGaps(const RangeList & list, const code
  * @brief outerRanges
  * @param list
  ** ------------------------------------------------------------------------------------------------------------- */
-UCDCompiler::RangeList UCDCompiler::outerRanges(const RangeList & list) {
+UTF_Compiler::RangeList UTF_Compiler::outerRanges(const RangeList & list) {
     RangeList ranges;
     if (LLVM_LIKELY(list.size() > 0)) {
         auto i = list.cbegin();
@@ -438,7 +438,7 @@ UCDCompiler::RangeList UCDCompiler::outerRanges(const RangeList & list) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief innerRanges
  ** ------------------------------------------------------------------------------------------------------------- */
-UCDCompiler::RangeList UCDCompiler::innerRanges(const RangeList & list) {
+UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
     RangeList ranges;
     if (LLVM_LIKELY(list.size() > 0)) {
         for (auto i = list.cbegin(), j = i + 1; j != list.cend(); ++j) {
@@ -452,12 +452,12 @@ UCDCompiler::RangeList UCDCompiler::innerRanges(const RangeList & list) {
     return ranges;
 }
 
-void UCDCompiler::addTarget(Var * theVar, CC * theCC) {
+void UTF_Compiler::addTarget(Var * theVar, CC * theCC) {
     mTarget.emplace(theCC, theVar);
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
 
-void UCDCompiler::compile(IfHierarchy h) {
+void UTF_Compiler::compile(IfHierarchy h) {
     if (h == IfHierarchy::None) generateRange(noIfHierachy, mPb);
     else generateRange(defaultIfHierachy, mPb);
 }
@@ -465,7 +465,7 @@ void UCDCompiler::compile(IfHierarchy h) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-UCDCompiler::UCDCompiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
+UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
 : mPb(pb), mLookAhead(lookAhead), mMask(mask) {
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();

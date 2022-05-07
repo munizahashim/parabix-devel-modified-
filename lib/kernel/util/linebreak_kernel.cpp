@@ -13,7 +13,6 @@
 #include <re/adt/re_name.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
-#include <re/ucd/ucd_compiler.hpp>
 #include <idisa/idisa_builder.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>

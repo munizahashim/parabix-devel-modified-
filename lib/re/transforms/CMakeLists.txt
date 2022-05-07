@@ -25,5 +25,5 @@ SRC
     to_utf8.cpp
 DEPS
     re.analysis
-    re.ucd
+    unicode.utf
 )

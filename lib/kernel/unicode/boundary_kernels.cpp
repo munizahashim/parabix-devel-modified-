@@ -12,7 +12,6 @@
 #include <re/compile/re_compiler.h>
 #include <re/analysis/re_name_gather.h>
 #include <re/transforms/to_utf8.h>
-#include <re/ucd/ucd_compiler.hpp>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/resolve_properties.h>
 #include <kernel/core/kernel_builder.h>

@@ -8,6 +8,8 @@ NAME
     unicode.utf
 SRC
     utf_encoder.cpp
+    utf_compiler.cpp
 DEPS
+    re.cc
     unicode.core
 )

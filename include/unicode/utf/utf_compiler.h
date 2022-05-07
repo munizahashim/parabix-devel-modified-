@@ -1,5 +1,5 @@
-#ifndef UCDCOMPILER_HPP
-#define UCDCOMPILER_HPP
+#ifndef UTF_COMPILER_HPP
+#define UTF_COMPILER_HPP
 
 #include <unicode/core/UCD_Config.h>
 #include <unicode/utf/utf_encoder.h>
@@ -22,16 +22,16 @@ namespace pablo {
     class Var;
 }
 
-namespace UCD {
+namespace UTF {
 
 class UnicodeSet;
 
-class UCDCompiler {
+class UTF_Compiler {
 
     using CC = re::CC;
     using PabloBuilder = pablo::PabloBuilder;
     using PabloAST = pablo::PabloAST;
-    using RangeList = std::vector<interval_t>;
+    using RangeList = std::vector<UCD::interval_t>;
 
     using TargetMap = boost::container::flat_map<const CC *, pablo::Var *>;
     using ValueMap = boost::container::flat_map<const CC *, PabloAST *>;
@@ -44,7 +44,7 @@ public:
     enum class IfHierarchy {None, Default};
     using NameMap = boost::container::flat_map<re::Name *, PabloAST *>;
 
-    UCDCompiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
+    UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
 
     void addTarget(pablo::Var * theVar, re::CC * theCC);
 
@@ -91,4 +91,4 @@ private:
 
 }
 
-#endif // UCDCOMPILER_HPP
+#endif // UTF_COMPILER_HPP

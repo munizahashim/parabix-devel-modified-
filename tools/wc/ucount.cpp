@@ -12,7 +12,6 @@
 #include <re/parse/parser.h>
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
-#include <re/ucd/ucd_compiler.hpp>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/s2p_kernel.h>

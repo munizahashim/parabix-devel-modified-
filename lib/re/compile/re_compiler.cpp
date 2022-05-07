@@ -23,7 +23,6 @@
 #include <re/analysis/re_local.h>
 #include <re/analysis/cc_sequence_search.h>
 #include <re/toolchain/toolchain.h>
-#include <re/ucd/ucd_compiler.hpp>
 
 namespace pablo { class PabloAST; }
 namespace pablo { class Var; }
