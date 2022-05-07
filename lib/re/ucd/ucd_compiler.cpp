@@ -119,15 +119,11 @@ const UCDCompiler::RangeList UCDCompiler::noIfHierachy = {{0x80, 0x10FFFF}};
 void UCDCompiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry) {
     // Pregenerate the suffix var outside of the if ranges. The DCE pass will either eliminate it if it's not used or the
     // code sinking pass will move appropriately into an inner if block.
-    CC *  suffix = makeByte(0x80, 0xBF);
-    assert (!suffix->empty());
     if (mMask) {
         auto nested = entry.createScope();
         entry.createIf(mMask, nested);
-        mSuffixVar = mCodeUnitCompiler->compileCC(suffix, nested);
         generateRange(ifRanges, 0, UNICODE_MAX, nested);
     } else {
-        mSuffixVar = mCodeUnitCompiler->compileCC(suffix, entry);
         generateRange(ifRanges, 0, UNICODE_MAX, entry);
     }
 }
@@ -226,14 +222,14 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
         codepoint_t lo, hi;
         std::tie(lo, hi) = ranges[0];
 
-        const auto min = mEncoder.encoded_length(lo_codepoint(ranges.front()));
-        const auto max = mEncoder.encoded_length(hi_codepoint(ranges.back()));
+        const auto lgth_min = mEncoder.encoded_length(lo_codepoint(ranges.front()));
+        const auto lgth_max = mEncoder.encoded_length(hi_codepoint(ranges.back()));
 
-        if (min != max) {
-            const auto mid = mEncoder.max_codepoint_of_length(min);
+        if (lgth_min != lgth_max) {
+            const auto mid = mEncoder.max_codepoint_of_length(lgth_min);
             target = sequenceGenerator(std::move(rangeIntersect(ranges, lo, mid)), code_unit, builder, target, prefix);
             target = sequenceGenerator(std::move(rangeIntersect(ranges, mid + 1, hi)), code_unit, builder, target, prefix);
-        } else if (min == code_unit) {
+        } else if (code_unit == lgth_min) {
             // We have a single code unit remaining to match for all code points in this CC.
             // Use the character class compiler to generate matches for these codepoints.
             PabloAST * var = mCodeUnitCompiler->compileCC(makeCC(byteDefinitions(ranges, code_unit), &Byte), builder);
@@ -247,8 +243,8 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
             for (auto rg : ranges) {
                 codepoint_t lo, hi;
                 std::tie(lo, hi) = rg;
-                const auto lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
-                const auto hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
+                auto lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
+                auto hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
                 if (lo_unit != hi_unit) {
                     if (!mEncoder.isLowCodePointAfterNthCodeUnit(lo, code_unit)) {
                         codepoint_t mid = mEncoder.maxCodePointWithCommonCodeUnits(lo, code_unit);
@@ -258,16 +254,22 @@ PabloAST * UCDCompiler::sequenceGenerator(const RangeList && ranges, const unsig
                         codepoint_t mid = mEncoder.minCodePointWithCommonCodeUnits(hi, code_unit);
                         target = sequenceGenerator(lo, mid - 1, code_unit, builder, target, prefix);
                         target = sequenceGenerator(mid, hi, code_unit, builder, target, prefix);
-                    } else { // we have a prefix group of type (a)
+                    } else { // we have a prefix group covering a full range
                         PabloAST * var = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
                         unsigned len = mEncoder.encoded_length(lo);
                         if (code_unit > 1) {
                             var = builder.createAnd(builder.createAdvance(prefix, 1), var);
                         }
-                        for (unsigned i = code_unit; i != len - 1; ++i) {
-                            var = builder.createAnd(mSuffixVar, builder.createAdvance(var, 1));
+                        for (unsigned i = code_unit+1; i < len; ++i) {
+                            lo_unit = mEncoder.nthCodeUnit(lo, i);
+                            hi_unit = mEncoder.nthCodeUnit(hi, i);
+                            PabloAST * sfx = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
+                            var = builder.createAnd(sfx, builder.createAdvance(var, 1));
                         }
-                        target = builder.createOrAnd(target, mSuffixVar, builder.createAdvance(var, 1));
+                        lo_unit = mEncoder.nthCodeUnit(lo, lgth_min);
+                        hi_unit = mEncoder.nthCodeUnit(hi, lgth_min);
+                        PabloAST * sfx = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
+                        target = builder.createOrAnd(target, sfx, builder.createAdvance(var, 1));
                     }
                 } else { // lo_unit == hi_unit
                     PabloAST * var = mCodeUnitCompiler->compileCC(makeByte(lo_unit, hi_unit), builder);
@@ -464,7 +466,7 @@ void UCDCompiler::compile(IfHierarchy h) {
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 UCDCompiler::UCDCompiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
-: mPb(pb), mLookAhead(lookAhead), mMask(mask), mSuffixVar(nullptr) {
+: mPb(pb), mLookAhead(lookAhead), mMask(mask) {
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
     unsigned streamWidth = ty->getIntegerBitWidth();

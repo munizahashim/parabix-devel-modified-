@@ -85,7 +85,6 @@ private:
     unsigned                mLookAhead;
     PabloAST *              mMask;
     std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
-    PabloAST *              mSuffixVar;
     TargetMap               mTarget;
     ValueMap                mTargetValue;
 };
