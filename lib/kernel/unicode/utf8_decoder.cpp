@@ -17,12 +17,12 @@ using namespace kernel;
 using namespace pablo;
 using namespace llvm;
 
-bool mAdvanceToFinalPosition = false;
+bool mAdvanceToFinalPosition = true;
 
 void UTF8_Decoder::generatePabloMethod() {
     PabloBuilder main(getEntryScope());
     //  input: 8 basis bit streams
-    std::vector<PabloAST *> UTF8_bit = getInputStreamSet("u8bit");
+    std::vector<PabloAST *> UTF8_bit = getInputStreamSet("utf8_bit");
     //  output: 21 basis bit streams for Unicode codepoint values.
     Var * Unicode_bit[21];
     
@@ -65,7 +65,7 @@ void UTF8_Decoder::generatePabloMethod() {
     // low 6 bits of the Unicode value.
     PabloAST * scope22 = u8pfx2;
     if (mAdvanceToFinalPosition) {
-        scope22 = level1.createAdvance(scope22, 1);
+        scope22 = level1.createAdvance(scope22, 1, "scope22");
     }
     PabloAST * suffix2_bit[6];
     for (unsigned i = 0; i < 6; i++) {
@@ -92,7 +92,7 @@ void UTF8_Decoder::generatePabloMethod() {
         if (mAdvanceToFinalPosition) {
             pfx3_bit[i] = level2.createAdvance(pfx3_bit[i], 2);
         }
-        level2.createAssign(Unicode_bit[i+12], level1.createOr(Unicode_bit[i+12], pfx3_bit[i]));
+        level2.createAssign(Unicode_bit[i+12], level2.createOr(Unicode_bit[i+12], pfx3_bit[i]));
     }
     // The low 6 bits of the 2nd byte of a 3-byte sequence become the
     // bit 6-11 of the Unicode value, while the low 6 bits of the 3rd byte
@@ -100,8 +100,8 @@ void UTF8_Decoder::generatePabloMethod() {
     PabloAST * scope32 = u8pfx3;
     PabloAST * scope33 = u8pfx3;
     if (mAdvanceToFinalPosition) {
-        scope32 = level2.createAdvance(scope32, 1);
-        scope33 = level2.createAdvance(scope32, 1);
+        scope32 = level2.createAdvance(scope32, 1, "scope32");
+        scope33 = level2.createAdvance(scope32, 1, "scope33");
     }
     PabloAST * suffix32_bit[6];
     PabloAST * suffix33_bit[6];
@@ -112,7 +112,7 @@ void UTF8_Decoder::generatePabloMethod() {
             suffix32_bit[i] = level2.createLookahead(suffix32_bit[i], 1);
             suffix33_bit[i] = level2.createLookahead(suffix33_bit[i], 2);
         }
-        suffix32_bit[i] = level2.createAnd(scope32, suffix32_bit[i]);
+        suffix32_bit[i] = level2.createAdvance(level2.createAnd(scope32, suffix32_bit[i]), 1);
         suffix33_bit[i] = level2.createAnd(scope33, suffix33_bit[i]);
         level2.createAssign(Unicode_bit[i+6], level2.createOr(Unicode_bit[i+6], suffix32_bit[i]));
         level2.createAssign(Unicode_bit[i], level2.createOr(Unicode_bit[i], suffix33_bit[i]));
@@ -131,7 +131,7 @@ void UTF8_Decoder::generatePabloMethod() {
         if (mAdvanceToFinalPosition) {
             pfx4_bit[i] = level3.createAdvance(pfx4_bit[i], 3);
         }
-        level1.createAssign(Unicode_bit[i+18], level1.createOr(Unicode_bit[i+18], pfx4_bit[i]));
+        level3.createAssign(Unicode_bit[i+18], level3.createOr(Unicode_bit[i+18], pfx4_bit[i]));
     }
     // The low 6 bits of the 2nd byte of a 4-byte sequence become the
     // bit 12-17 of the Unicode value, the low 6 bits of the 3rd byte
@@ -141,9 +141,9 @@ void UTF8_Decoder::generatePabloMethod() {
     PabloAST * scope43 = u8pfx4;
     PabloAST * scope44 = u8pfx4;
     if (mAdvanceToFinalPosition) {
-        scope42 = level3.createAdvance(scope42, 1);
-        scope43 = level3.createAdvance(scope42, 1);
-        scope44 = level3.createAdvance(scope43, 1);
+        scope42 = level3.createAdvance(scope42, 1, "scope42");
+        scope43 = level3.createAdvance(scope42, 1, "scope43");
+        scope44 = level3.createAdvance(scope43, 1, "scope44");
     }
     PabloAST * suffix42_bit[6];
     PabloAST * suffix43_bit[6];
@@ -160,11 +160,15 @@ void UTF8_Decoder::generatePabloMethod() {
         suffix42_bit[i] = level3.createAnd(scope42, suffix42_bit[i]);
         suffix43_bit[i] = level3.createAnd(scope43, suffix43_bit[i]);
         suffix44_bit[i] = level3.createAnd(scope44, suffix44_bit[i]);
+        if (mAdvanceToFinalPosition) {
+            suffix42_bit[i] = level3.createAdvance(suffix42_bit[i], 2);
+            suffix43_bit[i] = level3.createAdvance(suffix43_bit[i], 1);
+        }
         level3.createAssign(Unicode_bit[i+12], level3.createOr(Unicode_bit[i+12], suffix42_bit[i]));
         level3.createAssign(Unicode_bit[i+6], level3.createOr(Unicode_bit[i+6], suffix43_bit[i]));
         level3.createAssign(Unicode_bit[i], level3.createOr(Unicode_bit[i], suffix44_bit[i]));
     }
-    Var * output = getOutputStreamVar("u32bit");
+    Var * output = getOutputStreamVar("unicode_bit");
     for (unsigned i = 0; i < 21; i++) {
         main.createAssign(main.createExtract(output, i), Unicode_bit[i]);
     }
