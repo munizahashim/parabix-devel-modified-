@@ -60,6 +60,19 @@ static cl::opt<PabloCarryMode, true> PabloCarryModeOptions("CarryMode", cl::desc
         clEnumValN(PabloCarryMode::Compressed, "Compressed", "When possible, carries are stored as 64-bit integers.")
         CL_ENUM_VAL_SENTINEL), cl::cat(PabloOptions), cl::init(PabloCarryMode::Compressed));
 
+BitMovementMode MovementMode;
+static cl::opt<BitMovementMode, true> BitMovementOptions("BitMovement", cl::desc("Bit movement option for pablo algorithms"),
+    cl::location(MovementMode), cl::ValueOptional,
+    cl::values(
+        clEnumValN(BitMovementMode::Advance, "Advance", "Encode movements using Advance operations."),
+        clEnumValN(BitMovementMode::LookAhead, "LookAhead", "When possible, encode movements using LookAhead operations.")
+        CL_ENUM_VAL_SENTINEL), cl::cat(PabloOptions), cl::init(BitMovementMode::Advance));
+
+std::string BitMovementMode_string(BitMovementMode m) {
+    if (m == BitMovementMode::Advance) return "Advance";
+    else return "LookAhead";
+}
+
 bool DebugOptionIsSet(const PabloDebugFlags flag) {return DebugOptions.isSet(flag);}
     
 bool CompileOptionIsSet(const PabloCompilationFlags flag) {return PabloOptimizationsOptions.isSet(flag);}
