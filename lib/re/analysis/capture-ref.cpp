@@ -6,7 +6,10 @@
 
 #include <re/analysis/capture-ref.h>
 #include <re/adt/adt.h>
+#include <re/analysis/re_analysis.h>
+#include <re/alphabet/alphabet.h>
 #include <llvm/Support/raw_ostream.h>
+#include <limits.h>
 
 using namespace llvm;
 
@@ -80,6 +83,30 @@ ReferenceMap buildReferenceMap(const RE * re) {
         llvm::errs() << "\n_______\n";
     }
     return rm;
+}
+
+static std::pair<int, int> getLengthRange(std::vector<const RE *> v) {
+    int lo_len = 0;
+    int hi_len = 0;
+    for (auto & r: v) {
+        auto rg = getLengthRange(r, &cc::Unicode);
+        lo_len += rg.first;
+        if (rg.second == INT_MAX) hi_len = INT_MAX;
+        if (hi_len != INT_MAX) hi_len += rg.second;
+    }
+    return std::make_pair(lo_len, hi_len);
+}
+
+std::set<unsigned> referenceDistances(ReferenceMap rm) {
+    std::set<unsigned> distances;
+    for (auto & mapping : rm) {
+        auto rg1 = getLengthRange(mapping.first->getCapture(), &cc::Unicode);
+        auto rg2 = getLengthRange(mapping.second);
+        if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
+            distances.insert(rg1.first + rg2.first);
+        }
+    }
+    return distances;
 }
 
 }
