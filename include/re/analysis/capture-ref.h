@@ -4,11 +4,22 @@
 #include <set>
 
 namespace re {
-class RE; class Reference;
+class RE; class Capture; class Reference;
 
-using ReferenceMap = std::map<const Reference *, std::vector<const RE *>>;
 
-ReferenceMap buildReferenceMap(const RE * re);
+// Mapping from captures to all references to the capture.
+using RefMap = std::map<const Capture *, std::vector<const Reference *>>;
 
-std::set<unsigned> referenceDistances(ReferenceMap rm);
+// Mapping from references to twixt expressions between
+// the defining capture and the reference.
+using TwixtMap = std::map<const Reference *, std::vector<const RE *>>;
+
+struct ReferenceInfo {
+    RefMap captureRefs;
+    TwixtMap twixtREs;
+};
+
+ReferenceInfo buildReferenceInfo(const RE * re);
+
+std::set<unsigned> referenceDistances(ReferenceInfo info);
 }

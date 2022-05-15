@@ -27,43 +27,51 @@ void updateCaptures(const RE * re, CapturePostfixMap & cm) {
     }
 }
 
-void updateReferenceMap(const RE * re, CapturePostfixMap cm, ReferenceMap & rm) {
+void updateReferenceInfo(const RE * re, CapturePostfixMap cm, ReferenceInfo & info) {
     if (const Name * name = dyn_cast<Name>(re)) {
         if (LLVM_LIKELY(name->getDefinition() != nullptr)) {
-            return updateReferenceMap(name->getDefinition(), cm, rm);
+            return updateReferenceInfo(name->getDefinition(), cm, info);
         } else {
             UndefinedNameError(name);
         }
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        info.captureRefs.emplace(c, std::vector<const Reference *>{});
+        updateReferenceInfo(c->getCapturedRE(), cm, info);
     } else if (const Seq * seq = dyn_cast<Seq>(re)) {
         if (!seq->empty()) {
             RE * r1 = seq->front();
-            updateReferenceMap(r1, cm, rm);
+            updateReferenceInfo(r1, cm, info);
             CapturePostfixMap cm1 = cm;  // copy
             for (auto it = seq->begin()+1; it != seq->end(); it++)  {
                 updateCaptures(r1, cm1);
                 r1 = *it;
-                updateReferenceMap(r1, cm1, rm);
+                updateReferenceInfo(r1, cm1, info);
             }
         }
     } else if (const Alt * alt = dyn_cast<Alt>(re)) {
         for (auto & ai : *alt) {
-            updateReferenceMap(ai, cm, rm);
+            updateReferenceInfo(ai, cm, info);
         }
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
-        updateReferenceMap(rep->getRE(), cm, rm);
+        updateReferenceInfo(rep->getRE(), cm, info);
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
-        updateReferenceMap(diff->getLH(), cm, rm);
-        updateReferenceMap(diff->getRH(), cm, rm);
+        updateReferenceInfo(diff->getLH(), cm, info);
+        updateReferenceInfo(diff->getRH(), cm, info);
     } else if (const Intersect * ix = dyn_cast<Intersect>(re)) {
-        updateReferenceMap(ix->getLH(), cm, rm);
-        updateReferenceMap(ix->getRH(), cm, rm);
+        updateReferenceInfo(ix->getLH(), cm, info);
+        updateReferenceInfo(ix->getRH(), cm, info);
     } else if (const Reference * ref = dyn_cast<Reference>(re)) {
-        auto f = cm.find(ref->getCapture());
+        const Capture * c = ref->getCapture();
+        auto f = cm.find(c);
         if (f != cm.end()) {
-            rm.emplace(ref, f->second);
+            info.twixtREs.emplace(ref, f->second);
+            auto rl = info.captureRefs.find(c);
+            if (rl == info.captureRefs.end()) {
+                llvm::report_fatal_error("reference analysis: out of scope reference");
+            }
+            rl->second.push_back(ref);
         } else {
-            // reference without a defined capture
-            //rm.emplace(ref, nullptr);
+            llvm::report_fatal_error("reference without capture");
         }
     } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
         // Future extension:  property reference such as \p{Sc=\1} (same script as
@@ -71,18 +79,18 @@ void updateReferenceMap(const RE * re, CapturePostfixMap cm, ReferenceMap & rm) 
     }
 }
 
-ReferenceMap buildReferenceMap(const RE * re) {
-    ReferenceMap rm;
+ReferenceInfo buildReferenceMap(const RE * re) {
+    ReferenceInfo info;
     CapturePostfixMap cm;
-    updateReferenceMap(re, cm, rm);
-    for (auto & mapping : rm) {
+    updateReferenceInfo(re, cm, info);
+    for (auto & mapping : info.twixtREs) {
         llvm::errs() << Printer_RE::PrintRE(mapping.first) << ":\n";
         for (auto & r : mapping.second) {
             llvm::errs() << Printer_RE::PrintRE(r);
         }
         llvm::errs() << "\n_______\n";
     }
-    return rm;
+    return info;
 }
 
 static std::pair<int, int> getLengthRange(std::vector<const RE *> v) {
@@ -97,9 +105,9 @@ static std::pair<int, int> getLengthRange(std::vector<const RE *> v) {
     return std::make_pair(lo_len, hi_len);
 }
 
-std::set<unsigned> referenceDistances(ReferenceMap rm) {
+std::set<unsigned> referenceDistances(ReferenceInfo info) {
     std::set<unsigned> distances;
-    for (auto & mapping : rm) {
+    for (auto & mapping : info.twixtREs) {
         auto rg1 = getLengthRange(mapping.first->getCapture(), &cc::Unicode);
         auto rg2 = getLengthRange(mapping.second);
         if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
