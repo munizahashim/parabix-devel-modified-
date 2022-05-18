@@ -39,7 +39,7 @@ inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, con
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
-        if (isa<DynamicBuffer>(buffer) && bn.isOwned()) {
+        if (isa<DynamicBuffer>(buffer) && bn.isOwned() && (mNumOfThreads != 1 || mIsNestedPipeline)) {
             assert (bn.Locality != BufferLocality::ThreadLocal);
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
@@ -149,7 +149,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
         for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isUnowned() || bn.isShared() || (bn.isNonThreadLocal() != nonLocal)) {
+            if (bn.isUnowned() || (bn.isNonThreadLocal() != nonLocal)) {
                 continue;
             }
 
@@ -193,24 +193,25 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
         if (bn.Locality == BufferLocality::ThreadLocal) {
             continue;
         }
-        if (bn.isUnowned() || bn.isShared() || bn.isNonThreadLocal() != nonLocal) {
+        if (bn.isUnowned() || bn.isNonThreadLocal() != nonLocal) {
             continue;
         }
         StreamSetBuffer * const buffer = bn.Buffer;
         assert (isFromCurrentFunction(b, buffer->getHandle(), false));
         buffer->releaseBuffer(b);
 
-        if (isa<DynamicBuffer>(buffer) && bn.isOwned()) {
+        if (isa<DynamicBuffer>(buffer)) {
 
             const auto pe = in_edge(streamSet, mBufferGraph);
             const auto p = source(pe, mBufferGraph);
             const BufferPort & rd = mBufferGraph[pe];
             assert (rd.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(p, rd.Port);
-
-            if (!nonLocal) {
-                b->CreateFree(b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS));
-            } else if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+            if (!nonLocal && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+                Value * const ptr = b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
+                b->CreateFree(ptr);
+            }
+            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
                 Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                 Constant * const ZERO = b->getInt32(0);
                 b->CreateFree(b->CreateLoad(b->CreateInBoundsGEP(traceData, {ZERO, ZERO})));

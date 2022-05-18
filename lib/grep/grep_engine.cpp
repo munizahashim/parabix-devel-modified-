@@ -932,7 +932,6 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
         uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mMaxCount);
-
         close(fileDescriptor);
         if (handler.binaryFileSignalled()) {
             llvm::errs() << "Binary file " << fileName << "\n";

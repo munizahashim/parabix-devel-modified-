@@ -558,7 +558,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionReturnType returnValType) {
     if (LLVM_UNLIKELY(in_degree(mKernelId, mBufferGraph) == 0)) {
-        if (ExternallySynchronized) {
+        if (mIsNestedPipeline) {
             return b->isFinal();
         } else {
             return b->getFalse();
@@ -848,10 +848,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     Value * priorBufferPtr = nullptr;
-    if (isa<DynamicBuffer>(buffer)) {
-
-        // Attempt to delete any old buffer if one exists
-
+    if (isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+        // delete any old buffer if one exists
         priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
         Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
         #ifdef PRINT_DEBUG_MESSAGES
@@ -859,7 +857,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         #endif
         b->CreateFree(priorBuffer);
         b->CreateStore(ConstantPointerNull::get(cast<PointerType>(priorBuffer->getType())), priorBufferPtr);
-
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -869,7 +866,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     // TODO: can we determine which locks will always dominate another?
 
-    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     }
 
@@ -907,9 +904,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_storingPriorBuffer %" PRIx64 " in %" PRIx64, priorBuffer, priorBufferPtr);
         #endif
-        b->CreateStore(priorBuffer, priorBufferPtr);
-        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-            recordBufferExpansionHistory(b, outputPort, buffer);
+        if (mNumOfThreads != 1 || mIsNestedPipeline) {
+            b->CreateStore(priorBuffer, priorBufferPtr);
+            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+                recordBufferExpansionHistory(b, outputPort, buffer);
+            }
+        } else {
+            b->CreateFree(priorBuffer);
         }
     }
     b->CreateBr(afterCopyBackOrExpand);
@@ -1395,7 +1396,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
             const Binding & binding = partialSumPort.Binding;
             Constant * bindingName = b->GetString(binding.getName());
 
-            b->CreateAssert(b->CreateICmpULT(position, total),
+            b->CreateAssert(b->CreateICmpULE(position, total),
                             "%s.%s: partial sum reference position is not less than available items (%" PRIu64 " vs. %" PRIu64 ")",
                             mCurrentKernelName,
                             bindingName,

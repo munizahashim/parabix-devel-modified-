@@ -40,7 +40,7 @@ namespace kernel {
  * @brief identifyAllInternallySynchronizedKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
-    if (mNumOfThreads > 1 || ExternallySynchronized) {
+    if (mNumOfThreads > 1 || mIsNestedPipeline) {
         if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
 
             const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
@@ -77,7 +77,7 @@ void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
  * @brief readFirstSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readFirstSegmentNumber(BuilderRef b) {
-    if (ExternallySynchronized) {
+    if (mIsNestedPipeline) {
         mSegNo = b->getExternalSegNo(); assert (mSegNo);
     }
     else if (mNumOfThreads == 1) {
@@ -90,7 +90,7 @@ void PipelineCompiler::readFirstSegmentNumber(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
     ConstantInt * const ONE = b->getSize(1);
-    if (!ExternallySynchronized) {
+    if (!mIsNestedPipeline) {
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         if (LLVM_LIKELY(mNumOfThreads > 1)) {
             Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
@@ -113,7 +113,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
     #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (LLVM_LIKELY(ExternallySynchronized)) {
+    if (LLVM_LIKELY(mIsNestedPipeline)) {
         return;
     }
     assert (mNumOfThreads > 0);
@@ -130,7 +130,7 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
     Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(step));
     cast<PHINode>(mSegNo)->addIncoming(nextSegNo, exitBlock);
     #else
-    if (LLVM_LIKELY(ExternallySynchronized || mNumOfThreads > 1)) {
+    if (LLVM_LIKELY(mIsNestedPipeline || mNumOfThreads > 1)) {
         return;
     }
     cast<PHINode>(mSegNo)->addIncoming(mNextSegNo, exitBlock);
@@ -243,7 +243,7 @@ void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
         const auto syncLock = mCompilingHybridThread ? FixedDataSyncLock : HybridSyncLock;
         assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
         assert (FirstKernel <= syncLock && syncLock <= LastKernel);
-        const auto type = mIsStatelessKernel.test(syncLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(syncLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const otherThread = getSynchronizationLockPtrForKernel(b, syncLock, type);
         b->CreateBr(waiting);
 

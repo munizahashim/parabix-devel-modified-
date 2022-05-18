@@ -35,6 +35,8 @@ using boost::intrusive::detail::floor_log2;
 
 static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 
+#define DBOOST_STACKTRACE_USE_ADDR2LINE
+
 #ifdef HAS_ADDRESS_SANITIZER
 #include <llvm/Analysis/AliasAnalysis.h>
 #endif

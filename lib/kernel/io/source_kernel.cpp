@@ -41,8 +41,6 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     BasicBlock * const nonEmptyFile = b->CreateBasicBlock("NonEmptyFile");
     BasicBlock * const exit = b->CreateBasicBlock("Exit");
     IntegerType * const sizeTy = b->getSizeTy();
-    ConstantInt * const STRIDE_SIZE = b->getSize(stride);
-    Constant * const PAGE_ITEMS = b->getSize((8 * stride) / codeUnitWidth);
     Value * const fd = b->getScalarField("fileDescriptor");
     PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
     b->setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
@@ -65,10 +63,11 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     b->CreateBr(exit);
 
     b->SetInsertPoint(emptyFile);
-    Value * const emptyFilePtr = b->CreatePointerCast(b->CreateAnonymousMMap(STRIDE_SIZE), codeUnitPtrTy);
+    ConstantInt * const STRIDE_BYTES = b->getSize(stride * codeUnitWidth);
+    Value * const emptyFilePtr = b->CreatePointerCast(b->CreateAnonymousMMap(STRIDE_BYTES), codeUnitPtrTy);
     b->setScalarField("buffer", emptyFilePtr);
     b->setBaseAddress("sourceBuffer", emptyFilePtr);
-    b->setScalarField("fileItems", PAGE_ITEMS);
+    b->setScalarField("fileItems", STRIDE_BYTES);
     b->setTerminationSignal();
     b->CreateBr(exit);
 
@@ -90,6 +89,9 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
         b->CreateAssert(b->CreateIsNotNull(numOfStrides),
                         "Internal error: %s.numOfStrides cannot be 0", b->GetString("MMapSource"));
     }
+
+    // TODO: could we improve overall performance by trying to "preload" the data by reading it? This would increase
+    // the cost of this kernel but might allow the first kernel to read the file data be better balanced with it.
 
     ConstantInt * const MMAP_PAGE_SIZE = b->getSize(getPageSize());
     Value * const STRIDE_ITEMS = b->CreateMul(numOfStrides, b->getSize(stride));

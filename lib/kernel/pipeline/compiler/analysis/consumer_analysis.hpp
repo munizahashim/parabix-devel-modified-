@@ -42,12 +42,6 @@ void PipelineAnalysis::makeConsumerGraph() {
     mConsumerGraph = ConsumerGraph(LastStreamSet + 1);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        // copy the producing edge
-        const auto pe = in_edge(streamSet, mBufferGraph);
-        const BufferPort & output = mBufferGraph[pe];
-        const auto producer = source(pe, mBufferGraph);
-        add_edge(producer, streamSet, ConsumerEdge{output.Port, 0, ConsumerEdge::None}, mConsumerGraph);
-
         // If we have no consumers, we do not want to update the consumer count on exit
         // as we would then have to retain a scalar for it.
 
@@ -61,6 +55,12 @@ void PipelineAnalysis::makeConsumerGraph() {
             assert (!streamSetNode.CrossesHybridThreadBarrier);
             continue;
         }
+
+        // copy the producing edge
+        const auto pe = in_edge(streamSet, mBufferGraph);
+        const BufferPort & output = mBufferGraph[pe];
+        const auto producer = source(pe, mBufferGraph);
+        add_edge(producer, streamSet, ConsumerEdge{output.Port, 0, ConsumerEdge::None}, mConsumerGraph);
 
         const auto partitionId = KernelPartitionId[producer];
 

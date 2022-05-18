@@ -84,7 +84,7 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     IntegerType * const sizeTy = b->getSizeTy();
 
     #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (!ExternallySynchronized) {
+    if (!mIsNestedPipeline) {
         mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, 0);
     }
     #endif
@@ -136,10 +136,15 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
     const auto isStateless = isKernelStateFree(kernelId);
-    if (isStateless) {
+    if (LLVM_UNLIKELY(isStateless)) {
         mIsStatelessKernel.set(kernelId);
     }
     assert (mIsStatelessKernel.test(kernelId) == isStateless);
+    const auto isInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
+    if (LLVM_UNLIKELY(isInternallySynchronized)) {
+        mIsInternallySynchronized.set(kernelId);
+    }
+    const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
 
     IntegerType * const sizeTy = b->getSizeTy();
 
@@ -151,7 +156,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     const auto name = makeKernelName(kernelId);
 
-    const auto syncLockType = isStateless ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+    const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
     mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
 
     addConsumerKernelProperties(b, kernelId);
@@ -166,10 +171,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             if (LLVM_LIKELY(bn.isInternal())) {
                 mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
             }
-        } else if (LLVM_UNLIKELY(br.IsDeferred)) {
+        }
+        if (LLVM_UNLIKELY(br.IsDeferred)) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
-
     }
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
@@ -182,7 +187,8 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             if (LLVM_LIKELY(bn.isInternal())) {
                 mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
             }
-        } else if (LLVM_UNLIKELY(br.IsDeferred)) {
+        }
+        if (LLVM_UNLIKELY(br.IsDeferred)) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
@@ -191,7 +197,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     addFamilyKernelProperties(b, kernelId, groupId);
 
-    if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::InternallySynchronized))) {
+    if (LLVM_UNLIKELY(isInternallySynchronized)) {
         #warning only needed if its possible to loop back
         mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);
     }
@@ -217,7 +223,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-    if (LLVM_UNLIKELY(isStateless)) {
+    if (LLVM_UNLIKELY(allowDataParallelExecution)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
@@ -275,7 +281,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
     // the pipeline loop.
     initializeForAllKernels();
     #ifdef ENABLE_PAPI
-    if (!ExternallySynchronized) {
+    if (!mIsNestedPipeline) {
         initializePAPI(b);
     }
     #endif
@@ -415,6 +421,14 @@ inline void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     if (mNumOfThreads == 1) {
         generateSingleThreadKernelMethod(b);
     } else {
+        if (LLVM_UNLIKELY(mIsNestedPipeline)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "A multi-threaded pipeline is already internally synchronized. "
+                "Explicitly annotating " << mTarget->getName() << " with the InternallySynchronized attribute "
+                "will prevent an outer pipeline kernel from behaving in the intended manner.";
+            report_fatal_error(out.str());
+        }
         generateMultiThreadKernelMethod(b);
     }
     resetInternalBufferHandles();
@@ -437,7 +451,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     end(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         concludeStridesPerSegmentRecording(b);
-        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
         b->CreateStore(mSegNo, ptr);
     }
@@ -616,7 +630,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
                 args.push_back(initialSharedState);
             }
             args.push_back(ConstantPointerNull::get(mTarget->getThreadLocalStateType()->getPointerTo()));
-
             threadLocal[i] = mTarget->initializeThreadLocalInstance(b, args);
             assert (isFromCurrentFunction(b, threadLocal[i]));
             if (LLVM_LIKELY(mTarget->allocatesInternalStreamSets())) {
@@ -800,6 +813,18 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         mSegNo = nullptr;
     }
 
+    SmallVector<Value *, 2> threadLocalArgs;
+    if (LLVM_LIKELY(mTarget->hasThreadLocal() && mTarget->isStateful())) {
+        threadLocalArgs.push_back(initialSharedState);
+    }
+
+    Value * finalTerminationSignal = nullptr;
+    if (PipelineHasTerminationSignal) {
+        finalTerminationSignal = readTerminationSignalFromLocalState(b, processState);
+        assert (finalTerminationSignal);
+    }
+    destroyStateObject(b, processState);
+
     // wait for all other threads to complete
     AllocaInst * const status = b->CreateAlloca(voidPtrTy);
 
@@ -809,46 +834,36 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         pthreadJoinArgs[0] = threadId;
         pthreadJoinArgs[1] = status;
         b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
+
         // calculate the last segment # used by any kernel in case any reports require it.
         if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
             Value * const retVal = b->CreatePointerCast(status, intPtrPtrTy);
             mSegNo = b->CreateUMax(mSegNo, b->CreateLoad(retVal));
         }
-    }
-
-    if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
-        const auto n = mTarget->isStateful() ? 2 : 1;
-        SmallVector<Value *, 2> args(n);
-        if (LLVM_LIKELY(mTarget->isStateful())) {
-            args[0] = initialSharedState;
+        if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
+            assert (isFromCurrentFunction(b, threadLocal[i]));
+            threadLocalArgs.push_back(threadLocal[i]);
+            mTarget->finalizeThreadLocalInstance(b, threadLocalArgs);
+            b->CreateFree(threadLocal[i]);
+            threadLocalArgs.pop_back();
         }
-        for (unsigned i = 0; i < numOfAdditionalThreads; ++i) {
-            args[n - 1] = threadLocal[i];
-            mTarget->finalizeThreadLocalInstance(b, args);
+        if (PipelineHasTerminationSignal) {
+            Value * const terminatedSignal = readTerminationSignalFromLocalState(b, threadState[i]);
+            assert (terminatedSignal);
+            finalTerminationSignal = b->CreateUMax(finalTerminationSignal, terminatedSignal);
         }
+        destroyStateObject(b, threadState[i]);
     }
 
     if (PipelineHasTerminationSignal) {
         assert (initialTerminationSignalPtr);
         assert (mCurrentThreadTerminationSignalPtr);
-        Value * terminated = readTerminationSignalFromLocalState(b, processState);
-        assert (terminated);
-        for (unsigned i = 0; i < numOfAdditionalThreads; ++i) {
-            Value * const terminatedSignal = readTerminationSignalFromLocalState(b, threadState[i]);
-            assert (terminatedSignal);
-            assert (terminated->getType() == terminatedSignal->getType());
-            terminated = b->CreateUMax(terminated, terminatedSignal);
-        }
-        assert (terminated);
-        b->CreateStore(terminated, initialTerminationSignalPtr);
+        b->CreateStore(finalTerminationSignal, initialTerminationSignalPtr);
     }
 
     // TODO: the pipeline kernel scalar state is invalid after leaving this function. Best bet would be to copy the
     // scalarmap and replace it.
-    for (unsigned i = 0; i < numOfAdditionalThreads; ++i) {
-        destroyStateObject(b, threadState[i]);
-    }
-    destroyStateObject(b, processState);
+
     restoreDoSegmentState(storedState);
 
     assert (getHandle() == initialSharedState);
@@ -857,7 +872,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
 
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
-        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
         assert (isFromCurrentFunction(b, ptr));
         b->CreateStore(mSegNo, ptr);
@@ -875,10 +890,9 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
 
         // get the last segment # used by any kernel in case any reports require it.
-        const auto type = mIsStatelessKernel.test(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
         mSegNo = b->CreateLoad(ptr);
-
 
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
@@ -904,7 +918,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     releaseOwnedBuffers(b, true);
     resetInternalBufferHandles();
     #ifdef ENABLE_PAPI
-    if (!ExternallySynchronized) {
+    if (!mIsNestedPipeline) {
         shutdownPAPI(b);
     }
     #endif
@@ -939,6 +953,8 @@ inline StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
     } else {
         fields[TERMINATION_SIGNAL] = StructType::get(C);
     }
+
+
     return StructType::get(C, fields);
 }
 
@@ -1042,19 +1058,26 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
             }
             args.push_back(mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
+            if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
+                b->CreateFree(mKernelThreadLocalHandle);
+            }
         }
     }
+
     #ifdef ENABLE_PAPI
     accumulateFinalPAPICounters(b);
     #endif
     releaseOwnedBuffers(b, false);
+
     // Since all of the nested kernels thread local state is contained within
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         b->CreateFree(b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY));
     }
-    b->CreateFree(getThreadLocalHandle());
+    if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
+        b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
+    }
     ActiveKernels.clear();
     ActivePartitions.clear();
 }
@@ -1096,115 +1119,6 @@ void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
     b->LinkFunction("__pipeline_pin_current_thread_to_cpu",
                     __pipeline_pin_current_thread_to_cpu);
 }
-#if 0
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief verifyBufferRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::verifyBufferRelationships() const {
-
-    // If this pipeline is internally synchronized, it must own and manage its output buffers; otherwise
-    // the outer pipeline would have to be able to manage it without having correct knowledge of its
-    // current state in multithreaded mode. Verify that the correct attributes have been set.
-    if (LLVM_UNLIKELY(ExternallySynchronized)) {
-        for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);
-            const auto producer = parent(streamSet, mBufferGraph);
-            const Kernel * const kernelObj = getKernel(producer);
-            assert (kernelObj);
-            const auto synchronized = kernelObj->hasAttribute(AttrId::InternallySynchronized);
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & output = br.Binding;
-
-            const auto managed = br.IsManaged;
-            const auto sharedManaged = br.IsShared;
-
-            if (LLVM_UNLIKELY(managed && sharedManaged)) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << mTarget->getName() << "." << output.getName();
-                out << " cannot be both a Managed and SharedManaged buffer.";
-                report_fatal_error(out.str());
-            }
-
-            const auto unmanaged = !(managed | sharedManaged);
-
-            if (LLVM_UNLIKELY(synchronized ^ unmanaged)) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << mTarget->getName() << "." << output.getName()
-                    << " should ";
-                if (synchronized) {
-                    out << "not ";
-                }
-                out << "have been marked as a ManagedBuffer.";
-                report_fatal_error(out.str());
-            }
-
-
-        }
-    }
-
-
-
-#if 0
-
-    // verify that the buffer config is valid
-    for (unsigned i = FirstStreamSet; i <= LastStreamSet; ++i) {
-
-        const BufferNode & bn = G[i];
-        const auto pe = in_edge(i, G);
-        const auto producerVertex = source(pe, G);
-        const Kernel * const producer = getKernel(producerVertex);
-        const BufferRateData & producerRate = G[pe];
-        const Binding & output = producerRate.Binding;
-
-
-
-
-        // Type check stream set I/O types.
-        Type * const baseType = output.getType();
-        for (const auto e : make_iterator_range(out_edges(i, G))) {
-            const BufferRateData & consumerRate = G[e];
-            const Binding & input = consumerRate.Binding;
-            if (LLVM_UNLIKELY(baseType != input.getType())) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream msg(tmp);
-                msg << producer->getName() << ':' << output.getName()
-                    << " produces a ";
-                baseType->print(msg);
-                const Kernel * const consumer = getKernel(target(e, G));
-                msg << " but "
-                    << consumer->getName() << ':' << input.getName()
-                    << " expects ";
-                input.getType()->print(msg);
-                report_fatal_error(msg.str());
-            }
-        }
-
-        for (const auto ce : make_iterator_range(out_edges(i, G))) {
-            const Binding & input = G[ce].Binding;
-            if (LLVM_UNLIKELY(requiresLinearAccess(input))) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                const auto consumer = target(ce, G);
-                out << getKernel(consumer)->getName()
-                    << '.' << input.getName()
-                    << " requires that "
-                    << producer->getName()
-                    << '.' << output.getName()
-                    << " is a Linear buffer.";
-                report_fatal_error(out.str());
-            }
-        }
-
-
-    }
-
-#endif
-
-}
-
-#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeForAllKernels

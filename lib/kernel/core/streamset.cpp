@@ -750,7 +750,6 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
     Value * const size = b->CreateAdd(capacity, b->getSize(mUnderflow + mOverflow));
     Value * const baseAddress = b->CreatePageAlignedMalloc(mType, size, mAddressSpace);
-
     Value * const adjBaseAddress = addUnderflow(b, baseAddress, mUnderflow);
     b->CreateStore(adjBaseAddress, baseAddressField);
 
@@ -777,8 +776,8 @@ void DynamicBuffer::releaseBuffer(BuilderPtr b) const {
     indices[0] = b->getInt32(0);
     indices[1] = b->getInt32(mLinear ? MallocedAddress : BaseAddress);
     Value * const baseAddressField = b->CreateInBoundsGEP(handle, indices);
-    Value * const baseAddress = b->CreateLoad(baseAddressField);
-    b->CreateFree(subtractUnderflow(b, baseAddress, mUnderflow));
+    Value * const baseAddress = subtractUnderflow(b, b->CreateLoad(baseAddressField), mUnderflow);
+    b->CreateFree(baseAddress);
     b->CreateStore(ConstantPointerNull::get(cast<PointerType>(baseAddress->getType())), baseAddressField);
 }
 

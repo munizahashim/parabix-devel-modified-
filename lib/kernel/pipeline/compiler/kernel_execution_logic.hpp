@@ -32,7 +32,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
-    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         readAndUpdateInternalProcessedAndProducedItemCounts(b);
 
@@ -102,7 +102,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         mTerminatedExplicitly = nullptr;
     }
 
-    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     }
     if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {

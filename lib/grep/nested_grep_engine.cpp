@@ -238,7 +238,7 @@ void NestedInternalSearchEngine::grepCodeGen() {
     auto E = mGrepDriver.makePipeline({Binding{"buffer", buffer},
         Binding{"length", length},
         Binding{"accumulator", accumulator}});
-    E->setNumOfThreads(mNumOfThreads);
+    E->setNumOfThreads(codegen::SegmentThreads);
 
     StreamSet * const ByteStream = E->CreateStreamSet(1, 8);
     E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);

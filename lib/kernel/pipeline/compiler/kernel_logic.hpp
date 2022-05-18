@@ -297,6 +297,13 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isDataParallel
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::isDataParallel(const size_t kernel) const {
+    return mIsStatelessKernel.test(kernel) || mIsInternallySynchronized.test(kernel);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief isCurrentKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
 inline bool PipelineCompiler::isCurrentKernelStateFree() const {
@@ -378,7 +385,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
 
     mExecuteStridesIndividually = false;
     mCurrentKernelIsStateFree = false;
-    mUsePreAndPostInvocationSynchronizationLocks = false;
+    mAllowDataParallelExecution = false;
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;

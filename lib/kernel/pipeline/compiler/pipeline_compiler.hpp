@@ -547,7 +547,7 @@ public:
   //  void verifyBufferRelationships() const;
 
     bool hasAtLeastOneNonGreedyInput() const;
-
+    bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
 
 protected:
@@ -580,7 +580,7 @@ protected:
 
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
-    const bool                                  ExternallySynchronized;
+    const bool                                  mIsNestedPipeline;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
     const bool                                  EnableCycleCounter;
@@ -660,6 +660,7 @@ protected:
     FixedVector<Value *>                        mScalarValue;
     BitVector                                   mRequiresSynchronization;
     BitVector                                   mIsStatelessKernel;
+    BitVector                                   mIsInternallySynchronized;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -733,7 +734,7 @@ protected:
     bool                                        mCheckInputChannels = false;
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mCurrentKernelIsStateFree = false;
-    bool                                        mUsePreAndPostInvocationSynchronizationLocks = false;
+    bool                                        mAllowDataParallelExecution = false;
 
     unsigned                                    mNumOfAddressableItemCount = 0;
     unsigned                                    mNumOfVirtualBaseAddresses = 0;
@@ -859,7 +860,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
 
-, ExternallySynchronized(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
+, mIsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
@@ -893,6 +894,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
 , mRequiresSynchronization(PipelineOutput + 1)
 , mIsStatelessKernel(PipelineOutput + 1)
+, mIsInternallySynchronized(PipelineOutput + 1)
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 

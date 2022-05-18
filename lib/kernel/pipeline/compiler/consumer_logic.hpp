@@ -107,11 +107,11 @@ inline void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_LIKELY(bn.isOwned())) {
             const BufferPort & externalPort = mBufferGraph[e];
-            Value * const consumed = getConsumedOutputItems(externalPort.Port.Number); assert (consumed);
             const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
             const auto producer = parent(streamSet, mBufferGraph);
             if (LLVM_UNLIKELY((numOfIndependentConsumers != 0) || (producer == PipelineInput))) {
                 assert (!bn.CrossesHybridThreadBarrier);
+                Value * const consumed = getConsumedOutputItems(externalPort.Port.Number); assert (consumed);
                 setConsumedItemCount(b, streamSet, consumed, 0);
             }
         }
@@ -222,12 +222,12 @@ inline void PipelineCompiler::createConsumedPhiNodesAtExit(BuilderRef b) {
         if (c.Flags & ConsumerEdge::UpdatePhi) {
             const auto streamSet = source(e, mConsumerGraph);
             const ConsumerNode & cn = mConsumerGraph[streamSet];
+            assert (isFromCurrentFunction(b, cn.Consumed, true));
             if (LLVM_LIKELY(cn.PhiNode == nullptr)) {
                 const ConsumerEdge & c = mConsumerGraph[e];
                 const StreamSetPort port(PortType::Input, c.Port);
                 const auto prefix = makeBufferName(mKernelId, port);
                 PHINode * const consumedPhi = b->CreatePHI(sizeTy, 2, prefix + "_consumed");
-                assert (isFromCurrentFunction(b, cn.Consumed, false));
                 cn.PhiNode = consumedPhi;
             }
         }
@@ -328,6 +328,9 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
     const auto producer = source(pe, mBufferGraph);
     const BufferPort & rd = mBufferGraph[pe];
     Value * ptr = nullptr;
+
+    assert (isFromCurrentFunction(b, consumed.get(), false));
+
     if (LLVM_LIKELY(producer != PipelineInput || mTraceIndividualConsumedItemCounts)) {
         const auto prefix = makeBufferName(producer, rd.Port);
 

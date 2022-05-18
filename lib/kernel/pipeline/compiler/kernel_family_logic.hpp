@@ -169,6 +169,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     }
     const auto prefix = makeKernelName(mKernelId);
     Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
+
     if (mKernel->externallyInitialized()) {
         PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
         args.push_back(ConstantPointerNull::getNullValue(ptrTy));

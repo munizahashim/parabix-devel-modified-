@@ -16,6 +16,9 @@
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_set.hpp>
 
+#include <boost/stacktrace.hpp>
+#include <llvm/Support/raw_ostream.h>
+
 using namespace llvm;
 using namespace boost;
 using boost::intrusive::detail::floor_log2;

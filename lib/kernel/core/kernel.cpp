@@ -16,6 +16,7 @@
 #else
 #include <boost/uuid/detail/sha1.hpp>
 #endif
+
 using namespace llvm;
 using namespace boost;
 using boost::container::flat_set;
@@ -643,7 +644,7 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(BuilderRe
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef /* b */, Value * /* expectedNumOfStrides */) {
-    report_fatal_error("Kernel::generateAllocateThreadLocalInternalStreamSetsMethod is not handled yet");
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1093,6 +1094,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     } else {
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
+
     if (hasThreadLocal()) {
         SmallVector<Value *, 2> args;
         if (LLVM_LIKELY(isStateful())) {
@@ -1100,18 +1102,20 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         }
         args.push_back(threadLocalHandle);
         finalizeThreadLocalInstance(b, args);
-    }
-    if (successPhi) {
-        BasicBlock * const exitProgram = b->CreateBasicBlock("exitProgram");
-        BasicBlock * const resumeProgram = b->CreateBasicBlock("return");
-        b->CreateLikelyCondBr(successPhi, resumeProgram, exitProgram);
-        // if we have any error, just exit(-1)
-        b->SetInsertPoint(exitProgram);
-        b->CreateExit(-1);
-        b->CreateBr(resumeProgram);
-        b->SetInsertPoint(resumeProgram);
+        b->CreateFree(threadLocalHandle);
     }
 
+
+//    if (successPhi) {
+//        BasicBlock * const exitProgram = b->CreateBasicBlock("exitProgram");
+//        BasicBlock * const resumeProgram = b->CreateBasicBlock("return");
+//        b->CreateLikelyCondBr(successPhi, resumeProgram, exitProgram);
+//        // if we have any error, just exit(-1)
+//        b->SetInsertPoint(exitProgram);
+//        b->CreateExit(-1);
+//        b->CreateBr(resumeProgram);
+//        b->SetInsertPoint(resumeProgram);
+//    }
     Value * const result = finalizeInstance(b, sharedHandle);
     for (Value * stateObj : toFree) {
         b->CreateFree(stateObj);
@@ -1125,7 +1129,8 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b->CreatePageAlignedMalloc(getSharedStateType());
+        Value * const handle = b->CreatePageAlignedMalloc(getSharedStateType());
+        return handle;
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
@@ -1217,9 +1222,8 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         }
         initArgs.push_back(f->second); assert (initArgs.back());
     }
-    NestedStateObjs toFree;
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
-    Function * init = getInitializeFunction(b);
+    Function * const init = getInitializeFunction(b);
     b->CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
 

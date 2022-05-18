@@ -27,7 +27,7 @@ void PipelineCompiler::start(BuilderRef b) {
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugInit(b);
-    if (ExternallySynchronized) {
+    if (mIsNestedPipeline) {
         debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
     } else {
         debugPrint(b, "================================================= START %" PRIx64, getHandle());
@@ -90,26 +90,10 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
-    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
-    if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
-        mUsePreAndPostInvocationSynchronizationLocks = true;
-    } else if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mIsOptimizationBranch)) {
-
-        // Internally synchronized doesn't necessarily require countable input if all
-        // I/O is addressable and the responsibility of the inner kernel.
-
-        bool hasAllCountableInput = true;
-        for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-            const BufferPort & port = mBufferGraph[input];
-            if (LLVM_UNLIKELY(!isCountable(port.Binding))) {
-                hasAllCountableInput = false;
-                break;
-            }
-        }
-        mUsePreAndPostInvocationSynchronizationLocks = hasAllCountableInput;
-    }
-    #endif
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
+    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
+    mAllowDataParallelExecution = mCurrentKernelIsStateFree || mKernelIsInternallySynchronized;
+    #endif
     identifyPipelineInputs(mKernelId);
 
 
@@ -308,7 +292,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
     writeTerminationSignal(b, mTerminatedSignalPhi);
-    if (LLVM_UNLIKELY(mUsePreAndPostInvocationSynchronizationLocks)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
     }
     updatePhisAfterTermination(b);
@@ -397,7 +381,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 
     if (LLVM_LIKELY(mMayLoopToEntry)) {
 
-        if (LLVM_LIKELY(!mUsePreAndPostInvocationSynchronizationLocks)) {
+        if (LLVM_LIKELY(!mAllowDataParallelExecution)) {
             mHasMoreInput = hasMoreInput(b);
         }
 
@@ -669,7 +653,7 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
 
     b->SetInsertPoint(mKernelInsufficientInput);
 
-    if (LLVM_UNLIKELY(CheckAssertions && mUsePreAndPostInvocationSynchronizationLocks && mMayLoopToEntry)) {
+    if (LLVM_UNLIKELY(CheckAssertions && mAllowDataParallelExecution && mMayLoopToEntry)) {
         b->CreateAssert(b->CreateNot(mExecutedAtLeastOnceAtLoopEntryPhi),
                         "%s: is a statefree kernel with an invalid loop again check",
                         mCurrentKernelName);
@@ -886,7 +870,7 @@ void PipelineCompiler::end(BuilderRef b) {
     // pipeline, we can avoid testing at the end whether its terminated.
 
     Value * terminated = nullptr;
-    if (ExternallySynchronized) {
+    if (mIsNestedPipeline) {
         if (mCurrentThreadTerminationSignalPtr) {
             terminated = hasPipelineTerminated(b);
         }
@@ -919,7 +903,7 @@ void PipelineCompiler::end(BuilderRef b) {
         b->CreateFree(b->CreateLoad(bufferPtr));
     }
     #ifdef PRINT_DEBUG_MESSAGES
-    if (ExternallySynchronized) {
+    if (mIsNestedPipeline) {
         debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
     } else {
         debugPrint(b, "================================================= END %" PRIx64, getHandle());

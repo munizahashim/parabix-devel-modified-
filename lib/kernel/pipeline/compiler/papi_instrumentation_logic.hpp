@@ -1,12 +1,10 @@
 #if !defined(PAPI_INSTRUMENTATION_LOGIC_HPP) && defined(ENABLE_PAPI)
 #define PAPI_INSTRUMENTATION_LOGIC_HPP
 
-#ifdef ENABLE_PAPI
 #include <papi.h>
 #include <boost/tokenizer.hpp>
 #include <boost/format.hpp>
 #include <codegen/TypeBuilder.h>
-#endif
 
 // TODO: merge cycle counter with papi?
 
@@ -134,7 +132,7 @@ void PipelineCompiler::addPAPIEventCounterKernelProperties(BuilderRef b, const u
  * @brief initializePAPIAndCreateEventSet
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializePAPI(BuilderRef b) const {
-    if (LLVM_UNLIKELY(EnablePAPICounters && !ExternallySynchronized)) {
+    if (LLVM_UNLIKELY(EnablePAPICounters && !mIsNestedPipeline)) {
         Module * const m = b->getModule();
         Function * PAPIlibInitFn = m->getFunction("PAPI_library_init");
         IntegerType * const intTy = TypeBuilder<int, false>::get(b->getContext());
@@ -167,7 +165,7 @@ void PipelineCompiler::registerPAPIThread(BuilderRef /* b */) const {
  * @brief initializePAPIAndCreateEventSet
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::createEventSetAndStartPAPI(BuilderRef b) {
-    if (LLVM_UNLIKELY(EnablePAPICounters && !ExternallySynchronized)) {
+    if (LLVM_UNLIKELY(EnablePAPICounters && !mIsNestedPipeline)) {
         Module * const m = b->getModule();
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
@@ -314,7 +312,7 @@ void PipelineCompiler::unregisterPAPIThread(BuilderRef /* b */) const {
  * @brief stopPAPIAndDestroyEventSet
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::stopPAPIAndDestroyEventSet(BuilderRef b) {
-    if (LLVM_UNLIKELY(EnablePAPICounters && !ExternallySynchronized)) {
+    if (LLVM_UNLIKELY(EnablePAPICounters && !mIsNestedPipeline)) {
 
         Module * const m = b->getModule();
 

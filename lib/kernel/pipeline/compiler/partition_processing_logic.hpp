@@ -189,7 +189,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     #endif
     mKernelStartTime = startCycleCounter(b);
     if (mNumOfThreads > 1) {
-        const auto type = mIsStatelessKernel.test(firstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(firstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, firstKernel, type);
         acquireHybridThreadSynchronizationLock(b);
         updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
@@ -305,7 +305,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             Value * produced = nullptr;
             if (kernel < mKernelId) {
                 produced = mLocallyAvailableItems[streamSet];
-            } else if (kernel == mKernelId && !mUsePreAndPostInvocationSynchronizationLocks) {
+            } else if (kernel == mKernelId && !mAllowDataParallelExecution) {
                 if (fromKernelEntryBlock) {
                     if (LLVM_UNLIKELY(br.IsDeferred)) {
                         produced = mInitiallyProducedDeferredItemCount[streamSet];
@@ -462,7 +462,7 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
 
         assert (lastConsumer < PipelineOutput);
         assert (!KernelOnHybridThread.test(lastConsumer));
-        const auto type = mIsStatelessKernel.test(lastConsumer) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(lastConsumer) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, lastConsumer, type);
     }
 
@@ -474,7 +474,7 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
         }
         assert (KernelPartitionId[kernel] < partitionId);
         if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
-            if (mIsStatelessKernel.test(kernel)) {
+            if (isDataParallel(kernel)) {
                 releaseSynchronizationLock(b, kernel, SYNC_LOCK_PRE_INVOCATION);
                 releaseSynchronizationLock(b, kernel, SYNC_LOCK_POST_INVOCATION);
             } else {
@@ -499,7 +499,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
 
     loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(b);
 
-    if (LLVM_UNLIKELY(CheckAssertions && mUsePreAndPostInvocationSynchronizationLocks)) {
+    if (LLVM_UNLIKELY(CheckAssertions && mAllowDataParallelExecution)) {
 
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -654,7 +654,7 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
     updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
-    const auto type = mIsStatelessKernel.test(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+    const auto type = isDataParallel(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type);
 
     #ifdef ENABLE_PAPI
@@ -668,7 +668,7 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         readPAPIMeasurement(b, nextKernel, PAPIReadInitialMeasurementArray);
         #endif
         mKernelStartTime = startCycleCounter(b);
-        const auto type = mIsStatelessKernel.test(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, nextKernel, type);
         updateCycleCounter(b, nextKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
