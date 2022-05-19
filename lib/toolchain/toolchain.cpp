@@ -139,6 +139,15 @@ unsigned Z3_Timeout;
 static cl::opt<unsigned, true> Z3_TimeoutOption("Z3-timeout", cl::location(Z3_Timeout), cl::init(3000),
                                                cl::desc("Z3 timeout"), cl::value_desc("positive integer"));
 
+bool PabloTransposition;
+static cl::opt<bool, true> OptPabloTransposition("enable-pablo-s2p", cl::location(PabloTransposition),
+                                                 cl::desc("Enable experimental pablo transposition."), cl::init(false), cl::cat(CodeGenOptions));
+
+bool SplitTransposition;
+static cl::opt<bool, true> OptSplitTransposition("enable-split-s2p", cl::location(SplitTransposition),
+                                                 cl::desc("Enable experimental split transposition."), cl::init(false), cl::cat(CodeGenOptions));
+
+
 
 //unsigned NumOfKernels = 0;
 //unsigned NumOfStreamSets = 0;

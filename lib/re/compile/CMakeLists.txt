@@ -11,5 +11,4 @@ SRC
 DEPS
     re.analysis
     re.transforms
-    re.ucd
 )

@@ -10,20 +10,20 @@
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
 #include <re/adt/re_name.h>
-#include <re/ucd/ucd_compiler.hpp>
+#include <unicode/utf/utf_compiler.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 
-using NameMap = UCD::UCDCompiler::NameMap;
+using NameMap = UTF::UTF_Compiler::NameMap;
 
 using namespace cc;
 using namespace kernel;
 using namespace pablo;
 using namespace re;
 using namespace llvm;
-using namespace UCD;
+using namespace UTF;
 
 static std::string sourceShape(StreamSet * s) {
     return std::to_string(s->getNumElements()) + "x" + std::to_string(s->getFieldWidth());
@@ -65,22 +65,16 @@ llvm::StringRef CharClassesKernel::getSignature() const {
 
 void CharClassesKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::unique_ptr<cc::CC_Compiler> ccc;
-    if (mUseDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
-    } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
-    }
     unsigned n = mCCs.size();
 
-    UCD::UCDCompiler unicodeCompiler(*ccc.get(), pb);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     std::vector<Var *> mpx;
     for (unsigned i = 0; i < n; i++) {
         mpx.push_back(pb.createVar("mpx_basis" + std::to_string(i), pb.createZeroes()));
         unicodeCompiler.addTarget(mpx[i], mCCs[i]);
     }
     if (LLVM_UNLIKELY(AlgorithmOptionIsSet(DisableIfHierarchy))) {
-        unicodeCompiler.compile(UCDCompiler::IfHierarchy::None);
+        unicodeCompiler.compile(UTF_Compiler::IfHierarchy::None);
     } else {
         unicodeCompiler.compile();
     }

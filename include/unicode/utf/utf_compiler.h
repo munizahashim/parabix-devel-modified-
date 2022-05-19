@@ -1,8 +1,8 @@
-#ifndef UCDCOMPILER_HPP
-#define UCDCOMPILER_HPP
+#ifndef UTF_COMPILER_HPP
+#define UTF_COMPILER_HPP
 
 #include <unicode/core/UCD_Config.h>
-
+#include <unicode/utf/utf_encoder.h>
 #include <vector>
 #include <boost/container/flat_map.hpp>
 
@@ -16,21 +16,22 @@ namespace re {
 }
 
 namespace pablo {
+    class PabloBlock;
     class PabloBuilder;
     class PabloAST;
     class Var;
 }
 
-namespace UCD {
+namespace UTF {
 
 class UnicodeSet;
 
-class UCDCompiler {
+class UTF_Compiler {
 
     using CC = re::CC;
     using PabloBuilder = pablo::PabloBuilder;
     using PabloAST = pablo::PabloAST;
-    using RangeList = std::vector<interval_t>;
+    using RangeList = std::vector<UCD::interval_t>;
 
     using TargetMap = boost::container::flat_map<const CC *, pablo::Var *>;
     using ValueMap = boost::container::flat_map<const CC *, PabloAST *>;
@@ -43,7 +44,7 @@ public:
     enum class IfHierarchy {None, Default};
     using NameMap = boost::container::flat_map<re::Name *, PabloAST *>;
 
-    UCDCompiler(cc::CC_Compiler & ccCompiler, PabloBuilder & pb);
+    UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
 
     void addTarget(pablo::Var * theVar, re::CC * theCC);
 
@@ -67,7 +68,7 @@ protected:
 
     PabloAST * makePrefix(const codepoint_t cp, const unsigned byte_no, PabloBuilder & builder, PabloAST * prefix);
 
-    static RangeList byteDefinitions(const RangeList & list, const unsigned byte_no, bool isUTF_16);
+    RangeList byteDefinitions(const RangeList & list, const unsigned byte_no);
 
     template <typename RangeListOrUnicodeSet>
     static RangeList rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi);
@@ -79,13 +80,15 @@ protected:
     static RangeList innerRanges(const RangeList & list);
 
 private:
-    cc::CC_Compiler &       mCodeUnitCompiler;
-    PabloBuilder &          mPb;
-    PabloAST *              mSuffixVar;
+    UTF_Encoder             mEncoder;
+    pablo::PabloBuilder &   mPb;
+    unsigned                mLookAhead;
+    PabloAST *              mMask;
+    std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
     TargetMap               mTarget;
     ValueMap                mTargetValue;
 };
 
 }
 
-#endif // UCDCOMPILER_HPP
+#endif // UTF_COMPILER_HPP

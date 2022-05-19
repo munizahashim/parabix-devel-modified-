@@ -14,6 +14,7 @@
 #include <atomic>
 #include <set>
 #include <boost/filesystem.hpp>
+#include <re/analysis/capture-ref.h>
 #include <re/cc/multiplex_CCs.h>
 #include <re/parse/GLOB_parser.h>
 #include <kernel/core/callback.h>
@@ -181,6 +182,7 @@ protected:
     re::CC * mBreakCC;
     re::RE * mPrefixRE;
     re::RE * mSuffixRE;
+    re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;
     Component mInternalComponents;

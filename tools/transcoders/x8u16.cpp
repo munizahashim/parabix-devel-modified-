@@ -22,6 +22,7 @@
 #include <kernel/streamutils/zeroextend.h>
 #include <pablo/builder.hpp>
 #include <pablo/pablo_kernel.h>
+#include <toolchain/toolchain.h>
 #include <toolchain/pablo_toolchain.h>
 #include <pablo/pe_zeroes.h>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -176,7 +177,7 @@ x8u16FunctionType generatePipeline(CPUDriver & pxDriver) {
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    Selected_S2P(P, ByteStream, BasisBits);
 
     StreamSet * u16bits = P->CreateStreamSet(16);
 

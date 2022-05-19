@@ -10,7 +10,7 @@
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
 #include <unicode/core/unicode_set.h>
-#include <unicode/utf/UTF.h>
+#include <unicode/utf/utf_encoder.h>
 
 #include <util/small_flat_set.hpp>
 
@@ -129,13 +129,18 @@ bool isUnicodeUnitLength(const RE * re) {
     } else if (const CC * cc = dyn_cast<CC>(re)) {
         return !(cc->empty());
     } else if (const Name * n = dyn_cast<Name>(re)) {
-        // Eventually names might be set up for not unit length items.
-        if (n->getType() == Name::Type::Unicode || n->getType() == Name::Type::UnicodeProperty) {
-            return true;
-        } else if (n->getType() == Name::Type::ZeroWidth) {
+        RE * defn = n->getDefinition();
+        if (defn) return isUnicodeUnitLength(defn);
+        return false;
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return isUnicodeUnitLength(c->getCapturedRE());
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return isUnicodeUnitLength(r->getCapture());
+    } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
             return false;
         }
-        return isUnicodeUnitLength(n->getDefinition());
+        return true;
     }
     return false; // otherwise
 }
@@ -197,8 +202,9 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         if (isa<cc::CodeUnitAlphabet>(alphabet)) return std::make_pair(1, 1);
         if (indexAlphabet == alphabet) return std::make_pair(1, 1);
         if ((indexAlphabet == &cc::UTF8) && (alphabet == &cc::Unicode)) {
-            return std::make_pair(UTF<8>::encoded_length(lo_codepoint(cc->front())),
-                                  UTF<8>::encoded_length(hi_codepoint(cc->back())));
+            UTF_Encoder UTF8_Encoder(8);
+            return std::make_pair(UTF8_Encoder.encoded_length(lo_codepoint(cc->front())),
+                                  UTF8_Encoder.encoded_length(hi_codepoint(cc->back())));
         }
         return std::make_pair(1, INT_MAX);
     } else if (isa<Any>(re)) {
@@ -208,13 +214,24 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         }
         return std::make_pair(1, INT_MAX);
     } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+            return std::make_pair(0, 0);
+        }
+        if (indexAlphabet == &cc::Unicode) return std::make_pair(1, 1);
         RE * resolved = pe->getResolvedRE();
         if (resolved) return getLengthRange(resolved, indexAlphabet);
-        return std::make_pair(0, INT_MAX);
+        if (indexAlphabet == &cc::UTF8) {
+            return std::make_pair(1, 4);
+        }
+        return std::make_pair(1, INT_MAX);
     } else if (const Name * n = dyn_cast<Name>(re)) {
         RE * defn = n->getDefinition();
         if (defn) return getLengthRange(defn, indexAlphabet);
         return std::make_pair(0, INT_MAX);
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return getLengthRange(c->getCapturedRE(), indexAlphabet);
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return getLengthRange(r->getCapture(), indexAlphabet);
     }
     return std::make_pair(0, INT_MAX);
 }
@@ -238,6 +255,10 @@ bool isFixedLength(const RE * re) {
         return isFixedLength(g->getRE());
     } else if (const Name * n = dyn_cast<Name>(re)) {
         return isFixedLength(n->getDefinition());
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return isFixedLength(c->getCapturedRE());
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return isFixedLength(r->getCapture());
     }
     return true; // otherwise = CC, Any, Start, End, Range, Assertion
 }
@@ -270,14 +291,7 @@ int minMatchLength(const RE * re) {
     } else if (isa<CC>(re)) {
         return 1;
     } else if (const Name * n = dyn_cast<Name>(re)) {
-        // Eventually names might be set up for not unit length items.
-        switch (n->getType()) {
-            case Name::Type::Unicode:
-            case Name::Type::UnicodeProperty:
-                return 1;
-            default:
-                return 0;
-        }
+        return minMatchLength(n->getDefinition());
     } else if (const Capture * c = dyn_cast<Capture>(re)) {
         return minMatchLength(c->getCapturedRE());
     } else if (const Reference * r = dyn_cast<Reference>(re)) {
@@ -330,8 +344,9 @@ struct FixedUTF8Validator : public RE_Validator {
             alphabet = a->getSourceAlphabet();
         }
         if (alphabet == &cc::Unicode) {
-            auto min_lgth = UTF<8>::encoded_length(lo_codepoint(cc->front()));
-            auto max_lgth = UTF<8>::encoded_length(hi_codepoint(cc->back()));
+            UTF_Encoder UTF8_Encoder(8);
+            auto min_lgth = UTF8_Encoder.encoded_length(lo_codepoint(cc->front()));
+            auto max_lgth = UTF8_Encoder.encoded_length(hi_codepoint(cc->back()));
             return min_lgth == max_lgth;
         }
         return (alphabet == &cc::UTF8) || (alphabet == &cc::Byte);
@@ -577,8 +592,8 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
         return DefiniteLengthBackReferencesOnly(n->getDefinition());
     } else if (const Capture * c = dyn_cast<Capture>(re)) {
         return DefiniteLengthBackReferencesOnly(c->getCapturedRE());
-    } else if (isa<Reference>(re)) {
-        return false;
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return DefiniteLengthBackReferencesOnly(r->getCapture());
     }
     return true; // otherwise = CC, Any, Start, End, Range
 }

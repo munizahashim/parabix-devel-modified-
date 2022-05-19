@@ -76,7 +76,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    Selected_S2P(P, ByteStream, BasisBits);
 
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P->CreateStreamSet(5);

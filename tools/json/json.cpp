@@ -95,7 +95,7 @@ jsonFunctionType json_parsing_gen(
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
     StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
+    Selected_S2P(P, codeUnitStream, u8basis);
 
     // 1. Find string marker (without backslashes)
     // 2. and make string span

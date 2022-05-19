@@ -38,9 +38,9 @@ RE * ResolveCaseInsensitiveMode::transformName(Name * name) {
     }
     Name * n = nullptr;
     if (name->hasNamespace()) {
-        n = makeName(name->getNamespace(), name->getName() + "/i", name->getType());
+        n = makeName(name->getNamespace(), name->getName() + "/i");
     } else {
-        n = makeName(name->getName() + "/i", name->getType());
+        n = makeName(name->getName() + "/i");
     }
     n->setDefinition(transform(name->getDefinition()));
     return n;

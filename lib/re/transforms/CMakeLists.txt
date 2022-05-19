@@ -9,6 +9,7 @@ NAME
 SRC
     assertion_transformations.cpp
     exclude_CC.cpp
+    name_intro.cpp
     name_lookaheads.cpp
     re_contextual_simplification.cpp
     re_minimizer.cpp
@@ -18,12 +19,12 @@ SRC
     re_star_normal.cpp
     re_memoizing_transformer.cpp
     re_transformer.cpp
+    reference_transform.cpp
     remove_nullable.cpp
     replaceCC.cpp
     resolve_diffs.cpp
     to_utf8.cpp
-    name_intro.cpp
 DEPS
     re.analysis
-    re.ucd
+    unicode.utf
 )

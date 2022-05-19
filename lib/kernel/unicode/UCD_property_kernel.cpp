@@ -9,7 +9,7 @@
 #include <re/adt/re_name.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
-#include <re/ucd/ucd_compiler.hpp>
+#include <unicode/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
@@ -30,14 +30,7 @@ UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, 
 
 void UnicodePropertyKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::unique_ptr<cc::CC_Compiler> ccc;
-    bool useDirectCC = getInput(0)->getType()->getArrayNumElements() == 1;
-    if (useDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
-    } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("source"));
-    }
-    UCD::UCDCompiler unicodeCompiler(*ccc.get(), pb);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     pablo::Var * propertyVar = pb.createVar(mName->getFullName(), pb.createZeroes());
     re::RE * property_defn = mName->getDefinition();
     if (re::CC * propertyCC = llvm::dyn_cast<re::CC>(property_defn)) {

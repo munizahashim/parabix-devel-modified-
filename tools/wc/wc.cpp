@@ -10,7 +10,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/adt/adt.h>
 #include <re/unicode/resolve_properties.h>
-#include <re/ucd/ucd_compiler.hpp>
+#include <unicode/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -218,7 +218,7 @@ void WordCountKernel::generatePabloMethod() {
         WS_prop = UCD::linkAndResolve(WS_prop);
         re::CC * WS_CC = cast<re::CC>(cast<PropertyExpression>(WS_prop)->getResolvedRE());
         Var * WS = pb.createVar("space");
-        UCD::UCDCompiler unicodeCompiler(*ccc.get(), pb);
+        UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
         unicodeCompiler.addTarget(WS, WS_CC);
         unicodeCompiler.compile();
         //PabloAST * WS = ccc->compileCC(re::makeCC(re::re::makeByte(0x09, 0x0D), re::re::makeByte(0x20)));

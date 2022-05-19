@@ -56,6 +56,9 @@ enum DebugFlags {
     DebugFlagSentinel
 };
 
+extern bool PabloTransposition;
+extern bool SplitTransposition;
+
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
 
 bool LLVM_READONLY AnyDebugOptionIsSet();

@@ -21,18 +21,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    enum class Type {
-        Unicode
-        , UnicodeProperty
-        , ZeroWidth
-        , PropertyValue
-        , Unknown
-    };
     std::string getNamespace() const;
     bool hasNamespace() const;
     std::string getName() const;
     std::string getFullName() const;
-    Type getType() const;
     RE * getDefinition() const;
     bool operator<(const Name & other) const;
     bool operator<(const CC & other) const;
@@ -43,15 +35,14 @@ protected:
     friend Name * makeName(const std::string & name, RE * cc);
     friend Name * makeZeroWidth(const std::string & name, RE * zerowidth);
     friend Name * makeName(CC * const cc);
-    friend Name * makeName(const std::string &, Type, RE *);
-    friend Name * makeName(const std::string &, const std::string &, Type, RE *);
-    Name(const char * nameSpace, const length_t namespaceLength, const char * name, const length_t nameLength, Type type, RE * defn)
+    friend Name * makeName(const std::string &, RE *);
+    friend Name * makeName(const std::string &, const std::string &, RE *);
+    Name(const char * nameSpace, const length_t namespaceLength, const char * name, const length_t nameLength, RE * defn)
     : RE(ClassTypeId::Name)
     , mNamespaceLength(namespaceLength)
     , mNamespace(replicateString(nameSpace, namespaceLength))
     , mNameLength(nameLength)
     , mName(replicateString(name, nameLength))
-    , mType(type)
     , mDefinition(defn) {
 
     }
@@ -61,7 +52,6 @@ private:
     const char * const  mNamespace;
     const length_t      mNameLength;
     const char * const  mName;
-    Type                mType;
     RE *                mDefinition;
 };
 
@@ -80,10 +70,6 @@ inline std::string Name::getName() const {
 inline std::string Name::getFullName() const {
     if (hasNamespace()) return getNamespace() + ":" + getName();
     else return getName();
-}
-
-inline Name::Type Name::getType() const {
-    return mType;
 }
 
 inline RE * Name::getDefinition() const {
@@ -131,31 +117,21 @@ inline bool Name::operator > (const CC & other) const {
     return RE::ClassTypeId::CC < RE::ClassTypeId::Name;
 }
 
-inline Name * makeName(const std::string & name, const Name::Type type, RE * defn = nullptr) {
-    return new Name(nullptr, 0, name.c_str(), name.length(), type, defn);
+inline Name * makeName(const std::string & name, RE * defn = nullptr) {
+    return new Name(nullptr, 0, name.c_str(), name.length(), defn);
 }
 
-inline Name * makeName(const std::string & property, const std::string & value, const Name::Type type, RE * defn = nullptr) {
-    return new Name(property.c_str(), property.length(), value.c_str(), value.length(), type, defn);
-}
-
-inline Name * makeName(const std::string & name, RE * cc) {
-    if (llvm::isa<Name>(cc)) {
-        return llvm::cast<Name>(cc);
-    }
-    else if (llvm::isa<CC>(cc)) {
-        return new Name(nullptr, 0, name.c_str(), name.length(), Name::Type::Unicode, cc);
-    }
-    else return new Name(nullptr, 0, name.c_str(), name.length(), Name::Type::Unknown, cc);
+inline Name * makeName(const std::string & property, const std::string & value, RE * defn = nullptr) {
+    return new Name(property.c_str(), property.length(), value.c_str(), value.length(), defn);
 }
 
 inline Name * makeName(CC * const cc) {
     const std::string name = cc->canonicalName();
-    return new Name(nullptr, 0, name.c_str(), name.length(), Name::Type::Unicode, cc);
+    return new Name(nullptr, 0, name.c_str(), name.length(), cc);
 }
 
 inline Name * makeZeroWidth(const std::string & name, RE * zerowidth = NULL) {
-    return new Name(nullptr, 0, name.c_str(), name.length(), Name::Type::ZeroWidth, zerowidth);
+    return new Name(nullptr, 0, name.c_str(), name.length(), zerowidth);
 }
 
 template <typename To, typename FromTy> bool defined(FromTy * e) {

@@ -36,6 +36,14 @@ enum class PabloCarryMode {
 };
 extern PabloCarryMode CarryMode;
 
+enum class BitMovementMode {
+    Advance,
+    LookAhead
+};
+extern BitMovementMode MovementMode;
+
+std::string BitMovementMode_string(BitMovementMode m);
+
 extern llvm::sys::fs::OpenFlags PabloOutputFileFlag;
 extern llvm::sys::fs::OpenFlags PabloOptimizedOutputFileFlag;
 

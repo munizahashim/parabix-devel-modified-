@@ -4,8 +4,6 @@
 namespace grep {
 
 extern int Threads;
-extern bool PabloTransposition;
-extern bool SplitTransposition;
 extern bool UnicodeIndexing;
 extern bool PropertyKernels;
 extern bool MultithreadedSimpleRE;

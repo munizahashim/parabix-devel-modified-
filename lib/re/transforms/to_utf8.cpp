@@ -8,16 +8,15 @@
 #include <re/transforms/re_transformer.h>
 #include <re/adt/adt.h>
 #include <unicode/core/unicode_set.h>
-#include <unicode/utf/UTF.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
 namespace re {
 
-static RE * rangeCodeUnits(codepoint_t lo, codepoint_t hi, unsigned index, const unsigned lgth){
-    const codepoint_t hunit = UTF<8>::nthCodeUnit(hi, index);
-    const codepoint_t lunit = UTF<8>::nthCodeUnit(lo, index);
+RE * UTF8_Transformer::rangeCodeUnits(codepoint_t lo, codepoint_t hi, unsigned index, const unsigned lgth){
+    const codepoint_t hunit = mEncoder.nthCodeUnit(hi, index);
+    const codepoint_t lunit = mEncoder.nthCodeUnit(lo, index);
     if (index == lgth) {
         return makeCC(lunit, hunit, &cc::UTF8);
     }
@@ -40,11 +39,11 @@ static RE * rangeCodeUnits(codepoint_t lo, codepoint_t hi, unsigned index, const
     }
 }
 
-static RE * rangeToUTF8(codepoint_t lo, codepoint_t hi) {
-    const auto min_lgth = UTF<8>::encoded_length(lo);
-    const auto max_lgth = UTF<8>::encoded_length(hi);
+RE * UTF8_Transformer::rangeToUTF8(codepoint_t lo, codepoint_t hi) {
+    const auto min_lgth = mEncoder.encoded_length(lo);
+    const auto max_lgth = mEncoder.encoded_length(hi);
     if (min_lgth < max_lgth) {
-        const auto m = UTF<8>::max_codepoint_of_length(min_lgth);
+        const auto m = mEncoder.max_codepoint_of_length(min_lgth);
         return makeAlt({rangeToUTF8(lo, m), rangeToUTF8(m + 1, hi)});
     }
     else {
@@ -66,7 +65,9 @@ RE * UTF8_Transformer::transformAny(Any * e) {
 }
 
 UTF8_Transformer::UTF8_Transformer(NameTransformationMode m) :
-    EncodingTransformer("ToUTF8", &cc::Unicode, &cc::UTF8, m) {}
+EncodingTransformer("ToUTF8", &cc::Unicode, &cc::UTF8, m) {
+    mEncoder.setCodeUnitBits(8);
+}
 
 RE * toUTF8(RE * r, bool convertName) {
     const auto mode = convertName ? NameTransformationMode::TransformDefinition : NameTransformationMode::None;

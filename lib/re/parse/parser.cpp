@@ -781,7 +781,7 @@ Name * RE_Parser::createName(std::string value) {
     if (f != mNameMap.end()) {
         return f->second;
     }
-    Name * const property = makeName(value, Name::Type::UnicodeProperty);
+    Name * const property = makeName(value);
     mNameMap.insert(std::make_pair(std::move(key), property));
     return property;
     }
@@ -792,7 +792,7 @@ Name * RE_Parser::createName(std::string prop, std::string value) {
     if (f != mNameMap.end()) {
         return f->second;
     }
-    Name * const property = makeName(prop, value, Name::Type::UnicodeProperty);
+    Name * const property = makeName(prop, value);
     mNameMap.insert(std::make_pair(std::move(key), property));
     return property;
 }

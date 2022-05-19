@@ -6,80 +6,78 @@
 
 #include <re/analysis/capture-ref.h>
 #include <re/adt/adt.h>
+#include <re/analysis/re_analysis.h>
+#include <re/alphabet/alphabet.h>
 #include <llvm/Support/raw_ostream.h>
+#include <limits.h>
 
 using namespace llvm;
 
 namespace re {
 
-using CapturePostfixMap = std::map<const Capture *, std::vector<const RE *>>;
+using CapturePostfixMap = std::map<Capture *, std::vector<RE *>>;
 
-void updateCaptures(const RE * re, CapturePostfixMap & cm) {
-    CapturePostfixMap cm1 = cm;
-    for (auto & mapping : cm1) {
+void updateCaptures(RE * re, CapturePostfixMap & cm) {
+    for (auto & mapping : cm) {
         mapping.second.push_back(re);
     }
-    if (const Capture * c = dyn_cast<Capture>(re)) {
-        cm1.emplace(c, std::vector<const RE *>{});
+    if (Capture * c = dyn_cast<Capture>(re)) {
+        cm.emplace(c, std::vector<RE *>{});
     }
 }
 
-void updateReferenceMap(const RE * re, CapturePostfixMap cm, ReferenceMap & rm) {
-    if (const Name * name = dyn_cast<Name>(re)) {
-        if (LLVM_LIKELY(name->getDefinition() != nullptr)) {
-            return updateReferenceMap(name->getDefinition(), cm, rm);
-        } else {
-            UndefinedNameError(name);
-        }
-    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
+void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) {
+    if (Capture * c = dyn_cast<Capture>(re)) {
+        updateReferenceInfo(c->getCapturedRE(), cm, info);
+        info.captureRefs.emplace(c, std::vector<std::string>{});
+    } else if (Seq * seq = dyn_cast<Seq>(re)) {
         if (!seq->empty()) {
-            RE * r1 = seq->front();
-            updateReferenceMap(r1, cm, rm);
             CapturePostfixMap cm1 = cm;  // copy
+            RE * r1 = seq->front();
+            updateReferenceInfo(r1, cm1, info);
             for (auto it = seq->begin()+1; it != seq->end(); it++)  {
                 updateCaptures(r1, cm1);
                 r1 = *it;
-                updateReferenceMap(r1, cm1, rm);
+                updateReferenceInfo(r1, cm1, info);
             }
         }
-    } else if (const Alt * alt = dyn_cast<Alt>(re)) {
+    } else if (Alt * alt = dyn_cast<Alt>(re)) {
         for (auto & ai : *alt) {
-            updateReferenceMap(ai, cm, rm);
+            updateReferenceInfo(ai, cm, info);
         }
-    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
-        updateReferenceMap(rep->getRE(), cm, rm);
-    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
-        updateReferenceMap(diff->getLH(), cm, rm);
-        updateReferenceMap(diff->getRH(), cm, rm);
-    } else if (const Intersect * ix = dyn_cast<Intersect>(re)) {
-        updateReferenceMap(ix->getLH(), cm, rm);
-        updateReferenceMap(ix->getRH(), cm, rm);
-    } else if (const Reference * ref = dyn_cast<Reference>(re)) {
-        auto f = cm.find(ref->getCapture());
+    } else if (Rep * rep = dyn_cast<Rep>(re)) {
+        updateReferenceInfo(rep->getRE(), cm, info);
+    } else if (Diff * diff = dyn_cast<Diff>(re)) {
+        updateReferenceInfo(diff->getLH(), cm, info);
+        updateReferenceInfo(diff->getRH(), cm, info);
+    } else if (Intersect * ix = dyn_cast<Intersect>(re)) {
+        updateReferenceInfo(ix->getLH(), cm, info);
+        updateReferenceInfo(ix->getRH(), cm, info);
+    } else if (Reference * ref = dyn_cast<Reference>(re)) {
+        std::string refName = ref->getName();
+        Capture * c = ref->getCapture();
+        auto f = cm.find(c);
         if (f != cm.end()) {
-            rm.emplace(ref, f->second);
+            RE * twixt = makeSeq(f->second.begin(), f->second.end());
+            info.twixtREs.emplace(refName, twixt);
+            auto rl = info.captureRefs.find(c);
+            if (rl == info.captureRefs.end()) {
+                llvm::report_fatal_error("reference analysis: out of scope reference");
+            }
+            rl->second.push_back(refName);
         } else {
-            // reference without a defined capture
-            //rm.emplace(ref, nullptr);
+            llvm::report_fatal_error("reference without capture");
         }
-    } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+    } else if (PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
         // Future extension:  property reference such as \p{Sc=\1} (same script as
         // the capture char.
     }
 }
 
-ReferenceMap buildReferenceMap(const RE * re) {
-    ReferenceMap rm;
+ReferenceInfo buildReferenceInfo(RE * re) {
+    ReferenceInfo info;
     CapturePostfixMap cm;
-    updateReferenceMap(re, cm, rm);
-    for (auto & mapping : rm) {
-        llvm::errs() << Printer_RE::PrintRE(mapping.first) << ":\n";
-        for (auto & r : mapping.second) {
-            llvm::errs() << Printer_RE::PrintRE(r);
-        }
-        llvm::errs() << "\n_______\n";
-    }
-    return rm;
+    updateReferenceInfo(re, cm, info);
+    return info;
 }
-
 }

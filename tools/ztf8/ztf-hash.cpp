@@ -25,7 +25,6 @@
 #include <grep/grep_kernel.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
-#include <re/ucd/ucd_compiler.hpp>
 #include <re/unicode/resolve_properties.h>
 #include <pablo/bixnum/bixnum.h>
 #include <kernel/core/kernel_builder.h>

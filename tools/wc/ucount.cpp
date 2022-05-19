@@ -12,13 +12,15 @@
 #include <re/parse/parser.h>
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
-#include <re/ucd/ucd_compiler.hpp>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
+#include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
+#include <kernel/util/debug_display.h>
+#include <kernel/streamutils/stream_select.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
@@ -50,16 +52,23 @@ static cl::OptionCategory ucFlags("Command Flags", "ucount options");
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ucFlags));
 static cl::list<std::string> inputFiles(cl::Positional, cl::desc("<input file ...>"), cl::OneOrMore, cl::cat(ucFlags));
 
+static cl::opt<bool> U21("u21", cl::desc("Use Unicode 21 bits"), cl::cat(ucFlags));
+static cl::opt<bool> ShowStreams("show-streams", cl::desc("Show UTF streams"), cl::init(false), cl::cat(ucFlags));
+
+
 std::vector<fs::path> allFiles;
 
-typedef uint64_t (*UCountFunctionType)(uint32_t fd);
+ParabixIllustrator illustrator(50);  // display width 50
+
+typedef uint64_t (*UCountFunctionType)(uint32_t fd,  ParabixIllustrator * illustrator);
 
 UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
 
     auto & B = pxDriver.getBuilder();
 
     auto P = pxDriver.makePipeline(
-                {Binding{B->getInt32Ty(), "fileDescriptor"}},
+                {Binding{B->getInt32Ty(), "fileDescriptor"},
+                 Binding{B->getIntAddrTy(), "illustratorAddr"}},
                 {Binding{B->getInt64Ty(), "countResult"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
@@ -71,10 +80,27 @@ UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * const BasisBits = P->CreateStreamSet(8, 1);
+    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
 
     //  Transpose the ByteSteam into parallel bit stream form.
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+
+    if (U21) {
+        StreamSet * const u21_Basis = P->CreateStreamSet(21, 1);
+        P->CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
+        BasisBits = u21_Basis;
+        if (ShowStreams) {
+            Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
+            illustrator.registerIllustrator(illustratorAddr);
+            illustrator.captureByteData(P, "bytedata", ByteStream, '.');
+            for (unsigned i = 0; i < 21; i++) {
+                StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
+                illustrator.captureBitstream(P, "u21_" + std::to_string(i), u21_basis_i);
+            }
+        }
+
+    }
+
 
     //  Create a character class bit stream.
     StreamSet * CCstream = P->CreateStreamSet(1, 1);
@@ -110,7 +136,7 @@ uint64_t ucount1(UCountFunctionType fn_ptr, const uint32_t fileIdx) {
         close(fd);
         return 0;
     }
-    auto r = fn_ptr(fd);
+    auto r = fn_ptr(fd, &illustrator);
     close(fd);
     return r;
 }
@@ -161,6 +187,9 @@ int main(int argc, char *argv[]) {
         std::cout << std::setw(displayColumnWidth-1);
         std::cout << totalCount;
         std::cout << " total" << std::endl;
+    }
+    if (ShowStreams) {
+        illustrator.displayAllCapturedData();
     }
 
     return 0;

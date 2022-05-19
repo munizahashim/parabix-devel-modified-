@@ -11,7 +11,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>
-#include <re/ucd/ucd_compiler.hpp>
+#include <unicode/utf/utf_compiler.h>
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
@@ -72,12 +72,11 @@ WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet *
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), getInputStreamSet("source"));
     re::RE * word_prop = re::makePropertyExpression("word");
     word_prop = UCD::linkAndResolve(word_prop);
     re::CC * word_CC = cast<re::CC>(cast<re::PropertyExpression>(word_prop)->getResolvedRE());
     Var * wordChar = pb.createVar("word");
-    UCD::UCDCompiler unicodeCompiler(ccc, pb);
+    UTF::UTF_Compiler unicodeCompiler(getInputStreamVar("source"), pb);
     unicodeCompiler.addTarget(wordChar, word_CC);
     unicodeCompiler.compile();
     pb.createAssign(pb.createExtract(getOutputStreamVar("WordMarks"), pb.getInteger(0)), wordChar);
