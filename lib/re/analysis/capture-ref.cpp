@@ -35,7 +35,7 @@ void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) 
         }
     } else if (Capture * c = dyn_cast<Capture>(re)) {
         updateReferenceInfo(c->getCapturedRE(), cm, info);
-        info.captureRefs.emplace(c, std::vector<Reference *>{});
+        info.captureRefs.emplace(c, std::vector<std::string>{});
     } else if (Seq * seq = dyn_cast<Seq>(re)) {
         if (!seq->empty()) {
             CapturePostfixMap cm1 = cm;  // copy
@@ -60,16 +60,17 @@ void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) 
         updateReferenceInfo(ix->getLH(), cm, info);
         updateReferenceInfo(ix->getRH(), cm, info);
     } else if (Reference * ref = dyn_cast<Reference>(re)) {
+        std::string refName = ref->getName();
         Capture * c = ref->getCapture();
         auto f = cm.find(c);
         if (f != cm.end()) {
             RE * twixt = makeSeq(f->second.begin(), f->second.end());
-            info.twixtREs.emplace(ref, twixt);
+            info.twixtREs.emplace(refName, twixt);
             auto rl = info.captureRefs.find(c);
             if (rl == info.captureRefs.end()) {
                 llvm::report_fatal_error("reference analysis: out of scope reference");
             }
-            rl->second.push_back(ref);
+            rl->second.push_back(refName);
         } else {
             llvm::report_fatal_error("reference without capture");
         }

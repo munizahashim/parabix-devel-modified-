@@ -14,12 +14,12 @@ namespace re {
 struct FixedReferenceTransformer : public RE_Transformer {
 public:
     FixedReferenceTransformer(const ReferenceInfo & info) :
-        RE_Transformer("FixedReferenceTrasformer"),
+        RE_Transformer("FixedReferenceTransformer"),
         mRefInfo(info) {}
     RE * transformReference(Reference * r) override {
         auto rg1 = getLengthRange(r->getCapture(), &cc::Unicode);
         if (rg1.first != rg1.second) return r;
-        auto mapping = mRefInfo.twixtREs.find(r);
+        auto mapping = mRefInfo.twixtREs.find(r->getName());
         if (mapping == mRefInfo.twixtREs.end()) return r;
         auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
         if (rg2.first != rg2.second) return r;

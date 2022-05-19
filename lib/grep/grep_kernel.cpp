@@ -519,10 +519,12 @@ void FixedDistanceMatchesKernel::generatePabloMethod() {
 FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (BuilderRef b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
 : PabloKernel(b, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
 // inputs
-{Binding{"Basis", Basis}, Binding{"ToCheck", ToCheck}},
+{Binding{"Basis", Basis}},
 // output
 {Binding{"Matches", Matches}}), mMatchDistance(distance), mHasCheckStream(ToCheck != nullptr) {
-
+    if (mHasCheckStream) {
+        mInputStreamSets.push_back({"ToCheck", ToCheck});
+    }
 }
 
 void AbortOnNull::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {

@@ -469,8 +469,8 @@ UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned l
 : mPb(pb), mLookAhead(lookAhead), mMask(mask) {
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
-    unsigned streamWidth = ty->getIntegerBitWidth();
     if (streamCount == 1) {
+        unsigned streamWidth = ty->getElementType()->getIntegerBitWidth();
         mEncoder.setCodeUnitBits(streamWidth);
         mCodeUnitCompiler =
         std::make_unique<cc::Direct_CC_Compiler>(pb.getPabloBlock(), pb.createExtract(basis_var, pb.getInteger(0)));

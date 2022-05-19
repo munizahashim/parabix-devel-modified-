@@ -3,7 +3,6 @@
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
  */
-#pragma once
 #include <unicode/utf/utf_encoder.h>
 
 using codepoint_t = UCD::codepoint_t;

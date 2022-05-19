@@ -591,8 +591,8 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
         return DefiniteLengthBackReferencesOnly(n->getDefinition());
     } else if (const Capture * c = dyn_cast<Capture>(re)) {
         return DefiniteLengthBackReferencesOnly(c->getCapturedRE());
-    } else if (isa<Reference>(re)) {
-        return false;
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return DefiniteLengthBackReferencesOnly(r->getCapture());
     }
     return true; // otherwise = CC, Any, Start, End, Range
 }
