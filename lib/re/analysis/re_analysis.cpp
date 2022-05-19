@@ -136,6 +136,10 @@ bool isUnicodeUnitLength(const RE * re) {
             return false;
         }
         return isUnicodeUnitLength(n->getDefinition());
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return isUnicodeUnitLength(c->getCapturedRE());
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return isUnicodeUnitLength(r->getCapture());
     }
     return false; // otherwise
 }
@@ -216,6 +220,10 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         RE * defn = n->getDefinition();
         if (defn) return getLengthRange(defn, indexAlphabet);
         return std::make_pair(0, INT_MAX);
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return getLengthRange(c->getCapturedRE(), indexAlphabet);
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return getLengthRange(r->getCapture(), indexAlphabet);
     }
     return std::make_pair(0, INT_MAX);
 }
@@ -239,6 +247,10 @@ bool isFixedLength(const RE * re) {
         return isFixedLength(g->getRE());
     } else if (const Name * n = dyn_cast<Name>(re)) {
         return isFixedLength(n->getDefinition());
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return isFixedLength(c->getCapturedRE());
+    } else if (const Reference * r = dyn_cast<Reference>(re)) {
+        return isFixedLength(r->getCapture());
     }
     return true; // otherwise = CC, Any, Start, End, Range, Assertion
 }

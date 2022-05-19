@@ -19,6 +19,7 @@ SRC
     re_star_normal.cpp
     re_memoizing_transformer.cpp
     re_transformer.cpp
+    reference_transform.cpp
     remove_nullable.cpp
     replaceCC.cpp
     resolve_diffs.cpp
