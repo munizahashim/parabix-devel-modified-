@@ -114,6 +114,10 @@ RE * firstSym(RE * re) {
         RE * lh = firstSym(ix->getLH());
         RE * rh = firstSym(ix->getRH());
         return intersectCC(cast<CC>(lh), cast<CC>(rh));
+    } else if (Capture * c = dyn_cast<Capture>(re)) {
+        return firstSym(c->getCapturedRE());
+    } else if (Reference * r = dyn_cast<Reference>(re)) {
+        return firstSym(r->getCapture());
     }
     return makeCC();
 }
@@ -160,6 +164,10 @@ RE * finalSym(RE * re) {
         RE * lh = finalSym(ix->getLH());
         RE * rh = finalSym(ix->getRH());
         return intersectCC(cast<CC>(lh), cast<CC>(rh));
+    } else if (Capture * c = dyn_cast<Capture>(re)) {
+        return finalSym(c->getCapturedRE());
+    } else if (Reference * r = dyn_cast<Reference>(re)) {
+        return finalSym(r->getCapture());
     }
     return makeCC();
 }

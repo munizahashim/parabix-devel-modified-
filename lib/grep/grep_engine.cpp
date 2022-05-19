@@ -274,6 +274,9 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = re;
     mRefInfo = re::buildReferenceInfo(mRE);
     mRE = fixedReferenceTransform(mRefInfo, mRE);
+    if (!mRefInfo.twixtREs.empty()) {
+        UnicodeIndexing = true;
+    }
 
     mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     mRE = re::exclude_CC(mRE, mBreakCC);
@@ -413,7 +416,6 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
                 std::vector<re::CC *> ccs = {cc};
                 P->CreateKernelCall<CharClassesKernel>(ccs, SourceStream, ccStrm);
             } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
-                llvm::errs() << "External reference: " << name << "\n";
                 auto mapping = mRefInfo.twixtREs.find(ref->getName());
                 if (mapping == mRefInfo.twixtREs.end()) {
                     llvm::report_fatal_error("grep engine: undefined reference!");
@@ -422,7 +424,7 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
                 auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
                 if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
                     int dist = rg1.first + rg2.first;
-                    llvm::errs() << "Fixed reference distance " << dist << "\n";
+                    //llvm::errs() << "Fixed reference distance " << dist << "\n";
                     if (fixedRefSupport.count(dist) == 0) {
                         if (!U21_basis) {
                             U21_basis = P->CreateStreamSet(21, 1);

@@ -140,6 +140,11 @@ bool isUnicodeUnitLength(const RE * re) {
         return isUnicodeUnitLength(c->getCapturedRE());
     } else if (const Reference * r = dyn_cast<Reference>(re)) {
         return isUnicodeUnitLength(r->getCapture());
+    } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+            return false;
+        }
+        return true;
     }
     return false; // otherwise
 }
@@ -213,9 +218,16 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         }
         return std::make_pair(1, INT_MAX);
     } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+            return std::make_pair(0, 0);
+        }
+        if (indexAlphabet == &cc::Unicode) return std::make_pair(1, 1);
         RE * resolved = pe->getResolvedRE();
         if (resolved) return getLengthRange(resolved, indexAlphabet);
-        return std::make_pair(0, INT_MAX);
+        if (indexAlphabet == &cc::UTF8) {
+            return std::make_pair(1, 4);
+        }
+        return std::make_pair(1, INT_MAX);
     } else if (const Name * n = dyn_cast<Name>(re)) {
         RE * defn = n->getDefinition();
         if (defn) return getLengthRange(defn, indexAlphabet);
