@@ -129,13 +129,9 @@ bool isUnicodeUnitLength(const RE * re) {
     } else if (const CC * cc = dyn_cast<CC>(re)) {
         return !(cc->empty());
     } else if (const Name * n = dyn_cast<Name>(re)) {
-        // Eventually names might be set up for not unit length items.
-        if (n->getType() == Name::Type::Unicode || n->getType() == Name::Type::UnicodeProperty) {
-            return true;
-        } else if (n->getType() == Name::Type::ZeroWidth) {
-            return false;
-        }
-        return isUnicodeUnitLength(n->getDefinition());
+        RE * defn = n->getDefinition();
+        if (defn) return isUnicodeUnitLength(defn);
+        return false;
     } else if (const Capture * c = dyn_cast<Capture>(re)) {
         return isUnicodeUnitLength(c->getCapturedRE());
     } else if (const Reference * r = dyn_cast<Reference>(re)) {
@@ -295,14 +291,7 @@ int minMatchLength(const RE * re) {
     } else if (isa<CC>(re)) {
         return 1;
     } else if (const Name * n = dyn_cast<Name>(re)) {
-        // Eventually names might be set up for not unit length items.
-        switch (n->getType()) {
-            case Name::Type::Unicode:
-            case Name::Type::UnicodeProperty:
-                return 1;
-            default:
-                return 0;
-        }
+        return minMatchLength(n->getDefinition());
     } else if (const Capture * c = dyn_cast<Capture>(re)) {
         return minMatchLength(c->getCapturedRE());
     } else if (const Reference * r = dyn_cast<Reference>(re)) {

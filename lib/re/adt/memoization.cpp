@@ -47,9 +47,7 @@ static bool lessThan(const Alt * const lh, const Alt * const rh) {
 }
 
 static bool lessThan(const Name * const lh, const Name * const rh) {
-    if (lh->getType() != rh->getType()) {
-        return lh->getType() < rh->getType();
-    } else if (lh->hasNamespace() != rh->hasNamespace()) {
+    if (lh->hasNamespace() != rh->hasNamespace()) {
         return lh->hasNamespace();
     } else if (lh->hasNamespace() && (lh->getNamespace() != rh->getNamespace())) {
         return lh->getNamespace() < rh->getNamespace();

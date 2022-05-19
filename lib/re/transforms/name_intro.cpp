@@ -26,7 +26,7 @@ public:
         bool variable_length = false;
         variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
         if (variable_length) {
-            return makeName(cc->canonicalName(), Name::Type::Unicode, cc);
+            return makeName(cc->canonicalName(), cc);
         }
         return cc;
     }

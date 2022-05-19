@@ -299,12 +299,12 @@ struct PropertyExternalizer : public RE_Transformer {
         Name * externName;
         if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
             if (val_str == "")
-                externName = makeName(id, Name::Type::UnicodeProperty);
-            else externName = makeName(id, val_str, Name::Type::UnicodeProperty);
+                externName = makeName(id);
+            else externName = makeName(id, val_str);
         } else {
             id = "\\b{" + id + "}";
-            if (val_str == "" ) externName = makeName(id, Name::Type::ZeroWidth);
-            else externName = makeName(id, val_str, Name::Type::ZeroWidth);
+            if (val_str == "" ) externName = makeName(id);
+            else externName = makeName(id, val_str);
         }
         externName->setDefinition(exp->getResolvedRE());
         return externName;
@@ -318,7 +318,7 @@ RE * externalizeProperties(RE * r) {
 struct AnyExternalizer : public RE_Transformer {
     AnyExternalizer() : RE_Transformer("AnyExternalizer") {}
     RE * transformAny(Any * a) override {
-        Name * externName = makeName("Any", Name::Type::UnicodeProperty);
+        Name * externName = makeName("Any");
         externName->setDefinition(a);
         return externName;
     }

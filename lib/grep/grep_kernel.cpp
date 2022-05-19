@@ -693,7 +693,7 @@ void kernel::WordBoundaryLogic(const std::unique_ptr<ProgramBuilder> & P, UTF8_T
     
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
     wordProp = UCD::linkAndResolve(wordProp);
-    re::Name * word = re::makeName("word", re::Name::Type::UnicodeProperty);
+    re::Name * word = re::makeName("word");
     word->setDefinition(wordProp);
     StreamSet * WordStream = P->CreateStreamSet(1);
     P->CreateKernelCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);

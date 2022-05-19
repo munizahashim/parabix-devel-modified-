@@ -264,7 +264,7 @@ void GrepEngine::initRE(re::RE * re) {
     }
     re::RE * anchorRE = mBreakCC;
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        re::Name * anchorName = re::makeName("UTF8_LB", re::Name::Type::Unicode);
+        re::Name * anchorName = re::makeName("UTF8_LB");
         anchorName->setDefinition(re::makeUnicodeBreak());
         anchorRE = anchorName;
         setComponent(mExternalComponents, Component::UTF8index);
