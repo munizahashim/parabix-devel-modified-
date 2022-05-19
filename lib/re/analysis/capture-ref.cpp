@@ -27,13 +27,7 @@ void updateCaptures(RE * re, CapturePostfixMap & cm) {
 }
 
 void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) {
-    if (Name * name = dyn_cast<Name>(re)) {
-        if (LLVM_LIKELY(name->getDefinition() != nullptr)) {
-            return updateReferenceInfo(name->getDefinition(), cm, info);
-        } else {
-            UndefinedNameError(name);
-        }
-    } else if (Capture * c = dyn_cast<Capture>(re)) {
+    if (Capture * c = dyn_cast<Capture>(re)) {
         updateReferenceInfo(c->getCapturedRE(), cm, info);
         info.captureRefs.emplace(c, std::vector<std::string>{});
     } else if (Seq * seq = dyn_cast<Seq>(re)) {

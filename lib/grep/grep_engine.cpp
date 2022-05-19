@@ -29,6 +29,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/unicode/boundary_kernels.h>
+#include <kernel/unicode/utf8_decoder.h>
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/streamutils/stream_select.h>
@@ -48,6 +49,7 @@
 #include <re/alphabet/alphabet.h>
 #include <re/analysis/re_analysis.h>
 #include <re/analysis/re_name_gather.h>
+#include <re/analysis/capture-ref.h>
 #include <re/analysis/collect_ccs.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/multiplex_CCs.h>
@@ -56,6 +58,7 @@
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/name_intro.h>
+#include <re/transforms/reference_transform.h>
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
@@ -269,6 +272,9 @@ void GrepEngine::initRE(re::RE * re) {
     }
 
     mRE = re;
+    mRefInfo = re::buildReferenceInfo(mRE);
+    mRE = fixedReferenceTransform(mRefInfo, mRE);
+
     mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
@@ -389,6 +395,8 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
         mWordBoundary_stream = P->CreateStreamSet(1, 1);
         WordBoundaryLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mWordBoundary_stream);
     }
+    StreamSet * U21_basis = nullptr;
+    std::set<int> fixedRefSupport;
     for (auto e : mExternalNames) {
         re::RE * def = e->getDefinition();
         auto name = e->getFullName();
@@ -404,6 +412,28 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
                 mPropertyStreamMap.emplace(name, ccStrm);
                 std::vector<re::CC *> ccs = {cc};
                 P->CreateKernelCall<CharClassesKernel>(ccs, SourceStream, ccStrm);
+            } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
+                llvm::errs() << "External reference: " << name << "\n";
+                auto mapping = mRefInfo.twixtREs.find(ref->getName());
+                if (mapping == mRefInfo.twixtREs.end()) {
+                    llvm::report_fatal_error("grep engine: undefined reference!");
+                }
+                auto rg1 = getLengthRange(ref->getCapture(), &cc::Unicode);
+                auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
+                if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
+                    int dist = rg1.first + rg2.first;
+                    llvm::errs() << "Fixed reference distance " << dist << "\n";
+                    if (fixedRefSupport.count(dist) == 0) {
+                        if (!U21_basis) {
+                            U21_basis = P->CreateStreamSet(21, 1);
+                            P->CreateKernelCall<UTF8_Decoder>(SourceStream, U21_basis);
+                        }
+                        StreamSet * M = P->CreateStreamSet(1, 1);
+                        mPropertyStreamMap.emplace(name, M);
+                        P->CreateKernelCall<FixedDistanceMatchesKernel>(dist, U21_basis, M);
+                        fixedRefSupport.insert(dist);
+                    }
+                }
             }
         }
     }
