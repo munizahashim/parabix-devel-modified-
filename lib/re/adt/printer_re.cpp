@@ -150,10 +150,6 @@ const std::string Printer_RE::PrintRE(const RE * re) {
         if ((val_str != "") || (op != PropertyExpression::Operator::Eq)) {
             if (op == PropertyExpression::Operator::Eq) retVal.append(":");
             else if (op == PropertyExpression::Operator::NEq) retVal.append("!=");
-            else if (op == PropertyExpression::Operator::LEq) retVal.append("<=");
-            else if (op == PropertyExpression::Operator::GEq) retVal.append(">=");
-            else if (op == PropertyExpression::Operator::Less) retVal.append("<");
-            else if (op == PropertyExpression::Operator::Greater) retVal.append(">");
             retVal.append(pe->getValueString());
         }
         retVal.append(")");
