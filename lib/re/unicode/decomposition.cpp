@@ -83,8 +83,8 @@ private:
     StringPropertyObject * decompMappingObj;
     EnumeratedPropertyObject * cccObj;
     StringOverridePropertyObject * caseFoldObj;
-    const UnicodeSet & canonicalMapped;
-    const UnicodeSet & cc0Set;
+    const UnicodeSet canonicalMapped;
+    const UnicodeSet cc0Set;
     const UnicodeSet selfNFKD;
     const UnicodeSet selfCaseFold;
     const UnicodeSet HangulPrecomposed;

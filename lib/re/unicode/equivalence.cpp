@@ -95,7 +95,7 @@ private:
     EnumeratedPropertyObject * cccObj;
     const StringPropertyObject * sUCobj;
     const StringPropertyObject * sLCobj;
-    const UnicodeSet & ccc0set;
+    const UnicodeSet ccc0set;
     const UnicodeSet selfUC;
     const UnicodeSet selfLC;
 };

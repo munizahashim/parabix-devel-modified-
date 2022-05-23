@@ -73,8 +73,18 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const std::string & v
     return GetCodepointSet(property_enum_val);
 }
 
-const UnicodeSet & EnumeratedPropertyObject::GetCodepointSet(const int property_enum_val) const {
+const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const int property_enum_val) const {
     assert (property_enum_val >= 0);
+    UCD::UnicodeSet s;
+    if ((getPropertyCode() == UCD::property_t::age) && (property_enum_val > 0)) {
+        // Special logic for the age property:  \p{age=x.y} includes
+        // all codepoints defined as of version x.y, i.e., whose age
+        // property is numerically less than or equal to x.y.
+        for (uint64_t a = 1; a <= property_enum_val; a++) {
+            s.insert(*(property_value_sets[a]));
+        }
+        return s;
+    }
     return *(property_value_sets[property_enum_val]);
 }
 
@@ -94,11 +104,12 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSetMatchingPattern(re::RE
     std::memset(aligned + n, 0, m);
     std::vector<uint64_t> matchedEnums = grep(re, aligned, n);
     alloc.deallocate(aligned, 0);
-    UCD::UnicodeSet a;
+    const unsigned enumCount = GetEnumCount();
+    UCD::UnicodeSet s;
     for (const auto v : matchedEnums) {
-        a.insert(GetCodepointSet(v % GetEnumCount()));
+        s.insert(GetCodepointSet(v % enumCount));
     }
-    return a;
+    return s;
 }
 
 std::vector<UnicodeSet> & EnumeratedPropertyObject::GetEnumerationBasisSets() {

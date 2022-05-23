@@ -200,7 +200,7 @@ struct PropertyStandardization : public RE_Transformer {
                 // negated property.
                 exp->setOperator(PropertyExpression::Operator::NEq);
                 exp->setValueString("");
-            } else { /*  if (gt_F || ge_T || eq_T || ne_F)  positive properties.  */
+            } else { /*  if (eq_T || ne_F)  positive properties.  */
                 exp->setOperator(PropertyExpression::Operator::Eq);
                 exp->setValueString("");
             }

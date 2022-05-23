@@ -116,7 +116,7 @@ public:
     const std::string & GetPropertyValueGrepString() override;
     const UnicodeSet GetCodepointSet(const std::string & value_spec) override;
     const UnicodeSet GetCodepointSetMatchingPattern(re::RE *, GrepLinesFunctionType) override;
-    const UnicodeSet & GetCodepointSet(const int property_enum_val) const;
+    const UnicodeSet GetCodepointSet(const int property_enum_val) const;
     std::vector<UnicodeSet> & GetEnumerationBasisSets();
     unsigned GetEnumerationValue(codepoint_t cp);
     const std::string & GetValueEnumName(const int property_enum_val) const {return property_value_enum_names[property_enum_val]; }
