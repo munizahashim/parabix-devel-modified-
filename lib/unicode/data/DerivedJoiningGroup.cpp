@@ -15,29 +15,30 @@
 
 namespace UCD {
   namespace JG_ns {
-    const unsigned independent_prop_values = 102;
+    const unsigned independent_prop_values = 104;
     /** Code Point Ranges for No_Joining_Group
     [0000, 061f], [0621, 0621], [0640, 0640], [064b, 066d], [0670, 0670],
     [0674, 0674], [06d4, 06d4], [06d6, 06ed], [06f0, 06f9], [06fd, 06fe],
-    [0700, 070f], [0711, 0711], [0730, 074c], [0780, 085f], [086b, 089f],
-    [08ad, 08ad], [08b5, 08b5], [08c8, 10abf], [10ac6, 10ac6],
-    [10ac8, 10ac8], [10acb, 10acc], [10ae2, 10ae3], [10ae5, 10aea],
-    [10af0, 10d01], [10d03, 10d08], [10d0a, 10d18], [10d1a, 10d1b],
-    [10d1d, 10d1d], [10d1f, 10d1f], [10d21, 10d22], [10d24, 10ffff]**/
+    [0700, 070f], [0711, 0711], [0730, 074c], [0780, 085f], [086b, 086f],
+    [0883, 0885], [0887, 0888], [088f, 089f], [08ad, 08ad], [08c9, 10abf],
+    [10ac6, 10ac6], [10ac8, 10ac8], [10acb, 10acc], [10ae2, 10ae3],
+    [10ae5, 10aea], [10af0, 10d01], [10d03, 10d08], [10d0a, 10d18],
+    [10d1a, 10d1b], [10d1d, 10d1d], [10d1f, 10d1f], [10d21, 10d22],
+    [10d24, 10ffff]**/
 
 
     namespace {
     const static UnicodeSet::run_t __no_joining_group_Set_runs[] = {
     {Full, 49}, {Mixed, 3}, {Empty, 2}, {Mixed, 5}, {Empty, 1}, {Full, 7},
-    {Mixed, 1}, {Full, 1}, {Mixed, 2}, {Full, 2063}, {Mixed, 2}, {Full, 16},
-    {Mixed, 2}, {Full, 32662}};
+    {Mixed, 4}, {Full, 2063}, {Mixed, 2}, {Full, 16}, {Mixed, 2},
+    {Full, 32662}};
     const static UnicodeSet::bitquad_t  __no_joining_group_Set_quads[] = {
     0x00000002, 0xfffff801, 0x00113fff, 0xffd00000, 0x63ff3fff, 0x0002ffff,
-    0xffff0000, 0x00001fff, 0xfffff800, 0x00202000, 0xffffff00, 0x00001940,
-    0xffff07ec, 0xadfffdfb, 0xfffffff6};
+    0xffff0000, 0x00001fff, 0x0000f800, 0xffff81b8, 0x00002000, 0xfffffe00,
+    0x00001940, 0xffff07ec, 0xadfffdfb, 0xfffffff6};
     }
 
-    const static UnicodeSet no_joining_group_Set{const_cast<UnicodeSet::run_t *>(__no_joining_group_Set_runs), 14, 0, const_cast<UnicodeSet::bitquad_t *>(__no_joining_group_Set_quads), 15, 0};
+    const static UnicodeSet no_joining_group_Set{const_cast<UnicodeSet::run_t *>(__no_joining_group_Set_runs), 12, 0, const_cast<UnicodeSet::bitquad_t *>(__no_joining_group_Set_quads), 16, 0};
 
     /** Code Point Ranges for Ain
     [0639, 063a], [06a0, 06a0], [06fc, 06fc], [075d, 075f], [08b3, 08b3],
@@ -69,18 +70,18 @@ namespace UCD {
 
     /** Code Point Ranges for Alef
     [0622, 0623], [0625, 0625], [0627, 0627], [0671, 0673], [0675, 0675],
-    [0773, 0774]**/
+    [0773, 0774], [0870, 0882]**/
 
 
     namespace {
     const static UnicodeSet::run_t __alef_Set_runs[] = {
     {Empty, 49}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
-    {Empty, 34756}};
+    {Empty, 7}, {Mixed, 2}, {Empty, 34747}};
     const static UnicodeSet::bitquad_t  __alef_Set_quads[] = {
-    0x000000ac, 0x002e0000, 0x00180000};
+    0x000000ac, 0x002e0000, 0x00180000, 0xffff0000, 0x00000007};
     }
 
-    const static UnicodeSet alef_Set{const_cast<UnicodeSet::run_t *>(__alef_Set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__alef_Set_quads), 3, 0};
+    const static UnicodeSet alef_Set{const_cast<UnicodeSet::run_t *>(__alef_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__alef_Set_quads), 5, 0};
 
     /** Code Point Ranges for Beh
     [0628, 0628], [062a, 062b], [066e, 066e], [0679, 0680], [0750, 0756],
@@ -179,18 +180,18 @@ namespace UCD {
 
     /** Code Point Ranges for Gaf
     [063b, 063c], [06a9, 06a9], [06ab, 06ab], [06af, 06b4], [0762, 0764],
-    [08b0, 08b0], [08c2, 08c2]**/
+    [088d, 088d], [08b0, 08b0], [08c2, 08c2], [08c8, 08c8]**/
 
 
     namespace {
     const static UnicodeSet::run_t __gaf_Set_runs[] = {
     {Empty, 49}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 5}, {Mixed, 1},
-    {Empty, 9}, {Mixed, 2}, {Empty, 34745}};
+    {Empty, 8}, {Mixed, 3}, {Empty, 34745}};
     const static UnicodeSet::bitquad_t  __gaf_Set_quads[] = {
-    0x18000000, 0x001f8a00, 0x0000001c, 0x00010000, 0x00000004};
+    0x18000000, 0x001f8a00, 0x0000001c, 0x00002000, 0x00010000, 0x00000104};
     }
 
-    const static UnicodeSet gaf_Set{const_cast<UnicodeSet::run_t *>(__gaf_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__gaf_Set_quads), 5, 0};
+    const static UnicodeSet gaf_Set{const_cast<UnicodeSet::run_t *>(__gaf_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__gaf_Set_quads), 6, 0};
 
     /** Code Point Ranges for Gamal
     [0713, 0714], [072e, 072e]**/
@@ -207,19 +208,20 @@ namespace UCD {
 
     /** Code Point Ranges for Hah
     [062c, 062e], [0681, 0687], [06bf, 06bf], [0757, 0758], [076e, 076f],
-    [0772, 0772], [077c, 077c], [08a2, 08a2], [08c1, 08c1], [08c5, 08c6]**/
+    [0772, 0772], [077c, 077c], [088a, 088a], [08a2, 08a2], [08c1, 08c1],
+    [08c5, 08c6]**/
 
 
     namespace {
     const static UnicodeSet::run_t __hah_Set_runs[] = {
     {Empty, 49}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 4}, {Mixed, 2},
-    {Empty, 9}, {Mixed, 2}, {Empty, 34745}};
+    {Empty, 8}, {Mixed, 3}, {Empty, 34745}};
     const static UnicodeSet::bitquad_t  __hah_Set_quads[] = {
-    0x00007000, 0x000000fe, 0x80000000, 0x01800000, 0x1004c000, 0x00000004,
-    0x00000062};
+    0x00007000, 0x000000fe, 0x80000000, 0x01800000, 0x1004c000, 0x00000400,
+    0x00000004, 0x00000062};
     }
 
-    const static UnicodeSet hah_Set{const_cast<UnicodeSet::run_t *>(__hah_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__hah_Set_quads), 7, 0};
+    const static UnicodeSet hah_Set{const_cast<UnicodeSet::run_t *>(__hah_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__hah_Set_quads), 8, 0};
 
     /** Code Point Ranges for Teh_Marbuta_Goal
     [06c3, 06c3]**/
@@ -381,18 +383,18 @@ namespace UCD {
     const static UnicodeSet mim_Set{const_cast<UnicodeSet::run_t *>(__mim_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__mim_Set_quads), 1, 0};
 
     /** Code Point Ranges for Noon
-    [0646, 0646], [06b9, 06bc], [0767, 0769]**/
+    [0646, 0646], [06b9, 06bc], [0767, 0769], [0889, 0889]**/
 
 
     namespace {
     const static UnicodeSet::run_t __noon_Set_runs[] = {
     {Empty, 50}, {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 5}, {Mixed, 1},
-    {Empty, 34756}};
+    {Empty, 8}, {Mixed, 1}, {Empty, 34747}};
     const static UnicodeSet::bitquad_t  __noon_Set_quads[] = {
-    0x00000040, 0x1e000000, 0x00000380};
+    0x00000040, 0x1e000000, 0x00000380, 0x00000200};
     }
 
-    const static UnicodeSet noon_Set{const_cast<UnicodeSet::run_t *>(__noon_Set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__noon_Set_quads), 3, 0};
+    const static UnicodeSet noon_Set{const_cast<UnicodeSet::run_t *>(__noon_Set_runs), 9, 0, const_cast<UnicodeSet::bitquad_t *>(__noon_Set_quads), 4, 0};
 
     /** Code Point Ranges for Nun
     [0722, 0722]**/
@@ -421,7 +423,7 @@ namespace UCD {
     const static UnicodeSet pe_Set{const_cast<UnicodeSet::run_t *>(__pe_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__pe_Set_quads), 1, 0};
 
     /** Code Point Ranges for Qaf
-    [0642, 0642], [066f, 066f], [06a7, 06a8], [08a5, 08a5]**/
+    [0642, 0642], [066f, 066f], [06a7, 06a8], [08a5, 08a5], [08b5, 08b5]**/
 
 
     namespace {
@@ -429,7 +431,7 @@ namespace UCD {
     {Empty, 50}, {Mixed, 2}, {Empty, 1}, {Mixed, 1}, {Empty, 15},
     {Mixed, 1}, {Empty, 34746}};
     const static UnicodeSet::bitquad_t  __qaf_Set_quads[] = {
-    0x00000004, 0x00008000, 0x00000180, 0x00000020};
+    0x00000004, 0x00008000, 0x00000180, 0x00200020};
     }
 
     const static UnicodeSet qaf_Set{const_cast<UnicodeSet::run_t *>(__qaf_Set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__qaf_Set_quads), 4, 0};
@@ -557,18 +559,18 @@ namespace UCD {
     const static UnicodeSet swash_kaf_Set{const_cast<UnicodeSet::run_t *>(__swash_kaf_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__swash_kaf_Set_quads), 1, 0};
 
     /** Code Point Ranges for Tah
-    [0637, 0638], [069f, 069f], [08a3, 08a3]**/
+    [0637, 0638], [069f, 069f], [088b, 088c], [08a3, 08a3]**/
 
 
     namespace {
     const static UnicodeSet::run_t __tah_Set_runs[] = {
-    {Empty, 49}, {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 16},
-    {Mixed, 1}, {Empty, 34746}};
+    {Empty, 49}, {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 15},
+    {Mixed, 2}, {Empty, 34746}};
     const static UnicodeSet::bitquad_t  __tah_Set_quads[] = {
-    0x01800000, 0x80000000, 0x00000008};
+    0x01800000, 0x80000000, 0x00001800, 0x00000008};
     }
 
-    const static UnicodeSet tah_Set{const_cast<UnicodeSet::run_t *>(__tah_Set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__tah_Set_quads), 3, 0};
+    const static UnicodeSet tah_Set{const_cast<UnicodeSet::run_t *>(__tah_Set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__tah_Set_quads), 4, 0};
 
     /** Code Point Ranges for Taw
     [072c, 072c]**/
@@ -1381,6 +1383,32 @@ namespace UCD {
 
     const static UnicodeSet hanifi_rohingya_kinna_ya_Set{const_cast<UnicodeSet::run_t *>(__hanifi_rohingya_kinna_ya_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__hanifi_rohingya_kinna_ya_Set_quads), 2, 0};
 
+    /** Code Point Ranges for Thin_Yeh
+    [0886, 0886]**/
+
+
+    namespace {
+    const static UnicodeSet::run_t __thin_yeh_Set_runs[] = {
+    {Empty, 68}, {Mixed, 1}, {Empty, 34747}};
+    const static UnicodeSet::bitquad_t  __thin_yeh_Set_quads[] = {
+    0x00000040};
+    }
+
+    const static UnicodeSet thin_yeh_Set{const_cast<UnicodeSet::run_t *>(__thin_yeh_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__thin_yeh_Set_quads), 1, 0};
+
+    /** Code Point Ranges for Vertical_Tail
+    [088e, 088e]**/
+
+
+    namespace {
+    const static UnicodeSet::run_t __vertical_tail_Set_runs[] = {
+    {Empty, 68}, {Mixed, 1}, {Empty, 34747}};
+    const static UnicodeSet::bitquad_t  __vertical_tail_Set_quads[] = {
+    0x00004000};
+    }
+
+    const static UnicodeSet vertical_tail_Set{const_cast<UnicodeSet::run_t *>(__vertical_tail_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__vertical_tail_Set_quads), 1, 0};
+
     static EnumeratedPropertyObject property_object
         {jg,
         JG_ns::independent_prop_values,
@@ -1415,7 +1443,7 @@ namespace UCD {
         &malayalam_tta_Set, &malayalam_nna_Set, &malayalam_nnna_Set,
         &malayalam_bha_Set, &malayalam_ra_Set, &malayalam_lla_Set,
         &malayalam_llla_Set, &malayalam_ssa_Set, &hanifi_rohingya_pa_Set,
-        &hanifi_rohingya_kinna_ya_Set
+        &hanifi_rohingya_kinna_ya_Set, &thin_yeh_Set, &vertical_tail_Set
         }};
     }
 PropertyObject * get_JG_PropertyObject() {  return & JG_ns::property_object; }

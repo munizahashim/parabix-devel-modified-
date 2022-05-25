@@ -49,11 +49,12 @@ namespace UCD {
         [1f5b1, 1f5b2], [1f5bc, 1f5bc], [1f5c2, 1f5c4], [1f5d1, 1f5d3],
         [1f5dc, 1f5de], [1f5e1, 1f5e1], [1f5e3, 1f5e3], [1f5e8, 1f5e8],
         [1f5ef, 1f5ef], [1f5f3, 1f5f3], [1f5fa, 1f64f], [1f680, 1f6c5],
-        [1f6cb, 1f6d2], [1f6d5, 1f6d7], [1f6e0, 1f6e5], [1f6e9, 1f6e9],
+        [1f6cb, 1f6d2], [1f6d5, 1f6d7], [1f6dd, 1f6e5], [1f6e9, 1f6e9],
         [1f6eb, 1f6ec], [1f6f0, 1f6f0], [1f6f3, 1f6fc], [1f7e0, 1f7eb],
-        [1f90c, 1f93a], [1f93c, 1f945], [1f947, 1f978], [1f97a, 1f9cb],
-        [1f9cd, 1f9ff], [1fa70, 1fa74], [1fa78, 1fa7a], [1fa80, 1fa86],
-        [1fa90, 1faa8], [1fab0, 1fab6], [1fac0, 1fac2], [1fad0, 1fad6]**/
+        [1f7f0, 1f7f0], [1f90c, 1f93a], [1f93c, 1f945], [1f947, 1f9ff],
+        [1fa70, 1fa74], [1fa78, 1fa7c], [1fa80, 1fa86], [1fa90, 1faac],
+        [1fab0, 1faba], [1fac0, 1fac5], [1fad0, 1fad9], [1fae0, 1fae7],
+        [1faf0, 1faf6]**/
 
 
         namespace {
@@ -68,9 +69,8 @@ namespace UCD {
         {Mixed, 4}, {Empty, 5}, {Full, 1}, {Mixed, 1}, {Full, 2},
         {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Full, 7}, {Mixed, 1}, {Full, 1},
         {Mixed, 7}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Full, 2},
-        {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 8}, {Mixed, 4},
-        {Full, 2}, {Mixed, 1}, {Full, 1}, {Empty, 3}, {Mixed, 4},
-        {Empty, 30761}};
+        {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 8}, {Mixed, 3},
+        {Full, 5}, {Empty, 3}, {Mixed, 5}, {Empty, 30760}};
         const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
         0x03ff0408, 0x00004200, 0x10000000, 0x00000200, 0x02000004,
         0x03f00000, 0x00000600, 0x0c000000, 0x00000100, 0x00008000,
@@ -82,13 +82,12 @@ namespace UCD {
         0x00008000, 0xc0030000, 0x07fe4000, 0xffffffc0, 0x04000006,
         0x07fc8000, 0x00030000, 0xfffffff3, 0xcecfffff, 0xffb9ffff,
         0xbfffffff, 0x3fffffff, 0xffff7e00, 0x07f980ff, 0x00613c80,
-        0x10060130, 0x700e001c, 0xfc08810a, 0x0000ffff, 0x00e7f83f,
-        0x1ff91a3f, 0x00000fff, 0xfffff000, 0xf7ffffff, 0xffffffbf,
-        0xfdffffff, 0xffffefff, 0x071f0000, 0xffff007f, 0x007f01ff,
-        0x007f0007};
+        0x10060130, 0x700e001c, 0xfc08810a, 0x0000ffff, 0xe0e7f83f,
+        0x1ff91a3f, 0x00010fff, 0xfffff000, 0xf7ffffff, 0xffffffbf,
+        0x1f1f0000, 0xffff007f, 0x07ff1fff, 0x03ff003f, 0x007f00ff};
         }
 
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 62, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 66, 0};
+        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 60, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 65, 0};
 
         static BinaryPropertyObject property_object{emoji, std::move(codepoint_set)};
     }
@@ -144,7 +143,7 @@ PropertyObject * get_EMOJIMODIFIER_PropertyObject() {  return & EMOJIMODIFIER_ns
         [1f6c0, 1f6c0], [1f6cc, 1f6cc], [1f90c, 1f90c], [1f90f, 1f90f],
         [1f918, 1f91f], [1f926, 1f926], [1f930, 1f939], [1f93c, 1f93e],
         [1f977, 1f977], [1f9b5, 1f9b6], [1f9b8, 1f9b9], [1f9bb, 1f9bb],
-        [1f9cd, 1f9cf], [1f9d1, 1f9dd]**/
+        [1f9cd, 1f9cf], [1f9d1, 1f9dd], [1fac3, 1fac5], [1faf0, 1faf6]**/
 
 
         namespace {
@@ -153,15 +152,16 @@ PropertyObject * get_EMOJIMODIFIER_PropertyObject() {  return & EMOJIMODIFIER_ns
         {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 3}, {Mixed, 4},
         {Empty, 5}, {Mixed, 2}, {Empty, 5}, {Mixed, 1}, {Empty, 2},
         {Mixed, 2}, {Empty, 17}, {Mixed, 2}, {Empty, 1}, {Mixed, 1},
-        {Empty, 1}, {Mixed, 2}, {Empty, 30769}};
+        {Empty, 1}, {Mixed, 2}, {Empty, 7}, {Mixed, 2}, {Empty, 30760}};
         const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
         0x20000000, 0x02000000, 0x00003c00, 0x00000020, 0x00001c9c,
         0x0001ffcc, 0x11ffffc0, 0x000280ee, 0x00000400, 0x04300000,
         0x00610000, 0x0000f8e0, 0x00700008, 0x00001001, 0xff009000,
-        0x73ff0040, 0x00800000, 0x0b600000, 0x3ffee000};
+        0x73ff0040, 0x00800000, 0x0b600000, 0x3ffee000, 0x00000038,
+        0x007f0000};
         }
 
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 23, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 19, 0};
+        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 25, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 21, 0};
 
         static BinaryPropertyObject property_object{emojimodifierbase, std::move(codepoint_set)};
     }
@@ -184,11 +184,11 @@ PropertyObject * get_EMOJIMODIFIERBASE_PropertyObject() {  return & EMOJIMODIFIE
         [1f3f8, 1f43e], [1f440, 1f440], [1f442, 1f4fc], [1f4ff, 1f53d],
         [1f54b, 1f54e], [1f550, 1f567], [1f57a, 1f57a], [1f595, 1f596],
         [1f5a4, 1f5a4], [1f5fb, 1f64f], [1f680, 1f6c5], [1f6cc, 1f6cc],
-        [1f6d0, 1f6d2], [1f6d5, 1f6d7], [1f6eb, 1f6ec], [1f6f4, 1f6fc],
-        [1f7e0, 1f7eb], [1f90c, 1f93a], [1f93c, 1f945], [1f947, 1f978],
-        [1f97a, 1f9cb], [1f9cd, 1f9ff], [1fa70, 1fa74], [1fa78, 1fa7a],
-        [1fa80, 1fa86], [1fa90, 1faa8], [1fab0, 1fab6], [1fac0, 1fac2],
-        [1fad0, 1fad6]**/
+        [1f6d0, 1f6d2], [1f6d5, 1f6d7], [1f6dd, 1f6df], [1f6eb, 1f6ec],
+        [1f6f4, 1f6fc], [1f7e0, 1f7eb], [1f7f0, 1f7f0], [1f90c, 1f93a],
+        [1f93c, 1f945], [1f947, 1f9ff], [1fa70, 1fa74], [1fa78, 1fa7c],
+        [1fa80, 1fa86], [1fa90, 1faac], [1fab0, 1faba], [1fac0, 1fac5],
+        [1fad0, 1fad9], [1fae0, 1fae7], [1faf0, 1faf6]**/
 
 
         namespace {
@@ -201,9 +201,8 @@ PropertyObject * get_EMOJIMODIFIERBASE_PropertyObject() {  return & EMOJIMODIFIE
         {Full, 1}, {Mixed, 2}, {Full, 1}, {Mixed, 2}, {Full, 1}, {Mixed, 2},
         {Full, 4}, {Mixed, 1}, {Full, 1}, {Mixed, 5}, {Empty, 1},
         {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Full, 2},
-        {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 8}, {Mixed, 4},
-        {Full, 2}, {Mixed, 1}, {Full, 1}, {Empty, 3}, {Mixed, 4},
-        {Empty, 30761}};
+        {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 8}, {Mixed, 3},
+        {Full, 5}, {Empty, 3}, {Mixed, 5}, {Empty, 30760}};
         const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
         0x0c000000, 0x00091e00, 0x60000000, 0x00300000, 0x000fff00,
         0x80000000, 0x00080000, 0x60000c02, 0x00104030, 0x242c0400,
@@ -212,13 +211,12 @@ PropertyObject * get_EMOJIMODIFIERBASE_PropertyObject() {  return & EMOJIMODIFIE
         0xffffffc0, 0x04000002, 0x077c8000, 0x00030000, 0xffbfe001,
         0xdfffffff, 0x000fffff, 0x000f87ff, 0xff11ffff, 0x7fffffff,
         0xfffffffd, 0x9fffffff, 0x3fffffff, 0xffff7800, 0x040000ff,
-        0x00600000, 0x00000010, 0xf8000000, 0x0000ffff, 0x00e7103f,
-        0x1ff01800, 0x00000fff, 0xfffff000, 0xf7ffffff, 0xffffffbf,
-        0xfdffffff, 0xffffefff, 0x071f0000, 0xffff007f, 0x007f01ff,
-        0x007f0007};
+        0x00600000, 0x00000010, 0xf8000000, 0x0000ffff, 0xe0e7103f,
+        0x1ff01800, 0x00010fff, 0xfffff000, 0xf7ffffff, 0xffffffbf,
+        0x1f1f0000, 0xffff007f, 0x07ff1fff, 0x03ff003f, 0x007f00ff};
         }
 
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 52, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 51, 0};
+        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 50, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 50, 0};
 
         static BinaryPropertyObject property_object{emojipresentation, std::move(codepoint_set)};
     }

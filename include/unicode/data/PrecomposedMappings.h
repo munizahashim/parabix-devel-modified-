@@ -1,7 +1,7 @@
 #ifndef PRECOMPOSEDMAPPINGS_H
 #define PRECOMPOSEDMAPPINGS_H
 /*
- *  Copyright (c) 2020 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
