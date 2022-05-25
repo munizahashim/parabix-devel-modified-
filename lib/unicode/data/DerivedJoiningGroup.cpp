@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -1386,7 +1386,7 @@ namespace UCD {
         JG_ns::independent_prop_values,
         std::move(JG_ns::enum_names),
         std::move(JG_ns::value_names),
-        std::move(JG_ns::aliases_only_map),{
+        std::move(JG_ns::aliases),{
         &no_joining_group_Set, &ain_Set, &alaph_Set, &alef_Set, &beh_Set,
         &beth_Set, &dal_Set, &dalath_rish_Set, &e_Set, &feh_Set,
         &final_semkath_Set, &gaf_Set, &gamal_Set, &hah_Set,

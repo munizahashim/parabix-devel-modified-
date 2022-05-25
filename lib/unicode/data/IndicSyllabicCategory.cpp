@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -994,7 +994,7 @@ namespace UCD {
         INSC_ns::independent_prop_values,
         std::move(INSC_ns::enum_names),
         std::move(INSC_ns::value_names),
-        std::move(INSC_ns::aliases_only_map),{
+        std::move(INSC_ns::aliases),{
         &other_Set, &bindu_Set, &visarga_Set, &avagraha_Set, &nukta_Set,
         &virama_Set, &pure_killer_Set, &invisible_stacker_Set,
         &vowel_independent_Set, &vowel_dependent_Set, &vowel_Set,

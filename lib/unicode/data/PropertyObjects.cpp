@@ -155,11 +155,10 @@ const std::string & EnumeratedPropertyObject::GetPropertyValueGrepString() {
             buffer << property_value_full_names[i] + "\n";
         }
         for (unsigned i = 0; i != property_value_enum_names.size(); i++) {
-            if (property_value_enum_names[i] == property_value_full_names[i]) continue;
             buffer << property_value_enum_names[i] + "\n";
         }
-        for (auto & a : property_value_aliases) {
-            buffer << a.first + "\n";
+        for (unsigned i = 0; i != property_value_aliases.size(); i++) {
+            buffer << property_value_aliases[i] + "\n";
         }
         mPropertyValueGrepString = buffer.str();
     }
@@ -171,15 +170,18 @@ int EnumeratedPropertyObject::GetPropertyValueEnumCode(const std::string & value
     // to save space in the executable.   Add them if the property is used.
     if (uninitialized) {
         for (unsigned i = 0; i != property_value_full_names.size(); i++) {
-            property_value_aliases.insert({canonicalize_value_name(property_value_full_names[i]), i});
+            enum_name_map.insert({canonicalize_value_name(property_value_full_names[i]), i});
         }
         for (unsigned i = 0; i != property_value_enum_names.size(); i++) {
-            property_value_aliases.insert({canonicalize_value_name(property_value_enum_names[i]), i});
+            enum_name_map.insert({canonicalize_value_name(property_value_enum_names[i]), i});
+        }
+        for (unsigned i = 0; i != property_value_aliases.size(); i++) {
+            enum_name_map.insert({canonicalize_value_name(property_value_aliases[i]), i});
         }
         uninitialized = false;
     }
-    const auto valit = property_value_aliases.find(canonicalize_value_name(value_spec));
-    if (valit == property_value_aliases.end())
+    const auto valit = enum_name_map.find(canonicalize_value_name(value_spec));
+    if (valit == enum_name_map.end())
         return -1;
     return valit->second;
 }

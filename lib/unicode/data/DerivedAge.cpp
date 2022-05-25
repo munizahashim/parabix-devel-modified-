@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -1417,7 +1417,7 @@ namespace UCD {
         AGE_ns::independent_prop_values,
         std::move(AGE_ns::enum_names),
         std::move(AGE_ns::value_names),
-        std::move(AGE_ns::aliases_only_map),{
+        std::move(AGE_ns::aliases),{
         &unassigned_Set, &v1_1_Set, &v2_0_Set, &v2_1_Set, &v3_0_Set,
         &v3_1_Set, &v3_2_Set, &v4_0_Set, &v4_1_Set, &v5_0_Set, &v5_1_Set,
         &v5_2_Set, &v6_0_Set, &v6_1_Set, &v6_2_Set, &v6_3_Set, &v7_0_Set,

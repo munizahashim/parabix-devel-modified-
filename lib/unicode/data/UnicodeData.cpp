@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -43535,7 +43535,7 @@ PropertyObject * get_NA_PropertyObject() {  return & NA_ns::property_object; }
         23110, 23114, 23118, 23122, 23126, 23131, 23135, 23139, 23143,
         23147, 23151, 23155, 23160, 23164, 23169, 23174, 23179, 23183,
         23187, 23191, 23195, 23199, 23203, 23207, 23211, 23216};
-        const static char string_buffer alignas(64) [23296] = u8R"__(
+        const static char string_buffer alignas(64) [23296] = u8R"__( 
  ̈
 a
  ̄

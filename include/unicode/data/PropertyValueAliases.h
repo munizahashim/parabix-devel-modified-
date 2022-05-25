@@ -1,7 +1,7 @@
 #ifndef PROPERTYVALUEALIASES_H
 #define PROPERTYVALUEALIASES_H
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -41,19 +41,10 @@ namespace UCD {
             "V4_0", "V4_1", "V5_0", "V5_1", "V5_2", "V6_0", "V6_1", "V6_2",
             "V6_3", "V7_0", "V8_0", "V9_0", "V10_0", "V11_0", "V12_0",
             "V12_1", "V13_0"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"1.1", AGE_ns::V1_1}, {"10.0", AGE_ns::V10_0},
-            {"11.0", AGE_ns::V11_0}, {"12.0", AGE_ns::V12_0},
-            {"12.1", AGE_ns::V12_1}, {"13.0", AGE_ns::V13_0},
-            {"2.0", AGE_ns::V2_0}, {"2.1", AGE_ns::V2_1},
-            {"3.0", AGE_ns::V3_0}, {"3.1", AGE_ns::V3_1},
-            {"3.2", AGE_ns::V3_2}, {"4.0", AGE_ns::V4_0},
-            {"4.1", AGE_ns::V4_1}, {"5.0", AGE_ns::V5_0},
-            {"5.1", AGE_ns::V5_1}, {"5.2", AGE_ns::V5_2},
-            {"6.0", AGE_ns::V6_0}, {"6.1", AGE_ns::V6_1},
-            {"6.2", AGE_ns::V6_2}, {"6.3", AGE_ns::V6_3},
-            {"7.0", AGE_ns::V7_0}, {"8.0", AGE_ns::V8_0},
-            {"9.0", AGE_ns::V9_0}, {"na", AGE_ns::Unassigned}}};
+        const static std::vector<std::string> aliases = {{
+            "NA", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1",
+            "5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "6.3", "7.0", "8.0",
+            "9.0", "10.0", "11.0", "12.0", "12.1", "13.0"}};
     }
 
     namespace BLK_ns {
@@ -325,11 +316,30 @@ namespace UCD {
             "Variation_Selectors_Supplement",
             "Supplementary_Private_Use_Area_A",
             "Supplementary_Private_Use_Area_B"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"canadiansyllabics", BLK_ns::UCAS},
-            {"combiningmarksforsymbols", BLK_ns::Diacriticals_For_Symbols},
-            {"cyrillicsupplementary", BLK_ns::Cyrillic_Sup},
-            {"latin1", BLK_ns::Latin_1_Sup}, {"privateuse", BLK_ns::PUA}}};
+        const static std::vector<std::string> aliases = {{
+            "", "", "Latin_1", "", "", "", "", "", "", "",
+            "Cyrillic_Supplementary", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "Canadian_Syllabics", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "",
+            "Combining_Marks_For_Symbols", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "Private_Use", "", "",
+            "Arabic_Presentation_Forms-A", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            ""}};
     }
 
     namespace SC_ns {
@@ -407,8 +417,17 @@ namespace UCD {
             "Nandinagari", "Nyiakeng_Puachue_Hmong", "Wancho", "Chorasmian",
             "Dives_Akuru", "Khitan_Small_Script", "Yezidi",
             "Katakana_Or_Hiragana"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"qaac", SC_ns::Copt}, {"qaai", SC_ns::Zinh}}};
+        const static std::vector<std::string> aliases = {{
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "Qaai", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "Qaac", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""}};
     }
 
     namespace BC_ns {
@@ -429,7 +448,7 @@ namespace UCD {
             "Right_To_Left_Embedding", "Pop_Directional_Format",
             "Left_To_Right_Isolate", "Right_To_Left_Isolate",
             "First_Strong_Isolate", "Pop_Directional_Isolate"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -440,7 +459,7 @@ namespace UCD {
             "n", "o", "c"};
         const static std::vector<std::string> value_names = {
             "None", "Open", "Close"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -480,33 +499,13 @@ namespace UCD {
             "Above_Left", "Above", "Above_Right", "Double_Below",
             "Double_Above", "Iota_Subscript", "CCC133",
             "Attached_Below_Left"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"0", CCC_ns::NR}, {"1", CCC_ns::OV}, {"10", CCC_ns::CCC10},
-            {"103", CCC_ns::CCC103}, {"107", CCC_ns::CCC107},
-            {"11", CCC_ns::CCC11}, {"118", CCC_ns::CCC118},
-            {"12", CCC_ns::CCC12}, {"122", CCC_ns::CCC122},
-            {"129", CCC_ns::CCC129}, {"13", CCC_ns::CCC13},
-            {"130", CCC_ns::CCC130}, {"132", CCC_ns::CCC132},
-            {"133", CCC_ns::CCC133}, {"14", CCC_ns::CCC14},
-            {"15", CCC_ns::CCC15}, {"16", CCC_ns::CCC16},
-            {"17", CCC_ns::CCC17}, {"18", CCC_ns::CCC18},
-            {"19", CCC_ns::CCC19}, {"20", CCC_ns::CCC20},
-            {"200", CCC_ns::ATBL}, {"202", CCC_ns::ATB},
-            {"21", CCC_ns::CCC21}, {"214", CCC_ns::ATA},
-            {"216", CCC_ns::ATAR}, {"218", CCC_ns::BL},
-            {"22", CCC_ns::CCC22}, {"220", CCC_ns::B}, {"222", CCC_ns::BR},
-            {"224", CCC_ns::L}, {"226", CCC_ns::R}, {"228", CCC_ns::AL},
-            {"23", CCC_ns::CCC23}, {"230", CCC_ns::A}, {"232", CCC_ns::AR},
-            {"233", CCC_ns::DB}, {"234", CCC_ns::DA}, {"24", CCC_ns::CCC24},
-            {"240", CCC_ns::IS}, {"25", CCC_ns::CCC25},
-            {"26", CCC_ns::CCC26}, {"27", CCC_ns::CCC27},
-            {"28", CCC_ns::CCC28}, {"29", CCC_ns::CCC29},
-            {"30", CCC_ns::CCC30}, {"31", CCC_ns::CCC31},
-            {"32", CCC_ns::CCC32}, {"33", CCC_ns::CCC33},
-            {"34", CCC_ns::CCC34}, {"35", CCC_ns::CCC35},
-            {"36", CCC_ns::CCC36}, {"6", CCC_ns::HANR}, {"7", CCC_ns::NK},
-            {"8", CCC_ns::KV}, {"84", CCC_ns::CCC84}, {"9", CCC_ns::VR},
-            {"91", CCC_ns::CCC91}}};
+        const static std::vector<std::string> aliases = {{
+            "0", "1", "6", "7", "8", "9", "10", "11", "12", "13", "14",
+            "15", "16", "17", "18", "19", "20", "21", "22", "23", "24",
+            "25", "26", "27", "28", "29", "30", "31", "32", "33", "34",
+            "35", "36", "84", "91", "103", "107", "118", "122", "129",
+            "130", "132", "202", "214", "216", "218", "220", "222", "224",
+            "226", "228", "230", "232", "233", "234", "240", "133", "200"}};
     }
 
     namespace DT_ns {
@@ -520,8 +519,9 @@ namespace UCD {
             "None", "Canonical", "Compat", "Font", "Nobreak", "Initial",
             "Medial", "Final", "Isolated", "Circle", "Super", "Sub",
             "Vertical", "Wide", "Narrow", "Small", "Square", "Fraction"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            }};
+        const static std::vector<std::string> aliases = {{
+            "none", "can", "com", "font", "nb", "init", "med", "fin", "iso",
+            "enc", "sup", "sub", "vert", "wide", "nar", "sml", "sqr", "fra"}};
     }
 
     namespace EA_ns {
@@ -532,7 +532,7 @@ namespace UCD {
         const static std::vector<std::string> value_names = {
             "Neutral", "Narrow", "Ambiguous", "Wide", "Halfwidth",
             "Fullwidth"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -559,9 +559,10 @@ namespace UCD {
             "Initial_Punctuation", "Final_Punctuation", "Other", "Letter",
             "Cased_Letter", "Mark", "Number", "Punctuation", "Symbol",
             "Separator"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"cntrl", GC_ns::Cc}, {"combiningmark", GC_ns::M},
-            {"digit", GC_ns::Nd}, {"punct", GC_ns::P}}};
+        const static std::vector<std::string> aliases = {{
+            "", "", "", "", "", "", "", "", "", "digit", "", "", "", "", "",
+            "cntrl", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "Combining_Mark", "", "punct", "", ""}};
     }
 
     namespace GCB_ns {
@@ -575,7 +576,7 @@ namespace UCD {
             "Other", "Prepend", "CR", "LF", "Control", "Extend",
             "Regional_Indicator", "SpacingMark", "L", "V", "T", "LV", "LVT",
             "ZWJ", "E_Base", "E_Base_GAZ", "E_Modifier", "Glue_After_Zwj"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -587,7 +588,7 @@ namespace UCD {
         const static std::vector<std::string> value_names = {
             "Not_Applicable", "Leading_Jamo", "Vowel_Jamo", "Trailing_Jamo",
             "LV_Syllable", "LVT_Syllable"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -609,7 +610,7 @@ namespace UCD {
             "Top_And_Left", "Top_And_Left_And_Right", "Bottom_And_Right",
             "Bottom_And_Left", "Top_And_Bottom_And_Right",
             "Top_And_Bottom_And_Left", "Overstruck"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -652,7 +653,7 @@ namespace UCD {
             "Register_Shifter", "Syllable_Modifier", "Consonant_Killer",
             "Non_Joiner", "Joiner", "Number_Joiner", "Number",
             "Brahmi_Joining_Number"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -728,7 +729,7 @@ namespace UCD {
             "Malayalam_Nnna", "Malayalam_Bha", "Malayalam_Ra",
             "Malayalam_Lla", "Malayalam_Llla", "Malayalam_Ssa",
             "Hanifi_Rohingya_Pa", "Hanifi_Rohingya_Kinna_Ya"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -740,7 +741,7 @@ namespace UCD {
         const static std::vector<std::string> value_names = {
             "Non_Joining", "Join_Causing", "Dual_Joining", "Right_Joining",
             "Left_Joining", "Transparent"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -767,8 +768,10 @@ namespace UCD {
             "Word_Joiner", "Ideographic", "E_Base",
             "Conditional_Japanese_Starter", "H2", "H3", "Surrogate",
             "Contingent_Break", "Regional_Indicator", "E_Modifier"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
-            {"inseperable", LB_ns::IN}}};
+        const static std::vector<std::string> aliases = {{
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            "Inseperable", "", "", "", "", "", "", "", "", "", ""}};
     }
 
     namespace NFC_QC_ns {
@@ -778,7 +781,7 @@ namespace UCD {
             "Y", "N", "M"};
         const static std::vector<std::string> value_names = {
             "Yes", "No", "Maybe"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -789,7 +792,7 @@ namespace UCD {
             "Y", "N"};
         const static std::vector<std::string> value_names = {
             "Yes", "No"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -800,7 +803,7 @@ namespace UCD {
             "Y", "N", "M"};
         const static std::vector<std::string> value_names = {
             "Yes", "No", "Maybe"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -811,7 +814,7 @@ namespace UCD {
             "Y", "N"};
         const static std::vector<std::string> value_names = {
             "Yes", "No"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -822,7 +825,7 @@ namespace UCD {
             "None", "Nu", "Di", "De"};
         const static std::vector<std::string> value_names = {
             "None", "Numeric", "Digit", "Decimal"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -836,7 +839,7 @@ namespace UCD {
             "Other", "CR", "LF", "Extend", "Sep", "Format", "Sp", "Lower",
             "Upper", "OLetter", "Numeric", "ATerm", "STerm", "Close",
             "SContinue"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -848,7 +851,7 @@ namespace UCD {
         const static std::vector<std::string> value_names = {
             "Rotated", "Upright", "Transformed_Rotated",
             "Transformed_Upright"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 
@@ -866,7 +869,7 @@ namespace UCD {
             "Katakana", "ALetter", "MidLetter", "MidNum", "MidNumLet",
             "Numeric", "ExtendNumLet", "ZWJ", "WSegSpace", "E_Base",
             "E_Base_GAZ", "E_Modifier", "Glue_After_Zwj"};
-        static std::unordered_map<std::string, int> aliases_only_map {{
+        const static std::vector<std::string> aliases = {{
             }};
     }
 }

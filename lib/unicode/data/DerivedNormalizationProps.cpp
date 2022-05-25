@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -494,7 +494,7 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
         NFC_QC_ns::independent_prop_values,
         std::move(NFC_QC_ns::enum_names),
         std::move(NFC_QC_ns::value_names),
-        std::move(NFC_QC_ns::aliases_only_map),{
+        std::move(NFC_QC_ns::aliases),{
         &y_Set, &n_Set, &m_Set
         }};
     }
@@ -687,7 +687,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
         NFD_QC_ns::independent_prop_values,
         std::move(NFD_QC_ns::enum_names),
         std::move(NFD_QC_ns::value_names),
-        std::move(NFD_QC_ns::aliases_only_map),{
+        std::move(NFD_QC_ns::aliases),{
         &y_Set, &n_Set
         }};
     }
@@ -8892,7 +8892,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
         NFKC_QC_ns::independent_prop_values,
         std::move(NFKC_QC_ns::enum_names),
         std::move(NFKC_QC_ns::value_names),
-        std::move(NFKC_QC_ns::aliases_only_map),{
+        std::move(NFKC_QC_ns::aliases),{
         &y_Set, &n_Set, &m_Set
         }};
     }
@@ -9211,7 +9211,7 @@ PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_o
         NFKD_QC_ns::independent_prop_values,
         std::move(NFKD_QC_ns::enum_names),
         std::move(NFKD_QC_ns::value_names),
-        std::move(NFKD_QC_ns::aliases_only_map),{
+        std::move(NFKD_QC_ns::aliases),{
         &y_Set, &n_Set
         }};
     }

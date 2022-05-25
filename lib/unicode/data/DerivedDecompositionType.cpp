@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -636,7 +636,7 @@ namespace UCD {
         DT_ns::independent_prop_values,
         std::move(DT_ns::enum_names),
         std::move(DT_ns::value_names),
-        std::move(DT_ns::aliases_only_map),{
+        std::move(DT_ns::aliases),{
         &none_Set, &can_Set, &com_Set, &font_Set, &nb_Set, &init_Set,
         &med_Set, &fin_Set, &iso_Set, &enc_Set, &sup_Set, &sub_Set,
         &vert_Set, &wide_Set, &nar_Set, &sml_Set, &sqr_Set, &fra_Set

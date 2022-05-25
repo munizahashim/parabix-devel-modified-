@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -312,7 +312,7 @@ PropertyObject * get_BPB_PropertyObject() {  return & BPB_ns::property_object; }
         BPT_ns::independent_prop_values,
         std::move(BPT_ns::enum_names),
         std::move(BPT_ns::value_names),
-        std::move(BPT_ns::aliases_only_map),{
+        std::move(BPT_ns::aliases),{
         &n_Set, &o_Set, &c_Set
         }};
     }

@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -321,7 +321,7 @@ namespace UCD {
         EA_ns::independent_prop_values,
         std::move(EA_ns::enum_names),
         std::move(EA_ns::value_names),
-        std::move(EA_ns::aliases_only_map),{
+        std::move(EA_ns::aliases),{
         &n_Set, &na_Set, &a_Set, &w_Set, &h_Set, &f_Set
         }};
     }
