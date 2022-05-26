@@ -186,31 +186,7 @@ struct PropertyStandardization : public RE_Transformer {
         auto * propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
         if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
             int val_code = obj->GetPropertyValueEnumCode(canon);
-            int enum_count = obj->GetEnumCount();
-            bool lt_0 = (op == PropertyExpression::Operator::Less) && (val_code == 0);
-            bool gt_count = (op == PropertyExpression::Operator::Greater) && (val_code == enum_count);
-            if (lt_0 || gt_count) {
-                // Impossible property.
-                return makeAlt();
-            }
-            bool ge_0 = (op == PropertyExpression::Operator::GEq) && (val_code == 0);
-            bool le_count = (op == PropertyExpression::Operator::LEq) && (val_code == enum_count);
-            if (ge_0 || le_count) {  // always true cases
-                return makeAny();
-            }
-            bool le_0 = (op == PropertyExpression::Operator::LEq) && (val_code == 0);
-            bool ge_count = (op == PropertyExpression::Operator::GEq) && (val_code == enum_count);
             if (val_code < 0) return exp;
-            if (le_0 || ge_count) {  // Equality cases
-                exp->setOperator(PropertyExpression::Operator::Eq);
-            } else if (op == PropertyExpression::Operator::LEq) {
-                // Standardize to Less.
-                val_code += 1;
-                exp->setOperator(PropertyExpression::Operator::Less);
-            } else if (op == PropertyExpression::Operator::GEq) {
-                val_code -= 1;
-                exp->setOperator(PropertyExpression::Operator::Greater);
-            }
             exp->setValueString(obj->GetValueFullName(val_code));
             return exp;
         }
@@ -218,31 +194,13 @@ struct PropertyStandardization : public RE_Transformer {
             int val_code = obj->GetPropertyValueEnumCode(canon);
             // Standardize binary properties to positive form with an empty value string.
             if (val_code < 0) return exp;
-            bool lt_F = (op == PropertyExpression::Operator::Less) && (val_code == 0);
-            bool lt_T = (op == PropertyExpression::Operator::Less) && (val_code == 1);
-            bool le_F = (op == PropertyExpression::Operator::LEq) && (val_code == 0);
-            bool le_T = (op == PropertyExpression::Operator::LEq) && (val_code == 1);
-            //bool gt_F = (op == PropertyExpression::Operator::Greater) && (val_code == 0);
-            bool gt_T = (op == PropertyExpression::Operator::Greater) && (val_code == 1);
-            bool ge_F = (op == PropertyExpression::Operator::GEq) && (val_code == 0);
-            //bool ge_T = (op == PropertyExpression::Operator::GEq) && (val_code == 1);
-            if (le_T || ge_F) {
-                // All possible enum values.   Standardize to \p{any}.
-                return makeAny();
-            }
-            if (lt_F || gt_T) {
-                // No values.   return failure.
-                return makeAlt();
-            }
             bool eq_F = (op == PropertyExpression::Operator::Eq) && (val_code == 0);
-            //bool eq_T = (op == PropertyExpression::Operator::Eq) && (val_code == 1);
-            //bool ne_F = (op == PropertyExpression::Operator::NEq) && (val_code == 0);
             bool ne_T = (op == PropertyExpression::Operator::NEq) && (val_code == 1);
-            if (lt_T || le_F || eq_F || ne_T) {
+            if (eq_F || ne_T) {
                 // negated property.
                 exp->setOperator(PropertyExpression::Operator::NEq);
                 exp->setValueString("");
-            } else { /*  if (gt_F || ge_T || eq_T || ne_F)  positive properties.  */
+            } else { /*  if (eq_T || ne_F)  positive properties.  */
                 exp->setOperator(PropertyExpression::Operator::Eq);
                 exp->setValueString("");
             }
@@ -290,11 +248,7 @@ struct PropertyExternalizer : public RE_Transformer {
         std::string id = exp->getPropertyIdentifier();
         std::string val_str = exp->getValueString();
         std::string op_str = "";
-        if (op == PropertyExpression::Operator::Less) op_str = "<";
-        else if (op == PropertyExpression::Operator::LEq) op_str = "<=";
-        else if (op == PropertyExpression::Operator::Greater) op_str = ">";
-        else if (op == PropertyExpression::Operator::GEq) op_str = ">=";
-        else if (op == PropertyExpression::Operator::NEq) op_str = "!=";
+        if (op == PropertyExpression::Operator::NEq) op_str = "!=";
         val_str = op_str + val_str;
         Name * externName;
         if (exp->getKind() == PropertyExpression::Kind::Codepoint) {

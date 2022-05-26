@@ -54,6 +54,19 @@ EnumeratedProperty_template = r"""
             %s};
         const static std::vector<std::string> value_names = {
             %s};
+        const static std::vector<std::string> aliases = {{
+            %s}};
+    }
+"""
+
+BinaryProperty_template = r"""
+    namespace %s_ns {
+        enum value_t {
+            %s};
+        const static std::vector<std::string> enum_names = {
+            %s};
+        const static std::vector<std::string> value_names = {
+            %s};
         static std::unordered_map<std::string, int> aliases_only_map {{
             %s}};
     }
@@ -207,7 +220,7 @@ def emit_enumerated_property(f, property_code, independent_prop_values, prop_val
     f.write("        %s_ns::independent_prop_values,\n" % property_code.upper())
     f.write("        std::move(%s_ns::enum_names),\n" % property_code.upper())
     f.write("        std::move(%s_ns::value_names),\n" % property_code.upper())
-    f.write("        std::move(%s_ns::aliases_only_map),{\n" % property_code.upper())
+    f.write("        std::move(%s_ns::aliases),{\n" % property_code.upper())
     f.write("        " + cformat.multiline_fill(set_list, ',', 8))
     f.write("\n        }};"
             "\n    }\n")
@@ -378,7 +391,7 @@ class UCD_generator():
         full_name_text = cformat.multiline_fill(['"No"', '"Yes"'], ',', 12)
         binary_properties = ['{"n", N}', '{"y", Y}', '{"no", N}', '{"yes", Y}', '{"f", N}', '{"t", Y}', '{"false", N}', '{"true", Y}']
         binary_map_text = cformat.multiline_fill(binary_properties, ',', 12)
-        f.write(EnumeratedProperty_template % ('Binary', enum_text, enum_names, full_name_text, binary_map_text))
+        f.write(BinaryProperty_template % ('Binary', enum_text, enum_names, full_name_text, binary_map_text))
         #
         for p in self.property_enum_name_list:
             po = self.property_object_map[p]
@@ -397,14 +410,15 @@ class UCD_generator():
                 canon_full_names = [canonicalize(name) for name in full_names]
                 canon_enums = [canonicalize(e) for e in ordered_enum_list]
                 canon_keys = [canonicalize(k) for k in po.property_value_lookup_map.keys()]
-                aliases_only = []
-                for k in canon_keys:
-                    if k in canon_enums: continue
-                    if k in canon_full_names: continue
-                    if k in aliases_only: continue
-                    aliases_only.append(k)
-                map_text = cformat.multiline_fill(['{"%s", %s_ns::%s}' % (k, p.upper(), po.property_value_lookup_map[k]) for k in sorted(aliases_only)], ',', 12)
-                f.write(EnumeratedProperty_template % (p.upper(), enum_text, enum_names, full_name_text, map_text))
+                alias_text = ""
+                for k in range(po.max_aliases):
+                    alias_list = []
+                    for e in ordered_enum_list:
+                        if len(po.alias_map[e]) <= k: alias_list.append("")
+                        else:
+                            alias_list.append(po.alias_map[e][k-1])
+                    alias_text += cformat.multiline_fill(['"%s"' % name for name in alias_list], ',', 12)
+                f.write(EnumeratedProperty_template % (p.upper(), enum_text, enum_names, full_name_text, alias_text))
         f.write("}\n")
         cformat.close_header_file(f)
 
