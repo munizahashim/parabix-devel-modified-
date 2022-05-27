@@ -2,6 +2,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <string>
 
 namespace re {
 class RE; class Capture; class Reference; class Name;
