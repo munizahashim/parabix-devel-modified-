@@ -920,7 +920,7 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSe
     // new capacity 1
     b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryArray, {traceIndex, ONE}));
     // produced item count 2
-    Value * const produced = mAlreadyProducedPhi[outputPort];
+    Value * const produced = mCurrentProducedItemCountPhi[outputPort];
     b->CreateStore(produced, b->CreateGEP(entryArray, {traceIndex, TWO}));
 
     // consumer processed item count [3,n)

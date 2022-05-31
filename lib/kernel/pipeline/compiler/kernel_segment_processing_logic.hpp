@@ -56,9 +56,7 @@ void PipelineCompiler::start(BuilderRef b) {
 
     mKernel = nullptr;
     mKernelId = 0;
-    mNumOfAddressableItemCount = 0;
     mAddressableItemCountPtr.clear();
-    mNumOfVirtualBaseAddresses = 0;
     mVirtualBaseAddressPtr.clear();
     mNumOfTruncatedInputBuffers = 0;
     mTruncatedInputBuffer.clear();
@@ -88,7 +86,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
-    mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually);
+    mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually) || recordsAnyHistogramData();
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
@@ -116,7 +114,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         }
     }
 
-    mMayLoopToEntry = mExecuteStridesIndividually || mIsOptimizationBranch;
+    mMayLoopToEntry = mIsOptimizationBranch;
     if (LLVM_LIKELY(!mKernelIsInternallySynchronized)) {
         if (mHasExplicitFinalPartialStride || (mCheckInputChannels && hasAtLeastOneNonGreedyInput())) {
             mMayLoopToEntry = true;
@@ -485,15 +483,18 @@ inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
         const BufferPort & br = mBufferGraph[e];
         const auto port = br.Port;
         const auto prefix = makeBufferName(mKernelId, port);
-        mAlreadyProcessedPhi[port] = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProcessed");
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProcessed");
+        mAlreadyProcessedPhi[port] = phi;
+        mCurrentProcessedItemCountPhi[port] = phi;
         assert (mInitiallyProcessedItemCount[port]);
-        mAlreadyProcessedPhi[port]->addIncoming(mInitiallyProcessedItemCount[port], mKernelLoopStart);
+        phi->addIncoming(mInitiallyProcessedItemCount[port], mKernelLoopStart);
         Value * const value = mInitiallyProcessedDeferredItemCount[port];
         if (value) {
             PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProcessedDeferred");
             assert (phi);
             phi->addIncoming(value, mKernelLoopStart);
             mAlreadyProcessedDeferredPhi[port] = phi;
+            mCurrentProcessedDeferredItemCountPhi[port] = phi;
         }
     }
 
@@ -502,12 +503,16 @@ inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
         const auto port = br.Port;
         const auto prefix = makeBufferName(mKernelId, port);
         const auto streamSet = target(e, mBufferGraph);
-        mAlreadyProducedPhi[port] = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProduced");
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProduced");
+        mAlreadyProducedPhi[port] = phi;
+        mCurrentProducedItemCountPhi[port] = phi;
         assert (mInitiallyProducedItemCount[streamSet]);
-        mAlreadyProducedPhi[port]->addIncoming(mInitiallyProducedItemCount[streamSet], mKernelLoopStart);
+        phi->addIncoming(mInitiallyProducedItemCount[streamSet], mKernelLoopStart);
         if (mInitiallyProducedDeferredItemCount[streamSet]) {
-            mAlreadyProducedDeferredPhi[port] = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProducedDeferred");
-            mAlreadyProducedDeferredPhi[port]->addIncoming(mInitiallyProducedDeferredItemCount[streamSet], mKernelLoopStart);
+            PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_alreadyProducedDeferred");
+            mAlreadyProducedDeferredPhi[port] = phi;
+            mCurrentProducedDeferredItemCountPhi[port] = phi;
+            phi->addIncoming(mInitiallyProducedDeferredItemCount[streamSet], mKernelLoopStart);
         }
     }
     const auto prefix = makeKernelName(mKernelId);
@@ -541,20 +546,25 @@ inline void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b)
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
-        mLinearInputItemsPhi[inputPort] = b->CreatePHI(sizeTy, 2, prefix + "_linearlyAccessible");
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_linearlyAccessible");
+        mLinearInputItemsPhi[inputPort] = phi;
+        mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();
         mInputVirtualBaseAddressPhi[inputPort] = b->CreatePHI(bufferTy, 2, prefix + "_baseAddress");
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, outputPort);
-        mLinearOutputItemsPhi[outputPort] = b->CreatePHI(sizeTy, 2, prefix + "_linearlyWritable");
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_linearlyWritable");
+        mLinearOutputItemsPhi[outputPort] = phi;
+        mCurrentLinearOutputItems[outputPort] = phi;
     }
     const auto prefix = makeKernelName(mKernelId);
     mNumOfLinearStridesPhi = b->CreatePHI(sizeTy, 2, prefix + "_numOfLinearStridesPhi");
     if (LLVM_LIKELY(mKernel->hasFixedRateInput())) {
         mFixedRateFactorPhi = b->CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
     }
+    mCurrentFixedRateFactor = mFixedRateFactorPhi;
     mIsFinalInvocationPhi = b->CreatePHI(sizeTy, 2, prefix + "_isFinalPhi");
     if (mIsPartitionRoot) {
         mFinalPartialStrideFixedRateRemainderPhi = b->CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesPhi");

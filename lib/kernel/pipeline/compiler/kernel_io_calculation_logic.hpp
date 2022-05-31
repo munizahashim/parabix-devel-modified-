@@ -140,14 +140,8 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     Value * numOfLinearStrides = nullptr;
     if (mMayLoopToEntry) {
-        if (mExecuteStridesIndividually) {
-            Value * const anyMore = b->CreateICmpNE(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-            numOfLinearStrides = b->CreateZExt(anyMore, mMaximumNumOfStrides->getType());
-        } else {
-            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-        }
+        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     } else {
-        assert (!mExecuteStridesIndividually);
         numOfLinearStrides = mMaximumNumOfStrides;
     }
     assert (numOfLinearStrides);
@@ -181,6 +175,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
 
     mNumOfLinearStrides = numOfLinearStrides;
+    mCurrentNumOfLinearStrides = numOfLinearStrides;
 
     if (mMayLoopToEntry) {
         mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
@@ -431,7 +426,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
     }
 
-    Value * const strideLength = calculateStrideLength(b, port, mAlreadyProcessedPhi[port.Port], stepLength);
+    Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], stepLength);
 
     // Value * strideLength = getInputStrideLength(b, port, stepLength);
 
@@ -576,7 +571,7 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
             Value * const closed = isClosed(b, br.Port); assert (closed);
             Value * fullyConsumed = closed;
             if (!bn.IsLinear) {
-                Value * const processed = mAlreadyProcessedPhi[br.Port];
+                Value * const processed = mCurrentProcessedItemCountPhi[br.Port];
                 Value * const accessible = getAccessibleInputItems(b, br);
                 Value * const total = b->CreateAdd(processed, accessible);
                 Value * const avail = getLocallyAvailableItemCount(b, br.Port);
@@ -726,8 +721,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const available = getLocallyAvailableItemCount(b, inputPort);
-
-    Value * const processed = mAlreadyProcessedPhi[inputPort];
+    Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
 
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -870,7 +864,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     }
 
-    Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
+    Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
     Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
     BasicBlock * const afterCopyBackOrExpand = b->CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
@@ -901,9 +895,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
     if (isa<DynamicBuffer>(buffer)) {
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + "_storingPriorBuffer %" PRIx64 " in %" PRIx64, priorBuffer, priorBufferPtr);
-        #endif
         if (mNumOfThreads != 1 || mIsNestedPipeline) {
             b->CreateStore(priorBuffer, priorBufferPtr);
             if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
@@ -1032,7 +1023,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
     const StreamSetBuffer * const buffer = bn.Buffer;
-    Value * const produced = mAlreadyProducedPhi[outputPort]; assert (produced);
+    Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
     Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -1175,7 +1166,7 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
                 const auto factor = rate.getRate() / mFixedRateLCM;
                 accessible = b->CreateCeilUMulRational(principalFixedRateFactor, factor);
             } else {
-                Value * maxItems = b->CreateAdd(mAlreadyProcessedPhi[inputPort], getInputStrideLength(b, port));
+                Value * maxItems = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], getInputStrideLength(b, port));
                 // But since we may not necessarily be in our zero extension region, we must first
                 // test whether we are:
                 accessible = b->CreateSelect(mIsInputZeroExtended[inputPort], maxItems, accessible);
@@ -1306,7 +1297,7 @@ Value * PipelineCompiler::getInputStrideLength(BuilderRef b, const BufferPort & 
     if (mFirstInputStrideLength[inputPort.Port]) {
         return mFirstInputStrideLength[inputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, inputPort, mAlreadyProcessedPhi[inputPort.Port], nullptr);
+        Value * const strideLength = calculateStrideLength(b, inputPort, mCurrentProcessedItemCountPhi[inputPort.Port], nullptr);
         mFirstInputStrideLength[inputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1319,7 +1310,7 @@ Value * PipelineCompiler::getOutputStrideLength(BuilderRef b, const BufferPort &
     if (mFirstOutputStrideLength[outputPort.Port]) {
         return mFirstOutputStrideLength[outputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, outputPort, mAlreadyProducedPhi[outputPort.Port], nullptr);
+        Value * const strideLength = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], nullptr);
         mFirstOutputStrideLength[outputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1348,8 +1339,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     const StreamSetBuffer * const buffer = getInputBuffer(mKernelId, ref);
 
     ConstantInt * const sz_ZERO = b->getSize(0);
-    Value * position = mAlreadyProcessedPhi[ref];
-
+    Value * position = mCurrentProcessedItemCountPhi[ref];
     if (offset) {
         if (LLVM_UNLIKELY(CheckAssertions)) {
             const Binding & binding = partialSumPort.Binding;
@@ -1363,10 +1353,6 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
 
         const auto step = getPopCountStepSize(ref);
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "_offset = %" PRIu64, offset);
-        #endif
-
         if (step > 1) {
             ConstantInt * const sz_STEP = b->getSize(step);
             if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -1379,10 +1365,6 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
             }
 
             offset = b->CreateMul(offset, sz_STEP);
-
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, "_offset' = %" PRIu64, offset);
-            #endif
         }
 
         offset = b->CreateSub(offset, sz_ONE);
@@ -1402,8 +1384,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                             bindingName,
                             position, total);
 
-
-            Value * const alreadyProcessed = mAlreadyProcessedPhi[ref];
+            Value * const alreadyProcessed = mCurrentProcessedItemCountPhi[ref];
 
             b->CreateAssert(b->CreateICmpUGE(position, alreadyProcessed),
                             "%s.%s: partial sum reference position is less than its processed count (%" PRIu64 " vs. %" PRIu64 ")",
@@ -1496,7 +1477,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 //    unsigned numOfPeekableItems = 0;
 
     if (port.Type == PortType::Input) {
-        initialItemCount = mAlreadyProcessedPhi[port];
+        initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
         const auto streamSet = getInputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -1513,7 +1494,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         }
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
-        initialItemCount = mAlreadyProducedPhi[port];
+        initialItemCount = mCurrentProducedItemCountPhi[port];
         Value * const writable = getWritableOutputItems(b, partialSumPort, true);
         const auto streamSet = getOutputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -1588,7 +1569,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         offset = b->CreateSub(b->CreateMul(numOfLinearStrides, b->getSize(step)), sz_ONE);
     }
 
-    Value * const pos = b->CreateAdd(mAlreadyProcessedPhi[ref], offset);
+    Value * const pos = b->CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
     Value * const requiredItems = b->CreateLoad(ptr);
 
@@ -1792,9 +1773,9 @@ Value * PipelineCompiler::calculateNumOfLinearItems(BuilderRef b, const BufferPo
     } else if (rate.isPartialSum()) {
         Value * priorItemCount = nullptr;
         if (LLVM_LIKELY(port.Port.Type == PortType::Input)) {
-            priorItemCount = mAlreadyProcessedPhi[port.Port];
+            priorItemCount = mCurrentProcessedItemCountPhi[port.Port];
         } else {
-            priorItemCount = mAlreadyProducedPhi[port.Port];
+            priorItemCount = mCurrentProducedItemCountPhi[port.Port];
         }
         return getPartialSumItemCount(b, port, priorItemCount, linearStrides);
     } else if (rate.isRelative()) {
@@ -1813,6 +1794,8 @@ Value * PipelineCompiler::calculateNumOfLinearItems(BuilderRef b, const BufferPo
     llvm_unreachable("unexpected rate type");
 }
 
+#if 0
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updatePHINodesForLoopExit
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1821,20 +1804,22 @@ void PipelineCompiler::updatePHINodesForLoopExit(BuilderRef b) {
     BasicBlock * const exitBlock = b->GetInsertBlock();
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
-        mUpdatedProcessedPhi[port]->addIncoming(mAlreadyProcessedPhi[port], exitBlock);
+        mUpdatedProcessedPhi[port]->addIncoming(mCurrentProcessedItemCountPhi[port], exitBlock);
         if (mUpdatedProcessedDeferredPhi[port]) {
-            mUpdatedProcessedDeferredPhi[port]->addIncoming(mAlreadyProcessedDeferredPhi[port], exitBlock);
+            mUpdatedProcessedDeferredPhi[port]->addIncoming(mCurrentProcessedDeferredItemCountPhi[port], exitBlock);
         }
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
-        mUpdatedProducedPhi[port]->addIncoming(mAlreadyProducedPhi[port], exitBlock);
+        mUpdatedProducedPhi[port]->addIncoming(mCurrentProducedItemCountPhi[port], exitBlock);
         if (mUpdatedProducedDeferredPhi[port]) {
-            mUpdatedProducedDeferredPhi[port]->addIncoming(mAlreadyProducedDeferredPhi[port], exitBlock);
+            mUpdatedProducedDeferredPhi[port]->addIncoming(mCurrentProducedDeferredItemCountPhi[port], exitBlock);
         }
     }
 
 }
+
+#endif
 
 }
 

@@ -379,8 +379,9 @@ inline void reset(Vec & vec, const size_t n) {
  * @brief clearInternalStateForCurrentKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::clearInternalStateForCurrentKernel() {
-    mNumOfAddressableItemCount = 0;
-    mNumOfVirtualBaseAddresses = 0;
+
+    // TODO: make it so these are only needed in debug mode for assertion checks?
+
     mNumOfTruncatedInputBuffers = 0;
 
     mExecuteStridesIndividually = false;
@@ -427,6 +428,9 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedItemCount.reset(numOfInputs);
     mProcessedDeferredItemCountPtr.reset(numOfInputs);
     mProcessedDeferredItemCount.reset(numOfInputs);
+    mCurrentProcessedItemCountPhi.reset(numOfInputs);
+    mCurrentProcessedDeferredItemCountPhi.reset(numOfInputs);
+    mCurrentLinearInputItems.reset(numOfInputs);
     mUpdatedProcessedPhi.reset(numOfInputs);
     mUpdatedProcessedDeferredPhi.reset(numOfInputs);
     mConsumedItemCountsAtLoopExitPhi.reset(numOfInputs);
@@ -444,7 +448,10 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProducedItemCountPtr.reset(numOfOutputs);
     mProducedItemCount.reset(numOfOutputs);
     mProducedDeferredItemCountPtr.reset(numOfOutputs);
-    mProducedDeferredItemCount.reset(numOfOutputs);
+    mProducedDeferredItemCount.reset(numOfOutputs);    
+    mCurrentProducedItemCountPhi.reset(numOfOutputs);
+    mCurrentProducedDeferredItemCountPhi.reset(numOfOutputs);
+    mCurrentLinearOutputItems.reset(numOfOutputs);
     mProducedAtJumpPhi.reset(numOfOutputs);
     mProducedAtTerminationPhi.reset(numOfOutputs);
     mProducedAtTermination.reset(numOfOutputs);

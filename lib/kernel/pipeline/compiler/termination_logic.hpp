@@ -8,10 +8,9 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addTerminationProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_t kernelId) {
+inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
     const auto id = KernelPartitionId[kernelId];
     IntegerType * const sizeTy = b->getSizeTy();
-    const auto groupId = getCacheLineGroupId(kernelId);
     mTarget->addInternalScalar(sizeTy, TERMINATION_PREFIX + std::to_string(id), groupId);
     if (in_degree(id, mTerminationPropagationGraph) > 0) {
         mTarget->addInternalScalar(sizeTy, CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(id), groupId);

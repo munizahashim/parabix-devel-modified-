@@ -22,8 +22,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     mKernelDoSegmentFunctionType = doSegFuncType;
     #endif
 
-    const auto args = buildKernelCallArgumentList(b);
-
     #ifdef PRINT_DEBUG_MESSAGES
     debugHalt(b);
     #endif
@@ -74,6 +72,152 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
     Value * const beforeKernelCall = startCycleCounter(b);
+
+
+    BasicBlock * individualStrideLoop = nullptr;
+    PHINode * currentIndividualStrideIndexPhi = nullptr;
+    PHINode * nextIndividualStrideIndexPhi = nullptr;
+
+    SmallVector<PHINode *, 0> outerProcessedPhis;
+    SmallVector<PHINode *, 0> outerProcessedDeferredPhis;
+    SmallVector<PHINode *, 0> outerProducedPhis;
+    SmallVector<PHINode *, 0> outerProducedDeferredPhis;
+
+    if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
+
+        const auto prefix = makeKernelName(mKernelId);
+
+        IntegerType * const sizeTy = b->getSizeTy();
+
+        ConstantInt * const sz_ZERO = b->getSize(0);
+        ConstantInt * const sz_ONE = b->getSize(1);
+
+        Value * const isFinal = b->CreateICmpEQ(mNumOfLinearStrides, sz_ZERO);
+
+        BasicBlock * const entry = b->GetInsertBlock();
+        individualStrideLoop = b->CreateBasicBlock(prefix + "_determineNextSingleStrideArgs", mKernelCompletionCheck);
+        BasicBlock * const individualStrideBody = b->CreateBasicBlock(prefix + "_individualStrideBody", mKernelCompletionCheck);
+
+        b->CreateUnlikelyCondBr(isFinal, individualStrideBody, individualStrideLoop);
+
+        b->SetInsertPoint(individualStrideLoop);
+        currentIndividualStrideIndexPhi = b->CreatePHI(b->getSizeTy(), 2, prefix + "_currentStridePhi");
+        currentIndividualStrideIndexPhi->addIncoming(sz_ZERO, entry);
+
+        const auto indeg = in_degree(mKernelId, mBufferGraph);
+
+        outerProcessedPhis.resize(indeg);
+        outerProcessedDeferredPhis.resize(indeg);
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
+            outerProcessedPhis[br.Port.Number] = phi;
+            mCurrentProcessedItemCountPhi[br.Port] = phi;
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
+                outerProcessedDeferredPhis[br.Port.Number] = phi;
+                mCurrentProcessedDeferredItemCountPhi[br.Port] = phi;
+            }
+        }
+
+        const auto outdeg = out_degree(mKernelId, mBufferGraph);
+        outerProducedPhis.resize(outdeg);
+        outerProducedDeferredPhis.resize(outdeg);
+
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
+            outerProducedPhis[br.Port.Number] = phi;
+            mCurrentProducedItemCountPhi[br.Port] = phi;
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
+                outerProducedDeferredPhis[br.Port.Number] = phi;
+                mCurrentProducedDeferredItemCountPhi[br.Port] = phi;
+            }
+        }
+
+        SmallVector<Value *, 16> linearInputItems(indeg);
+        SmallVector<Value *, 16> linearOutputItems(outdeg);
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            linearInputItems[br.Port.Number] = calculateNumOfLinearItems(b, br, sz_ONE);
+        }
+
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            linearOutputItems[br.Port.Number] = calculateNumOfLinearItems(b, br, sz_ONE);
+        }
+
+        Value * const nextStrideIndex = b->CreateAdd(currentIndividualStrideIndexPhi, b->getSize(1));
+        BasicBlock * const oneStrideArgsExit = b->GetInsertBlock();
+        b->CreateBr(individualStrideBody);
+
+        b->SetInsertPoint(individualStrideBody);
+        nextIndividualStrideIndexPhi = b->CreatePHI(sizeTy, 2, prefix + "_nextStridePhi");
+        nextIndividualStrideIndexPhi->addIncoming(sz_ZERO, entry);
+        nextIndividualStrideIndexPhi->addIncoming(nextStrideIndex, oneStrideArgsExit);
+        PHINode * const numOfInvokedStrides = b->CreatePHI(sizeTy, 2, prefix + "_numOfInvokedStrides");
+        numOfInvokedStrides->addIncoming(sz_ZERO, entry);
+        numOfInvokedStrides->addIncoming(sz_ONE, oneStrideArgsExit);
+        mCurrentNumOfLinearStrides = numOfInvokedStrides;
+
+        if (mCurrentFixedRateFactor) {
+            const auto stride = mKernel->getStride() * mFixedRateLCM;
+            assert (stride.denominator() == 1);
+            PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
+            phi->addIncoming(mCurrentFixedRateFactor, entry);
+            phi->addIncoming(b->getSize(stride.numerator()), oneStrideArgsExit);
+            mCurrentFixedRateFactor = phi;
+        }
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
+            phi->addIncoming(outerProcessedPhis[br.Port.Number], oneStrideArgsExit);
+            mCurrentProcessedItemCountPhi[br.Port] = phi;
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
+                phi->addIncoming(outerProcessedDeferredPhis[br.Port.Number], oneStrideArgsExit);
+                mCurrentProcessedDeferredItemCountPhi[br.Port] = phi;
+            }
+            PHINode * const phi2 = b->CreatePHI(sizeTy, 2);
+            phi2->addIncoming(mCurrentLinearInputItems[br.Port], entry);
+            phi2->addIncoming(linearInputItems[br.Port.Number], oneStrideArgsExit);
+            mCurrentLinearInputItems[br.Port] = phi2;
+        }
+
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
+            phi->addIncoming(outerProducedPhis[br.Port.Number], oneStrideArgsExit);
+            mCurrentProducedItemCountPhi[br.Port] = phi;
+            if (LLVM_UNLIKELY(br.IsDeferred)) {
+                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
+                phi->addIncoming(outerProducedDeferredPhis[br.Port.Number], oneStrideArgsExit);
+                mCurrentProducedDeferredItemCountPhi[br.Port] = phi;
+            }
+            PHINode * const phi2 = b->CreatePHI(sizeTy, 2);
+            phi2->addIncoming(mCurrentLinearOutputItems[br.Port], entry);
+            phi2->addIncoming(linearOutputItems[br.Port.Number], oneStrideArgsExit);
+            mCurrentLinearOutputItems[br.Port] = phi2;
+        }
+
+    }
+
+    ArgVec args;
+
+    buildKernelCallArgumentList(b, args);
+
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
@@ -87,6 +231,48 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     } else {
         doSegmentRetVal = b->CreateCall(doSegFuncType, doSegment, args);
     }
+
+    updateProcessedAndProducedItemCounts(b);
+
+    readReturnedOutputVirtualBaseAddresses(b);
+
+    if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
+
+        if (LLVM_LIKELY(mGenerateTransferredItemCountHistogram)) {
+            updateTransferredItemsForHistogramData(b);
+        }
+
+        BasicBlock * const individualStrideBodyExit = b->GetInsertBlock();
+        const auto prefix = makeKernelName(mKernelId);
+        BasicBlock * const individualStrideLoopExit = b->CreateBasicBlock(prefix + "_individualStrideExit", mKernelCompletionCheck);
+
+        currentIndividualStrideIndexPhi->addIncoming(nextIndividualStrideIndexPhi, individualStrideBodyExit);
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            outerProcessedPhis[br.Port.Number]->addIncoming(mProcessedItemCount[br.Port], individualStrideBodyExit);
+            if (LLVM_UNLIKELY(mCurrentProcessedDeferredItemCountPhi[br.Port] )) {
+                outerProcessedDeferredPhis[br.Port.Number]->addIncoming(mProcessedDeferredItemCount[br.Port], individualStrideBodyExit);
+            }
+        }
+
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            outerProducedPhis[br.Port.Number]->addIncoming(mProducedItemCount[br.Port], individualStrideBodyExit);
+            if (LLVM_UNLIKELY(mCurrentProducedDeferredItemCountPhi[br.Port] )) {
+                outerProducedDeferredPhis[br.Port.Number]->addIncoming(mProducedDeferredItemCount[br.Port], individualStrideBodyExit);
+            }
+        }
+
+        Value * done = b->CreateICmpEQ(nextIndividualStrideIndexPhi, mNumOfLinearStrides);
+        if (mKernelCanTerminateEarly) {
+            done = b->CreateOr(done, b->CreateICmpNE(doSegmentRetVal, b->getSize(0)));
+        }
+        b->CreateCondBr(done, individualStrideLoopExit, individualStrideLoop);
+
+        b->SetInsertPoint(individualStrideLoopExit);
+    }
+
     updateCycleCounter(b, mKernelId, beforeKernelCall, CycleCounter::KERNEL_EXECUTION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
@@ -105,20 +291,17 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
     }
-    if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
-        updateProcessedAndProducedItemCounts(b);
-    }
-    readReturnedOutputVirtualBaseAddresses(b);
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief buildKernelCallArgumentList
  ** ------------------------------------------------------------------------------------------------------------- */
-ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
+void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) {
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration, Kernel::getDoSegmentFields,
     // Kernel::setDoSegmentProperties and Kernel::getDoSegmentProperties.
@@ -126,7 +309,8 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
 
-    ArgVec args;
+    unsigned numOfAddressableItemCount = 0;
+    unsigned numOfVirtualBaseAddresses = 0;
 
     auto addNextArg = [&](Value * arg) {
 
@@ -184,11 +368,11 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
 //                    ptr = mProducedItemCountPtr[port.Port];
 //                }
 //            } else {
-                if (LLVM_UNLIKELY(mNumOfAddressableItemCount == mAddressableItemCountPtr.size())) {
+                if (LLVM_UNLIKELY(numOfAddressableItemCount == mAddressableItemCountPtr.size())) {
                     auto aic = b->CreateAllocaAtEntryPoint(b->getSizeTy());
                     mAddressableItemCountPtr.push_back(aic);
                 }
-                ptr = mAddressableItemCountPtr[mNumOfAddressableItemCount++];
+                ptr = mAddressableItemCountPtr[numOfAddressableItemCount++];
                 b->CreateStore(itemCount, ptr);
 //            }
             addNextArg(ptr);
@@ -230,9 +414,9 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             addNextArg(mSegNo);
         }
     }
-    addNextArg(mNumOfLinearStrides);
-    if (mFixedRateFactorPhi) {
-        addNextArg(mFixedRateFactorPhi);
+    addNextArg(mCurrentNumOfLinearStrides);
+    if (mCurrentFixedRateFactor) {
+        addNextArg(mCurrentFixedRateFactor);
     }
 
     PointerType * const voidPtrTy = b->getVoidPtrTy();
@@ -242,12 +426,11 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         const BufferPort & rt = mBufferGraph[port];
 
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
-
             Value * processed = nullptr;
-            if (rt.IsDeferred) {
-                processed = mAlreadyProcessedDeferredPhi[rt.Port];
+            if (mCurrentProcessedDeferredItemCountPhi[rt.Port]) {
+                processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
-                processed = mAlreadyProcessedPhi[rt.Port];
+                processed = mCurrentProcessedItemCountPhi[rt.Port];
             }
             assert (processed);
 
@@ -259,8 +442,9 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             if (LLVM_UNLIKELY(requiresItemCount(rt.Binding))) {
                 // calculate how many linear items are from the *deferred* position
                 Value * inputItems = mLinearInputItemsPhi[rt.Port]; assert (inputItems);
-                if (rt.IsDeferred) {
-                    Value * diff = b->CreateSub(mAlreadyProcessedPhi[rt.Port], mAlreadyProcessedDeferredPhi[rt.Port]);
+                if (mCurrentProcessedDeferredItemCountPhi[rt.Port]) {
+                    const auto prefix = makeBufferName(mKernelId, rt.Port);
+                    Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[rt.Port], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
                     inputItems = b->CreateAdd(inputItems, diff);
                 }
                 addNextArg(inputItems);
@@ -280,8 +464,7 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
         const auto streamSet = target(port, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
-
-        Value * produced = mAlreadyProducedPhi[rt.Port];
+        Value * produced = mCurrentProducedItemCountPhi[rt.Port];
 
         if (LLVM_UNLIKELY(rt.IsShared)) {
             if (CheckAssertions) {
@@ -289,11 +472,11 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
             }
             addNextArg(b->CreatePointerCast(buffer->getHandle(), voidPtrTy));
         } else if (LLVM_UNLIKELY(rt.IsManaged)) {
-            if (LLVM_UNLIKELY(mNumOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
+            if (LLVM_UNLIKELY(numOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
                 auto vba = b->CreateAllocaAtEntryPoint(voidPtrTy);
                 mVirtualBaseAddressPtr.push_back(vba);
             }
-            Value * ptr = mVirtualBaseAddressPtr[mNumOfVirtualBaseAddresses++];
+            Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
             ptr = b->CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
             b->CreateStore(buffer->getBaseAddress(b.get()), ptr);
             addNextArg(b->CreatePointerCast(ptr, voidPtrPtrTy));
@@ -314,7 +497,6 @@ ArgVec PipelineCompiler::buildKernelCallArgumentList(BuilderRef b) {
     }
 
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
-    return args;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -333,8 +515,8 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             const Binding & input = getInputBinding(inputPort);
             const ProcessingRate & rate = input.getRate();
             if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
-                processed = b->CreateAdd(mAlreadyProcessedPhi[inputPort], mLinearInputItemsPhi[inputPort]);
-                if (mAlreadyProcessedDeferredPhi[inputPort]) {
+                processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mCurrentLinearInputItems[inputPort]);
+                if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                     assert (mReturnedProcessedItemCountPtr[inputPort]);
                     mProcessedDeferredItemCount[inputPort] = b->CreateLoad(mReturnedProcessedItemCountPtr[inputPort]);
                     #ifdef PRINT_DEBUG_MESSAGES
@@ -385,8 +567,8 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             const Binding & output = getOutputBinding(outputPort);
             const ProcessingRate & rate = output.getRate();
             if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
-                produced = b->CreateAdd(mAlreadyProducedPhi[outputPort], mLinearOutputItemsPhi[outputPort]);
-                if (mAlreadyProducedDeferredPhi[outputPort]) {
+                produced = b->CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
+                if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                     assert (mReturnedProducedItemCountPtr[outputPort]);
                     mProducedDeferredItemCount[outputPort] = b->CreateLoad(mReturnedProducedItemCountPtr[outputPort]);
                     #ifdef PRINT_DEBUG_MESSAGES
@@ -447,9 +629,8 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                     const auto streamSet = target(port, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
                     if (LLVM_LIKELY(bn.isInternal() && bn.isOwned())) {
-
                         Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
-                        Value * const delta = b->CreateSub(produced, mAlreadyProducedPhi[outputPort]);
+                        Value * const delta = b->CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
                         Value * const withinCapacity = b->CreateICmpULE(delta, writable);
                         const Binding & output = getOutputBinding(outputPort);
                         b->CreateAssert(withinCapacity,

@@ -151,7 +151,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     const auto groupId = getCacheLineGroupId(kernelId);
 
     if (isRoot) {
-        addTerminationProperties(b, kernelId);
+        addTerminationProperties(b, kernelId, groupId);
     }
 
     const auto name = makeKernelName(kernelId);
@@ -225,6 +225,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
+    }
+
+    if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram)) {
+        addHistogramProperties(b, kernelId, groupId);
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
