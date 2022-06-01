@@ -92,6 +92,8 @@ public:
 
     enum class ScalarType { Input, Output, Internal, NonPersistent, ThreadLocal };
 
+    enum class ThreadLocalScalarAccumulationRule { DoNothing, Sum };
+
     struct InternalScalar {
 
         ScalarType getScalarType() const {
@@ -110,23 +112,31 @@ public:
             return mGroup;
         }
 
+        ThreadLocalScalarAccumulationRule getAccumulationRule() const {
+            return mAccumulationRule;
+        }
+
         explicit InternalScalar(llvm::Type * const valueType,
-                                const llvm::StringRef name, const unsigned group = 1)
-        : InternalScalar(ScalarType::Internal, valueType, name, group) {
+                                const llvm::StringRef name, const unsigned group = 0,
+                                const ThreadLocalScalarAccumulationRule rule = ThreadLocalScalarAccumulationRule::DoNothing)
+        : InternalScalar(ScalarType::Internal, valueType, name, group, rule) {
 
         }
 
         explicit InternalScalar(const ScalarType scalarType, llvm::Type * const valueType,
-                                const llvm::StringRef name, const unsigned group = 1)
-        : mScalarType(scalarType), mValueType(valueType), mName(name.str()), mGroup(group) {
-
+                                const llvm::StringRef name, const unsigned group = 0,
+                                const ThreadLocalScalarAccumulationRule rule = ThreadLocalScalarAccumulationRule::DoNothing)
+        : mScalarType(scalarType), mValueType(valueType), mName(name.str()), mGroup(group)
+        , mAccumulationRule(rule) {
+            assert (rule == ThreadLocalScalarAccumulationRule::DoNothing || scalarType == ScalarType::ThreadLocal);
         }
 
     private:
-        const ScalarType        mScalarType;
-        llvm::Type * const      mValueType;
-        const std::string       mName;
-        const unsigned          mGroup;
+        const ScalarType                        mScalarType;
+        llvm::Type * const                      mValueType;
+        const std::string                       mName;
+        const unsigned                          mGroup;
+        const ThreadLocalScalarAccumulationRule mAccumulationRule;
     };
 
     using InternalScalars = std::vector<InternalScalar>;
@@ -316,17 +326,18 @@ public:
 
     void addInternalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
-        mInternalScalars.emplace_back(ScalarType::Internal, type, name, group);
+        mInternalScalars.emplace_back(ScalarType::Internal, type, name, group, ThreadLocalScalarAccumulationRule::DoNothing);
     }
 
     void addNonPersistentScalar(llvm::Type * type, const llvm::StringRef name) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
-        mInternalScalars.emplace_back(ScalarType::NonPersistent, type, name, 0);
+        mInternalScalars.emplace_back(ScalarType::NonPersistent, type, name, 0, ThreadLocalScalarAccumulationRule::DoNothing);
     }
 
-    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0) {
+    void addThreadLocalScalar(llvm::Type * type, const llvm::StringRef name, const unsigned group = 0,
+                              const ThreadLocalScalarAccumulationRule rule = ThreadLocalScalarAccumulationRule::DoNothing) {
         assert ("cannot modify state types after initialization" && !mSharedStateType && !mThreadLocalStateType);
-        mInternalScalars.emplace_back(ScalarType::ThreadLocal, type, name, group);
+        mInternalScalars.emplace_back(ScalarType::ThreadLocal, type, name, group, rule);
     }
 
     void setModule(llvm::Module * const module) {

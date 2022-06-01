@@ -12,7 +12,12 @@ bool inline __trackPort(const BufferPort & br) {
     const ProcessingRate & pr = bd.getRate();
     switch (pr.getKind()) {
         case RateId::Fixed:
+            // fixed rate doesn't need to be tracked as the only one that wouldn't be the exact rate would be
+            // the final partial one but that isn't a very interesting value to model.
         case RateId::Greedy:
+        case RateId::Unknown:
+            // TODO: to support these, we'd need to use a non-static length histogram array but ideally we'd
+            // want a sparse one.
             return false;
         default:
             return true;
@@ -60,7 +65,8 @@ void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelI
             const auto prefix = makeBufferName(kernelId, br.Port);
             Type * const histTy = ArrayType::get(sizeTy, ceiling(br.Maximum) + 1);
             if (LLVM_UNLIKELY(makeThreadLocalProps)) {
-                mTarget->addThreadLocalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId);
+                mTarget->addThreadLocalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId,
+                                              ThreadLocalScalarAccumulationRule::Sum);
             } else {
                 mTarget->addInternalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId);
             }
@@ -73,7 +79,8 @@ void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelI
             const auto prefix = makeBufferName(kernelId, br.Port);
             Type * const histTy = ArrayType::get(sizeTy, ceiling(br.Maximum) + 1);
             if (LLVM_UNLIKELY(makeThreadLocalProps)) {
-                mTarget->addThreadLocalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId);
+                mTarget->addThreadLocalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId,
+                                              ThreadLocalScalarAccumulationRule::Sum);
             } else {
                 mTarget->addInternalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId);
             }

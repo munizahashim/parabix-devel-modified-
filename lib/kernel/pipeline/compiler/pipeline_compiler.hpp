@@ -124,6 +124,8 @@ const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 
 using ArgVec = Vec<Value *, 64>;
 
+using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;
+
 using BufferPortMap = flat_set<std::pair<unsigned, unsigned>>;
 
 using PartitionJumpPhiOutMap = flat_map<std::pair<unsigned, unsigned>, Value *>;
