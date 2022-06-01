@@ -493,10 +493,7 @@ RE * RE_Parser::parsePropertyExpression(PropertyExpression::Kind k) {
     if (atany("<>=:")) {
         // We have a property-name op value expression
         if (accept('=') || accept(':')) op = PropertyExpression::Operator::Eq;
-        else if (accept("<=")) op = PropertyExpression::Operator::LEq;
-        else if (accept(">=")) op = PropertyExpression::Operator::GEq;
-        else if (accept('<')) op = PropertyExpression::Operator::Less;
-        else if (accept('>')) op = PropertyExpression::Operator::Greater;
+        else if (accept("!=")) op = PropertyExpression::Operator::NEq;
         while (accept(' ') || accept('\t')) {/* skip whitespace, do nothing */}
         auto val_start = mCursor.pos();
         if (accept('/')) {

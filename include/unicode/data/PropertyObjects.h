@@ -99,7 +99,7 @@ public:
                              const unsigned independent_enums,
                              const std::vector<std::string> && enum_names,
                              const std::vector<std::string> && names,
-                             std::unordered_map<std::string, int> && aliases,
+                             const std::vector<std::string> && aliases,
                              std::vector<const UnicodeSet *> && sets)
     : PropertyObject(p, ClassTypeId::EnumeratedProperty)
     , independent_enum_count(independent_enums)
@@ -116,7 +116,7 @@ public:
     const std::string & GetPropertyValueGrepString() override;
     const UnicodeSet GetCodepointSet(const std::string & value_spec) override;
     const UnicodeSet GetCodepointSetMatchingPattern(re::RE *, GrepLinesFunctionType) override;
-    const UnicodeSet & GetCodepointSet(const int property_enum_val) const;
+    const UnicodeSet GetCodepointSet(const int property_enum_val) const;
     std::vector<UnicodeSet> & GetEnumerationBasisSets();
     unsigned GetEnumerationValue(codepoint_t cp);
     const std::string & GetValueEnumName(const int property_enum_val) const {return property_value_enum_names[property_enum_val]; }
@@ -134,7 +134,8 @@ private:
     const unsigned independent_enum_count;
     const std::vector<std::string> property_value_enum_names;
     const std::vector<std::string> property_value_full_names;
-    std::unordered_map<std::string, int> property_value_aliases;
+    const std::vector<std::string> property_value_aliases;
+    std::unordered_map<std::string, int> enum_name_map;
     std::string mPropertyValueGrepString;
     bool uninitialized; // full names must be added dynamically.
     const std::vector<const UnicodeSet *> property_value_sets;

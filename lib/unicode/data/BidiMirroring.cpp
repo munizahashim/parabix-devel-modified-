@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -36,10 +36,10 @@ namespace UCD {
         [2a66, 2a78], [2aa3, 2aa5], [2aae, 2aae], [2ad7, 2add],
         [2adf, 2ae2], [2ae6, 2aeb], [2aef, 2af6], [2afb, 2bfd],
         [2bff, 2e01], [2e06, 2e08], [2e0b, 2e0b], [2e0e, 2e1b],
-        [2e1e, 2e1f], [2e2a, 3007], [3012, 3013], [301c, fe58],
-        [fe5f, fe63], [fe66, ff07], [ff0a, ff1b], [ff1d, ff1d],
-        [ff1f, ff3a], [ff3c, ff3c], [ff3e, ff5a], [ff5c, ff5c],
-        [ff5e, ff5e], [ff61, ff61], [ff64, 10ffff]**/
+        [2e1e, 2e1f], [2e2a, 2e54], [2e5d, 3007], [3012, 3013],
+        [301c, fe58], [fe5f, fe63], [fe66, ff07], [ff0a, ff1b],
+        [ff1d, ff1d], [ff1f, ff3a], [ff3c, ff3c], [ff3e, ff5a],
+        [ff5c, ff5c], [ff5e, ff5e], [ff61, ff61], [ff64, 10ffff]**/
 
         
         namespace {
@@ -49,7 +49,7 @@ namespace UCD {
         {Full, 11}, {Mixed, 10}, {Full, 33}, {Mixed, 1}, {Full, 2},
         {Mixed, 2}, {Full, 12}, {Mixed, 4}, {Full, 1}, {Mixed, 1},
         {Full, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 3}, {Full, 7},
-        {Mixed, 1}, {Full, 16}, {Mixed, 2}, {Full, 14}, {Mixed, 1},
+        {Mixed, 1}, {Full, 16}, {Mixed, 3}, {Full, 13}, {Mixed, 1},
         {Full, 1649}, {Mixed, 2}, {Full, 4}, {Mixed, 4}, {Full, 32772}};
         const static UnicodeSet::bitquad_t  __null_codepoint_set_quads[] = {
         0xaffffcff, 0xd7ffffff, 0xd7ffffff, 0xf7fff7ff, 0xc3ffffff,
@@ -59,11 +59,11 @@ namespace UCD {
         0xffc000ff, 0x8f9fd487, 0xffff0003, 0xf6000007, 0xfeff00c6,
         0xf0c87fcc, 0xccdffcff, 0xcfcf87ff, 0x01ffffcf, 0x00004038,
         0xbf800000, 0xf87f8fc7, 0xbfffffff, 0xcfffc9c3, 0xfffffc00,
-        0xf00c00ff, 0x81ffffff, 0xffffffcf, 0xaffffcff, 0xd7ffffff,
-        0x57ffffff, 0xfffffff2};
+        0xe01fffff, 0xf00c00ff, 0x81ffffff, 0xffffffcf, 0xaffffcff,
+        0xd7ffffff, 0x57ffffff, 0xfffffff2};
         }
 
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 35, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 42, 0};
+        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 35, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 43, 0};
 
 
 
@@ -116,7 +116,7 @@ namespace UCD {
         1530, 1534, 1538, 1542, 1546, 1550, 1554, 1558, 1562, 1566, 1570,
         1574, 1578, 1582, 1586, 1590, 1594, 1598, 1602, 1606, 1610, 1614,
         1618, 1622, 1626, 1630, 1634, 1638, 1642, 1646, 1650, 1654, 1658,
-        1662};
+        1662, 1666, 1670, 1674, 1678, 1682, 1686, 1690, 1694};
         const static char string_buffer alignas(64) [1792] = u8R"__()
 (
 >
@@ -499,6 +499,14 @@ namespace UCD {
 ⸦
 ⸩
 ⸨
+⹖
+⹕
+⹘
+⹗
+⹚
+⹙
+⹜
+⹛
 〉
 〈
 》
@@ -587,7 +595,8 @@ namespace UCD {
         0x2ae4, 0x2ae5, 0x2aec, 0x2aed, 0x2aee, 0x2af7, 0x2af8, 0x2af9,
         0x2afa, 0x2bfe, 0x2e02, 0x2e03, 0x2e04, 0x2e05, 0x2e09, 0x2e0a,
         0x2e0c, 0x2e0d, 0x2e1c, 0x2e1d, 0x2e20, 0x2e21, 0x2e22, 0x2e23,
-        0x2e24, 0x2e25, 0x2e26, 0x2e27, 0x2e28, 0x2e29, 0x3008, 0x3009,
+        0x2e24, 0x2e25, 0x2e26, 0x2e27, 0x2e28, 0x2e29, 0x2e55, 0x2e56,
+        0x2e57, 0x2e58, 0x2e59, 0x2e5a, 0x2e5b, 0x2e5c, 0x3008, 0x3009,
         0x300a, 0x300b, 0x300c, 0x300d, 0x300e, 0x300f, 0x3010, 0x3011,
         0x3014, 0x3015, 0x3016, 0x3017, 0x3018, 0x3019, 0x301a, 0x301b,
         0xfe59, 0xfe5a, 0xfe5b, 0xfe5c, 0xfe5d, 0xfe5e, 0xfe64, 0xfe65,

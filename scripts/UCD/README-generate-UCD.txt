@@ -6,7 +6,8 @@ Generating UCD data files.
 
 2. python3 UCD_properties.py
 3. python3 UCD_equivalence.py
-4, python3 Unihan_parser.py  -- for CJK Radical support
+4, python3 Unihan_parser.py  -- for CJK Radical support (make sure Unihan files
+   have been placed in the Unihan subdirectory of the UCD_src_dir) 
 5. copy generated include/UCD_Config.h to include/unicode/core
    copy other generated include files to include/unicode/data
    copy generated src files to lib/unicode/data
