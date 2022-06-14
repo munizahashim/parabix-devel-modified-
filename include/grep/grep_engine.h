@@ -122,7 +122,8 @@ protected:
         MoveMatchesToEOL = 4,
         MatchSpans = 8,
         GraphemeClusterBoundary = 16,
-        WordBoundary = 32
+        WordBoundary = 32,
+        U21 = 64
     };
     bool hasComponent(Component compon_set, Component c);
     void setComponent(Component & compon_set, Component c);
@@ -186,9 +187,11 @@ protected:
     std::string mFileSuffix;
     Component mExternalComponents;
     Component mInternalComponents;
+    const cc::Alphabet * mIndexAlphabet;
     std::map<std::string, kernel::StreamSet *> mPropertyStreamMap;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
+    kernel::StreamSet * mU21;
     kernel::StreamSet * mGCB_stream;
     kernel::StreamSet * mWordBoundary_stream;
     re::UTF8_Transformer mUTF8_Transformer;

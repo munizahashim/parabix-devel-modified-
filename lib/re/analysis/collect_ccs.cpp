@@ -13,7 +13,7 @@ namespace re {
     
 struct SetCollector final : public RE_Inspector {
 
-    SetCollector(const cc::Alphabet * alphabet, re::NameProcessingMode m, std::vector<CC *> & ccs)
+    SetCollector(const cc::Alphabet * alphabet, re::NameProcessingMode m, CC_Set & ccs)
     : RE_Inspector(m, InspectionMode::IgnoreNonUnique)
     , alphabet(alphabet)
     , ccs(ccs) {
@@ -33,16 +33,40 @@ struct SetCollector final : public RE_Inspector {
 
 private:
     const cc::Alphabet * const alphabet;
-    std::vector<CC *> & ccs;
+    CC_Set & ccs;
 };
 
 
-std::vector<CC *> collectCCs(RE * const re, const cc::Alphabet & a, re::NameProcessingMode m) {
-    std::vector<CC *> ccs;
+CC_Set collectCCs(RE * const re, const cc::Alphabet & a, re::NameProcessingMode m) {
+    CC_Set ccs;
     SetCollector collector(&a, m, ccs);
     collector.inspectRE(re);
     return ccs;
 }
+
+struct AlphabetCollector final : public RE_Inspector {
+
+    AlphabetCollector(Alphabet_Set & alphabets)
+    : RE_Inspector()
+    , mAlphabets(alphabets) {
+
+    }
+
+    void inspectCC(CC * cc) final {
+        mAlphabets.insert(cc->getAlphabet());
+    }
+
+private:
+    Alphabet_Set & mAlphabets;
+};
+
+Alphabet_Set collectAlphabets(RE * const re) {
+    Alphabet_Set alphabets;
+    AlphabetCollector collector(alphabets);
+    collector.inspectRE(re);
+    return alphabets;
+}
+
 
 
 

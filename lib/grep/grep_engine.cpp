@@ -136,6 +136,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mGrepRecordBreak(GrepRecordBreakKind::LF),
     mExternalComponents(static_cast<Component>(0)),
     mInternalComponents(static_cast<Component>(0)),
+    mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
     mGCB_stream(nullptr),
@@ -276,6 +277,8 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = fixedReferenceTransform(mRefInfo, mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
+        setComponent(mExternalComponents, Component::S2P);
+        setComponent(mExternalComponents, Component::U21);
     }
 
     mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
@@ -299,6 +302,7 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (UnicodeIndexing) {
+        mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::UTF8index);
     }
@@ -345,12 +349,17 @@ void GrepEngine::initRE(re::RE * re) {
 }
 
 StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, StreamSet * ByteStream) {
+    StreamSet * Source = ByteStream;
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
-        return BasisBits;
+        Source = BasisBits;
     }
-    else return ByteStream;
+    if (hasComponent(mExternalComponents, Component::U21)) {
+        mU21 = P->CreateStreamSet(21, 1);
+        P->CreateKernelCall<UTF8_Decoder>(Source, mU21);
+    }
+    return Source;
 }
 
 void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
@@ -398,7 +407,6 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
         mWordBoundary_stream = P->CreateStreamSet(1, 1);
         WordBoundaryLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mWordBoundary_stream);
     }
-    StreamSet * U21_basis = nullptr;
     std::set<int> fixedRefSupport;
     for (auto e : mExternalNames) {
         re::RE * def = e->getDefinition();
@@ -426,13 +434,9 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
                     int dist = rg1.first + rg2.first;
                     //llvm::errs() << "Fixed reference distance " << dist << "\n";
                     if (fixedRefSupport.count(dist) == 0) {
-                        if (!U21_basis) {
-                            U21_basis = P->CreateStreamSet(21, 1);
-                            P->CreateKernelCall<UTF8_Decoder>(SourceStream, U21_basis);
-                        }
                         StreamSet * M = P->CreateStreamSet(1, 1);
                         mPropertyStreamMap.emplace(name, M);
-                        P->CreateKernelCall<FixedDistanceMatchesKernel>(dist, U21_basis, M);
+                        P->CreateKernelCall<FixedDistanceMatchesKernel>(dist, SourceStream, M);
                         fixedRefSupport.insert(dist);
                     }
                 }
@@ -500,9 +504,9 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
 }
 
 void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(&cc::Unicode);
-    auto lengths = getLengthRange(re, &cc::Unicode);
-    const auto UnicodeSets = re::collectCCs(re, cc::Unicode);
+    auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
+    auto lengths = getLengthRange(re, mIndexAlphabet);
+    const auto UnicodeSets = re::collectCCs(re, *mIndexAlphabet);
     if (UnicodeSets.empty()) {
         // All inputs will be externals.   Do not register a source stream.
         options->setRE(re);
@@ -538,8 +542,8 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
 }
 
 void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
-    auto lengths = getLengthRange(re, &cc::UTF8);
+    auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
+    auto lengths = getLengthRange(re, mIndexAlphabet);
     options->setSource(Source);
     StreamSet * MatchResults = nullptr;
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {

@@ -167,6 +167,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
         if (i < mMain.mAlphabets.size()) {
             RE_Compiler code_unit_compiler(mPB.getPabloBlock(), mMain.mIndexingTransformer->getEncodingAlphabet());
             code_unit_compiler.addAlphabet(encodingAlphabet, mMain.mBasisSets[i]);
+            //llvm::errs() << "EncodingAlphabet " + encodingAlphabet->getName() + "\n";
             PabloAST * ccStrm = code_unit_compiler.compileRE(mMain.mIndexingTransformer->transformRE(cc)).stream();
             mLocallyCompiledCCs.emplace(cc, ccStrm);
             return Marker(mPB.createAnd(nextPos, ccStrm, cc->canonicalName()));
@@ -189,8 +190,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (f == mMain.mExternalNameMap.end()) {
         llvm::report_fatal_error("RE compiler cannot find name: " + nameString);
     }
-    auto externalLength = f->second.length();
     auto externalMarker = f->second.marker();
+    if (marker.stream() == mMain.mIndexStream) {
+        return externalMarker;
+    }
+    auto externalLength = f->second.length();
     auto external_adv = externalLength + externalMarker.offset();
     if (external_adv < marker.offset()) {
         llvm::report_fatal_error("Negative advance amount in processing "  + nameString);
