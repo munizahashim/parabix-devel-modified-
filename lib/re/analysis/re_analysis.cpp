@@ -5,7 +5,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
 #include <re/adt/printer_re.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>

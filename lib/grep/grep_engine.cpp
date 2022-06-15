@@ -52,7 +52,7 @@
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/collect_ccs.h>
 #include <re/cc/cc_kernel.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/replaceCC.h>
@@ -511,7 +511,7 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
         // All inputs will be externals.   Do not register a source stream.
         options->setRE(re);
     } else {
-        auto mpx = std::make_shared<MultiplexedAlphabet>("mpx", UnicodeSets);
+        auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
         re = transformCCs(mpx, re);
         options->setRE(re);
         auto mpx_basis = mpx->getMultiplexedCCs();

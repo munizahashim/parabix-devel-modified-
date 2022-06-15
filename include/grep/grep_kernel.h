@@ -27,7 +27,7 @@ enum class GrepCombiningType {None, Exclude, Include};
 class GrepKernelOptions {
     friend class ICGrepKernel;
 public:
-    using Alphabets = std::vector<std::pair<std::shared_ptr<cc::Alphabet>, StreamSet *>>;
+    using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
     GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8, re::EncodingTransformer * encodingTransformer = nullptr);
     void setIndexingTransformer(re::EncodingTransformer *, StreamSet * indexStream);
     void setSource(StreamSet * s);
@@ -36,7 +36,7 @@ public:
 
     void addExternal(std::string name, StreamSet * strm, unsigned offset = 0, unsigned lgth = 1);
 
-    void addAlphabet(std::shared_ptr<cc::Alphabet> a, StreamSet * basis);
+    void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
     void setPrefixRE(re::RE * re);
 

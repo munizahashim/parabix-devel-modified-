@@ -16,7 +16,7 @@
 #include <pablo/pe_zeroes.h>            // for Zeroes
 #include <re/adt/adt.h>
 #include <re/cc/cc_compiler_target.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/cc/cc_compiler.h>
 #include <re/transforms/to_utf8.h>
 #include <re/analysis/re_analysis.h>

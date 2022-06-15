@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <unicode/core/unicode_set.h>
+#include <util/slab_allocator.h>
 
 namespace cc {
     
@@ -27,6 +28,7 @@ inline std::string numberingSuffix(ByteNumbering numbering) {
 
 class Alphabet {
 public:
+    using Allocator = SlabAllocator<Alphabet *>;
     const std::string & getName() const { return mAlphabetName;}
     virtual const unsigned getSize() const = 0;
     enum class ClassTypeId : unsigned {UnicodeMappableAlphabet, CodeUnitAlphabet, MultiplexedAlphabet};
@@ -36,6 +38,10 @@ public:
     virtual ~Alphabet() {}
 protected:
     Alphabet(const std::string && name, ClassTypeId k) : mAlphabetName(std::move(name)), mClassTypeId(k) {}
+    void* operator new (std::size_t size) noexcept {
+        return mAllocator.allocate<uint8_t>(size);
+    }
+    static Allocator mAllocator;
 private:
     const std::string mAlphabetName;
     const ClassTypeId mClassTypeId;

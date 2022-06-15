@@ -15,8 +15,6 @@ using CC_Set = std::vector<re::CC *>;
 
 class MultiplexedAlphabet final : public Alphabet {
 public:
-    MultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs);
-
     static inline bool classof(const Alphabet * a) {
         return a->getClassTypeId() == ClassTypeId::MultiplexedAlphabet;
     }
@@ -39,6 +37,11 @@ public:
     re::CC * transformCC(const re::CC * sourceCC) const;
     
     re::CC * invertCC(const re::CC * transformedCC) const;
+
+    friend MultiplexedAlphabet * makeMultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs);
+protected:
+    MultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs);
+
 private:
     const Alphabet * mSourceAlphabet;
     const CC_Set mUnicodeSets;
@@ -48,6 +51,9 @@ private:
     unsigned long findTargetCCIndex(const re::CC * sourceCC) const;
 };
 
+inline MultiplexedAlphabet * makeMultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs) {
+    return new MultiplexedAlphabet(alphabetName, CCs);
+}
 }
 
 

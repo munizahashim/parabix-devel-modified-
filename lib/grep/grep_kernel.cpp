@@ -44,7 +44,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <re/cc/cc_compiler.h>         // for CC_Compiler
 #include <re/cc/cc_compiler_target.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/compile/re_compiler.h>
 
 using namespace kernel;
@@ -167,7 +167,7 @@ void GrepKernelOptions::setCombiningStream(GrepCombiningType t, StreamSet * toCo
 }
 void GrepKernelOptions::setResults(StreamSet * r) {mResults = r;}
 
-void GrepKernelOptions::addAlphabet(std::shared_ptr<cc::Alphabet> a, StreamSet * basis) {
+void GrepKernelOptions::addAlphabet(const cc::Alphabet * a, StreamSet * basis) {
     mAlphabets.emplace_back(a, basis);
 }
 
@@ -674,7 +674,7 @@ void kernel::GraphemeClusterLogic(const std::unique_ptr<ProgramBuilder> & P, UTF
     
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
     const auto GCB_Sets = re::collectCCs(GCB, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
-    auto GCB_mpx = std::make_shared<cc::MultiplexedAlphabet>("GCB_mpx", GCB_Sets);
+    auto GCB_mpx = cc::makeMultiplexedAlphabet("GCB_mpx", GCB_Sets);
     GCB = transformCCs(GCB_mpx, GCB, re::NameTransformationMode::TransformDefinition);
     auto GCB_basis = GCB_mpx->getMultiplexedCCs();
     StreamSet * const GCB_Classes = P->CreateStreamSet(GCB_basis.size());
