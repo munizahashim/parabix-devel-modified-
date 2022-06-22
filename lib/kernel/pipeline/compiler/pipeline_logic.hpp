@@ -151,7 +151,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     const auto groupId = getCacheLineGroupId(kernelId);
 
     if (isRoot) {
-        addTerminationProperties(b, kernelId);
+        addTerminationProperties(b, kernelId, groupId);
     }
 
     const auto name = makeKernelName(kernelId);
@@ -225,6 +225,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
+    }
+
+    if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram)) {
+        addHistogramProperties(b, kernelId, groupId);
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
@@ -816,6 +820,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     SmallVector<Value *, 2> threadLocalArgs;
     if (LLVM_LIKELY(mTarget->hasThreadLocal() && mTarget->isStateful())) {
         threadLocalArgs.push_back(initialSharedState);
+        threadLocalArgs.push_back(threadLocal[0]);
     }
 
     Value * finalTerminationSignal = nullptr;
@@ -869,7 +874,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (getHandle() == initialSharedState);
     assert (getThreadLocalHandle() == initialThreadLocal);
 
-    initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
+    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
 
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
@@ -1044,7 +1049,7 @@ inline Value * PipelineCompiler::isProcessThread(BuilderRef b, Value * const thr
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
+void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {    
     initializeForAllKernels();
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {

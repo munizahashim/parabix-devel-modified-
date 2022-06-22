@@ -115,7 +115,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
 
     assert (mMayLoopToEntry);
     Value * const totalExecutedNumOfStrides =
-        b->CreateExactUDiv(mAlreadyProcessedPhi[condInput], BIT_BLOCK_WIDTH);
+        b->CreateExactUDiv(mCurrentProcessedItemCountPhi[condInput], BIT_BLOCK_WIDTH);
     Value * const limit = b->CreateAdd(totalExecutedNumOfStrides, numOfLinearStrides);
 
     // Prior scan state is always initially 0

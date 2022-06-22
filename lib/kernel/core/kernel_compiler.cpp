@@ -175,7 +175,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
             b->CreateMProtect(mSharedHandle, CBuilder::Protect::WRITE);
         }
     }
-    initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
+    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     for (const auto & binding : mInputScalars) {
         b->setScalarField(binding.getName(), nextArg());
     }
@@ -184,7 +184,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
     // TODO: we could permit shared managed buffers here if we passed in the buffer
     // into the init method. However, since there are no uses of this in any written
     // program, we currently prohibit it.
-    initializeOwnedBufferHandles(b, InitializeOptions::SkipThreadLocal);
+    initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     // any kernel can set termination on initialization
     mTerminationSignalPtr = b->getScalarFieldPtr(TERMINATION_SIGNAL);
     b->CreateStore(b->getSize(KernelBuilder::TerminationCode::None), mTerminationSignalPtr);
@@ -240,7 +240,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
         threadLocal->addIncoming(providedState, mEntryPoint);
         threadLocal->addIncoming(allocedState, allocThreadLocal);
         mThreadLocalHandle = threadLocal;
-        initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
+        initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateInitializeThreadLocalMethod(b);
         b->CreateRet(threadLocal);
         clearInternalStateAfterCodeGen();
@@ -268,8 +268,8 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(Builder
             setHandle(nextArg());
         }
         Value * const expectedNumOfStrides = nextArg();
-        initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
-        initializeOwnedBufferHandles(b, InitializeOptions::SkipThreadLocal);
+        initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+        initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
         b->CreateRetVoid();
         clearInternalStateAfterCodeGen();
@@ -298,8 +298,8 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Bu
         }
         setThreadLocalHandle(nextArg());
         Value * const expectedNumOfStrides = nextArg();
-        initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
-        initializeOwnedBufferHandles(b, InitializeOptions::IncludeThreadLocal);
+        initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
+        initializeOwnedBufferHandles(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
         b->CreateRetVoid();
         clearInternalStateAfterCodeGen();
@@ -398,7 +398,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         mFixedRateFactor = nextArg();
     }
 
-    initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
+    initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
 
     // NOTE: the disadvantage of passing the stream pointers as a parameter is that it becomes more difficult
     // to access a stream set from a LLVM function call. We could create a stream-set aware function creation
@@ -940,8 +940,9 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) 
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
+        Value * const mainThreadLocalHandle = nextArg();
         mThreadLocalHandle = nextArg();
-        initializeScalarMap(b, InitializeOptions::IncludeThreadLocal);
+        initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars, mainThreadLocalHandle);
         mTarget->generateFinalizeThreadLocalMethod(b);
         b->CreateRetVoid();
         clearInternalStateAfterCodeGen();
@@ -961,11 +962,11 @@ inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
         setHandle(&*(args++));
         assert (args == mCurrentMethod->arg_end());
     }
-    initializeScalarMap(b, InitializeOptions::SkipThreadLocal);
+    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b->CreateMProtect(mSharedHandle,CBuilder::Protect::WRITE);
     }
-    initializeOwnedBufferHandles(b, InitializeOptions::SkipThreadLocal);
+    initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     mTarget->generateFinalizeMethod(b); // may be overridden by the Kernel subtype
     const auto outputs = getFinalOutputScalars(b);
     if (outputs.empty()) {
@@ -996,7 +997,7 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions options) {
+void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions options, Value * const mainThreadLocal) {
 
     FixedArray<Value *, 3> indices;
     indices[0] = b->getInt32(0);
@@ -1025,7 +1026,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         return true;
     };
     assert ("incorrect shared handle/type!" && verifyStateType(mSharedHandle, sharedTy));
-    if (options == InitializeOptions::IncludeThreadLocal) {
+    if (options == InitializeOptions::IncludeThreadLocalScalars) {
         assert ("incorrect thread local handle/type!" && verifyStateType(mThreadLocalHandle, threadLocalTy));
     }
     #undef CHECK_TYPES
@@ -1058,6 +1059,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
     flat_set<unsigned> sharedGroups;
     flat_set<unsigned> threadLocalGroups;
 
+    bool hasThreadLocalAccum = false;
+
     for (const auto & scalar : mInternalScalars) {
         assert (scalar.getValueType());
         switch (scalar.getScalarType()) {
@@ -1065,7 +1068,13 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 sharedGroups.insert(scalar.getGroup());
                 break;
             case ScalarType::ThreadLocal:
+                if (options == InitializeOptions::DoNotIncludeThreadLocalScalars) continue;
                 threadLocalGroups.insert(scalar.getGroup());
+                if (options != InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars) continue;
+                if (scalar.getAccumulationRule() != Kernel::ThreadLocalScalarAccumulationRule::DoNothing) {
+                    assert (mainThreadLocal && "no main thread local given?");
+                    hasThreadLocalAccum = true;
+                }
                 break;
             default: break;
         }
@@ -1073,6 +1082,16 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
     std::vector<unsigned> sharedIndex(sharedGroups.size() + 2, 0);
     std::vector<unsigned> threadLocalIndex(threadLocalGroups.size(), 0);
+
+
+    BasicBlock * combineToMainThreadLocal = nullptr;
+
+    if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
+        combineToMainThreadLocal = b->CreateBasicBlock("combineToMainThreadLocal");
+    }
+
+
+
 
     auto enumerate = [&](const Bindings & bindings, const unsigned groupId) {
         indices[1] = b->getInt32(groupId * 2);
@@ -1088,6 +1107,10 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
     };
 
     enumerate(mInputScalars, 0);
+
+    bool addedThreadLocalAccum = false;
+
+    BasicBlock * combineExit = combineToMainThreadLocal;
 
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
@@ -1113,7 +1136,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 END_SCOPED_REGION
                 break;
             case ScalarType::ThreadLocal:
-                if (options == InitializeOptions::SkipThreadLocal) continue;
+                if (options == InitializeOptions::DoNotIncludeThreadLocalScalars) continue;
                 assert (mThreadLocalHandle);
                 BEGIN_SCOPED_REGION
                 const auto j = getGroupIndex(threadLocalGroups);
@@ -1124,6 +1147,65 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 assert (threadLocalTy->getStructElementType(j * 2)->getStructElementType(k) == binding.getValueType());
                 indices[2] = b->getInt32(k++);
                 scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                if (LLVM_UNLIKELY(hasThreadLocalAccum && (binding.getAccumulationRule() != Kernel::ThreadLocalScalarAccumulationRule::DoNothing))) {
+                    const auto ip = b->saveIP();
+                    b->SetInsertPoint(combineExit);
+
+                    addedThreadLocalAccum = true;
+
+                    Value * const mainScalar = b->CreateGEP(threadLocalTy, mainThreadLocal, indices);
+                    Type * const ty = mainScalar->getType()->getPointerElementType();
+                    if (isa<ArrayType>(ty)) {
+                        ArrayType * const arrayTy = cast<ArrayType>(ty);
+                        const auto m = arrayTy->getNumElements();
+                        if (LLVM_UNLIKELY(m == 0)) {
+                            report_fatal_error(getName() + ": cannot automatically accumulate a 0-element scalar");
+                        }
+
+                        ConstantInt * const i32_ZERO = b->getInt32(0);
+                        ConstantInt * const i32_ONE = b->getInt32(1);
+
+                        FixedArray<Value *, 2> indices;
+                        indices[0] = i32_ZERO;
+
+                        BasicBlock * const entry = b->GetInsertBlock();
+                        BasicBlock * const loop = b->CreateBasicBlock();
+                        BasicBlock * const exit = b->CreateBasicBlock();
+                        b->CreateBr(loop);
+
+                        b->SetInsertPoint(loop);
+                        PHINode * const idxPhi = b->CreatePHI(b->getInt32Ty(), 2);
+                        idxPhi->addIncoming(i32_ZERO, entry);
+                        indices[1] = idxPhi;
+                        Value * const scalarVal = b->CreateLoad(b->CreateGEP(scalar, indices));
+                        Value * const mainScalarPtr = b->CreateGEP(mainScalar, indices);
+                        Value * mainScalarVal = b->CreateLoad(mainScalarPtr);
+                        switch (binding.getAccumulationRule()) {
+                            case Kernel::ThreadLocalScalarAccumulationRule::Sum:
+                                mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
+                                break;
+                            default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
+                        }
+                        b->CreateStore(mainScalarVal, mainScalarPtr);
+                        Value * const nextIdx = b->CreateAdd(idxPhi, i32_ONE);
+                        idxPhi->addIncoming(nextIdx, loop);
+                        b->CreateCondBr(b->CreateICmpNE(nextIdx, b->getInt32(m)), loop, exit);
+
+                        b->SetInsertPoint(exit);
+                        combineExit = exit;
+                    } else {
+                        Value * const scalarVal = b->CreateLoad(scalar);
+                        Value * mainScalarVal = b->CreateLoad(mainScalar);
+                        switch (binding.getAccumulationRule()) {
+                            case Kernel::ThreadLocalScalarAccumulationRule::Sum:
+                                mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
+                                break;
+                            default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
+                        }
+                        b->CreateStore(mainScalarVal, mainScalar);
+                    }
+                    b->restoreIP(ip);
+                }
                 END_SCOPED_REGION
                 break;
             case ScalarType::NonPersistent:
@@ -1135,6 +1217,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         addToScalarFieldMap(binding.getName(), scalar, binding.getValueType());
     }
 
+    assert (!hasThreadLocalAccum || addedThreadLocalAccum);
+
     enumerate(mOutputScalars, sharedGroups.size() + 1);
 
     // finally add any aliases
@@ -1143,6 +1227,15 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         if (f != mScalarFieldMap.end()) {
             addToScalarFieldMap(alias.first, f->second, nullptr);
         }
+    }
+
+    if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
+        BasicBlock * const exit = b->CreateBasicBlock("afterThreadLocalAccumulation");
+        Value * const cond = b->CreateICmpEQ(mThreadLocalHandle, mainThreadLocal);
+        b->CreateCondBr(cond, exit, combineToMainThreadLocal);
+        b->SetInsertPoint(combineExit);
+        b->CreateBr(exit);
+        b->SetInsertPoint(exit);
     }
 }
 

@@ -52,6 +52,8 @@ class EnumeratedPropertyObject(PropertyObject):
         self.property_value_enum_integer = {}
         self.property_value_full_name_map = {}
         self.property_value_lookup_map = {}
+        self.alias_map = {}
+        self.max_aliases = 0
         self.enum_integer = 0
         self.value_map = {}
         self.default_value = None
@@ -72,6 +74,8 @@ class EnumeratedPropertyObject(PropertyObject):
         for name in [value_enum, value_preferred_full_name] + aliases:
             self.property_value_lookup_map[name] = value_enum
             self.property_value_lookup_map[canonicalize(name)] = value_enum
+        self.alias_map[value_enum] = aliases
+        if len(aliases) > self.max_aliases: self.max_aliases = len(aliases)
         self.value_map[value_enum] = empty_uset()
 
     def setDefaultValue(self, default):

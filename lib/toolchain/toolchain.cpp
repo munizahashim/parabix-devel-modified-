@@ -43,6 +43,9 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(TraceProducedItemCounts, "Trace produced item count deltas over segments."),
                         clEnumVal(TraceUnconsumedItemCounts, "Trace unconsumed item counts over segments."),
 
+                        clEnumVal(GenerateTransferredItemCountHistogram, "Generate a histogram CSV each non-Fixed port detailing "
+                                                                         "the transfered item count per executed stride."),
+
                         clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
                         clEnumVal(EnablePipelineAsserts, "Enable built-in Parabix framework asserts in generated pipeline IR."),
                         clEnumVal(EnableMProtect, "Use mprotect to cause a write fault when erroneously "

@@ -211,7 +211,7 @@ inline Reference * makeReference(std::string name, Capture * capture, unsigned i
 class PropertyExpression : public RE {
 public:
     enum class Kind {Codepoint, Boundary};
-    enum class Operator {Eq, NEq, Less, LEq, Greater, GEq};
+    enum class Operator {Eq, NEq};
 
     PropertyExpression::Kind getKind() const { return mKind;}
     std::string getPropertyIdentifier() const { return mIdentifier;}

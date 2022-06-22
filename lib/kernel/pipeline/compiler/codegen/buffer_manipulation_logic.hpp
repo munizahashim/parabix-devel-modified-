@@ -106,10 +106,10 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(BuilderRef b,
         Value * const zeroExtended = mIsInputZeroExtended[rt.Port];
         if (zeroExtended) {
             PHINode * processed = nullptr;
-            if (mAlreadyProcessedDeferredPhi[rt.Port]) {
-                processed = mAlreadyProcessedDeferredPhi[rt.Port];
+            if (mCurrentProcessedDeferredItemCountPhi[rt.Port]) {
+                processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
-                processed = mAlreadyProcessedPhi[rt.Port];
+                processed = mCurrentProcessedItemCountPhi[rt.Port];
             }
             const BufferNode & bn = mBufferGraph[source(e, mBufferGraph)];
             const Binding & binding = rt.Binding;
@@ -368,12 +368,13 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
             const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
+
             if (port.IsDeferred) {
-                args[2] = mAlreadyProcessedDeferredPhi[inputPort];
+                args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
             } else {
-                args[2] = mAlreadyProcessedPhi[inputPort];
+                args[2] = mCurrentProcessedItemCountPhi[inputPort];
             }
-            args[3] = b->CreateAdd(mAlreadyProcessedPhi[inputPort], selected);
+            args[3] = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], selected);
             args[4] = buffer->getStreamSetCount(b);
             args[5] = bufferStorage;
 

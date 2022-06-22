@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2021 International Characters, Inc.
+ *  Copyright (c) 2022 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -205,19 +205,20 @@ namespace UCD {
     {Mixed, 1}, {Empty, 327}, {Mixed, 1}, {Empty, 27}, {Mixed, 1},
     {Empty, 87}, {Mixed, 1}, {Empty, 177}, {Mixed, 1}, {Full, 7},
     {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 297},
-    {Mixed, 1}, {Empty, 439}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
-    {Empty, 62}, {Mixed, 1}, {Empty, 100}, {Mixed, 2}, {Empty, 216},
-    {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 202}, {Mixed, 1},
-    {Empty, 127}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 28595}};
+    {Mixed, 1}, {Empty, 369}, {Mixed, 1}, {Empty, 69}, {Mixed, 1},
+    {Full, 1}, {Mixed, 1}, {Empty, 62}, {Mixed, 1}, {Empty, 100},
+    {Mixed, 2}, {Empty, 216}, {Mixed, 1}, {Full, 2}, {Mixed, 1},
+    {Empty, 202}, {Mixed, 1}, {Empty, 127}, {Mixed, 1}, {Full, 1},
+    {Mixed, 1}, {Empty, 28595}};
     const static UnicodeSet::bitquad_t  __kangXi_109_quads[] = {
     0xffffc000, 0x0000003f, 0xffffc000, 0x07ffffff, 0x00000008, 0x00002000,
     0x20000000, 0x00000700, 0x00380000, 0x00000400, 0x80000000, 0x00000020,
     0x00002000, 0xfffffff0, 0xffefffff, 0xffdfffff, 0x1fffffef, 0x08000000,
-    0x80000000, 0x0000003f, 0x000c0000, 0xffffffe0, 0x00001fff, 0xff800000,
-    0x001fffff, 0x00000fff, 0xfffff800, 0x00001fff};
+    0x80000000, 0x80000000, 0x0000003f, 0x000c0000, 0xffffffe0, 0x00001fff,
+    0xff800000, 0x001fffff, 0x00000fff, 0xfffff800, 0x00001fff};
     }
 
-    const static UnicodeSet kangXi_109{const_cast<UnicodeSet::run_t *>(__kangXi_109_runs), 51, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_109_quads), 28, 0};
+    const static UnicodeSet kangXi_109{const_cast<UnicodeSet::run_t *>(__kangXi_109_runs), 53, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_109_quads), 29, 0};
 
 
     namespace {
@@ -484,15 +485,16 @@ namespace UCD {
     {Empty, 538}, {Mixed, 1}, {Empty, 478}, {Mixed, 2}, {Empty, 986},
     {Mixed, 1}, {Empty, 2644}, {Mixed, 1}, {Empty, 44}, {Mixed, 1},
     {Empty, 185}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 629},
-    {Mixed, 1}, {Empty, 168}, {Mixed, 1}, {Empty, 224}, {Mixed, 1},
-    {Empty, 183}, {Mixed, 1}, {Empty, 142}, {Mixed, 1}, {Empty, 28581}};
+    {Mixed, 1}, {Empty, 168}, {Mixed, 1}, {Empty, 69}, {Mixed, 1},
+    {Empty, 154}, {Mixed, 1}, {Empty, 183}, {Mixed, 1}, {Empty, 142},
+    {Mixed, 1}, {Empty, 28581}};
     const static UnicodeSet::bitquad_t  __kangXi_121_quads[] = {
     0x00007ffc, 0xffc00000, 0x0001ffff, 0x00020000, 0x00000002, 0x00000002,
-    0xfffffffc, 0x000003ff, 0xfc000000, 0x001ff000, 0x0fff0000, 0x000c0000,
-    0x000000fc};
+    0xfffffffc, 0x000003ff, 0xfc000000, 0x001ff000, 0x00000200, 0x0fff0000,
+    0x000c0000, 0x000000fc};
     }
 
-    const static UnicodeSet kangXi_121{const_cast<UnicodeSet::run_t *>(__kangXi_121_runs), 25, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_121_quads), 13, 0};
+    const static UnicodeSet kangXi_121{const_cast<UnicodeSet::run_t *>(__kangXi_121_runs), 27, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_121_quads), 14, 0};
 
 
     namespace {
@@ -651,21 +653,21 @@ namespace UCD {
     {Empty, 2251}, {Mixed, 1}, {Empty, 260}, {Mixed, 1}, {Empty, 134},
     {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 266}, {Mixed, 2}, {Full, 6},
     {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 581},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 47}, {Mixed, 1}, {Empty, 69},
-    {Mixed, 1}, {Empty, 48}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
-    {Empty, 224}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 171},
-    {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 142}, {Mixed, 1}, {Full, 3},
-    {Mixed, 1}, {Empty, 28576}};
+    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 42}, {Mixed, 1}, {Empty, 4},
+    {Mixed, 1}, {Empty, 69}, {Mixed, 1}, {Empty, 48}, {Mixed, 1}, {Full, 1},
+    {Mixed, 1}, {Empty, 224}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
+    {Empty, 171}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 142},
+    {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 28576}};
     const static UnicodeSet::bitquad_t  __kangXi_130_quads[] = {
     0x00004000, 0x02000000, 0xfffff000, 0x0000ffff, 0x00010000, 0x00020000,
     0x00000022, 0xfffffe00, 0xffffffef, 0x00000007, 0x00000040, 0x00080000,
     0x10000000, 0x00018100, 0x00000008, 0x00008000, 0xfffffe00, 0xff7fffff,
-    0xfff7ffff, 0xff3fffff, 0x1fffffff, 0xffc00000, 0x00000017, 0x00000400,
-    0x00000001, 0xffff8000, 0x00000003, 0xffffff80, 0x00000fff, 0x00c00000,
-    0x000001be, 0xc0000000, 0x00003fff};
+    0xfff7ffff, 0xff3fffff, 0x1fffffff, 0xffc00000, 0x00000017, 0x00400000,
+    0x00000400, 0x00000001, 0xffff8000, 0x00000003, 0xffffff80, 0x00000fff,
+    0x00c00000, 0x000001be, 0xc0000000, 0x00003fff};
     }
 
-    const static UnicodeSet kangXi_130{const_cast<UnicodeSet::run_t *>(__kangXi_130_runs), 61, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_130_quads), 33, 0};
+    const static UnicodeSet kangXi_130{const_cast<UnicodeSet::run_t *>(__kangXi_130_runs), 63, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_130_quads), 34, 0};
 
 
     namespace {
@@ -1301,17 +1303,18 @@ namespace UCD {
     {Empty, 581}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 572},
     {Mixed, 1}, {Full, 5}, {Mixed, 1}, {Empty, 830}, {Mixed, 1}, {Empty, 7},
     {Mixed, 1}, {Empty, 3169}, {Mixed, 1}, {Full, 11}, {Mixed, 1},
-    {Empty, 354}, {Mixed, 2}, {Empty, 27}, {Mixed, 1}, {Empty, 147},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 233}, {Mixed, 2},
-    {Empty, 142}, {Mixed, 1}, {Empty, 166}, {Mixed, 1}, {Full, 1},
-    {Mixed, 1}, {Empty, 28551}};
+    {Empty, 354}, {Mixed, 2}, {Empty, 21}, {Mixed, 1}, {Empty, 5},
+    {Mixed, 1}, {Empty, 147}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
+    {Empty, 233}, {Mixed, 2}, {Empty, 142}, {Mixed, 1}, {Empty, 166},
+    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 28551}};
     const static UnicodeSet::bitquad_t  __kangXi_163_quads[] = {
     0xfff80000, 0x0000001f, 0xfffe0000, 0x000001ff, 0x00001000, 0x00004040,
-    0xffffff00, 0x0000ffff, 0xff800000, 0x0007ffff, 0x00003800, 0xfff80000,
-    0x0000003f, 0xfffffc00, 0x001fffff, 0x0000007c, 0x80000000, 0x00000007};
+    0xffffff00, 0x0000ffff, 0xff800000, 0x0007ffff, 0x00800000, 0x00003800,
+    0xfff80000, 0x0000003f, 0xfffffc00, 0x001fffff, 0x0000007c, 0x80000000,
+    0x00000007};
     }
 
-    const static UnicodeSet kangXi_163{const_cast<UnicodeSet::run_t *>(__kangXi_163_runs), 33, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_163_quads), 18, 0};
+    const static UnicodeSet kangXi_163{const_cast<UnicodeSet::run_t *>(__kangXi_163_runs), 35, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_163_quads), 19, 0};
 
 
     namespace {
@@ -2324,14 +2327,15 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_210_runs[] = {
-    {Empty, 620}, {Mixed, 1}, {Empty, 653}, {Mixed, 1}, {Empty, 2833},
-    {Mixed, 1}, {Empty, 1313}, {Mixed, 1}, {Empty, 324}, {Mixed, 1},
-    {Empty, 233}, {Mixed, 1}, {Empty, 28834}};
+    {Empty, 620}, {Mixed, 1}, {Empty, 191}, {Mixed, 1}, {Empty, 461},
+    {Mixed, 1}, {Empty, 2833}, {Mixed, 1}, {Empty, 1313}, {Mixed, 1},
+    {Empty, 324}, {Mixed, 1}, {Empty, 233}, {Mixed, 1}, {Empty, 28834}};
     const static UnicodeSet::bitquad_t  __kangXi_210_quads[] = {
-    0x000c0000, 0x0000fc00, 0x10000000, 0x000ffff0, 0x00060000, 0x1c000000};
+    0x000c0000, 0x00000200, 0x0000fc00, 0x10000000, 0x000ffff0, 0x00060000,
+    0x1c000000};
     }
 
-    const static UnicodeSet kangXi_210{const_cast<UnicodeSet::run_t *>(__kangXi_210_runs), 13, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_210_quads), 6, 0};
+    const static UnicodeSet kangXi_210{const_cast<UnicodeSet::run_t *>(__kangXi_210_runs), 15, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_210_quads), 7, 0};
 
 
     namespace {
@@ -2347,18 +2351,19 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_211_runs[] = {
-    {Empty, 620}, {Mixed, 2}, {Empty, 652}, {Mixed, 2}, {Empty, 2848},
-    {Mixed, 1}, {Empty, 431}, {Mixed, 1}, {Empty, 865}, {Mixed, 1},
-    {Full, 5}, {Mixed, 1}, {Empty, 132}, {Mixed, 1}, {Empty, 6}, {Mixed, 1},
-    {Empty, 178}, {Mixed, 1}, {Empty, 233}, {Mixed, 2}, {Empty, 113},
-    {Mixed, 1}, {Empty, 199}, {Mixed, 2}, {Empty, 28518}};
+    {Empty, 620}, {Mixed, 2}, {Empty, 237}, {Mixed, 1}, {Empty, 414},
+    {Mixed, 2}, {Empty, 2848}, {Mixed, 1}, {Empty, 431}, {Mixed, 1},
+    {Empty, 865}, {Mixed, 1}, {Full, 5}, {Mixed, 1}, {Empty, 132},
+    {Mixed, 1}, {Empty, 6}, {Mixed, 1}, {Empty, 178}, {Mixed, 1},
+    {Empty, 233}, {Mixed, 2}, {Empty, 113}, {Mixed, 1}, {Empty, 199},
+    {Mixed, 2}, {Empty, 28518}};
     const static UnicodeSet::bitquad_t  __kangXi_211_quads[] = {
-    0xfff00000, 0x00000fff, 0xfffc0000, 0x7fffffff, 0x10000000, 0x00000800,
-    0xfff00000, 0x00007fff, 0x000000e0, 0x0a000000, 0x03f00000, 0xe0000000,
-    0x01ffffff, 0x20000000, 0xfc000000, 0x000001ff};
+    0xfff00000, 0x00000fff, 0x00008000, 0xfffc0000, 0x7fffffff, 0x10000000,
+    0x00000800, 0xfff00000, 0x00007fff, 0x000000e0, 0x0e000000, 0x03f00000,
+    0xe0000000, 0x01ffffff, 0x20000000, 0xfc000000, 0x000001ff};
     }
 
-    const static UnicodeSet kangXi_211{const_cast<UnicodeSet::run_t *>(__kangXi_211_runs), 25, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_211_quads), 16, 0};
+    const static UnicodeSet kangXi_211{const_cast<UnicodeSet::run_t *>(__kangXi_211_runs), 27, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_211_quads), 17, 0};
 
 
     namespace {
@@ -2367,7 +2372,7 @@ namespace UCD {
     {Mixed, 1}, {Empty, 6}, {Mixed, 1}, {Empty, 178}, {Mixed, 2},
     {Empty, 233}, {Mixed, 1}, {Empty, 314}, {Mixed, 1}, {Empty, 28518}};
     const static UnicodeSet::bitquad_t  __kangXi_211s_quads[] = {
-    0x80000000, 0x00001fff, 0x00018000, 0x0001ff00, 0x14000000, 0xfc000000,
+    0x80000000, 0x00001fff, 0x00018000, 0x0001ff00, 0x10000000, 0xfc000000,
     0x007fffff, 0x02000000, 0x3ffffe00};
     }
 
@@ -2376,16 +2381,25 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_212_runs[] = {
-    {Empty, 621}, {Mixed, 1}, {Empty, 654}, {Mixed, 1}, {Empty, 721},
-    {Mixed, 1}, {Empty, 7}, {Mixed, 1}, {Empty, 3421}, {Mixed, 2},
-    {Empty, 131}, {Mixed, 1}, {Empty, 186}, {Mixed, 1}, {Empty, 233},
+    {Empty, 621}, {Mixed, 1}, {Empty, 360}, {Mixed, 1}, {Empty, 293},
+    {Mixed, 1}, {Empty, 721}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
+    {Empty, 2268}, {Mixed, 1}, {Empty, 299}, {Mixed, 1}, {Empty, 41},
+    {Mixed, 1}, {Empty, 137}, {Mixed, 1}, {Empty, 64}, {Mixed, 1},
+    {Empty, 607}, {Mixed, 2}, {Empty, 20}, {Mixed, 1}, {Empty, 24},
+    {Mixed, 1}, {Empty, 11}, {Mixed, 1}, {Empty, 10}, {Mixed, 1},
+    {Empty, 3}, {Mixed, 1}, {Empty, 32}, {Mixed, 1}, {Empty, 25},
+    {Mixed, 1}, {Empty, 74}, {Mixed, 1}, {Empty, 35}, {Mixed, 1},
+    {Empty, 75}, {Mixed, 1}, {Empty, 148}, {Mixed, 1}, {Empty, 84},
     {Mixed, 1}, {Empty, 314}, {Mixed, 2}, {Empty, 28517}};
     const static UnicodeSet::bitquad_t  __kangXi_212_quads[] = {
-    0x00001000, 0x01fee000, 0x00000010, 0x02000000, 0xfffe0000, 0x0000003f,
-    0x00020000, 0x07800000, 0x04000000, 0xc0000000, 0x00000001};
+    0x00001000, 0x10000000, 0x01fee000, 0x00000010, 0x02000000, 0x00400000,
+    0x00000002, 0x00008000, 0x00000200, 0x60000000, 0xfffe0000, 0x0000003f,
+    0x08000000, 0x00008000, 0x02000000, 0x40000000, 0x00000002, 0x20000000,
+    0x00020000, 0x02000000, 0x00100000, 0x07800000, 0x80000000, 0x04000000,
+    0xc0000000, 0x00000001};
     }
 
-    const static UnicodeSet kangXi_212{const_cast<UnicodeSet::run_t *>(__kangXi_212_runs), 19, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_212_quads), 11, 0};
+    const static UnicodeSet kangXi_212{const_cast<UnicodeSet::run_t *>(__kangXi_212_runs), 49, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_212_quads), 26, 0};
 
 
     namespace {
@@ -2402,16 +2416,16 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_213_runs[] = {
-    {Empty, 621}, {Mixed, 1}, {Empty, 654}, {Mixed, 1}, {Empty, 715},
-    {Mixed, 1}, {Empty, 13}, {Mixed, 1}, {Empty, 3408}, {Mixed, 1},
-    {Empty, 13}, {Mixed, 2}, {Empty, 137}, {Mixed, 1}, {Empty, 413},
-    {Mixed, 1}, {Empty, 28833}};
+    {Empty, 621}, {Mixed, 1}, {Empty, 6}, {Mixed, 1}, {Empty, 647},
+    {Mixed, 1}, {Empty, 715}, {Mixed, 1}, {Empty, 13}, {Mixed, 1},
+    {Empty, 3408}, {Mixed, 1}, {Empty, 13}, {Mixed, 2}, {Empty, 137},
+    {Mixed, 1}, {Empty, 413}, {Mixed, 1}, {Empty, 28833}};
     const static UnicodeSet::bitquad_t  __kangXi_213_quads[] = {
-    0x00078000, 0x70000000, 0x00000180, 0x00004000, 0x08000000, 0xffffffc0,
-    0x000003ff, 0x20000000, 0xf8000000};
+    0x00078000, 0x00000001, 0x70000000, 0x00000180, 0x00004000, 0x08000000,
+    0xffffffc0, 0x000003ff, 0x20000000, 0xf8000000};
     }
 
-    const static UnicodeSet kangXi_213{const_cast<UnicodeSet::run_t *>(__kangXi_213_runs), 17, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_213_quads), 9, 0};
+    const static UnicodeSet kangXi_213{const_cast<UnicodeSet::run_t *>(__kangXi_213_runs), 19, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_213_quads), 10, 0};
 
 
     namespace {
@@ -2427,15 +2441,16 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_214_runs[] = {
-    {Empty, 621}, {Mixed, 1}, {Empty, 655}, {Mixed, 1}, {Empty, 4152},
-    {Mixed, 1}, {Empty, 130}, {Mixed, 1}, {Empty, 186}, {Mixed, 2},
-    {Empty, 233}, {Mixed, 1}, {Empty, 314}, {Mixed, 1}, {Empty, 28517}};
+    {Empty, 621}, {Mixed, 1}, {Empty, 655}, {Mixed, 1}, {Empty, 2847},
+    {Mixed, 1}, {Empty, 1304}, {Mixed, 1}, {Empty, 130}, {Mixed, 1},
+    {Empty, 186}, {Mixed, 2}, {Empty, 233}, {Mixed, 1}, {Empty, 314},
+    {Mixed, 1}, {Empty, 28517}};
     const static UnicodeSet::bitquad_t  __kangXi_214_quads[] = {
-    0x00380000, 0x0000003f, 0x007ffc00, 0x00100000, 0x80000000, 0x00000003,
-    0x00000001, 0x00000600};
+    0x00380000, 0x0000003f, 0x00000010, 0x007ffc00, 0x00100000, 0x80000000,
+    0x00000003, 0x00000001, 0x00000600};
     }
 
-    const static UnicodeSet kangXi_214{const_cast<UnicodeSet::run_t *>(__kangXi_214_runs), 15, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_214_quads), 8, 0};
+    const static UnicodeSet kangXi_214{const_cast<UnicodeSet::run_t *>(__kangXi_214_runs), 17, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_214_quads), 9, 0};
 
 
     namespace {
@@ -2579,30 +2594,32 @@ namespace UCD {
     const static UnicodeSet::run_t __kangXi_30_runs[] = {
     {Empty, 427}, {Mixed, 1}, {Full, 4}, {Mixed, 1}, {Empty, 188},
     {Mixed, 1}, {Empty, 49}, {Mixed, 1}, {Full, 10}, {Mixed, 1}, {Full, 7},
-    {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 1297}, {Mixed, 1},
-    {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 4}, {Empty, 1}, {Mixed, 1},
-    {Empty, 2093}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 8},
-    {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 13}, {Mixed, 2},
-    {Empty, 19}, {Mixed, 1}, {Empty, 40}, {Mixed, 1}, {Full, 10},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Full, 19}, {Mixed, 1}, {Full, 10},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Full, 2}, {Empty, 195}, {Mixed, 1},
-    {Empty, 652}, {Mixed, 1}, {Empty, 80}, {Mixed, 1}, {Empty, 263},
-    {Mixed, 1}, {Empty, 10}, {Mixed, 1}, {Full, 3}, {Mixed, 1},
-    {Empty, 116}, {Mixed, 1}, {Empty, 23}, {Mixed, 1}, {Full, 7},
-    {Mixed, 1}, {Empty, 178}, {Mixed, 1}, {Full, 12}, {Mixed, 1},
-    {Empty, 294}, {Mixed, 2}, {Empty, 75}, {Mixed, 1}, {Full, 3},
-    {Mixed, 1}, {Empty, 28653}};
+    {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 584}, {Mixed, 1},
+    {Empty, 712}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1},
+    {Mixed, 4}, {Empty, 1}, {Mixed, 1}, {Empty, 2093}, {Mixed, 1},
+    {Empty, 1}, {Mixed, 1}, {Empty, 8}, {Mixed, 1}, {Empty, 3}, {Mixed, 1},
+    {Empty, 13}, {Mixed, 2}, {Empty, 19}, {Mixed, 1}, {Empty, 40},
+    {Mixed, 1}, {Full, 10}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Full, 19},
+    {Mixed, 1}, {Full, 10}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Full, 2},
+    {Empty, 195}, {Mixed, 1}, {Empty, 652}, {Mixed, 1}, {Empty, 80},
+    {Mixed, 1}, {Empty, 263}, {Mixed, 1}, {Empty, 10}, {Mixed, 1},
+    {Full, 3}, {Mixed, 1}, {Empty, 115}, {Mixed, 2}, {Empty, 11},
+    {Mixed, 1}, {Empty, 11}, {Mixed, 1}, {Full, 7}, {Mixed, 1},
+    {Empty, 178}, {Mixed, 1}, {Full, 12}, {Mixed, 1}, {Empty, 294},
+    {Mixed, 2}, {Empty, 75}, {Mixed, 1}, {Full, 3}, {Mixed, 1},
+    {Empty, 28653}};
     const static UnicodeSet::bitquad_t  __kangXi_30_quads[] = {
     0xfffffff8, 0x1fffffff, 0x01800000, 0xfffffff8, 0x7fffffff, 0xffdfffff,
-    0x007fffff, 0x00000840, 0x40000001, 0x40000000, 0x00002000, 0x00002000,
-    0x01c00000, 0x0f002000, 0x02800000, 0x00800000, 0x00000400, 0x00000004,
-    0x00080000, 0x00000080, 0x10000000, 0xfe000000, 0xfffff7ff, 0xffffffbf,
-    0xffffff7f, 0xfffffdff, 0xff9fffff, 0x00010000, 0x00000020, 0x00080000,
-    0x00800000, 0xfffc0000, 0x000000ff, 0x7f000000, 0xffff8000, 0x00000003,
-    0xff000000, 0x03ffffff, 0xfe000000, 0x0000d7ff, 0xffffff80, 0x00001fff};
+    0x007fffff, 0x20000000, 0x00000840, 0x40000001, 0x40000000, 0x00002000,
+    0x00002000, 0x01c00000, 0x0f002000, 0x02800000, 0x00800000, 0x00000400,
+    0x00000004, 0x00080000, 0x00000080, 0x10000000, 0xfe000000, 0xfffff7ff,
+    0xffffffbf, 0xffffff7f, 0xfffffdff, 0xff9fffff, 0x00010000, 0x00000020,
+    0x00080000, 0x00800000, 0xfffc0000, 0x000000ff, 0x01000000, 0x7f000000,
+    0x06000000, 0xffff8000, 0x00000003, 0xff000000, 0x03ffffff, 0xfe000000,
+    0x0000d7ff, 0xffffff80, 0x00001fff};
     }
 
-    const static UnicodeSet kangXi_30{const_cast<UnicodeSet::run_t *>(__kangXi_30_runs), 76, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_30_quads), 42, 0};
+    const static UnicodeSet kangXi_30{const_cast<UnicodeSet::run_t *>(__kangXi_30_runs), 80, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_30_quads), 45, 0};
 
 
     namespace {
@@ -2627,7 +2644,7 @@ namespace UCD {
     const static UnicodeSet::run_t __kangXi_32_runs[] = {
     {Empty, 433}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 259},
     {Mixed, 1}, {Full, 12}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 565},
-    {Mixed, 2}, {Empty, 715}, {Mixed, 2}, {Empty, 4}, {Mixed, 2},
+    {Mixed, 3}, {Empty, 714}, {Mixed, 2}, {Empty, 4}, {Mixed, 2},
     {Empty, 1}, {Mixed, 1}, {Empty, 2144}, {Mixed, 1}, {Empty, 92},
     {Mixed, 2}, {Full, 3}, {Mixed, 1}, {Full, 12}, {Mixed, 1}, {Full, 1},
     {Mixed, 4}, {Empty, 250}, {Mixed, 1}, {Empty, 422}, {Mixed, 1},
@@ -2638,14 +2655,14 @@ namespace UCD {
     {Mixed, 1}, {Empty, 28649}};
     const static UnicodeSet::bitquad_t  __kangXi_32_quads[] = {
     0xffffffc0, 0x00000007, 0x80000000, 0xfffffeff, 0x000007fd, 0x10480000,
-    0x00002000, 0x00000404, 0x00001000, 0x00018000, 0x06000000, 0x30000000,
-    0x08000000, 0xf0000000, 0xff7fffff, 0xefffffff, 0xfbffffff, 0xfffffffd,
-    0xf7ffffff, 0xff7fffff, 0x07ffffff, 0x00000080, 0x00000100, 0x00000080,
-    0xfffe0000, 0x0003ffff, 0x80000000, 0x00000003, 0xffc00000, 0x00000001,
-    0xfc000000, 0x0003ffff, 0x03fc0000, 0xffe00000, 0x000000ff};
+    0x00002000, 0x40000000, 0x00000404, 0x00001000, 0x00018000, 0x06000000,
+    0x30000000, 0x08000000, 0xf0000000, 0xff7fffff, 0xefffffff, 0xfbffffff,
+    0xfffffffd, 0xf7ffffff, 0xff7fffff, 0x07ffffff, 0x00000080, 0x00000100,
+    0x00000080, 0xfffe0000, 0x0003ffff, 0x80000000, 0x00000003, 0xffc00000,
+    0x00000001, 0xfc000000, 0x0003ffff, 0x03fc0000, 0xffe00000, 0x000000ff};
     }
 
-    const static UnicodeSet kangXi_32{const_cast<UnicodeSet::run_t *>(__kangXi_32_runs), 55, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_32_quads), 35, 0};
+    const static UnicodeSet kangXi_32{const_cast<UnicodeSet::run_t *>(__kangXi_32_runs), 55, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_32_quads), 36, 0};
 
 
     namespace {
@@ -2775,16 +2792,16 @@ namespace UCD {
     const static UnicodeSet::run_t __kangXi_4_runs[] = {
     {Empty, 416}, {Mixed, 1}, {Empty, 208}, {Mixed, 2}, {Empty, 110},
     {Mixed, 1}, {Empty, 3362}, {Mixed, 3}, {Empty, 1329}, {Mixed, 1},
-    {Empty, 129}, {Mixed, 1}, {Empty, 7}, {Mixed, 2}, {Empty, 179},
+    {Empty, 128}, {Mixed, 2}, {Empty, 7}, {Mixed, 2}, {Empty, 179},
     {Mixed, 2}, {Empty, 327}, {Mixed, 1}, {Empty, 64}, {Mixed, 1},
     {Empty, 28670}};
     const static UnicodeSet::bitquad_t  __kangXi_4_quads[] = {
     0x00000060, 0x80000000, 0x01fffdff, 0x02000000, 0xffffffc0, 0xfedcaeff,
-    0x000001ff, 0x0000f000, 0x00000010, 0xffff8000, 0x00000003, 0x80000000,
-    0x003fffff, 0x00000004, 0x0000fc00};
+    0x000001ff, 0x0000f000, 0x00200000, 0x00000010, 0xffff8000, 0x00000003,
+    0x80000000, 0x003fffff, 0x00000004, 0x0000fc00};
     }
 
-    const static UnicodeSet kangXi_4{const_cast<UnicodeSet::run_t *>(__kangXi_4_runs), 21, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_4_quads), 15, 0};
+    const static UnicodeSet kangXi_4{const_cast<UnicodeSet::run_t *>(__kangXi_4_runs), 21, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_4_quads), 16, 0};
 
 
     namespace {
@@ -3357,27 +3374,28 @@ namespace UCD {
 
     namespace {
     const static UnicodeSet::run_t __kangXi_72_runs[] = {
-    {Empty, 470}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 188},
-    {Mixed, 1}, {Empty, 152}, {Mixed, 1}, {Full, 7}, {Mixed, 1},
-    {Empty, 200}, {Mixed, 1}, {Empty, 252}, {Mixed, 1}, {Empty, 718},
-    {Mixed, 1}, {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 1},
-    {Mixed, 1}, {Empty, 2093}, {Mixed, 1}, {Empty, 9}, {Mixed, 1},
-    {Empty, 380}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Full, 6}, {Mixed, 2},
-    {Full, 3}, {Mixed, 2}, {Empty, 316}, {Mixed, 1}, {Empty, 649},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 89}, {Mixed, 1}, {Empty, 68},
-    {Mixed, 2}, {Empty, 199}, {Mixed, 1}, {Full, 5}, {Mixed, 1},
-    {Empty, 243}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 100},
-    {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 28626}};
+    {Empty, 470}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 40},
+    {Mixed, 1}, {Empty, 147}, {Mixed, 1}, {Empty, 152}, {Mixed, 1},
+    {Full, 7}, {Mixed, 1}, {Empty, 200}, {Mixed, 1}, {Empty, 252},
+    {Mixed, 1}, {Empty, 718}, {Mixed, 1}, {Empty, 1}, {Mixed, 3},
+    {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 2093},
+    {Mixed, 1}, {Empty, 9}, {Mixed, 1}, {Empty, 380}, {Mixed, 1}, {Full, 2},
+    {Mixed, 1}, {Full, 6}, {Mixed, 2}, {Full, 3}, {Mixed, 2}, {Empty, 316},
+    {Mixed, 1}, {Empty, 649}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
+    {Empty, 89}, {Mixed, 1}, {Empty, 68}, {Mixed, 2}, {Empty, 199},
+    {Mixed, 1}, {Full, 5}, {Mixed, 1}, {Empty, 243}, {Mixed, 1}, {Empty, 1},
+    {Mixed, 1}, {Empty, 100}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
+    {Empty, 28626}};
     const static UnicodeSet::bitquad_t  __kangXi_72_quads[] = {
-    0xffff0000, 0x0000ffff, 0x00800000, 0xffffffe0, 0x2000ffff, 0x00000040,
-    0x00000080, 0x00000800, 0x00000020, 0x00000001, 0x00040040, 0x00000008,
-    0x00020000, 0x40000000, 0x08000000, 0xf8000000, 0xfffffdff, 0xfffffffd,
-    0xfffbffff, 0xbbffffff, 0x00000001, 0x00000004, 0xffffffc0, 0x001fffff,
-    0x0000001c, 0xffffffc0, 0x7fffffff, 0xfffff800, 0x00ffffff, 0x00800000,
-    0x0023e000, 0xfffe0000, 0x7fffffff};
+    0xffff0000, 0x0000ffff, 0x00000001, 0x00800000, 0xffffffe0, 0x2000ffff,
+    0x00000040, 0x00000080, 0x00000800, 0x00000020, 0x00000001, 0x00040040,
+    0x00000008, 0x00020000, 0x40000000, 0x08000000, 0xf8000000, 0xfffffdff,
+    0xfffffffd, 0xfffbffff, 0xbbffffff, 0x00000001, 0x00000004, 0xffffffc0,
+    0x001fffff, 0x0000001c, 0xffffffc0, 0x7fffffff, 0xfffff800, 0x00ffffff,
+    0x00800000, 0x0023e000, 0xfffe0000, 0x7fffffff};
     }
 
-    const static UnicodeSet kangXi_72{const_cast<UnicodeSet::run_t *>(__kangXi_72_runs), 57, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_72_quads), 33, 0};
+    const static UnicodeSet kangXi_72{const_cast<UnicodeSet::run_t *>(__kangXi_72_runs), 59, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_72_quads), 34, 0};
 
 
     namespace {
@@ -3426,20 +3444,21 @@ namespace UCD {
     {Mixed, 1}, {Empty, 2502}, {Mixed, 1}, {Full, 5}, {Mixed, 1},
     {Full, 21}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Full, 6}, {Mixed, 1},
     {Empty, 260}, {Mixed, 1}, {Empty, 666}, {Mixed, 1}, {Full, 5},
-    {Mixed, 1}, {Empty, 82}, {Mixed, 1}, {Empty, 71}, {Mixed, 1}, {Full, 5},
-    {Mixed, 1}, {Empty, 106}, {Mixed, 1}, {Empty, 92}, {Mixed, 1},
-    {Full, 7}, {Mixed, 1}, {Empty, 235}, {Mixed, 2}, {Empty, 102},
-    {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 28621}};
+    {Mixed, 1}, {Empty, 82}, {Mixed, 1}, {Empty, 9}, {Mixed, 1},
+    {Empty, 61}, {Mixed, 1}, {Full, 5}, {Mixed, 1}, {Empty, 106},
+    {Mixed, 1}, {Empty, 92}, {Mixed, 1}, {Full, 7}, {Mixed, 1},
+    {Empty, 235}, {Mixed, 2}, {Empty, 102}, {Mixed, 1}, {Full, 3},
+    {Mixed, 1}, {Empty, 28621}};
     const static UnicodeSet::bitquad_t  __kangXi_75_quads[] = {
     0xfffffffe, 0xfffffffd, 0x1fffffff, 0xffffff00, 0x00000001, 0x20000010,
     0x20100000, 0x00020000, 0x10001000, 0x04000000, 0x80000000, 0x04000300,
     0x00100006, 0x00180000, 0x00000010, 0x00100000, 0x00060000, 0xfff80000,
     0xffffff7f, 0xfffffffb, 0xffff7fff, 0xfff7ffff, 0x00100000, 0xfffe0000,
-    0x000001ff, 0x0007ff00, 0xf8000000, 0x1fffffff, 0x00020000, 0xff000000,
-    0x0000000f, 0xf8000000, 0x00007fff, 0xffff0000, 0x000003ff};
+    0x000001ff, 0x0007ff00, 0x06000000, 0xf8000000, 0x1fffffff, 0x00020000,
+    0xff000000, 0x0000000f, 0xf8000000, 0x00007fff, 0xffff0000, 0x000003ff};
     }
 
-    const static UnicodeSet kangXi_75{const_cast<UnicodeSet::run_t *>(__kangXi_75_runs), 58, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_75_quads), 35, 0};
+    const static UnicodeSet kangXi_75{const_cast<UnicodeSet::run_t *>(__kangXi_75_runs), 60, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_75_quads), 36, 0};
 
 
     namespace {
@@ -3608,7 +3627,7 @@ namespace UCD {
     {Empty, 28612}};
     const static UnicodeSet::bitquad_t  __kangXi_85_quads[] = {
     0xff000000, 0x00000001, 0xfff00000, 0xffdfffff, 0x000007ff, 0x00001000,
-    0x00010000, 0x00200010, 0x00000404, 0x00006000, 0x00040100, 0x00040010,
+    0x80010000, 0x00200010, 0x00000404, 0x00006000, 0x00040100, 0x00040010,
     0x00400c00, 0x00201008, 0x00000020, 0x000000e0, 0x0f800000, 0x00000080,
     0xfffe0000, 0xfdffffff, 0xfffffffb, 0x00000003, 0x00400000, 0xffffff00,
     0x00001fff, 0x7f800000, 0xfff00000, 0x000fffff, 0xffc00000, 0x7fffffff,
@@ -3697,20 +3716,21 @@ namespace UCD {
     {Empty, 2105}, {Mixed, 2}, {Full, 1}, {Mixed, 2}, {Full, 4}, {Mixed, 1},
     {Full, 1}, {Mixed, 2}, {Full, 1}, {Mixed, 6}, {Full, 1}, {Mixed, 2},
     {Empty, 1301}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 126},
-    {Mixed, 1}, {Empty, 9}, {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Empty, 178},
-    {Mixed, 1}, {Full, 4}, {Mixed, 1}, {Empty, 319}, {Mixed, 1},
-    {Empty, 66}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 28665}};
+    {Mixed, 1}, {Empty, 9}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Full, 1},
+    {Mixed, 1}, {Empty, 178}, {Mixed, 1}, {Full, 4}, {Mixed, 1},
+    {Empty, 319}, {Mixed, 1}, {Empty, 66}, {Mixed, 1}, {Full, 2},
+    {Mixed, 1}, {Empty, 28665}};
     const static UnicodeSet::bitquad_t  __kangXi_9_quads[] = {
     0xffff0000, 0x000007ff, 0xfc000000, 0x7fffffff, 0x07000080, 0x00002000,
     0x00000020, 0x08200100, 0x00100000, 0x20000000, 0x00030000, 0x00080000,
     0xfff9bffc, 0xfffbffff, 0xfffffffb, 0xffffffef, 0xfffdffff, 0x3fffffbf,
     0xfffffbff, 0xfffffffb, 0xe6ffffff, 0xffbfffff, 0xfff7ffff, 0xffffff7f,
     0xefffffff, 0xfffffffb, 0x002dffff, 0xffffff80, 0x7fffffff, 0x00000fc0,
-    0xffffffe0, 0x007fffff, 0xfffffffe, 0x003fffff, 0x02001ff0, 0xfffffffe,
-    0x000003ff};
+    0xffffffe0, 0xf9ffffff, 0x007fffff, 0xfffffffe, 0x003fffff, 0x02001ff0,
+    0xfffffffe, 0x000003ff};
     }
 
-    const static UnicodeSet kangXi_9{const_cast<UnicodeSet::run_t *>(__kangXi_9_runs), 53, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_9_quads), 37, 0};
+    const static UnicodeSet kangXi_9{const_cast<UnicodeSet::run_t *>(__kangXi_9_runs), 55, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_9_quads), 38, 0};
 
 
     namespace {
@@ -3822,20 +3842,20 @@ namespace UCD {
     {Mixed, 1}, {Full, 9}, {Mixed, 1}, {Empty, 344}, {Mixed, 1},
     {Empty, 712}, {Mixed, 1}, {Empty, 3}, {Mixed, 4}, {Empty, 2},
     {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 2195}, {Mixed, 1},
-    {Empty, 477}, {Mixed, 1}, {Full, 15}, {Mixed, 1}, {Empty, 798},
-    {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 67}, {Mixed, 1}, {Empty, 92},
-    {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 211}, {Mixed, 1}, {Full, 2},
-    {Mixed, 1}, {Empty, 212}, {Mixed, 1}, {Empty, 121}, {Mixed, 2},
-    {Empty, 28603}};
+    {Empty, 477}, {Mixed, 1}, {Full, 15}, {Mixed, 1}, {Empty, 734},
+    {Mixed, 1}, {Empty, 63}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 67},
+    {Mixed, 1}, {Empty, 92}, {Mixed, 1}, {Full, 2}, {Mixed, 1},
+    {Empty, 211}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 212},
+    {Mixed, 1}, {Empty, 121}, {Mixed, 2}, {Empty, 28603}};
     const static UnicodeSet::bitquad_t  __kangXi_96_quads[] = {
     0xffffff00, 0x000001ff, 0xfffffe00, 0x0fffffff, 0x00020000, 0x00800000,
     0x00100000, 0x00006000, 0x00001000, 0x00008010, 0x00000400, 0x00000002,
-    0x00000040, 0xfffffe00, 0x000003fd, 0xffffe000, 0x0007ffff, 0x000003e0,
-    0xffff0000, 0x00000003, 0xffe00000, 0x007fffff, 0x0007fe00, 0xffffe000,
-    0x07ffffff};
+    0x00000040, 0xfffffe00, 0x000003fd, 0x40000000, 0xffffe000, 0x0007ffff,
+    0x000003e0, 0xffff0000, 0x00000003, 0xffe00000, 0x007fffff, 0x0007fe00,
+    0xffffe000, 0x07ffffff};
     }
 
-    const static UnicodeSet kangXi_96{const_cast<UnicodeSet::run_t *>(__kangXi_96_runs), 43, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_96_quads), 25, 0};
+    const static UnicodeSet kangXi_96{const_cast<UnicodeSet::run_t *>(__kangXi_96_runs), 45, 0, const_cast<UnicodeSet::bitquad_t *>(__kangXi_96_quads), 26, 0};
 
 
     namespace {

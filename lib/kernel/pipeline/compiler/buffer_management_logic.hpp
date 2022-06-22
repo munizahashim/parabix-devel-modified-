@@ -558,7 +558,7 @@ void PipelineCompiler::writeLookBehindLogic(BuilderRef b) {
         if (bn.LookBehind) {
             const BufferPort & br = mBufferGraph[e];
             Constant * const underflow = b->getSize(bn.LookBehind);
-            Value * const produced = mAlreadyProducedPhi[br.Port];
+            Value * const produced = mCurrentProducedItemCountPhi[br.Port];
             Value * const capacity = buffer->getCapacity(b);
             Value * const producedOffset = b->CreateURem(produced, capacity);
             Value * const needsCopy = b->CreateICmpULE(producedOffset, underflow);
@@ -582,7 +582,7 @@ void PipelineCompiler::writeDelayReflectionLogic(BuilderRef b) {
             const BufferNode & bn = mBufferGraph[streamSet];
             const StreamSetBuffer * const buffer = bn.Buffer;
             Value * const capacity = buffer->getCapacity(b);
-            Value * const produced = mAlreadyProducedPhi[br.Port];
+            Value * const produced = mCurrentProducedItemCountPhi[br.Port];
             const auto size = round_up_to(br.Delay, b->getBitBlockWidth());
             Constant * const reflection = b->getSize(size);
             Value * const producedOffset = b->CreateURem(produced, capacity);
@@ -603,7 +603,7 @@ void PipelineCompiler::writeCopyBackLogic(BuilderRef b) {
             const StreamSetBuffer * const buffer = bn.Buffer;
             const BufferPort & br = mBufferGraph[e];
             Value * const capacity = buffer->getCapacity(b);
-            Value * const alreadyProduced = mAlreadyProducedPhi[br.Port];
+            Value * const alreadyProduced = mCurrentProducedItemCountPhi[br.Port];
             Value * const priorOffset = b->CreateURem(alreadyProduced, capacity);
             Value * const produced = mProducedItemCount[br.Port];
             Value * const producedOffset = b->CreateURem(produced, capacity);
@@ -853,13 +853,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     PointerType * const bufferType = buffer->getPointerType();
     Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
 
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        const Binding & binding = rateData.Binding;
-//        b->CreateAssert(baseAddress, "%s.%s: baseAddress cannot be null",
-//                        mCurrentKernelName,
-//                        b->GetString(binding.getName()));
-//    }
-
     Value * const address = buffer->getStreamLogicalBasePtr(b, baseAddress, ZERO, blockIndex);
     Value * const addr = b->CreatePointerCast(address, bufferType);
     if (prefetch) {
@@ -909,10 +902,10 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & inputPort = mBufferGraph[input];
         PHINode * processed = nullptr;
-        if (mAlreadyProcessedDeferredPhi[inputPort.Port]) {
-            processed = mAlreadyProcessedDeferredPhi[inputPort.Port];
+        if (mCurrentProcessedDeferredItemCountPhi[inputPort.Port]) {
+            processed = mCurrentProcessedDeferredItemCountPhi[inputPort.Port];
         } else {
-            processed = mAlreadyProcessedPhi[inputPort.Port];
+            processed = mCurrentProcessedItemCountPhi[inputPort.Port];
         }
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];

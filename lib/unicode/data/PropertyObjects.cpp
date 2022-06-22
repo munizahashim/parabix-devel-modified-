@@ -73,8 +73,18 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const std::string & v
     return GetCodepointSet(property_enum_val);
 }
 
-const UnicodeSet & EnumeratedPropertyObject::GetCodepointSet(const int property_enum_val) const {
+const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const int property_enum_val) const {
     assert (property_enum_val >= 0);
+    UCD::UnicodeSet s;
+    if ((getPropertyCode() == UCD::property_t::age) && (property_enum_val > 0)) {
+        // Special logic for the age property:  \p{age=x.y} includes
+        // all codepoints defined as of version x.y, i.e., whose age
+        // property is numerically less than or equal to x.y.
+        for (uint64_t a = 1; a <= property_enum_val; a++) {
+            s.insert(*(property_value_sets[a]));
+        }
+        return s;
+    }
     return *(property_value_sets[property_enum_val]);
 }
 
@@ -94,11 +104,12 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSetMatchingPattern(re::RE
     std::memset(aligned + n, 0, m);
     std::vector<uint64_t> matchedEnums = grep(re, aligned, n);
     alloc.deallocate(aligned, 0);
-    UCD::UnicodeSet a;
+    const unsigned enumCount = GetEnumCount();
+    UCD::UnicodeSet s;
     for (const auto v : matchedEnums) {
-        a.insert(GetCodepointSet(v % GetEnumCount()));
+        s.insert(GetCodepointSet(v % enumCount));
     }
-    return a;
+    return s;
 }
 
 std::vector<UnicodeSet> & EnumeratedPropertyObject::GetEnumerationBasisSets() {
@@ -144,11 +155,10 @@ const std::string & EnumeratedPropertyObject::GetPropertyValueGrepString() {
             buffer << property_value_full_names[i] + "\n";
         }
         for (unsigned i = 0; i != property_value_enum_names.size(); i++) {
-            if (property_value_enum_names[i] == property_value_full_names[i]) continue;
             buffer << property_value_enum_names[i] + "\n";
         }
-        for (auto & a : property_value_aliases) {
-            buffer << a.first + "\n";
+        for (unsigned i = 0; i != property_value_aliases.size(); i++) {
+            buffer << property_value_aliases[i] + "\n";
         }
         mPropertyValueGrepString = buffer.str();
     }
@@ -160,15 +170,18 @@ int EnumeratedPropertyObject::GetPropertyValueEnumCode(const std::string & value
     // to save space in the executable.   Add them if the property is used.
     if (uninitialized) {
         for (unsigned i = 0; i != property_value_full_names.size(); i++) {
-            property_value_aliases.insert({canonicalize_value_name(property_value_full_names[i]), i});
+            enum_name_map.insert({canonicalize_value_name(property_value_full_names[i]), i});
         }
         for (unsigned i = 0; i != property_value_enum_names.size(); i++) {
-            property_value_aliases.insert({canonicalize_value_name(property_value_enum_names[i]), i});
+            enum_name_map.insert({canonicalize_value_name(property_value_enum_names[i]), i});
+        }
+        for (unsigned i = 0; i != property_value_aliases.size(); i++) {
+            enum_name_map.insert({canonicalize_value_name(property_value_aliases[i]), i});
         }
         uninitialized = false;
     }
-    const auto valit = property_value_aliases.find(canonicalize_value_name(value_spec));
-    if (valit == property_value_aliases.end())
+    const auto valit = enum_name_map.find(canonicalize_value_name(value_spec));
+    if (valit == enum_name_map.end())
         return -1;
     return valit->second;
 }

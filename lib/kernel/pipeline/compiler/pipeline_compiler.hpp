@@ -116,11 +116,15 @@ const static std::string STATISTICS_STRIDES_PER_SEGMENT_SUFFIX = ".SSPS";
 const static std::string STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX = ".SPIC";
 const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
 
+const static std::string STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TICH";
+
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 
 using ArgVec = Vec<Value *, 64>;
+
+using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;
 
 using BufferPortMap = flat_set<std::pair<unsigned, unsigned>>;
 
@@ -250,7 +254,7 @@ public:
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
     void ensureSufficientOutputSpace(BuilderRef b, const BufferPort & port, const unsigned streamSet);
-    void updatePHINodesForLoopExit(BuilderRef b);
+//    void updatePHINodesForLoopExit(BuilderRef b);
 
     Value * calculateTransferableItemCounts(BuilderRef b, Value * const numOfLinearStrides);
 
@@ -274,8 +278,7 @@ public:
     Value * allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlock * const insertBefore) const;
 
     void writeKernelCall(BuilderRef b);
-    ArgVec buildKernelCallArgumentList(BuilderRef b);
-    ArgVec buildKernelCallArgumentList(BuilderRef b, const Kernel * const kernelObj);
+    void buildKernelCallArgumentList(BuilderRef b, ArgVec & args);
     void updateProcessedAndProducedItemCounts(BuilderRef b);
     void readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b);
     void readReturnedOutputVirtualBaseAddresses(BuilderRef b) const;
@@ -335,7 +338,7 @@ public:
 
 // termination codegen functions
 
-    void addTerminationProperties(BuilderRef b, const size_t kernel);
+    void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
     void initializePipelineInputTerminationSignal(BuilderRef b);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
@@ -491,6 +494,13 @@ public:
     void checkPAPIRetValAndExitOnError(BuilderRef b, StringRef source, const int expected, Value * const retVal) const;
 
 #endif
+
+// histogram functions
+
+    bool recordsAnyHistogramData() const;
+    void addHistogramProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
+    void updateTransferredItemsForHistogramData(BuilderRef b);
+
 // debug message functions
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -558,6 +568,7 @@ protected:
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
     const bool                       			mTraceIndividualConsumedItemCounts;
+    const bool                                  mGenerateTransferredItemCountHistogram;
 
     const unsigned								mNumOfThreads;
 
@@ -711,9 +722,11 @@ protected:
     PHINode *                                   mTerminatedAtExitPhi = nullptr;
     PHINode *                                   mTotalNumOfStridesAtExitPhi = nullptr;
     Value *                                     mNumOfLinearStrides = nullptr;
+    Value *                                     mCurrentNumOfLinearStrides = nullptr;
     Value *                                     mHasZeroExtendedInput = nullptr;
     PHINode *                                   mNumOfLinearStridesPhi = nullptr;
     PHINode *                                   mFixedRateFactorPhi = nullptr;
+    Value *                                     mCurrentFixedRateFactor = nullptr;
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
@@ -736,8 +749,6 @@ protected:
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
 
-    unsigned                                    mNumOfAddressableItemCount = 0;
-    unsigned                                    mNumOfVirtualBaseAddresses = 0;
     unsigned                                    mNumOfTruncatedInputBuffers = 0;
 
     InputPortVector<Value *>                    mInitiallyProcessedItemCount; // *before* entering the kernel
@@ -756,6 +767,11 @@ protected:
     InputPortVector<Value *>                    mProcessedItemCount;
     InputPortVector<Value *>                    mProcessedDeferredItemCountPtr;
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
+
+    InputPortVector<PHINode *>                  mCurrentProcessedItemCountPhi;
+    InputPortVector<PHINode *>                  mCurrentProcessedDeferredItemCountPhi;
+    InputPortVector<Value *>                    mCurrentLinearInputItems;
+
     InputPortVector<PHINode *>                  mConsumedItemCountsAtLoopExitPhi; // exiting the kernel
     InputPortVector<PHINode *>                  mUpdatedProcessedPhi; // exiting the kernel
     InputPortVector<PHINode *>                  mUpdatedProcessedDeferredPhi;
@@ -776,6 +792,11 @@ protected:
     OutputPortVector<Value *>                   mProducedItemCount;
     OutputPortVector<Value *>                   mProducedDeferredItemCountPtr;
     OutputPortVector<Value *>                   mProducedDeferredItemCount;
+
+    OutputPortVector<PHINode *>                 mCurrentProducedItemCountPhi;
+    OutputPortVector<PHINode *>                 mCurrentProducedDeferredItemCountPhi;
+    OutputPortVector<Value *>                   mCurrentLinearOutputItems;
+
     OutputPortVector<PHINode *>                 mProducedAtJumpPhi;
     OutputPortVector<PHINode *>                 mProducedAtTerminationPhi; // exiting after termination
     OutputPortVector<Value *>                   mProducedAtTermination;
@@ -844,6 +865,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
+, mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mNumOfThreads(pipelineKernel->getNumOfThreads())
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
@@ -920,6 +942,11 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
+
+, mCurrentProcessedItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
+, mCurrentProcessedDeferredItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
+, mCurrentLinearInputItems(P.MaxNumOfInputPorts, mAllocator)
+
 , mConsumedItemCountsAtLoopExitPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedDeferredPhi(P.MaxNumOfInputPorts, mAllocator)
@@ -939,6 +966,11 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mProducedItemCount(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCount(P.MaxNumOfOutputPorts, mAllocator)
+
+, mCurrentProducedItemCountPhi(P.MaxNumOfOutputPorts, mAllocator)
+, mCurrentProducedDeferredItemCountPhi(P.MaxNumOfOutputPorts, mAllocator)
+, mCurrentLinearOutputItems(P.MaxNumOfOutputPorts, mAllocator)
+
 , mProducedAtJumpPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedAtTerminationPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedAtTermination(P.MaxNumOfOutputPorts, mAllocator)
@@ -1022,5 +1054,6 @@ LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
 #include "codegen/optimization_branch_logic.hpp"
 #include "pipeline_optimization_logic.hpp"
 #include "papi_instrumentation_logic.hpp"
+#include "histogram_generation_logic.hpp"
 
 #endif // PIPELINE_COMPILER_HPP

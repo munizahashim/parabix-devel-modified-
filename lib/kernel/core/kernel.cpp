@@ -863,7 +863,9 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(BuilderRef b) const {
             if (LLVM_LIKELY(isStateful())) {
                 params.push_back(getSharedStateType()->getPointerTo());
             }
-            params.push_back(getThreadLocalStateType()->getPointerTo());
+            PointerType * const threadLocalPtrTy = getThreadLocalStateType()->getPointerTo();
+            params.push_back(threadLocalPtrTy);
+            params.push_back(threadLocalPtrTy);
 
             FunctionType * const funcType = FunctionType::get(b->getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
@@ -879,6 +881,7 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(BuilderRef b) const {
             if (LLVM_LIKELY(isStateful())) {
                 setNextArgName("shared");
             }
+            setNextArgName("main_thread_local");
             setNextArgName("thread_local");
             assert (arg == func->arg_end());
 
@@ -1111,6 +1114,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
             args.push_back(sharedHandle);
         }
         args.push_back(threadLocalHandle);
+        args.push_back(threadLocalHandle);
         finalizeThreadLocalInstance(b, args);
         b->CreateFree(threadLocalHandle);
     }
@@ -1174,7 +1178,7 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> ar
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
-    assert (args.size() == (isStateful() ? 2 : 1));
+    assert (args.size() == (isStateful() ? 3 : 2));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
     b->CreateCall(init->getFunctionType(), init, args);
 }

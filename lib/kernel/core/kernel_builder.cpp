@@ -40,7 +40,7 @@ Value * KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
  * @brief getScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelBuilder::getScalarField(const StringRef fieldName) {
-    return CreateLoad(getScalarFieldPtr(fieldName));
+    return CreateLoad(getScalarFieldPtr(fieldName), fieldName);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
