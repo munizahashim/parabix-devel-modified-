@@ -143,7 +143,10 @@ protected:
     kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
-
+    void applyColorization(const std::unique_ptr<kernel::ProgramBuilder> & E,
+                                              kernel::StreamSet * MatchSpans,
+                                              kernel::StreamSet * Basis,
+                                              kernel::StreamSet * ColorizedBasis);
     std::string linePrefix(std::string fileName);
 
 protected:

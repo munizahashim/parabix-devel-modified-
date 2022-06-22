@@ -182,7 +182,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
 
         // Baais bit streams expanded with 0 bits for each string to be inserted.
         StreamSet * ExpandedBasis = P->CreateStreamSet(8);
-        SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, GammaDistribution(5.0f, 0.1f));
+        SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, 0, GammaDistribution(5.0f, 0.1f));
         // P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
         // We need to insert strings at all positions marked by 0s in the
@@ -197,7 +197,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
 
         StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
-        SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum, GammaDistribution(5.0f, 0.1f));
+        SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum, 0, GammaDistribution(5.0f, 0.1f));
         // P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
 
         StreamSet * InstantiatedBasis = P->CreateStreamSet(8);

@@ -150,6 +150,8 @@ void Kernel::makeModule(BuilderRef b) {
  * @brief generateKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateKernel(BuilderRef b) {
+    assert (!mGenerated);
+    mGenerated = true;
     if (LLVM_UNLIKELY(mModule == nullptr)) {
         report_fatal_error(getName() + " does not have a module");
     }
@@ -157,8 +159,15 @@ void Kernel::generateKernel(BuilderRef b) {
         report_fatal_error(getName() + ": stride cannot be 0");
     }
     b->setModule(mModule);
-    instantiateKernelCompiler(b)->generateKernel(b);
-    mGenerated = true;
+    errs() << getName() << ".setModule("; errs().write_hex((uintptr_t)mModule) << ")\n";
+    assert (mSharedStateType == nullptr && mThreadLocalStateType == nullptr);
+    callBeforeInstantiatingKernelCompiler(b);
+    errs() << getName() << ".callBeforeInstantiatingKernelCompiler\n";
+    auto kc = instantiateKernelCompiler(b);
+    errs() << getName() << ".instantiateKernelCompiler\n";
+    kc->generateKernel(b);
+    errs() << getName() << ".generateKernel\n";
+    assert (getModule());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -203,6 +212,7 @@ void Kernel::ensureLoaded() {
  * @brief loadCachedKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::loadCachedKernel(BuilderRef b) {
+    assert (!mGenerated);
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b->getModule(); assert (mModule);
     SmallVector<char, 256> tmp;

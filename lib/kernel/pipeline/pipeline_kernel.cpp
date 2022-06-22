@@ -10,6 +10,7 @@
 // #include "PROP/compiler/pipeline_compiler.hpp"
 #endif
 #include <llvm/IR/Function.h>
+#include <kernel/pipeline/pipeline_builder.h>
 
 // NOTE: the pipeline kernel is primarily a proxy for the pipeline compiler. Ideally, by making some kernels
 // a "family", the pipeline kernel will be compiled once for the lifetime of a program. Thus we can avoid even
@@ -235,6 +236,24 @@ void PipelineKernel::setOutputScalarAt(const unsigned i, Scalar * const value) {
 #undef REPLACE_INTERNAL_KERNEL_BINDINGS
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief constructKernelAfterInstantiation
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineKernel::callBeforeInstantiatingKernelCompiler(BuilderRef b) {
+    if (LLVM_UNLIKELY(instantiatesPipelineAfterConstruction())) {
+        PipelineBuilder builder(PipelineBuilder::Internal{}, reinterpret_cast<BaseDriver &>(b->getDriver()),
+                                mInputStreamSets, mOutputStreamSets, mInputScalars, mOutputScalars);
+        instantiatePipelineAfterConstruction(builder);
+        mKernels.swap(builder.mKernels);
+        builder.mKernels.clear();
+        mCallBindings.swap(builder.mCallBindings);
+        builder.mCallBindings.clear();
+        mLengthAssertions.swap(builder.mLengthAssertions);
+        builder.mLengthAssertions.clear();
+        errs() << "PipelineKernel::callBeforeInstantiatingKernelCompiler\n";
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(BuilderRef b) const {
@@ -251,14 +270,14 @@ bool PipelineKernel::isCachable() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(BaseDriver & driver,
+PipelineKernel::PipelineKernel(BuilderRef b,
                                std::string && signature,
                                const unsigned numOfThreads,
                                Kernels && kernels, CallBindings && callBindings,
                                Bindings && stream_inputs, Bindings && stream_outputs,
                                Bindings && scalar_inputs, Bindings && scalar_outputs,
                                LengthAssertions && lengthAssertions)
-: Kernel(driver.getBuilder(), TypeId::Pipeline,
+: Kernel(b, TypeId::Pipeline,
          [&] () {
              std::string tmp;
              tmp.reserve(32);

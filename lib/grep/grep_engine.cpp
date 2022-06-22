@@ -69,6 +69,12 @@
 #include <kernel/util/debug_display.h>
 #include <util/aligned_allocator.h>
 
+#define USE_NESTED_GREP_COLOURIZATION_PIPELINE
+
+#ifdef USE_NESTED_GREP_COLOURIZATION_PIPELINE
+#include "grep_colourization_pipeline.hpp"
+#endif
+
 using namespace llvm;
 using namespace cc;
 using namespace kernel;
@@ -716,10 +722,14 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
-void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
+
+void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
                                           StreamSet * MatchSpans,
                                           StreamSet * Basis,
                                           StreamSet * ColorizedBasis) {
+#ifdef USE_NESTED_GREP_COLOURIZATION_PIPELINE
+    E->CreateKernelCall<GrepColourizationPipeline>(MatchSpans, Basis, ColorizedBasis);
+#else
     std::string ESC = "\x1B";
     std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
     unsigned insertLengthBits = 4;
@@ -751,6 +761,7 @@ void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
     SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
 
     E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+#endif
 }
 
 void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, StreamSet * ByteStream, bool BatchMode) {

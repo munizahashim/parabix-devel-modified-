@@ -9,6 +9,7 @@
 #include <llvm/IR/Value.h>
 #include <string>
 #include <kernel/pipeline/driver/driver.h>
+#include <kernel/pipeline/pipeline_builder.h>
 
 namespace kernel {
 
@@ -36,17 +37,32 @@ enum class StreamExpandOptimization {None, NullCheck};
     FieldDepositKernel.
 
  */
-void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
+void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset = 0,
                   StreamExpandOptimization opt = StreamExpandOptimization::None,
                   unsigned expansionFieldWidth = 64,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
 
+inline void SpreadByMask(PipelineBuilder & P,
+                         StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
+                         unsigned streamOffset = 0,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
+    return SpreadByMask(P, mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+}
+
+inline void SpreadByMask(const std::unique_ptr<PipelineBuilder> & P,
+                         StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
+                         unsigned streamOffset = 0,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
+    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+}
+
 inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
-                         ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
-    return SpreadByMask(P, mask, toSpread, outputs, 0, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+                         unsigned streamOffset = 0,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
+    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
 
 /*  Create a spread mask for inserting a single item into a stream for each position
@@ -56,10 +72,28 @@ inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
 
 enum class InsertPosition {Before, After};
 
-StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
+
+
+StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P,
                                     StreamSet * insertion_mask,
                                     InsertPosition p = InsertPosition::Before,
                                     ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
+
+inline StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<PipelineBuilder> & P,
+                                    StreamSet * insertion_mask,
+                                    InsertPosition p = InsertPosition::Before,
+                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution()) {
+    return UnitInsertionSpreadMask(*P.get(), insertion_mask, p, insertionProbabilityDistribution);
+}
+
+inline StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
+                                    StreamSet * insertion_mask,
+                                    InsertPosition p = InsertPosition::Before,
+                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution()) {
+    return UnitInsertionSpreadMask(*P.get(), insertion_mask, p, insertionProbabilityDistribution);
+}
+
+
 
 /*   Prepare a spread mask for inserting data into bit streams.
      At each stream position, a bixnum encodes the number of items
@@ -73,11 +107,27 @@ StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
      of either n 0 bits followed by a 1 bit (InsertPostion::Before)
      or a 1 bit followed by n 0 bits (InsertPosition::After).    */
 
-StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
+StreamSet * InsertionSpreadMask(PipelineBuilder & P,
                                 StreamSet * bixNumInsertCount,
                                 InsertPosition p = InsertPosition::Before,
                                 ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
                                 ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
+
+inline StreamSet * InsertionSpreadMask(const std::unique_ptr<PipelineBuilder> &P,
+                                StreamSet * bixNumInsertCount,
+                                InsertPosition p = InsertPosition::Before,
+                                ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
+                                ProcessingRateProbabilityDistribution expansionRate = UniformDistribution()) {
+    return InsertionSpreadMask(*P.get(), bixNumInsertCount, p, itemsPerOutputUnit, expansionRate);
+}
+
+inline StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> &P,
+                                StreamSet * bixNumInsertCount,
+                                InsertPosition p = InsertPosition::Before,
+                                ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
+                                ProcessingRateProbabilityDistribution expansionRate = UniformDistribution()) {
+    return InsertionSpreadMask(*P.get(), bixNumInsertCount, p, itemsPerOutputUnit, expansionRate);
+}
 
 /* The following kernels are used by SpreadByMask internally. */
 

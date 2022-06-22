@@ -68,7 +68,7 @@ public:
                              const re::PatternVector & patterns,
                              const bool caseInsensitive,
                              re::CC * const breakCC)
-        : PipelineKernel(driver
+        : PipelineKernel(driver.getBuilder()
                          // signature
                          , [&]() -> std::string {
                             std::string tmp;

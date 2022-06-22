@@ -20,6 +20,7 @@ const static std::string FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX = "_FTIP"
 const static std::string FINALIZE_FUNCTION_POINTER_SUFFIX = "_FIP";
 
 class PipelineCompiler;
+class PipelineBuilder;
 
 class PipelineKernel : public Kernel {
     friend class Kernel;
@@ -39,15 +40,15 @@ public:
     using Kernels = std::vector<Kernel *>;
 
     struct CallBinding {
-        const std::string Name;
-        llvm::FunctionType * const Type;
-        void * const FunctionPointer;
-        const Scalars Args;
+        std::string Name;
+        llvm::FunctionType * Type;
+        void * FunctionPointer;
+        Scalars Args;
 
         mutable llvm::Constant * Callee;
 
         CallBinding(std::string Name, llvm::FunctionType * Type, void * FunctionPointer, std::initializer_list<Scalar *> && Args)
-        : Name(std::move(Name)), Type(Type), FunctionPointer(FunctionPointer), Args(Args.begin(), Args.end()), Callee(nullptr) { }
+        : Name(std::move(Name)), Type(Type), FunctionPointer(FunctionPointer), Args(Args.begin(), Args.end()), Callee(nullptr) { }    
     };
 
     using CallBindings = std::vector<CallBinding>;
@@ -98,13 +99,21 @@ public:
 
 protected:
 
-    PipelineKernel(BaseDriver & driver,
+    PipelineKernel(BuilderRef b,
                    std::string && signature,
                    const unsigned numOfThreads,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
                    LengthAssertions && lengthAssertions);
+
+    virtual bool instantiatesPipelineAfterConstruction() const { return false; }
+
+    virtual void instantiatePipelineAfterConstruction(PipelineBuilder & builder) {};
+
+private:
+
+    void callBeforeInstantiatingKernelCompiler(BuilderRef b) final;
 
     void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
 
@@ -138,9 +147,9 @@ protected:
 
     const unsigned                            mNumOfThreads;
     const std::string                         mSignature;
-    const Kernels                             mKernels;
-    const CallBindings                        mCallBindings;
-    const LengthAssertions                    mLengthAssertions;
+    Kernels                                   mKernels;
+    CallBindings                              mCallBindings;
+    LengthAssertions                          mLengthAssertions;
 
 };
 

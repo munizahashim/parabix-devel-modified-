@@ -224,6 +224,10 @@ add_output_rate:    O.set(nextRateId++);
             }
         } else { // just propagate the bitsets
 
+            if (in_degree(i, G) != 1) {
+                errs() << " XXXX " << i << "\n";
+            }
+
             assert (in_degree(i, G) == 1);
 
             for (const auto e : make_iterator_range(out_edges(i, G))) {

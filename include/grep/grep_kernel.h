@@ -15,7 +15,6 @@ namespace re { class RE; }
 namespace cc { class Alphabet; }
 namespace kernel {
 
-
 class UTF8_index : public pablo::PabloKernel {
 public:
     UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index);

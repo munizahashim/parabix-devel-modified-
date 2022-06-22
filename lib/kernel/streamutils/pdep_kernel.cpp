@@ -24,17 +24,17 @@ namespace kernel {
 
 using BuilderRef = Kernel::BuilderRef;
 
-void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
+void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset,
                   StreamExpandOptimization opt,
                   unsigned expansionFieldWidth,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
     unsigned streamCount = outputs->getNumElements();
-    StreamSet * const expanded = P->CreateStreamSet(streamCount);
-    Scalar * base = P->CreateConstant(P->getDriver().getBuilder()->getSize(streamOffset));
-    P->CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, opt, expansionFieldWidth, itemsPerOutputUnit);
-    P->CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
+    StreamSet * const expanded = P.CreateStreamSet(streamCount);
+    Scalar * base = P.CreateConstant(P.getDriver().getBuilder()->getSize(streamOffset));
+    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, opt, expansionFieldWidth, itemsPerOutputUnit);
+    P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
 
 StreamExpandKernel::StreamExpandKernel(BuilderRef b,
@@ -522,16 +522,16 @@ void UnitInsertionExtractionMasks::generateFinalBlockMethod(BuilderRef b, Value 
     RepeatDoBlockLogic(b);
 }
 #define USE_FILTER_BY_MASK_KERNEL
-StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P, StreamSet * insertion_mask, InsertPosition p,
+StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P, StreamSet * insertion_mask, InsertPosition p,
                                     ProcessingRateProbabilityDistribution insertionProbabilityDistribution) {
-    auto stream01 = P->CreateStreamSet(1);
-    auto valid01 = P->CreateStreamSet(1);
-    P->CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
-    auto spread_mask = P->CreateStreamSet(1);
+    auto stream01 = P.CreateStreamSet(1);
+    auto valid01 = P.CreateStreamSet(1);
+    P.CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
+    auto spread_mask = P.CreateStreamSet(1);
 #ifndef USE_FILTER_BY_MASK_KERNEL
     FilterByMask(P, valid01, stream01, spread_mask, spreadCountDensity);
 #else
-    P->CreateKernelCall<FilterByMaskKernel>
+    P.CreateKernelCall<FilterByMaskKernel>
         (Select(valid01, {0}),
          SelectOperationList{Select(stream01, {0})},
          spread_mask, 64, insertionProbabilityDistribution);
@@ -597,7 +597,7 @@ void SpreadMaskStep::generatePabloMethod() {
     }
 }
 
-StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
+StreamSet * InsertionSpreadMask(PipelineBuilder & P,
                                 StreamSet * bixNumInsertCount, InsertPosition pos,
                                 ProcessingRateProbabilityDistribution itemsPerOutputUnit,
                                 ProcessingRateProbabilityDistribution expansionRate) {
@@ -607,18 +607,18 @@ StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
     }
     /* Create a spread mask that adds one spread position for any position
        at which there is at least one item to insert.  */
-    StreamSet * spread1_mask = P->CreateStreamSet(1);
+    StreamSet * spread1_mask = P.CreateStreamSet(1);
     spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
     /* Spread out the counts so that there are two positions for each nonzero entry. */
-    StreamSet * spread_counts = P->CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, itemsPerOutputUnit);
+    StreamSet * spread_counts = P.CreateStreamSet(steps);
+    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, 0, itemsPerOutputUnit);
     /* Divide the count at each original position equally into the
        two positions that were created by the unit spread process. */
-    StreamSet * reduced_counts = P->CreateStreamSet(steps - 1);
-    P->CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
+    StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
+    P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
     StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
-    StreamSet * finalmask = P->CreateStreamSet(1);    
-    SpreadByMask(P, submask, spread1_mask, finalmask, itemsPerOutputUnit);
+    StreamSet * finalmask = P.CreateStreamSet(1);
+    SpreadByMask(P, submask, spread1_mask, finalmask, 0, itemsPerOutputUnit);
     return finalmask;
 }
 }

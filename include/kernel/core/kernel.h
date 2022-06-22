@@ -434,6 +434,8 @@ protected:
 
 protected:
 
+    virtual void callBeforeInstantiatingKernelCompiler(BuilderRef) {}
+
     static std::string getStringHash(const llvm::StringRef str);
 
     LLVM_READNONE std::string getDefaultFamilyName() const;

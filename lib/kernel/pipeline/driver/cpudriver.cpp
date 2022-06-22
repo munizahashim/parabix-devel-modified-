@@ -223,26 +223,41 @@ void CPUDriver::generateUncachedKernels() {
     // mapping is known.
 
     preparePassManager();
+
+    assert (mMainModule);
+
+    // NOTE: mUncachedKernel.size() may change!
+
     mCachedKernel.reserve(mUncachedKernel.size());
-    for (auto & kernel : mUncachedKernel) {
-        {
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+
+    for (;;) {
+        auto & kernel = mUncachedKernel.back();
+        if (LLVM_UNLIKELY(kernel->isGenerated())) {
+            addKernel(kernel.release());
+        } else {
+            #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
             NamedRegionTimer T(kernel->getSignature(), kernel->getName(),
                                "kernel", "Kernel Generation",
                                codegen::TimeKernelsIsEnabled);
-#else
+            #else
             NamedRegionTimer T(kernel->getName(), "Kernel Generation",
                                codegen::TimeKernelsIsEnabled);
-#endif
-            kernel->generateKernel(mBuilder);
+            #endif
             Module * const module = kernel->getModule(); assert (module);
+            kernel->generateKernel(mBuilder);
             module->setTargetTriple(mMainModule->getTargetTriple());
             module->setDataLayout(mMainModule->getDataLayout());
             mPassManager->run(*module);
             mCachedKernel.emplace_back(kernel.release());
         }
+        mUncachedKernel.pop_back();
+        if (LLVM_UNLIKELY(mUncachedKernel.empty())) {
+            break;
+        }
     }
-    mUncachedKernel.clear();
+
+    assert (mUncachedKernel.empty());
+
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(5, 0, 0)
     llvm::reportAndResetTimings();
     #endif

@@ -364,7 +364,7 @@ Kernel * PipelineBuilder::makeKernel() {
     out.flush();
 
     PipelineKernel * const pipeline =
-        new PipelineKernel(mDriver, std::move(signature),
+        new PipelineKernel(mDriver.getBuilder(), std::move(signature),
                            mNumOfThreads,
                            std::move(mKernels), std::move(mCallBindings),
                            std::move(mInputStreamSets), std::move(mOutputStreamSets),

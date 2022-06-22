@@ -751,7 +751,6 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
     }
     StructType * const st = kernelObj->getSharedStateType();
     if (st == nullptr) {
-        assert (kernelObj->getNumOfScalarInputs() == 0);
         return true;
     }
     assert (st->getStructNumElements() >= kernelObj->getNumOfScalarInputs());

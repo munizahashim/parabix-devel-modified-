@@ -482,6 +482,9 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
 
     // Copy the list of kernels and add in any internal kernels
     Kernels kernels(mPipelineKernel->getKernels());
+    if (LLVM_UNLIKELY(kernels.empty())) {
+        llvm::report_fatal_error("Pipeline must have at least one kernel");
+    }
     assert (num_vertices(Relationships) == 0);
     const unsigned p_in = add_vertex(RelationshipNode(mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
