@@ -4,6 +4,7 @@
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
+#include <unicode/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -17,6 +18,8 @@ public:
         RE_Transformer("FixedReferenceTransformer"),
         mRefInfo(info) {}
     RE * transformReference(Reference * r) override {
+        UCD::property_t p = r->getReferencedProperty();
+        std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
         auto rg1 = getLengthRange(r->getCapture(), &cc::Unicode);
         if (rg1.first != rg1.second) return r;
         auto mapping = mRefInfo.twixtREs.find(r->getName());
@@ -24,7 +27,8 @@ public:
         auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
         if (rg2.first != rg2.second) return r;
         int fixed_dist = rg1.first + rg2.first;
-        return re::makeName("back_ref_dist=" + std::to_string(fixed_dist), r);
+        std::string externalName = pname + "@-" + std::to_string(fixed_dist);
+        return re::makeName(externalName, r);
     };
 private:
     const ReferenceInfo & mRefInfo;

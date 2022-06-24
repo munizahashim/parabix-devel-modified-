@@ -5,6 +5,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <re/adt/re_cc.h>
 #include <re/adt/re_re.h>
+#include <unicode/data/PropertyAliases.h>
 
 namespace UCD {
     class UnicodeSet;
@@ -188,20 +189,26 @@ public:
     }
     Capture * getCapture() const {return mCapture;}
     unsigned getInstance() const {return mInstance;}
-    static Reference * Create(std::string name, Capture * capture, unsigned instance) {
-        return new Reference(name.c_str(), name.length(), capture, instance);
+    UCD::property_t getReferencedProperty() const {return mReferencedProperty;}
+    void setReferencedProperty(UCD::property_t p) {mReferencedProperty = p;}
+    static Reference * Create(std::string name, Capture * capture, unsigned instance, UCD::property_t p = UCD::identity) {
+        return new Reference(name.c_str(), name.length(), capture, instance, p);
     }
     RE_SUBTYPE(Reference)
 private:
-    Reference(const char * name, const length_t nameLength, Capture * capture, unsigned instance): RE(ClassTypeId::Reference)
+    Reference(const char * name, const length_t nameLength,
+              Capture * capture, unsigned instance, UCD::property_t p = UCD::identity) :
+    RE(ClassTypeId::Reference)
     , mNameLength(nameLength)
     , mName(replicateString(name, nameLength))
     , mCapture(capture)
-    , mInstance(instance) {}
+    , mInstance(instance)
+    , mReferencedProperty(p) {}
     const length_t mNameLength;
     const char * const mName;
     Capture * mCapture;
     unsigned mInstance;
+    UCD::property_t mReferencedProperty;
 };
 
 inline Reference * makeReference(std::string name, Capture * capture, unsigned instance){

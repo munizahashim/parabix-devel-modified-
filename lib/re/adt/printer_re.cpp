@@ -22,6 +22,7 @@
 #include <re/adt/re_assertion.h>
 #include <re/adt/re_group.h>
 #include <re/alphabet/alphabet.h>
+#include <unicode/data/PropertyAliases.h>
 
 using namespace re;
 using namespace llvm;
@@ -64,6 +65,10 @@ const std::string Printer_RE::PrintRE(const RE * re) {
         retVal += r->getName();
         retVal += ".";
         retVal += std::to_string(r->getInstance());
+        UCD::property_t p = r->getReferencedProperty();
+        //if (p != UCD::identity) {
+            retVal += ":" + UCD::getPropertyFullName(p);
+        //}
         retVal += "\" ";
     } else if (const Range* rg = dyn_cast<const Range>(re)) {
         retVal = "Range (";
