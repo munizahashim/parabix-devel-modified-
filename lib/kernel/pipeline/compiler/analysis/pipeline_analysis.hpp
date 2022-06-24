@@ -13,6 +13,7 @@
 
 #include <llvm/Support/Format.h>
 #include "../pipeline_compiler.hpp"
+#include <kernel/pipeline/pipeline_builder.h>
 
 namespace kernel {
 
@@ -21,6 +22,8 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
     using KernelPartitionIds = flat_map<ProgramGraph::vertex_descriptor, unsigned>;
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
+
+        //pipelineKernel->
 
         PipelineAnalysis P(pipelineKernel);
 
@@ -100,7 +103,9 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mNumOfThreads(pipelineKernel->getNumOfThreads())
-    , mLengthAssertions(pipelineKernel->getLengthAssertions())
+    , mKernels(pipelineKernel->mKernels)
+    , mCallBindings(pipelineKernel->mCallBindings)
+    , mLengthAssertions(pipelineKernel->mLengthAssertions)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers) {
@@ -123,9 +128,9 @@ private:
 
     void addPopCountKernels(BuilderRef b, Kernels & partition, KernelVertexVec & vertex, ProgramGraph & G);
 
-    void combineDuplicateKernels(BuilderRef b, const Kernels & partition, ProgramGraph & G);
+    void combineDuplicateKernels(BuilderRef b, ProgramGraph & G);
 
-    void removeUnusedKernels(const unsigned p_in, const unsigned p_out, const Kernels & partition, ProgramGraph & G);
+    void removeUnusedKernels(const unsigned p_in, const unsigned p_out, ProgramGraph & G);
 
     void identifyPipelineInputs();
 
@@ -243,7 +248,9 @@ private:
 
     PipelineKernel * const          mPipelineKernel;
     const unsigned					mNumOfThreads;
-    const LengthAssertions &        mLengthAssertions;
+    Kernels                         mKernels;
+    CallBindings                    mCallBindings;
+    LengthAssertions                mLengthAssertions;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
 
@@ -300,6 +307,7 @@ public:
     OwningVector<Binding>           mInternalBindings;
     OwningVector<StreamSetBuffer>   mInternalBuffers;
 };
+
 
 }
 

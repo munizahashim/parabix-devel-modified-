@@ -113,7 +113,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
                 Value * const valid = b->CreateICmpULE(diff, maxSize);
                 Constant * const bindingName = b->GetString(br.Binding.get().getName());
                 b->CreateAssert(valid, "%s.%s: attempting to update %" PRIu64 "-th value of histogram data "
-                                       "but internal array only has %" PRIx64 " elements",
+                                       "but internal array can only support up to %" PRIx64 " elements",
                                         mCurrentKernelName, bindingName, diff, maxSize);
             }
             args[1] = diff;
@@ -135,7 +135,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
                 Value * const valid = b->CreateICmpULE(diff, maxSize);
                 Constant * const bindingName = b->GetString(br.Binding.get().getName());
                 b->CreateAssert(valid, "%s.%s: attempting to update %" PRIu64 "-th value of histogram data "
-                                       "but internal array only has %" PRIu64 " elements",
+                                       "but internal array can only support up to %" PRIu64 " elements",
                                         mCurrentKernelName, bindingName, diff, maxSize);
             }
             args[1] = diff;
@@ -143,6 +143,74 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             b->CreateStore(b->CreateAdd(b->CreateLoad(toInc), sz_ONE), toInc);
         }
     }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief printHistogramReport
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::printHistogramReport(BuilderRef b) {
+
+    assert (mGenerateTransferredItemCountHistogram);
+
+    unsigned numOfEntries = 0;
+
+    for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
+
+        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            if (__trackPort(br)) {
+                numOfEntries++;
+            }
+        }
+
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            if (__trackPort(br)) {
+                numOfEntries++;
+            }
+        }
+
+    }
+
+    if (LLVM_LIKELY(numOfEntries > 0)) {
+
+        IntegerType * const sizeTy = b->getSizeTy();
+
+        FixedArray<Type *, 2> fields;
+        fields[0] = sizeTy->getPointerTo();
+        fields[1] = sizeTy;
+
+        StructType * const entryTy = StructType::get(b->getContext(), fields);
+        ArrayType * entriesTy = ArrayType::get(entryTy, numOfEntries);
+
+#warning FINISH HISTOGRAM REPORT GENERATION
+
+//        for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
+
+//            for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+//                const BufferPort & br = mBufferGraph[e];
+//                if (__trackPort(br)) {
+//                    numOfEntries++;
+//                }
+//            }
+
+//            for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+//                const BufferPort & br = mBufferGraph[e];
+//                if (__trackPort(br)) {
+//                    numOfEntries++;
+//                }
+//            }
+
+//        }
+
+
+
+
+
+
+    }
+
 
 }
 

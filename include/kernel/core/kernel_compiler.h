@@ -336,7 +336,7 @@ protected:
 
 private:
 
-    void initializeScalarMap(BuilderRef b, const InitializeOptions options, llvm::Value * const mainThreadLocal = nullptr);
+    void initializeScalarMap(BuilderRef b, const InitializeOptions options);
 
     void initializeIOBindingMap();
 
@@ -345,6 +345,8 @@ private:
 protected:
 
     void addAlias(llvm::StringRef alias, llvm::StringRef scalarName);
+
+    llvm::Value * getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
 
 protected:
 
@@ -411,6 +413,10 @@ protected:
 
     llvm::Value *                   mSharedHandle = nullptr;
     llvm::Value *                   mThreadLocalHandle = nullptr;
+    // When finalizing thread-local data, the user may want to summarize it.
+    // The common thread local handle points to the first thread's
+    // thread-local handle.
+    llvm::Value *                   mCommonThreadLocalHandle = nullptr;
 
     llvm::Value *                   mTerminationSignalPtr = nullptr;
     llvm::Value *                   mIsFinal = nullptr;

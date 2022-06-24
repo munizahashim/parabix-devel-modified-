@@ -405,9 +405,10 @@ void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
             const auto j = ref.Index + firstArgIndex;
             args[j] = getInputScalar(b, source(e, mScalarGraph));
         }
-        Function * terminationFn = kernel->getInitializeFunction(b);
-        FunctionType * fTy = terminationFn->getFunctionType();
-        Value * const terminatedOnInit = b->CreateCall(fTy, terminationFn, args);
+        Function * initFn = kernel->getInitializeFunction(b);
+        FunctionType * fTy = initFn->getFunctionType();
+        assert (fTy->getNumParams() == args.size());
+        Value * const terminatedOnInit = b->CreateCall(fTy, initFn, args);
         Value * const term = b->CreateICmpNE(terminatedOnInit, ZERO);
         terminated = b->CreateOr(terminated, term);
     }

@@ -19,12 +19,14 @@ const static std::string DO_SEGMENT_FUNCTION_POINTER_SUFFIX = "_SFP";
 const static std::string FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX = "_FTIP";
 const static std::string FINALIZE_FUNCTION_POINTER_SUFFIX = "_FIP";
 
-class PipelineCompiler;
+class PipelineAnalysis;
 class PipelineBuilder;
+class PipelineCompiler;
 
 class PipelineKernel : public Kernel {
     friend class Kernel;
     friend class PipelineCompiler;
+    friend class PipelineAnalysis;
     friend class PipelineBuilder;
 public:
 
@@ -97,6 +99,8 @@ public:
 
     virtual ~PipelineKernel();
 
+    virtual void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> &) {}
+
 protected:
 
     PipelineKernel(BuilderRef b,
@@ -107,13 +111,8 @@ protected:
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
                    LengthAssertions && lengthAssertions);
 
-    virtual bool instantiatesPipelineAfterConstruction() const { return false; }
-
-    virtual void instantiatePipelineAfterConstruction(PipelineBuilder & builder) {};
 
 private:
-
-    void callBeforeInstantiatingKernelCompiler(BuilderRef b) final;
 
     void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
 

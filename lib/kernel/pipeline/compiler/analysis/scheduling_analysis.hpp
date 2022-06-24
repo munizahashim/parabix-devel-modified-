@@ -730,7 +730,14 @@ is_bipartite_graph:
             const auto v = target(e, I);
             const size_t Wu = weight[firstStreamSet + u]; assert (Wu > 0);
             const size_t Wv = weight[firstStreamSet + v]; assert (Wv > 0);
-            maxCutWeights.emplace(e, std::sqrt((double)(Wu * Wu + Wv * Wv)));
+            const auto a = Wu + Wv;
+            assert (a >= Wu && a >= Wv);
+            Rational V1{a, 4 * (Wu * Wu + Wv * Wv)};
+            Rational V2 = V1 * a;
+            assert (V2 > V1 || a < 2);
+            Rational V3 = V2 * a;
+            assert (V3 > V2 || a < 2);
+            maxCutWeights.emplace(e, boost::rational_cast<double>(V3));
         }
 
         if (LLVM_UNLIKELY(maxCutWeights.empty())) {

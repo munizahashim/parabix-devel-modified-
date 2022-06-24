@@ -180,6 +180,22 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getCommonThreadLocalHandlePtr
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
+    const Kernel * const kernel = getKernel(kernelIndex);
+    assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
+    const auto prefix = makeKernelName(kernelIndex);
+    Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
+    if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+        StructType * const localStateTy = kernel->getThreadLocalStateType();
+        handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
+    }
+    assert (handle->getType()->isPointerTy());
+    return handle;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief isBounded
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isBounded() const {

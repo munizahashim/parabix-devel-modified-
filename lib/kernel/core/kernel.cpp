@@ -159,15 +159,8 @@ void Kernel::generateKernel(BuilderRef b) {
         report_fatal_error(getName() + ": stride cannot be 0");
     }
     b->setModule(mModule);
-    errs() << getName() << ".setModule("; errs().write_hex((uintptr_t)mModule) << ")\n";
     assert (mSharedStateType == nullptr && mThreadLocalStateType == nullptr);
-    callBeforeInstantiatingKernelCompiler(b);
-    errs() << getName() << ".callBeforeInstantiatingKernelCompiler\n";
-    auto kc = instantiateKernelCompiler(b);
-    errs() << getName() << ".instantiateKernelCompiler\n";
-    kc->generateKernel(b);
-    errs() << getName() << ".generateKernel\n";
-    assert (getModule());
+    instantiateKernelCompiler(b)->generateKernel(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -931,6 +924,9 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
         if (LLVM_LIKELY(isStateful())) {
             params.push_back(getSharedStateType()->getPointerTo());
         }
+        if (LLVM_LIKELY(hasThreadLocal())) {
+            params.push_back(getThreadLocalStateType()->getPointerTo());
+        }
         FunctionType * const terminateType = FunctionType::get(resultType, params, false);
         terminateFunc = Function::Create(terminateType, GlobalValue::ExternalLinkage, funcName, m);
         terminateFunc->setCallingConv(CallingConv::C);
@@ -938,7 +934,10 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
 
         auto args = terminateFunc->arg_begin();
         if (LLVM_LIKELY(isStateful())) {
-            (args++)->setName("handle");
+            (args++)->setName("shared");
+        }
+        if (LLVM_LIKELY(hasThreadLocal())) {
+            (args++)->setName("threadLocal");
         }
         assert (args == terminateFunc->arg_end());
     }
@@ -1107,7 +1106,6 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     } else {
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
-
     if (hasThreadLocal()) {
         SmallVector<Value *, 2> args;
         if (LLVM_LIKELY(isStateful())) {
@@ -1118,18 +1116,6 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
         finalizeThreadLocalInstance(b, args);
         b->CreateFree(threadLocalHandle);
     }
-
-
-//    if (successPhi) {
-//        BasicBlock * const exitProgram = b->CreateBasicBlock("exitProgram");
-//        BasicBlock * const resumeProgram = b->CreateBasicBlock("return");
-//        b->CreateLikelyCondBr(successPhi, resumeProgram, exitProgram);
-//        // if we have any error, just exit(-1)
-//        b->SetInsertPoint(exitProgram);
-//        b->CreateExit(-1);
-//        b->CreateBr(resumeProgram);
-//        b->SetInsertPoint(resumeProgram);
-//    }
     Value * const result = finalizeInstance(b, sharedHandle);
     for (Value * stateObj : toFree) {
         b->CreateFree(stateObj);
@@ -1236,9 +1222,12 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
         }
         initArgs.push_back(f->second); assert (initArgs.back());
     }
+
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
     Function * const init = getInitializeFunction(b);
+    assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b->CreateCall(init->getFunctionType(), init, initArgs);
+
     END_SCOPED_REGION
 
     if (LLVM_LIKELY(hasFamilyName())) {

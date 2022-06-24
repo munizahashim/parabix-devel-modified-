@@ -150,6 +150,7 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
 Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const {
     Function * const init = mKernel->getInitializeFunction(b);
     assert (!mKernel->hasFamilyName());
+    assert (init->getFunctionType()->getNumParams() == args.size());
     return b->CreateCall(init->getFunctionType(), init, args);
 }
 
@@ -165,7 +166,6 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     SmallVector<Value *, 2> args;
     if (mKernelSharedHandle) {
         args.push_back(mKernelSharedHandle);
-
     }
     const auto prefix = makeKernelName(mKernelId);
     Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
@@ -176,7 +176,6 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     } else {
         args.push_back(threadLocal);
     }
-
     Value * const retVal = b->CreateCall(init->getFunctionType(), func, args);
     if (mKernel->externallyInitialized()) {
         b->CreateStore(b->CreatePointerCast(retVal, b->getVoidPtrTy()), threadLocal);

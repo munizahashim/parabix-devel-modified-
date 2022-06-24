@@ -305,19 +305,14 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
         const auto curPartitionId = KernelPartitionId[i];
         const auto isRoot = (curPartitionId != partitionId);
         partitionId = curPartitionId;
-
-
-
-
         // Family kernels must be initialized in the "main" method.
-        const Kernel * kernel = getKernel(i);
-
         setActiveKernel(b, i, false);
+        assert (mKernel->isGenerated());
         if (isRoot) {
             initializeStridesPerSegment(b);
         }
 
-        if (LLVM_LIKELY(!kernel->externallyInitialized())) {
+        if (LLVM_LIKELY(!mKernel->externallyInitialized())) {
             ArgVec args;
             if (LLVM_LIKELY(mKernel->isStateful())) {
                 args.push_back(mKernelSharedHandle);
@@ -818,8 +813,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
 
     SmallVector<Value *, 2> threadLocalArgs;
-    if (LLVM_LIKELY(mTarget->hasThreadLocal() && mTarget->isStateful())) {
+    if (LLVM_LIKELY(mTarget->isStateful())) {
         threadLocalArgs.push_back(initialSharedState);
+    }
+    if (LLVM_LIKELY(mTarget->isStateful())) {
         threadLocalArgs.push_back(threadLocal[0]);
     }
 
@@ -909,14 +906,20 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         printOptionalStridesPerSegment(b);
         printProducedItemCountDeltas(b);
         printUnconsumedItemCounts(b);
+        if (mGenerateTransferredItemCountHistogram) {
+            printHistogramReport(b);
+        }
     }
 
     mScalarValue.reset(FirstKernel, LastScalar);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        setActiveKernel(b, i, false);
+        setActiveKernel(b, i, true);
         SmallVector<Value *, 1> params;
         if (LLVM_LIKELY(mKernel->isStateful())) {
             params.push_back(mKernelSharedHandle);
+        }
+        if (LLVM_UNLIKELY(mKernel->hasThreadLocal())) {
+            params.push_back(mKernelThreadLocalHandle);
         }
         mScalarValue[i] = callKernelFinalizeFunction(b, params);
     }
@@ -1061,6 +1064,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
             if (LLVM_LIKELY(mKernelSharedHandle != nullptr)) {
                 args.push_back(mKernelSharedHandle);
             }
+            args.push_back(getCommonThreadLocalHandlePtr(b, i));
             args.push_back(mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
             if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {

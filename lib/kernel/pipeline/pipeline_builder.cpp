@@ -65,6 +65,23 @@ Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel) {
     return kernel;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initializePipeline
+ ** ------------------------------------------------------------------------------------------------------------- */
+PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) {
+    // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
+    // this gives me a safe workaround for the problem.
+    PipelineBuilder nested(Internal{}, mDriver, pk->mInputStreamSets, pk->mOutputStreamSets, pk->mInputScalars, pk->mOutputScalars);
+    std::unique_ptr<PipelineBuilder> tmp(&nested);
+    pk->instantiateNestedPipeline(tmp);
+    tmp.release();
+    initializeKernel(pk);
+    pk->mKernels.swap(nested.mKernels);
+    pk->mCallBindings.swap(nested.mCallBindings);
+    pk->mLengthAssertions.swap(nested.mLengthAssertions);
+    return pk;
+}
+
 using Kernels = PipelineBuilder::Kernels;
 
 enum class VertexType { Kernel, StreamSet, Scalar };

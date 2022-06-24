@@ -481,17 +481,16 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
 
 
     // Copy the list of kernels and add in any internal kernels
-    Kernels kernels(mPipelineKernel->getKernels());
-    if (LLVM_UNLIKELY(kernels.empty())) {
+    if (LLVM_UNLIKELY(mKernels.empty())) {
         llvm::report_fatal_error("Pipeline must have at least one kernel");
     }
     assert (num_vertices(Relationships) == 0);
     const unsigned p_in = add_vertex(RelationshipNode(mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
-    const auto n = kernels.size();
+    const auto n = mKernels.size();
     KernelVertexVec vertex(n);
     for (unsigned i = 0; i < n; ++i) {
-        const Kernel * K = kernels[i];
+        const Kernel * K = mKernels[i];
         if (LLVM_UNLIKELY(K == mPipelineKernel)) {
             std::string tmp;
             raw_string_ostream msg(tmp);
@@ -513,41 +512,39 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     addConsumerRelationships(PortType::Input, p_out, mPipelineKernel->getOutputStreamSetBindings(), Relationships, true);
 
     for (unsigned i = 0; i < n; ++i) {
-        addProducerRelationships(PortType::Output, vertex[i], kernels[i]->getOutputStreamSetBindings(), Relationships);
+        addProducerRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputStreamSetBindings(), Relationships);
     }
     for (unsigned i = 0; i < n; ++i) {
-        addConsumerRelationships(PortType::Input, vertex[i], kernels[i]->getInputStreamSetBindings(), Relationships, false);
+        addConsumerRelationships(PortType::Input, vertex[i], mKernels[i]->getInputStreamSetBindings(), Relationships, false);
     }
 
     for (unsigned i = 0; i < n; ++i) {
-        addReferenceRelationships(PortType::Input, vertex[i], kernels[i]->getInputStreamSetBindings(), Relationships);
+        addReferenceRelationships(PortType::Input, vertex[i], mKernels[i]->getInputStreamSetBindings(), Relationships);
     }
     for (unsigned i = 0; i < n; ++i) {
-        addReferenceRelationships(PortType::Output, vertex[i], kernels[i]->getOutputStreamSetBindings(), Relationships);
+        addReferenceRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputStreamSetBindings(), Relationships);
     }
 
-    addPopCountKernels(b, kernels, vertex, Relationships);
+    addPopCountKernels(b, mKernels, vertex, Relationships);
     // addRegionSelectorKernels(b, kernels, vertex, G, internalKernels, internalBindings);
 
     addProducerRelationships(PortType::Output, p_in, mPipelineKernel->getInputScalarBindings(), Relationships);
     addConsumerRelationships(PortType::Input, p_out, mPipelineKernel->getOutputScalarBindings(), Relationships, true);
     for (unsigned i = 0; i < n; ++i) {
-        addProducerRelationships(PortType::Output, vertex[i], kernels[i]->getOutputScalarBindings(), Relationships);
+        addProducerRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputScalarBindings(), Relationships);
     }
 
     for (unsigned i = 0; i < n; ++i) {
-        addConsumerRelationships(PortType::Input, vertex[i], kernels[i]->getInputScalarBindings(), Relationships, true);
+        addConsumerRelationships(PortType::Input, vertex[i], mKernels[i]->getInputScalarBindings(), Relationships, true);
     }
 
-    for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
+    for (const CallBinding & C : mCallBindings) {
         addConsumerRelationships(PortType::Input, C, Relationships);
     }
 
     // Pipeline optimizations
-    combineDuplicateKernels(b, kernels, Relationships);
-    removeUnusedKernels(p_in, p_out, kernels, Relationships);
-
-
+    combineDuplicateKernels(b, Relationships);
+    removeUnusedKernels(p_in, p_out, Relationships);
 
 }
 
@@ -912,7 +909,7 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief combineDuplicateKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels & kernels, ProgramGraph & G) /*static*/ {
+void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, ProgramGraph & G) /*static*/ {
 
     using StreamSetVector = std::vector<std::pair<unsigned, StreamSetPort>>;
     using ScalarVector = std::vector<unsigned>;
@@ -937,7 +934,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
     };
 
     std::vector<unsigned> kernelList;
-    for (const Kernel * kernel : kernels) {
+    for (const Kernel * kernel : mKernels) {
         kernelList.push_back(G.addOrFind(kernel));
     }
 
@@ -1095,8 +1092,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, const Kernels
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief removeUnusedKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineAnalysis::removeUnusedKernels(const unsigned p_in, const unsigned p_out,
-                                                  const Kernels & kernels, ProgramGraph & G) /*static*/ {
+inline void PipelineAnalysis::removeUnusedKernels(const unsigned p_in, const unsigned p_out, ProgramGraph & G) {
 
     flat_set<unsigned> visited;
     std::queue<unsigned> pending;
@@ -1117,7 +1113,7 @@ inline void PipelineAnalysis::removeUnusedKernels(const unsigned p_in, const uns
         pending.push(c);
         visited.insert_unique(c);
     }
-    for (const Kernel * kernel : kernels) {
+    for (const Kernel * kernel : mKernels) {
         if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
             const auto k = G.find(kernel);
             pending.push(k);

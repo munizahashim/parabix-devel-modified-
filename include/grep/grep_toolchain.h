@@ -11,7 +11,7 @@ extern int ScanMatchBlocks;
 extern int MatchCoordinateBlocks;
 extern unsigned ByteCClimit;
 extern bool TraceFiles;
-
+extern bool UseNestedColourizationPipeline;
 }
 
 #endif // GREP_TOOLCHAIN_H

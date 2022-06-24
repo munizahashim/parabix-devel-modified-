@@ -68,12 +68,7 @@
 #include <toolchain/toolchain.h>
 #include <kernel/util/debug_display.h>
 #include <util/aligned_allocator.h>
-
-#define USE_NESTED_GREP_COLOURIZATION_PIPELINE
-
-#ifdef USE_NESTED_GREP_COLOURIZATION_PIPELINE
 #include "grep_colourization_pipeline.hpp"
-#endif
 
 using namespace llvm;
 using namespace cc;
@@ -727,42 +722,45 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
                                           StreamSet * MatchSpans,
                                           StreamSet * Basis,
                                           StreamSet * ColorizedBasis) {
-#ifdef USE_NESTED_GREP_COLOURIZATION_PIPELINE
-    E->CreateKernelCall<GrepColourizationPipeline>(MatchSpans, Basis, ColorizedBasis);
-#else
-    std::string ESC = "\x1B";
-    std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
-    unsigned insertLengthBits = 4;
-    std::vector<unsigned> insertAmts;
-    for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
+    if (UseNestedColourizationPipeline) {
+        E->CreateNestedPipelineCall<GrepColourizationPipeline>(MatchSpans, Basis, ColorizedBasis);
+    } else {
+        std::string ESC = "\x1B";
+        std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
+        unsigned insertLengthBits = 4;
+        std::vector<unsigned> insertAmts;
+        for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-    StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-    E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
+        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
+        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
 
-    StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-    E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-    //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-    StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-    //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
+        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
+        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+        //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
+        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
 
-    // For each run of 0s marking insert positions, create a parallel
-    // bixnum sequentially numbering the string insert positions.
-    StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
-    E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-    //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
-    // Baais bit streams expanded with 0 bits for each string to be inserted.
+        // For each run of 0s marking insert positions, create a parallel
+        // bixnum sequentially numbering the string insert positions.
+        StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
+        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+        //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+        // Baais bit streams expanded with 0 bits for each string to be inserted.
 
-    StreamSet * ExpandedBasis = E->CreateStreamSet(8);
-    SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
-    //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+        StreamSet * ExpandedBasis = E->CreateStreamSet(8);
+        SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
+        //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
-    // Map the match start/end marks to their positions in the expanded basis.
-    StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-    SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+        // Map the match start/end marks to their positions in the expanded basis.
+        StreamSet * ExpandedMarks = E->CreateStreamSet(2);
+        SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
 
-    E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
-#endif
+        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+    }
 }
+
+
+
 
 void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, StreamSet * ByteStream, bool BatchMode) {
     StreamSet * SourceStream = getBasis(E, ByteStream);
@@ -1024,6 +1022,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             accum.setFileLabel(fileNames[0]);
             useMMap = mPreferMMap && canMMap(fileNames[0]);
         }
+        assert (f);
         f(useMMap, fileDescriptor, &accum, mMaxCount);
         close(fileDescriptor);
         if (accum.binaryFileSignalled()) {

@@ -40,6 +40,7 @@ using RateId = ProcessingRate::KindId;
 using Scalars = PipelineKernel::Scalars;
 using Kernels = PipelineKernel::Kernels;
 using CallBinding = PipelineKernel::CallBinding;
+using CallBindings = PipelineKernel::CallBindings;
 using CallRef = RefWrapper<CallBinding>;
 using LengthAssertion = PipelineKernel::LengthAssertion;
 using LengthAssertions = PipelineKernel::LengthAssertions;

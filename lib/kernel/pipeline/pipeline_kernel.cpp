@@ -236,24 +236,6 @@ void PipelineKernel::setOutputScalarAt(const unsigned i, Scalar * const value) {
 #undef REPLACE_INTERNAL_KERNEL_BINDINGS
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief constructKernelAfterInstantiation
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::callBeforeInstantiatingKernelCompiler(BuilderRef b) {
-    if (LLVM_UNLIKELY(instantiatesPipelineAfterConstruction())) {
-        PipelineBuilder builder(PipelineBuilder::Internal{}, reinterpret_cast<BaseDriver &>(b->getDriver()),
-                                mInputStreamSets, mOutputStreamSets, mInputScalars, mOutputScalars);
-        instantiatePipelineAfterConstruction(builder);
-        mKernels.swap(builder.mKernels);
-        builder.mKernels.clear();
-        mCallBindings.swap(builder.mCallBindings);
-        builder.mCallBindings.clear();
-        mLengthAssertions.swap(builder.mLengthAssertions);
-        builder.mLengthAssertions.clear();
-        errs() << "PipelineKernel::callBeforeInstantiatingKernelCompiler\n";
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(BuilderRef b) const {

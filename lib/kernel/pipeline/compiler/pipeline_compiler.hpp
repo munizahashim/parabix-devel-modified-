@@ -254,7 +254,6 @@ public:
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
     void ensureSufficientOutputSpace(BuilderRef b, const BufferPort & port, const unsigned streamSet);
-//    void updatePHINodesForLoopExit(BuilderRef b);
 
     Value * calculateTransferableItemCounts(BuilderRef b, Value * const numOfLinearStrides);
 
@@ -389,8 +388,6 @@ public:
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
     void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
 
-
-
 // prefetch instructions
 
     void prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * const addr, const bool write) const;
@@ -471,6 +468,7 @@ public:
 // thread local functions
 
     Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
+    Value * getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
 
 // optimization branch functions
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
@@ -500,6 +498,7 @@ public:
     bool recordsAnyHistogramData() const;
     void addHistogramProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
     void updateTransferredItemsForHistogramData(BuilderRef b);
+    void printHistogramReport(BuilderRef b);
 
 // debug message functions
 

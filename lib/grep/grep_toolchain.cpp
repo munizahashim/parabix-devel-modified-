@@ -38,4 +38,7 @@ bool TraceFiles;
 static cl::opt<bool, true> OptTraceFiles("TraceFiles", cl::location(TraceFiles),
                                          cl::desc("Report files as they are opened."), cl::init(false));
 
+bool UseNestedColourizationPipeline;
+static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
+                                         cl::desc("Use a nested pipeline for colourization."), cl::init(false));
 }

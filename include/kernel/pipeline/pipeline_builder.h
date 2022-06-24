@@ -8,9 +8,13 @@ class BaseDriver;
 namespace kernel {
 
 class OptimizationBranchBuilder;
+//class PipelineAnalysis;
+//class PipelineCompiler;
 
 class PipelineBuilder {
     friend class PipelineKernel;
+    friend class PipelineAnalysis;
+    friend class PipelineCompiler;
     friend class OptimizationBranchBuilder;
 public:
 
@@ -79,6 +83,17 @@ public:
                     Bindings && scalar_inputs, Bindings && scalar_outputs,
                     const unsigned numOfThreads);
 
+    PipelineBuilder(BaseDriver & driver,
+                    llvm::StringRef pipelineName,
+                    Bindings && stream_inputs, Bindings && stream_outputs,
+                    Bindings && scalar_inputs, Bindings && scalar_outputs,
+                    const unsigned numOfThreads);
+
+    template<typename KernelType, typename... Args>
+    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
+        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...));
+    }
+
     virtual ~PipelineBuilder() {}
 
     virtual Kernel * makeKernel();
@@ -98,6 +113,8 @@ protected:
                     Bindings scalar_inputs, Bindings scalar_outputs);
 
     Kernel * initializeKernel(Kernel * const kernel);
+
+    PipelineKernel * initializePipeline(PipelineKernel * const kernel);
 
 protected:
 
