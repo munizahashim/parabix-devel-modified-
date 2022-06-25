@@ -382,6 +382,20 @@ found_non_empty_type:
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief generateOrLoadKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::generateOrLoadKernel(BuilderRef b) {
+    if (LLVM_LIKELY(isGenerated())) {
+        ensureLoaded();
+    } else if (getInitializeFunction(b, false)) {
+        loadCachedKernel(b);
+    } else {
+        setModule(b->getModule());
+        generateKernel(b);
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addKernelDeclarations
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::addKernelDeclarations(BuilderRef b) {

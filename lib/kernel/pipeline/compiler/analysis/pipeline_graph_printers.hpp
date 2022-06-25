@@ -192,7 +192,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printBufferGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
+void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
 
     using BufferId = StreamSetBuffer::BufferKind;
 
@@ -364,9 +364,15 @@ void PipelineAnalysis::printBufferGraph(raw_ostream & out) const {
             return;
         }
 
-        const Kernel * const kernelObj = getKernel(kernel);
+        Kernel * const kernelObj = const_cast<Kernel *>(getKernel(kernel));
 
         assert (kernelObj);
+        // TODO: ugly workaround but its possible that we created kernels during analysis
+        // that may not have been compiled. We only really want the state types analyzed
+        // and compiled, however, so not only is this the wrong place for this but its also
+        // more than necessary.
+
+        kernelObj->generateOrLoadKernel(b);
 
         const auto nonLinear = mayHaveNonLinearIO(kernel);
 

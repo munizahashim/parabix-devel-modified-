@@ -279,7 +279,6 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         assert (k < REQ_INTEGERS);
         const auto intExecTime = values[k++];
         knownOverheads += intExecTime;
-        assert (knownOverheads <= intSubTotal);
         const double overheadPerc = (((long double)(intSubTotal - knownOverheads)) * 100.0L) / fSubTotal;
         out << (boost::format("%5.1f") % overheadPerc).str() << ' ';
         const double execTimePerc = (((long double)intExecTime) * 100.0L) / fSubTotal;

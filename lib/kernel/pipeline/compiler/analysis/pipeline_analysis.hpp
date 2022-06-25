@@ -23,16 +23,11 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
-        //pipelineKernel->
-
         PipelineAnalysis P(pipelineKernel);
 
-//        std::random_device rd;
-//        xoroshiro128 rng(rd);
+        std::random_device rd;
+        pipeline_random_engine rng{rd()};
 
-        pipeline_random_engine rng;
-
-//        const auto graphSeed = 2081280305;
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
 
         P.generateInitialPipelineGraph(b);
@@ -89,7 +84,8 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
-            P.printBufferGraph(errs());
+            assert (b->getModule() == pipelineKernel->getModule());
+            P.printBufferGraph(b, errs());
         }
 
         return P;
@@ -108,7 +104,8 @@ private:
     , mLengthAssertions(pipelineKernel->mLengthAssertions)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
-    , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers) {
+    , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
+    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized)) {
 
     }
 
@@ -241,7 +238,7 @@ private:
 public:
 
     // Debug functions
-    void printBufferGraph(raw_ostream & out) const;
+    void printBufferGraph(BuilderRef b, raw_ostream & out) const;
     static void printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name = "G");
 
 private:
@@ -259,6 +256,8 @@ public:
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
     const bool                      mTraceIndividualConsumedItemCounts;
+
+    const bool                      IsNestedPipeline;
 
     static const unsigned           PipelineInput = 0U;
     static const unsigned           FirstKernel = 1U;

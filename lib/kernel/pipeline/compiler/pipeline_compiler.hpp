@@ -881,7 +881,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
 
-, mIsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
+, mIsNestedPipeline(P.IsNestedPipeline)
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))

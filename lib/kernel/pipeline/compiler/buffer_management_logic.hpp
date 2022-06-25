@@ -390,9 +390,9 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const Binding & binding = br.Binding;
 
         if (br.IsDeferred || isAddressable(binding)) {
-            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-                continue;
-            }
+//            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+//                continue;
+//            }
         } else if (LLVM_UNLIKELY(!isCountable(binding))) {
             continue;
         }
@@ -427,9 +427,9 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const Binding & binding = br.Binding;
 
         if (br.IsDeferred || isAddressable(binding)) {
-            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-                continue;
-            }
+//            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+//                continue;
+//            }
         } else if (LLVM_UNLIKELY(!isCountable(binding))) {
             continue;
         }

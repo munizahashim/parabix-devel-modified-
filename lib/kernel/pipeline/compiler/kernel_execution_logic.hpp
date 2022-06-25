@@ -32,7 +32,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
-        readAndUpdateInternalProcessedAndProducedItemCounts(b);
+        if (mCurrentKernelIsStateFree) {
+            readAndUpdateInternalProcessedAndProducedItemCounts(b);
+        }
 
         BasicBlock * resumeKernelExecution = nullptr;
 
@@ -427,7 +429,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
 
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
             Value * processed = nullptr;
-            if (mCurrentProcessedDeferredItemCountPhi[rt.Port]) {
+            if (rt.IsDeferred) {
                 processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
                 processed = mCurrentProcessedItemCountPhi[rt.Port];
@@ -442,7 +444,8 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             if (LLVM_UNLIKELY(requiresItemCount(rt.Binding))) {
                 // calculate how many linear items are from the *deferred* position
                 Value * inputItems = mLinearInputItemsPhi[rt.Port]; assert (inputItems);
-                if (mCurrentProcessedDeferredItemCountPhi[rt.Port]) {
+
+                if (rt.IsDeferred) {
                     const auto prefix = makeBufferName(mKernelId, rt.Port);
                     Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[rt.Port], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
                     inputItems = b->CreateAdd(inputItems, diff);
@@ -516,6 +519,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             const ProcessingRate & rate = input.getRate();
             if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
                 processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mCurrentLinearInputItems[inputPort]);
+                assert (input.isDeferred() ^ mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr);
                 if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                     assert (mReturnedProcessedItemCountPtr[inputPort]);
                     mProcessedDeferredItemCount[inputPort] = b->CreateLoad(mReturnedProcessedItemCountPtr[inputPort]);
@@ -568,6 +572,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             const ProcessingRate & rate = output.getRate();
             if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
                 produced = b->CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
+                assert (output.isDeferred() ^ mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr);
                 if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                     assert (mReturnedProducedItemCountPtr[outputPort]);
                     mProducedDeferredItemCount[outputPort] = b->CreateLoad(mReturnedProducedItemCountPtr[outputPort]);

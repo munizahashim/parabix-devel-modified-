@@ -7,6 +7,7 @@
 #include <kernel/streamutils/run_index.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/core/kernel_builder.h>
 
 namespace kernel {
 
@@ -27,14 +28,16 @@ public:
                          // called functions
                          , {}
                          // stream inputs
-                         , {{"MatchSpans", MatchSpans}, {"Basis", Basis}}
+                         , {Bind("MatchSpans", MatchSpans, Deferred()), Bind("Basis", Basis, Deferred())}
                          // stream outputs
-                         , {{"ColorizedBasis", ColorizedBasis}} // not fixed!
+                         , {Bind("ColorizedBasis", ColorizedBasis, BoundedRate(0, 4))}
                          // scalars
                          , {}, {}
                          // length assertions
                          , {}) {
         addAttribute(InternallySynchronized());
+        // NOTE: the 8x is to accommodate FilterByMask minimum I/O.
+        setStride(8 * b->getBitBlockWidth());
     }
 
     void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> & E) final {

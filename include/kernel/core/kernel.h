@@ -35,6 +35,7 @@ class StreamSet;
 
 class Kernel : public AttributeSet {
     friend class KernelCompiler;
+    friend class PipelineAnalysis;
     friend class PipelineCompiler;
     friend class PipelineKernel;
     friend class OptimizationBranchCompiler;
@@ -458,6 +459,8 @@ protected:
     virtual void linkExternalMethods(BuilderRef b);
 
     void constructStateTypes(BuilderRef b);
+
+    void generateOrLoadKernel(BuilderRef b);
 
     virtual void generateInitializeMethod(BuilderRef) { }
 

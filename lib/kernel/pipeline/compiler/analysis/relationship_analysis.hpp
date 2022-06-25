@@ -353,6 +353,27 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         fixStrideStepLength(firstKernelInPartition, LastKernel);
     }
 
+    if (LLVM_UNLIKELY(IsNestedPipeline && (MinimumNumOfStrides[PipelineInput] != 1))) {
+        auto checkIO = [](const Bindings & bindings) -> bool {
+            for (const Binding & binding : bindings) {
+                if (isCountable(binding) && !binding.isDeferred()) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if (checkIO(mPipelineKernel->getInputStreamSetBindings()) || checkIO(mPipelineKernel->getOutputStreamSetBindings())) {
+            errs() << "WARNING! nested pipeline "
+                   << mPipelineKernel->getName() <<
+                      " requires more than one stride of input but has at least one "
+                      "non-deferred Countable I/O rate. This may cause I/O errors "
+                      "with the outer pipeline.\n\n"
+                      "Check -PrintPipelineGraph for details.\n";
+        }
+    }
+
+
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.
     // Similarly, if we disable partitioning, every kernel will be placed into its own partition.

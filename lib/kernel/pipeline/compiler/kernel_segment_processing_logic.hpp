@@ -448,11 +448,11 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
     }
     b->CreateUnlikelyCondBr(isFinal, mKernelTerminated, mKernelLoopExit);
-
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         mUpdatedProcessedPhi[port]->addIncoming(mProcessedItemCount[port], exitBlock);
         if (mUpdatedProcessedDeferredPhi[port]) {
+            assert (mProcessedDeferredItemCount[port]);
             mUpdatedProcessedDeferredPhi[port]->addIncoming(mProcessedDeferredItemCount[port], exitBlock);
         }
     }
@@ -460,6 +460,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
         const auto port = mBufferGraph[e].Port;
         mUpdatedProducedPhi[port]->addIncoming(mProducedItemCount[port], exitBlock);
         if (mUpdatedProducedDeferredPhi[port]) {
+            assert (mProducedDeferredItemCount[port]);
             mUpdatedProducedDeferredPhi[port]->addIncoming(mProducedDeferredItemCount[port], exitBlock);
         }
     }

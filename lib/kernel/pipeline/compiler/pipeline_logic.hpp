@@ -54,17 +54,10 @@ inline void destroyStateObject(BuilderRef b, Value * threadState) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateImplicitKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
+void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
+    assert (b->getModule() == mTarget->getModule());
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        Kernel * const kernel = const_cast<Kernel *>(getKernel(i));
-        if (LLVM_LIKELY(kernel->isGenerated())) {
-            kernel->ensureLoaded();
-        } else if (kernel->getInitializeFunction(b, false)) {
-            kernel->loadCachedKernel(b);
-        } else {
-            kernel->setModule(mTarget->getModule());
-            kernel->generateKernel(b);
-        }
+        const_cast<Kernel *>(getKernel(i))->generateOrLoadKernel(b);
     }
 }
 
