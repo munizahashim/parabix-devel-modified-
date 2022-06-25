@@ -8,8 +8,8 @@ namespace re {
 class RE; class Capture; class Reference; class Name;
 
 
-// Mapping from captures to all references to the capture.
-using RefMap = std::map<Capture *, std::vector<std::string>>;
+// Mapping from capture names to all references to the capture.
+using RefMap = std::map<std::string, std::vector<std::string>>;
 
 // Mapping from references to twixt expressions between
 // the defining capture and the reference.

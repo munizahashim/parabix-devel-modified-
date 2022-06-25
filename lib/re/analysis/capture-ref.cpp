@@ -15,21 +15,32 @@ using namespace llvm;
 
 namespace re {
 
-using CapturePostfixMap = std::map<Capture *, std::vector<RE *>>;
+using CapturePostfixMap = std::map<std::string, std::vector<RE *>>;
 
 void updateCaptures(RE * re, CapturePostfixMap & cm) {
     for (auto & mapping : cm) {
         mapping.second.push_back(re);
     }
     if (Capture * c = dyn_cast<Capture>(re)) {
-        cm.emplace(c, std::vector<RE *>{});
+        cm.emplace(c->getName(), std::vector<RE *>{});
     }
 }
 
+void update1reference(Reference * ref, CapturePostfixMap & cm, ReferenceInfo & info) {
+    std::string refName = ref->getName();
+    auto f = cm.find(refName);
+    std::string instanceName = refName + std::to_string(ref->getInstance());
+    if (f != cm.end()) {
+        RE * twixt = makeSeq(f->second.begin(), f->second.end());
+        info.twixtREs.emplace(instanceName, twixt);
+    } else {
+        llvm::report_fatal_error("reference without capture");
+    }
+}
 void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) {
     if (Capture * c = dyn_cast<Capture>(re)) {
         updateReferenceInfo(c->getCapturedRE(), cm, info);
-        info.captureRefs.emplace(c, std::vector<std::string>{});
+        info.captureRefs.emplace(c->getName(), std::vector<std::string>{});
     } else if (Seq * seq = dyn_cast<Seq>(re)) {
         if (!seq->empty()) {
             CapturePostfixMap cm1 = cm;  // copy
@@ -54,23 +65,12 @@ void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) 
         updateReferenceInfo(ix->getLH(), cm, info);
         updateReferenceInfo(ix->getRH(), cm, info);
     } else if (Reference * ref = dyn_cast<Reference>(re)) {
-        std::string refName = ref->getName();
-        Capture * c = ref->getCapture();
-        auto f = cm.find(c);
-        if (f != cm.end()) {
-            RE * twixt = makeSeq(f->second.begin(), f->second.end());
-            info.twixtREs.emplace(refName, twixt);
-            auto rl = info.captureRefs.find(c);
-            if (rl == info.captureRefs.end()) {
-                llvm::report_fatal_error("reference analysis: out of scope reference");
-            }
-            rl->second.push_back(refName);
-        } else {
-            llvm::report_fatal_error("reference without capture");
-        }
+        update1reference(ref, cm, info);
     } else if (PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
-        // Future extension:  property reference such as \p{Sc=\1} (same script as
-        // the capture char.
+        RE * defn = pe->getResolvedRE();
+        if (defn && isa<Reference>(defn)) {
+            update1reference(cast<Reference>(defn), cm, info);
+        }
     }
 }
 

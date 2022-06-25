@@ -22,7 +22,8 @@ public:
         std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
         auto rg1 = getLengthRange(r->getCapture(), &cc::Unicode);
         if (rg1.first != rg1.second) return r;
-        auto mapping = mRefInfo.twixtREs.find(r->getName());
+        std::string instanceName = r->getName() + std::to_string(r->getInstance());
+        auto mapping = mRefInfo.twixtREs.find(instanceName);
         if (mapping == mRefInfo.twixtREs.end()) return r;
         auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
         if (rg2.first != rg2.second) return r;

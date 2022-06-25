@@ -38,10 +38,10 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
     if (PrintOptionIsSet(ShowAllREs) || PrintOptionIsSet(ShowREs)) {
         errs() << "Parser:\n" << Printer_RE::PrintRE(r) << '\n';
     }
-    r = removeUnneededCaptures(r);
     r = resolveEscapeNames(r);
     r = resolveGraphemeMode(r, false /* not in grapheme mode at top level*/);
     r = UCD::linkAndResolve(r, grep::lineNumGrep);
+    r = removeUnneededCaptures(r);
     r = UCD::inlineSimpleProperties(r);
     //r = resolveBoundaryProperties(r);
     r = UCD::externalizeProperties(r);

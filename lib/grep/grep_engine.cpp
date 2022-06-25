@@ -273,6 +273,9 @@ void GrepEngine::initRE(re::RE * re) {
     }
 
     mRE = re;
+
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
+
     mRefInfo = re::buildReferenceInfo(mRE);
     mRE = fixedReferenceTransform(mRefInfo, mRE);
     if (!mRefInfo.twixtREs.empty()) {
@@ -280,8 +283,6 @@ void GrepEngine::initRE(re::RE * re) {
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::U21);
     }
-
-    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
     mRE = resolveAnchors(mRE, anchorRE);
@@ -305,6 +306,11 @@ void GrepEngine::initRE(re::RE * re) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::UTF8index);
+        const auto UnicodeSets = re::collectCCs(mRE, *mIndexAlphabet);
+        if (!UnicodeSets.empty()) {
+            auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
+            mRE = transformCCs(mpx, mRE);
+        }
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);
@@ -506,28 +512,24 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
 void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     auto lengths = getLengthRange(re, mIndexAlphabet);
-    const auto UnicodeSets = re::collectCCs(re, *mIndexAlphabet);
-    if (UnicodeSets.empty()) {
-        // All inputs will be externals.   Do not register a source stream.
-        options->setRE(re);
-    } else {
-        auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
-        re = transformCCs(mpx, re);
-        options->setRE(re);
-        auto mpx_basis = mpx->getMultiplexedCCs();
-        StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
-        StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
-        P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
-        FilterByMask(P, mU8index, u8CharClasses, CharClasses);
-        options->setSource(CharClasses);
-        options->addAlphabet(mpx, CharClasses);
+    options->setRE(re);
+    auto alphabets = re::collectAlphabets(re);
+    for (auto & a : alphabets) {
+        //llvm::errs() << "found: " << a->getName() << "\n";
+        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
+            auto mpx_basis = mpx->getMultiplexedCCs();
+            StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
+            StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
+            P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
+            FilterByMask(P, mU8index, u8CharClasses, CharClasses);
+            options->setSource(CharClasses);
+            options->addAlphabet(mpx, CharClasses);
+        }
     }
     StreamSet * const MatchResults = P->CreateStreamSet(1, 1);
     options->setResults(MatchResults);
     addExternalStreams(P, options, re, mU8index);
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    StreamSet * u8index1 = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * u8initial = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
@@ -537,6 +539,8 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
         SpreadByMask(P, u8initial, MatchSpans, ExpandedSpans);
         P->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
     } else {
+        StreamSet * u8index1 = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
         SpreadByMask(P, u8index1, MatchResults, Results);
     }
 }
