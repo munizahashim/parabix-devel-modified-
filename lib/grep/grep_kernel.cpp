@@ -159,7 +159,6 @@ void GrepKernelOptions::setIndexingTransformer(EncodingTransformer * encodingTra
 }
 
 void GrepKernelOptions::setRE(RE * e) {mRE = e;}
-void GrepKernelOptions::setPrefixRE(RE * e) {mPrefixRE = e;}
 void GrepKernelOptions::setSource(StreamSet * s) {mSource = s;}
 void GrepKernelOptions::setCombiningStream(GrepCombiningType t, StreamSet * toCombine){
     mCombiningType = t;
@@ -240,9 +239,6 @@ std::string GrepKernelOptions::makeSignature() {
     raw_string_ostream sig(tmp);
     if (mSource) {
         sig << mSource->getNumElements() << 'x' << mSource->getFieldWidth();
-        if (mSource->getFieldWidth() == 8) {
-            sig << ':' << grep::ByteCClimit;
-        }
         sig << '/' << mCodeUnitAlphabet->getName();
     }
     if (mEncodingTransformer) {
@@ -258,9 +254,6 @@ std::string GrepKernelOptions::makeSignature() {
         sig << "&~";
     } else if (mCombiningType == GrepCombiningType::Include) {
         sig << "|=";
-    }
-    if (mPrefixRE) {
-        sig << ':' << Printer_RE::PrintRE(mPrefixRE);
     }
     sig << ':' << Printer_RE::PrintRE(mRE);
     sig.flush();
@@ -310,59 +303,10 @@ void ICGrepKernel::generatePabloMethod() {
         }
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
-    if (mOptions->mPrefixRE) {
-        RE_Compiler::Marker prefixMatches = re_compiler.compileRE(mOptions->mPrefixRE);
-        PabloBlock * scope1 = getEntryScope()->createScope();
-        pb.createIf(prefixMatches.stream(), scope1);
-
-        PabloAST * u8bytes = pb.createExtract(getInput(0), pb.getInteger(0));
-        PabloAST * nybbles[2];
-        nybbles[0] = scope1->createPackL(scope1->getInteger(8), u8bytes);
-        nybbles[1] = scope1->createPackH(scope1->getInteger(8), u8bytes);
-
-        PabloAST * bitpairs[4];
-        for (unsigned i = 0; i < 2; i++) {
-            bitpairs[2*i] = scope1->createPackL(scope1->getInteger(4), nybbles[i]);
-            bitpairs[2*i + 1] = scope1->createPackH(scope1->getInteger(4), nybbles[i]);
-        }
-
-        std::vector<PabloAST *> basis(8);
-        for (unsigned i = 0; i < 4; i++) {
-            basis[2*i] = scope1->createPackL(scope1->getInteger(2), bitpairs[i]);
-            basis[2*i + 1] = scope1->createPackH(scope1->getInteger(2), bitpairs[i]);
-        }
-        RE_Compiler re_compiler(scope1, mOptions->mCodeUnitAlphabet);
-        re_compiler.addAlphabet(mOptions->mCodeUnitAlphabet, basis);
-        for (unsigned i = 0; i < mOptions->mAlphabets.size(); i++) {
-            auto & alpha = mOptions->mAlphabets[i].first;
-            auto basis = getInputStreamSet(alpha->getName() + "_basis");
-            re_compiler.addAlphabet(alpha, basis);
-        }
-        if (mOptions->mEncodingTransformer) {
-            PabloAST * idxStrm = pb.createExtract(getInputStreamVar("mIndexing"), pb.getInteger(0));
-            re_compiler.addIndexingAlphabet(mOptions->mEncodingTransformer, idxStrm);
-        }
-        for (unsigned i = 0; i < mOptions->mExternalBindings.size(); i++) {
-            auto extName = mOptions->mExternalBindings[i].getName();
-            PabloAST * extStrm = pb.createExtract(getInputStreamVar(extName), pb.getInteger(0));
-            unsigned offset = mOptions->mExternalOffsets[i];
-            unsigned lgth = mOptions->mExternalLengths[i];
-            if ((extName == "\\b{g}") || (extName == "\\b")) {
-                re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, 1), 0));
-            } else {
-                re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), lgth));
-            }
-        }
-        RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE, prefixMatches);
-        PabloAST * matchResult = matches.stream();
-        if (matches.offset() == 0) matchResult = scope1->createAdvance(matchResult, scope1->getInteger(1));
-        scope1->createAssign(final_matches, matchResult);
-    } else {
-        RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
-        PabloAST * matchResult = matches.stream();
-        if (matches.offset() == 0) matchResult = pb.createAdvance(matchResult, 1);
-        pb.createAssign(final_matches, matchResult);
-    }
+    RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
+    PabloAST * matchResult = matches.stream();
+    if (matches.offset() == 0) matchResult = pb.createAdvance(matchResult, 1);
+    pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
     PabloAST * value = nullptr;
     if (mOptions->mCombiningType == GrepCombiningType::None) {

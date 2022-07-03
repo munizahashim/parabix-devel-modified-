@@ -336,13 +336,9 @@ void GrepEngine::initRE(re::RE * re) {
 
     // For simple regular expressions with a small number of characters, we
     // can bypass transposition and use the Direct CC compiler.
-    mPrefixRE = nullptr;
-    mSuffixRE = nullptr;
     if ((mGrepRecordBreak != GrepRecordBreakKind::Unicode) && mExternalNames.empty() && !UnicodeIndexing) {
         if (byteTestsWithinLimit(mRE, ByteCClimit)) {
             return;  // skip transposition
-        } else if (hasTriCCwithinLimit(mRE, ByteCClimit, mPrefixRE, mSuffixRE)) {
-            return;  // skip transposition and set mPrefixRE, mSuffixRE
         } else {
             setComponent(mExternalComponents, Component::S2P);
         }
@@ -512,6 +508,7 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
 void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     auto lengths = getLengthRange(re, mIndexAlphabet);
+    options->setSource(Source);
     options->setRE(re);
     auto alphabets = re::collectAlphabets(re);
     for (auto & a : alphabets) {
@@ -519,10 +516,9 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
             auto mpx_basis = mpx->getMultiplexedCCs();
             StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
-            StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
             P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
+            StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
             FilterByMask(P, mU8index, u8CharClasses, CharClasses);
-            options->setSource(CharClasses);
             options->addAlphabet(mpx, CharClasses);
         }
     }
@@ -549,32 +545,20 @@ void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     auto lengths = getLengthRange(re, mIndexAlphabet);
     options->setSource(Source);
-    StreamSet * MatchResults = nullptr;
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        MatchResults = P->CreateStreamSet(1, 1);
-        options->setResults(MatchResults);
-    } else {
-        options->setResults(Results);
-    }
-    if (hasComponent(mExternalComponents, Component::UTF8index)) {
-        options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
-        if (mSuffixRE != nullptr) {
-            options->setPrefixRE(mPrefixRE);
-            options->setRE(mSuffixRE);
+    options->setResults(Results);
+    if (mIndexAlphabet == &cc::UTF8) {
+        if (hasComponent(mExternalComponents, Component::UTF8index)) {
+            options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
         } else {
-            options->setRE(re);
-        }
-    } else {
-        if (mSuffixRE != nullptr) {
-            options->setPrefixRE(toUTF8(mPrefixRE));
-            options->setRE(toUTF8(mSuffixRE));
-        } else {
-            options->setRE(toUTF8(re));
+            re = toUTF8(re);
         }
     }
+    options->setRE(re);
     addExternalStreams(P, options, re);
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
+        StreamSet * MatchResults = Results;
+        Results = P->CreateStreamSet(1);
         P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, Results);
     }
 }

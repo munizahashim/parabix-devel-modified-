@@ -181,8 +181,6 @@ protected:
     re:: RE * mRE;
     std::set<re::Name *> mExternalNames;
     re::CC * mBreakCC;
-    re::RE * mPrefixRE;
-    re::RE * mSuffixRE;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;

@@ -18,8 +18,6 @@ public:
         RE_Transformer("FixedReferenceTransformer"),
         mRefInfo(info) {}
     RE * transformReference(Reference * r) override {
-        UCD::property_t p = r->getReferencedProperty();
-        std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
         auto rg1 = getLengthRange(r->getCapture(), &cc::Unicode);
         if (rg1.first != rg1.second) return r;
         std::string instanceName = r->getName() + std::to_string(r->getInstance());
@@ -27,6 +25,8 @@ public:
         if (mapping == mRefInfo.twixtREs.end()) return r;
         auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
         if (rg2.first != rg2.second) return r;
+        UCD::property_t p = r->getReferencedProperty();
+        std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
         int fixed_dist = rg1.first + rg2.first;
         std::string externalName = pname + "@-" + std::to_string(fixed_dist);
         return re::makeName(externalName, r);

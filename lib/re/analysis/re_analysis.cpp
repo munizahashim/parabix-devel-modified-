@@ -474,23 +474,6 @@ bool byteTestsWithinLimit(RE * re, unsigned limit) {
     return btc_object.testCount <= btc_object.testLimit;
 }
 
-bool hasTriCCwithinLimit(RE * r, unsigned byteCClimit, RE * & prefixRE, RE * & suffixRE) {
-    if (const Seq * seq = dyn_cast<Seq>(r)) {
-        if (seq->size() < 4) return false;
-        if (!isa<CC>(seq->front())) return false;
-        if (!isa<CC>((*seq)[1])) return false;
-        if (!isa<CC>((*seq)[2])) return false;
-        prefixRE = makeSeq(seq->begin(), seq->begin()+3);
-        if (byteTestsWithinLimit(prefixRE, byteCClimit)) {
-            suffixRE = makeSeq(seq->begin()+3, seq->end());
-            return true;
-        }
-        return false;
-    }
-    return false;
-}
-
-
 bool hasStartAnchor(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         for (const RE * re : *alt) {

@@ -38,7 +38,6 @@ public:
 
     void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
-    void setPrefixRE(re::RE * re);
 
 protected:
     Bindings streamSetInputBindings();
@@ -61,7 +60,6 @@ private:
     std::vector<unsigned>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
-    re::RE *                    mPrefixRE = nullptr;
 };
 
 
