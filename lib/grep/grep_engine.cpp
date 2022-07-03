@@ -505,10 +505,20 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
     }
 }
 
-void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
+StreamSet * GrepEngine::RunGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     auto lengths = getLengthRange(re, mIndexAlphabet);
     options->setSource(Source);
+    StreamSet * indexStream = nullptr;
+    if (mIndexAlphabet == &cc::UTF8) {
+        if (hasComponent(mExternalComponents, Component::UTF8index)) {
+            options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
+        } else {
+            re = toUTF8(re);
+        }
+    } else {
+        indexStream = mU8index;
+    }
     options->setRE(re);
     auto alphabets = re::collectAlphabets(re);
     for (auto & a : alphabets) {
@@ -517,49 +527,37 @@ void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, r
             auto mpx_basis = mpx->getMultiplexedCCs();
             StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
             P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
-            StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
-            FilterByMask(P, mU8index, u8CharClasses, CharClasses);
-            options->addAlphabet(mpx, CharClasses);
+            if (mIndexAlphabet == &cc::UTF8) {
+                options->addAlphabet(mpx, u8CharClasses);
+            } else {
+                StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
+                FilterByMask(P, mU8index, u8CharClasses, CharClasses);
+                options->addAlphabet(mpx, CharClasses);
+            }
         }
     }
+    addExternalStreams(P, options, re, indexStream);
     StreamSet * const MatchResults = P->CreateStreamSet(1, 1);
     options->setResults(MatchResults);
-    addExternalStreams(P, options, re, mU8index);
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        StreamSet * u8initial = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
         StreamSet * MatchSpans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, MatchSpans);
+        if (mIndexAlphabet == &cc::UTF8) return MatchSpans;
+        StreamSet * u8initial = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
         StreamSet * ExpandedSpans = P->CreateStreamSet(1, 1);
         SpreadByMask(P, u8initial, MatchSpans, ExpandedSpans);
+        StreamSet * Results = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
+        return Results;
     } else {
+        if (mIndexAlphabet == &cc::UTF8) return MatchResults;
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * Results = P->CreateStreamSet(1, 1);
         SpreadByMask(P, u8index1, MatchResults, Results);
-    }
-}
-
-void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
-    auto lengths = getLengthRange(re, mIndexAlphabet);
-    options->setSource(Source);
-    options->setResults(Results);
-    if (mIndexAlphabet == &cc::UTF8) {
-        if (hasComponent(mExternalComponents, Component::UTF8index)) {
-            options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
-        } else {
-            re = toUTF8(re);
-        }
-    }
-    options->setRE(re);
-    addExternalStreams(P, options, re);
-    P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        StreamSet * MatchResults = Results;
-        Results = P->CreateStreamSet(1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, Results);
+        return Results;
     }
 }
 
@@ -570,12 +568,8 @@ StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & P, 
 
     prepareExternalStreams(P, SourceStream);
 
-    StreamSet * Matches = P->CreateStreamSet(1, 1);
-        if (UnicodeIndexing) {
-            UnicodeIndexedGrep(P, mRE, SourceStream, Matches);
-        } else {
-            U8indexedGrep(P, mRE, SourceStream, Matches);
-        }
+    StreamSet * Matches = RunGrep(P, mRE, SourceStream);
+
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
         P->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
@@ -752,12 +746,8 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
 
     prepareExternalStreams(E, SourceStream);
 
-    StreamSet * Matches = E->CreateStreamSet(1, 1);
-    if (UnicodeIndexing) {
-        UnicodeIndexedGrep(E, mRE, SourceStream, Matches);
-    } else {
-        U8indexedGrep(E, mRE, SourceStream, Matches);
-    }
+    StreamSet * Matches = RunGrep(E, mRE, SourceStream);
+
     StreamSet * MatchedLineEnds = Matches;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = E->CreateStreamSet();
