@@ -33,9 +33,10 @@ public:
     void setSource(StreamSet * s);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
-
-    void addExternal(std::string name, StreamSet * strm, unsigned offset = 0, unsigned lgth = 1);
-
+    void addExternal(std::string name,
+                     StreamSet * strm,
+                     unsigned offset = 0,
+                     std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
     void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
 
@@ -57,7 +58,7 @@ private:
     StreamSet *                 mResults = nullptr;
     Bindings                    mExternalBindings;
     std::vector<unsigned>       mExternalOffsets;
-    std::vector<unsigned>       mExternalLengths;
+    std::vector<std::pair<int, int>>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
 };

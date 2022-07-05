@@ -36,6 +36,7 @@
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/re_multiplex.h>
 #include <kernel/unicode/boundary_kernels.h>
+#include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <re/analysis/re_name_gather.h>
 #include <re/unicode/boundaries.h>
@@ -176,7 +177,7 @@ unsigned round_up_to_blocksize(unsigned offset) {
 }
 
 
-void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, unsigned lgth) {
+void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, std::pair<int, int> lengthRange) {
     if (offset == 0) {
         if (mSource) {
             mExternalBindings.emplace_back(name, strm, FixedRate(), ZeroExtended());
@@ -193,7 +194,7 @@ void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned
         }
     }
     mExternalOffsets.push_back(offset);
-    mExternalLengths.push_back(lgth);
+    mExternalLengths.push_back(lengthRange);
 }
 
 Bindings GrepKernelOptions::streamSetInputBindings() {
@@ -295,11 +296,11 @@ void ICGrepKernel::generatePabloMethod() {
         auto extName = mOptions->mExternalBindings[i].getName();
         PabloAST * extStrm = pb.createExtract(getInputStreamVar(extName), pb.getInteger(0));
         unsigned offset = mOptions->mExternalOffsets[i];
-        unsigned lgth = mOptions->mExternalLengths[i];
+        std::pair<int, int> lgthRange = mOptions->mExternalLengths[i];
         if ((extName == "\\b{g}") || (extName == "\\b")) {
-            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, 1), 0));
+            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, 1), std::make_pair(0, 0)));
         } else {
-            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), lgth));
+            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), lgthRange));
         }
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());

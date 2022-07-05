@@ -194,7 +194,10 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (marker.stream() == mMain.mIndexStream) {
         return externalMarker;
     }
-    auto externalLength = f->second.length();
+    auto externalLength = f->second.minLength();
+    if (externalLength != f->second.maxLength()) {
+        llvm::report_fatal_error("Variable length external not in initial position:  "  + nameString);
+    }
     auto external_adv = externalLength + externalMarker.offset();
     if (external_adv < marker.offset()) {
         llvm::report_fatal_error("Negative advance amount in processing "  + nameString);
