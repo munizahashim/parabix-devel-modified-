@@ -796,9 +796,14 @@ void OptimizationBranchCompiler::generateFinalizeThreadLocalMethod(BuilderRef b)
 void OptimizationBranchCompiler::generateFinalizeMethod(BuilderRef b) {
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i];
+        SmallVector<Value *, 2> args;
         if (LLVM_LIKELY(kernel->isStateful())) {
-            kernel->finalizeInstance(b, loadSharedHandle(b, i));
+            args.push_back(loadSharedHandle(b, i));
         }
+        if (LLVM_LIKELY(kernel->hasThreadLocal())) {
+            args.push_back(loadThreadLocalHandle(b, i));
+        }
+        kernel->finalizeInstance(b, args);
     }
     // allocate any owned output buffers
     const auto n = mTarget->getNumOfStreamOutputs();

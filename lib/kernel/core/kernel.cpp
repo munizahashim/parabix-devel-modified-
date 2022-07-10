@@ -1120,17 +1120,18 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenera
     } else {
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
+    SmallVector<Value *, 3> args;
+    if (LLVM_LIKELY(isStateful())) {
+        args.push_back(sharedHandle);
+    }
     if (hasThreadLocal()) {
-        SmallVector<Value *, 2> args;
-        if (LLVM_LIKELY(isStateful())) {
-            args.push_back(sharedHandle);
-        }
         args.push_back(threadLocalHandle);
         args.push_back(threadLocalHandle);
         finalizeThreadLocalInstance(b, args);
         b->CreateFree(threadLocalHandle);
+        args.pop_back();
     }
-    Value * const result = finalizeInstance(b, sharedHandle);
+    Value * const result = finalizeInstance(b, args);
     for (Value * stateObj : toFree) {
         b->CreateFree(stateObj);
     }
@@ -1167,7 +1168,7 @@ void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
 Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
     Value * instance = nullptr;
     if (hasThreadLocal()) {
-        assert (args.size() == (isStateful() ? 2 : 1));
+        assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 1 : 0)));
         Function * const init = getInitializeThreadLocalFunction(b);
         instance = b->CreateCall(init->getFunctionType(), init, args);
     }
@@ -1178,7 +1179,7 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> ar
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
-    assert (args.size() == (isStateful() ? 3 : 2));
+    assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 2 : 0)));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
     b->CreateCall(init->getFunctionType(), init, args);
 }
@@ -1186,14 +1187,10 @@ void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) c
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief finalizeInstance
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * Kernel::finalizeInstance(BuilderRef b, Value * const handle) const {
-    Value * result = nullptr;
+Value * Kernel::finalizeInstance(BuilderRef b, ArrayRef<Value *> args) const {
     Function * const termFunc = getFinalizeFunction(b);
-    if (LLVM_LIKELY(isStateful())) {
-        result = b->CreateCall(termFunc->getFunctionType(), termFunc, { handle });
-    } else {
-        result = b->CreateCall(termFunc->getFunctionType(), termFunc, {});
-    }
+    assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 1 : 0)));
+    Value * result = b->CreateCall(termFunc->getFunctionType(), termFunc, args);
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
         result = nullptr;

@@ -144,9 +144,9 @@ protected:
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
     void applyColorization(const std::unique_ptr<kernel::ProgramBuilder> & E,
+                                              kernel::StreamSet * SourceCoords,
                                               kernel::StreamSet * MatchSpans,
-                                              kernel::StreamSet * Basis,
-                                              kernel::StreamSet * ColorizedBasis);
+                                              kernel::StreamSet * Basis);
     std::string linePrefix(std::string fileName);
 
 protected:

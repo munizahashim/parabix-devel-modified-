@@ -438,7 +438,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
 
     bool hidePipelineOutput = in_degree(PipelineOutput, mBufferGraph) == 0;
     for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
-        if (mPartitionJumpIndex[i] == KernelPartitionId[PipelineOutput]) {
+        if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
             hidePipelineOutput = false;
             break;
         }
@@ -561,7 +561,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
 
     for (unsigned i = 0; i < PartitionCount; ++i) {
         const auto a = i;
-        const auto b = mPartitionJumpIndex[i];
+        const auto b = PartitionJumpTargetId[i];
         if (b > (a + 1)) {
             const auto s = firstKernelOfPartition[a];
             const auto t = firstKernelOfPartition[b];

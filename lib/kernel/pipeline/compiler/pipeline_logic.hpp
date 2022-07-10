@@ -137,7 +137,12 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
         mIsInternallySynchronized.set(kernelId);
     }
+    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
     const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
+    #else
+    const auto allowDataParallelExecution = isStateless;
+    #endif
+    assert (allowDataParallelExecution == isDataParallel(kernelId));
 
     IntegerType * const sizeTy = b->getSizeTy();
 
@@ -191,7 +196,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     addFamilyKernelProperties(b, kernelId, groupId);
 
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
-        #warning only needed if its possible to loop back
+        // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire
         mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);
     }
 
@@ -431,10 +436,20 @@ inline void PipelineCompiler::generateKernelMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     mCompilingHybridThread = false;
-    createThreadStateForSingleThread(b);
     initializeForAllKernels();
-    start(b);
+    if (PipelineHasTerminationSignal) {
+        mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
+    }
+    if (LLVM_UNLIKELY(mIsNestedPipeline)) {
+        mSegNo = mExternalSegNo; assert (mExternalSegNo);
+    }
+    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
+    else {
+        mSegNo = b->getSize(0);
+    }
+    #endif
     ActiveKernelIndex = 0;
+    start(b);
     branchToInitialPartition(b);
     for (; ActiveKernelIndex < ActiveKernels.size() - 1; ++ActiveKernelIndex) {
         setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
@@ -442,10 +457,11 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     }
     end(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
+        // TODO: this isn't fully correct for when this is a nested pipeline
         concludeStridesPerSegmentRecording(b);
-        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
-        b->CreateStore(mSegNo, ptr);
+//        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+//        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
+//        b->CreateStore(mSegNo, ptr);
     }
     ActiveKernels.clear();
     ActivePartitions.clear();
@@ -909,9 +925,11 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         setActiveKernel(b, i, true);
         SmallVector<Value *, 1> params;
         if (LLVM_LIKELY(mKernel->isStateful())) {
+            assert (mTarget->isStateful());
             params.push_back(mKernelSharedHandle);
         }
         if (LLVM_UNLIKELY(mKernel->hasThreadLocal())) {
+            assert (mTarget->hasThreadLocal());
             params.push_back(mKernelThreadLocalHandle);
         }
         mScalarValue[i] = callKernelFinalizeFunction(b, params);
@@ -941,11 +959,7 @@ inline StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
 
     fields[PIPELINE_PARAMS] = StructType::get(C, mTarget->getDoSegmentFields(b));
     #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (mNumOfThreads > 1) {
-        fields[INITIAL_SEG_NO] = b->getSizeTy();
-    } else {
-        fields[INITIAL_SEG_NO] = StructType::get(C);
-    }
+    fields[INITIAL_SEG_NO] = b->getSizeTy();
     #endif
     Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
     fields[PROCESS_THREAD_ID] = pthreadSelfFn->getReturnType();
@@ -1009,25 +1023,15 @@ inline void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * thread
 
     FixedArray<Value *, 2> indices2;
     indices2[0] = ZERO;
+    assert (!mIsNestedPipeline && mNumOfThreads != 1);
     #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (mNumOfThreads > 1) {
-        indices2[1] = b->getInt32(INITIAL_SEG_NO);
-        mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
-    }
+    indices2[1] = b->getInt32(INITIAL_SEG_NO);
+    mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
     #endif
     mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
     if (PipelineHasTerminationSignal) {
         indices2[1] = b->getInt32(TERMINATION_SIGNAL);
         mCurrentThreadTerminationSignalPtr = b->CreateInBoundsGEP(threadState, indices2);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief createThreadStateForSingleThread
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::createThreadStateForSingleThread(BuilderRef /* b */) {
-    if (PipelineHasTerminationSignal) {
-        mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
     }
 }
 

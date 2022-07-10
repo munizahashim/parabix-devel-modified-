@@ -293,7 +293,7 @@ public:
     BitVector                       KernelOnHybridThread;
     BitVector                       PartitionOnHybridThread;
 
-    std::vector<unsigned>           mPartitionJumpIndex;
+    std::vector<unsigned>           PartitionJumpTargetId;
 
     ConsumerGraph                   mConsumerGraph;
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;

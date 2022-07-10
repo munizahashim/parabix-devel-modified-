@@ -73,36 +73,36 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
                 }
             }
 
-            auto firstConsumerOrProducer = producer;
-            auto lastConsumer = lastReader;
-            if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                // For the purpose of reporting the consumed item count, the pipeline output
-                // is always a "consumer" of the pipeline input.
-                firstConsumerOrProducer = PipelineOutput;
-                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                    const auto consumer = target(input, mConsumerGraph);
-                    firstConsumerOrProducer = std::min(firstConsumerOrProducer, consumer);
-                }
-                lastConsumer = PipelineOutput;
-            } else {
-                for (const auto input : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-                    const auto consumer = target(input, mConsumerGraph);
-                    lastConsumer = std::max(lastConsumer, consumer);
-                }
-            }
+//            auto firstConsumerOrProducer = producer;
+//            auto lastConsumer = lastReader;
+//            if (LLVM_UNLIKELY(producer == PipelineInput)) {
+//                // For the purpose of reporting the consumed item count, the pipeline output
+//                // is always a "consumer" of the pipeline input.
+//                firstConsumerOrProducer = PipelineOutput;
+//                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+//                    const auto consumer = target(input, mConsumerGraph);
+//                    firstConsumerOrProducer = std::min(firstConsumerOrProducer, consumer);
+//                }
+//                lastConsumer = PipelineOutput;
+//            } else {
+//                for (const auto input : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+//                    const auto consumer = target(input, mConsumerGraph);
+//                    lastConsumer = std::max(lastConsumer, consumer);
+//                }
+//            }
 
-            const auto prodPartId = KernelPartitionId[firstConsumerOrProducer];
-            const auto consPartId = KernelPartitionId[lastConsumer];
+//            const auto prodPartId = KernelPartitionId[firstConsumerOrProducer];
+//            const auto consPartId = KernelPartitionId[lastConsumer];
 
-            const auto consPrefix = prefix + "_consumed@partition";
+//            const auto consPrefix = prefix + "_consumed@partition";
 
-            for (auto partitionId = prodPartId + 1; partitionId <= consPartId; ++partitionId) {
-                if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
-                    b->SetInsertPoint(mPartitionEntryPoint[partitionId]);
-                    PHINode * const phi = b->CreatePHI(sizeTy, PartitionCount, consPrefix + std::to_string(partitionId));
-                    mPartitionConsumedItemCountPhi[partitionId][k] = phi;
-                }
-            }
+//            for (auto partitionId = prodPartId + 1; partitionId <= consPartId; ++partitionId) {
+//                if (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread) {
+//                    b->SetInsertPoint(mPartitionEntryPoint[partitionId]);
+//                    PHINode * const phi = b->CreatePHI(sizeTy, PartitionCount, consPrefix + std::to_string(partitionId));
+//                    mPartitionConsumedItemCountPhi[partitionId][k] = phi;
+//                }
+//            }
         }
     }
 
@@ -188,7 +188,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     readPAPIMeasurement(b, firstKernel, PAPIReadInitialMeasurementArray);
     #endif
     mKernelStartTime = startCycleCounter(b);
-    if (mNumOfThreads > 1) {
+    if (mNumOfThreads != 1 || mIsNestedPipeline) {
         const auto type = isDataParallel(firstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, firstKernel, type);
         acquireHybridThreadSynchronizationLock(b);
@@ -296,7 +296,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
         // the prior produced count.
 
 
-        const auto k = streamSet - FirstStreamSet;
+        const unsigned k = streamSet - FirstStreamSet;
 
         const BufferPort & br = mBufferGraph[e];
         // Select/load the appropriate produced item count
@@ -337,23 +337,29 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             prodPhi->addIncoming(produced, exitPoint);
         }
 
-        PHINode * const consPhi = mPartitionConsumedItemCountPhi[targetPartitionId][k];
+        // If we have a nested kernel that can skip past all kernels that consume from an external input,
+        // it won't update the value it needs to report to the external pipeline. Can the external
+        // pipeline pass in a shared scalar and trust that the nested one will read/write it safely?
 
-        if (consPhi) {
+//        PHINode * const consPhi = mPartitionConsumedItemCountPhi[targetPartitionId][k];
 
-            Value * const consumed = readConsumedItemCount(b, streamSet);
-            assert (isFromCurrentFunction(b, consumed, false));
+//        if (consPhi) {
 
-            #ifdef PRINT_DEBUG_MESSAGES
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << makeKernelName(mKernelId) << " -> " <<
-                   makeBufferName(kernel, br.Port) << "_consumed = %" PRIu64;
-            debugPrint(b, out.str(), consumed);
-            #endif
 
-            consPhi->addIncoming(consumed, exitPoint);
-        }
+
+//            Value * const consumed = readConsumedItemCount(b, streamSet);
+//            assert (isFromCurrentFunction(b, consumed, false));
+
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            SmallVector<char, 256> tmp;
+//            raw_svector_ostream out(tmp);
+//            out << makeKernelName(mKernelId) << " -> " <<
+//                   makeBufferName(kernel, br.Port) << "_consumed = %" PRIu64;
+//            debugPrint(b, out.str(), consumed);
+//            #endif
+
+//            consPhi->addIncoming(consumed, exitPoint);
+//        }
     }
 
 }
@@ -393,21 +399,13 @@ void PipelineCompiler::phiOutPartitionStatusFlags(BuilderRef b, const unsigned t
 
 }
 
+
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief releaseAllSynchronizationLocksUntil
+ * @brief getFirstKernelInTargetPartition
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned partitionId) {
-    // Find the first kernel in the partition we're jumping to and acquire the LSN then release
-    // all of the kernels we skipped over. However, to safely jump to a partition, we need to
-    // know how many items were processed by any consumers of the kernels up to the target
-    // kernel; otherwise we run the risk of mangling the buffer state. For safety, wait until we
-    // can acquire the last consumer's lock but only release the locks that we end up skipping.
-
-
+unsigned PipelineCompiler::getFirstKernelInTargetPartition(const unsigned partitionId) const {
 
     unsigned firstKernelInTargetPartition = 0;
-
-    const auto n = LastStreamSet - FirstStreamSet;
     assert (PartitionOnHybridThread.test(partitionId) == mCompilingHybridThread);
     const auto m = ActiveKernels.size();
     auto k = ActiveKernelIndex;
@@ -422,57 +420,78 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
     }
     assert (firstKernelInTargetPartition <= PipelineOutput);
     assert (firstKernelInTargetPartition > mKernelId);
+    return firstKernelInTargetPartition;
+}
 
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief acquirePartitionSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition) {
+    // Find the first kernel in the partition we're jumping to and acquire the LSN then release
+    // all of the kernels we skipped over. However, to safely jump to a partition, we need to
+    // know how many items were processed by any consumers of the kernels up to the target
+    // kernel; otherwise we run the risk of mangling the buffer state. For safety, wait until we
+    // can acquire the last consumer's lock but only release the locks that we end up skipping.
     // TODO: experiment with a mutex lock here.
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
     Value * const startTime = startCycleCounter(b);
+    assert (firstKernelInTargetPartition <= PipelineOutput);
 
-    if (LLVM_LIKELY(!mCompilingHybridThread)) {
+//    auto lastConsumer = firstKernelInTargetPartition;
+//    for (unsigned i = 0; i <= n; ++i) {
+//        if (mPartitionConsumedItemCountPhi[partitionId][i]) {
+//            for (const auto e : make_iterator_range(out_edges(FirstStreamSet + i, mConsumerGraph))) {
+//                const auto consumer = target(e, mConsumerGraph);
+//                if (mRequiresSynchronization.test(consumer)) {
+//                   auto c = consumer;
+//                   if (KernelOnHybridThread.test(consumer)) {
+//                        c = std::max<unsigned>(consumer, firstAfterHybridThread);
+//                   }
+//                   lastConsumer = std::max<unsigned>(lastConsumer, c);
+//                }
+//            }
+//        }
+//    }
 
-        auto firstAfterHybridThread = PipelineOutput;
-        if (KernelOnHybridThread.any()) {
-            const auto lastOnHybridThread = KernelOnHybridThread.find_last_in(FirstKernel, PipelineOutput);
-            assert (lastOnHybridThread < PipelineOutput);
-            firstAfterHybridThread = lastOnHybridThread + 1;
-        }
+//    if (lastConsumer == PipelineOutput) {
+//        lastConsumer = KernelOnHybridThread.find_last_unset_in(FirstKernel, PipelineOutput);
+//        assert (lastConsumer < PipelineOutput);
+//    }
 
-        auto lastConsumer = firstKernelInTargetPartition;
-        for (unsigned i = 0; i <= n; ++i) {
-            if (mPartitionConsumedItemCountPhi[partitionId][i]) {
-                for (const auto e : make_iterator_range(out_edges(FirstStreamSet + i, mConsumerGraph))) {
-                    const auto consumer = target(e, mConsumerGraph);
-                    if (mRequiresSynchronization.test(consumer)) {
-                       auto c = consumer;
-                       if (KernelOnHybridThread.test(consumer)) {
-                            c = std::max<unsigned>(consumer, firstAfterHybridThread);
-                       }
-                       lastConsumer = std::max<unsigned>(lastConsumer, c);
-                    }
-                }
-            }
-        }
 
-        if (lastConsumer == PipelineOutput) {
-            lastConsumer = KernelOnHybridThread.find_last_unset_in(FirstKernel, PipelineOutput);
-            assert (lastConsumer < PipelineOutput);
-        }
 
-        assert (lastConsumer < PipelineOutput);
-        assert (!KernelOnHybridThread.test(lastConsumer));
-        const auto type = isDataParallel(lastConsumer) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLock(b, lastConsumer, type);
+    const auto targetLock = (firstKernelInTargetPartition == PipelineOutput) ? LastKernel : firstKernelInTargetPartition;
+    assert (!KernelOnHybridThread.test(firstKernelInTargetPartition));
+    const auto type = isDataParallel(targetLock) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+    acquireSynchronizationLock(b, targetLock, type);
+
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+        BasicBlock * const exitBlock = b->GetInsertBlock();
+        mPartitionStartTimePhi[KernelPartitionId[firstKernelInTargetPartition]]->addIncoming(startTime, exitBlock);
     }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief releaseAllSynchronizationLocksUntil
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::releaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned firstKernelInTargetPartition) {
+    // Find the first kernel in the partition we're jumping to and acquire the LSN then release
+    // all of the kernels we skipped over. However, to safely jump to a partition, we need to
+    // know how many items were processed by any consumers of the kernels up to the target
+    // kernel; otherwise we run the risk of mangling the buffer state. For safety, wait until we
+    // can acquire the last consumer's lock but only release the locks that we end up skipping.
 
     unsigned releasedPartitionId = 0;
+    ConstantInt * const sz_ZERO = b->getSize(0);
     for (auto kernel = mKernelId; kernel < firstKernelInTargetPartition; ++kernel) {
         if (releasedPartitionId != KernelPartitionId[kernel]) {
             releasedPartitionId = KernelPartitionId[kernel];
-            recordStridesPerSegment(b, kernel, b->getSize(0));
+            recordStridesPerSegment(b, kernel, sz_ZERO);
         }
-        assert (KernelPartitionId[kernel] < partitionId);
         if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
             if (isDataParallel(kernel)) {
                 releaseSynchronizationLock(b, kernel, SYNC_LOCK_PRE_INVOCATION);
@@ -483,11 +502,6 @@ Value * PipelineCompiler::acquireAndReleaseAllSynchronizationLocksUntil(BuilderR
         }
     }
 
-    updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
-    #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_PARTITION_JUMP_SYNCHRONIZATION);
-    #endif
-    return startTime;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -498,31 +512,6 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
     b->SetInsertPoint(mKernelInitiallyTerminated);
 
     loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(b);
-
-    if (LLVM_UNLIKELY(CheckAssertions && mAllowDataParallelExecution)) {
-
-
-        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-            const BufferPort & br = mBufferGraph[e];
-            const auto inputPort = br.Port;
-            const auto prefix = makeBufferName(mKernelId, inputPort);
-            Value * const processedPtr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
-            Value * const itemCount = b->CreateLoad(processedPtr);
-            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProcessedItemCount[inputPort]);
-            b->CreateAssert(v, "%s does not match", b->GetString(prefix));
-        }
-
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
-            const BufferPort & br = mBufferGraph[e];
-            const auto outputPort = br.Port;
-            const auto prefix = makeBufferName(mKernelId, outputPort);
-            Value * const ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
-            Value * const itemCount = b->CreateLoad(ptr);
-            Value * const v = b->CreateICmpEQ(itemCount, mInitiallyProducedItemCount[streamSet]);
-            b->CreateAssert(v, "%s does not match", b->GetString(prefix));
-        }
-    }
 
     if (mIsPartitionRoot) {
 
@@ -537,12 +526,10 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
 
         if (LLVM_LIKELY(nextPartitionId != jumpId)) {
 
-            Value * const startTime = acquireAndReleaseAllSynchronizationLocksUntil(b, nextPartitionId);
-            mKernelInitiallyTerminatedExit = b->GetInsertBlock();
+            const auto targetKernelId = getFirstKernelInTargetPartition(nextPartitionId);
 
-            if (LLVM_UNLIKELY(EnableCycleCounter)) {
-                mPartitionStartTimePhi[nextPartitionId]->addIncoming(startTime, mKernelInitiallyTerminatedExit);
-            }
+            acquirePartitionSynchronizationLock(b, targetKernelId);
+            mKernelInitiallyTerminatedExit = b->GetInsertBlock();
 
             PHINode * const exhaustedInputPhi = mExhaustedPipelineInputAtPartitionEntry[nextPartitionId];
             exhaustedInputPhi->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
@@ -550,6 +537,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             for (auto kernel = PipelineInput; kernel <= mKernelId; ++kernel) {
                 phiOutPartitionItemCounts(b, kernel, nextPartitionId, true);
             }
+
             for (auto kernel = mKernelId + 1U; kernel <= PipelineOutput; ++kernel) {
                 if (KernelPartitionId[kernel] == nextPartitionId) {
                     break;
@@ -558,10 +546,18 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             }
             phiOutPartitionStatusFlags(b, nextPartitionId, true);
 
+            releaseAllSynchronizationLocksUntil(b, targetKernelId);
+
+            zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
+
+            ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, true);
+
             updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
             #endif
+
+
 
             b->CreateBr(mNextPartitionEntryPoint);
         } else {
@@ -607,18 +603,15 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     assert(std::find(ActivePartitions.begin(), ActivePartitions.end(), jumpPartitionId) != ActivePartitions.end());
     assert (mCurrentPartitionId < jumpPartitionId);
 
-    Value * const startTime = acquireAndReleaseAllSynchronizationLocksUntil(b, jumpPartitionId);
-    BasicBlock * const exitBlock = b->GetInsertBlock();
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        mPartitionStartTimePhi[jumpPartitionId]->addIncoming(startTime, exitBlock);
-    }
+    const auto targetKernelId = getFirstKernelInTargetPartition(jumpPartitionId);
+    acquirePartitionSynchronizationLock(b, targetKernelId);
 
     PHINode * const exhaustedInputPhi = mExhaustedPipelineInputAtPartitionEntry[jumpPartitionId];
     if (exhaustedInputPhi) {
         assert (isFromCurrentFunction(b, exhaustedInputPhi, false));
         Value * const exhausted = mIsBounded ? mExhaustedInputAtJumpPhi : mExhaustedInput;
         assert (isFromCurrentFunction(b, exhausted, false));
-        exhaustedInputPhi->addIncoming(exhausted, exitBlock); assert (exhausted);
+        exhaustedInputPhi->addIncoming(exhausted, b->GetInsertBlock()); assert (exhausted);
     }
     for (auto kernel = PipelineInput; kernel <= mKernelId; ++kernel) {
         phiOutPartitionItemCounts(b, kernel, jumpPartitionId, false);
@@ -636,6 +629,12 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
     #endif
+
+    releaseAllSynchronizationLocksUntil(b, targetKernelId);
+
+    zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
+
+    ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, false);
 
     updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
     #ifdef ENABLE_PAPI
@@ -719,26 +718,26 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
             }
         }
 
-        for (unsigned i = 0; i != n; ++i) {
-            PHINode * const phi = mPartitionConsumedItemCountPhi[nextPartitionId][i];
-            if (phi) {
-                assert (isFromCurrentFunction(b, phi, false));
-                const auto streamSet = FirstStreamSet + i;
-                const ConsumerNode & cn = mConsumerGraph[streamSet];
-                assert (cn.Consumed);
-                assert (isFromCurrentFunction(b, cn.Consumed, false));
-                phi->addIncoming(cn.Consumed, exitBlock);
-                cn.Consumed = phi;
-                assert (cn.PhiNode == nullptr);
-                // The consumed phi node propagates the *initial* consumed item count for
-                // each item to reflect the fact we've skipped some kernel. However, since
-                // we might skip the actual producer, we need to constantly update the
-                // initial item count value to construct a legal program. Despite this
-                // the initial consumed item count should be considered as fixed value
-                // per pipeline iteration.
-                mInitialConsumedItemCount[streamSet] = phi;
-            }
-        }
+//        for (unsigned i = 0; i != n; ++i) {
+//            PHINode * const phi = mPartitionConsumedItemCountPhi[nextPartitionId][i];
+//            if (phi) {
+//                assert (isFromCurrentFunction(b, phi, false));
+//                const auto streamSet = FirstStreamSet + i;
+//                const ConsumerNode & cn = mConsumerGraph[streamSet];
+//                assert (cn.Consumed);
+//                assert (isFromCurrentFunction(b, cn.Consumed, false));
+//                phi->addIncoming(cn.Consumed, exitBlock);
+//                cn.Consumed = phi;
+//                assert (cn.PhiNode == nullptr);
+//                // The consumed phi node propagates the *initial* consumed item count for
+//                // each item to reflect the fact we've skipped some kernel. However, since
+//                // we might skip the actual producer, we need to constantly update the
+//                // initial item count value to construct a legal program. Despite this
+//                // the initial consumed item count should be considered as fixed value
+//                // per pipeline iteration.
+//                mInitialConsumedItemCount[streamSet] = phi;
+//            }
+//        }
 
         for (unsigned j = 0; j <= ActivePartitionIndex; ++j) {
             const auto i = ActivePartitions[j];
@@ -754,6 +753,74 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
        ++ActivePartitionIndex;
     }
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief ensureAnyExternalProcessedAndProducedCountsAreUpdated
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry) {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const auto & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isExternal())) {
+            const auto output = in_edge(streamSet, mBufferGraph);
+            const auto producer = source(output, mBufferGraph);
+            assert (producer >= PipelineInput && producer <= LastKernel);
+
+            if (producer >= mKernelId && producer < targetKernelId) { // is output streamset
+
+                for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    if (target(e, mBufferGraph) == PipelineOutput) {
+                        const BufferPort & outputPort = mBufferGraph[output];
+                        assert (outputPort.Port.Type == PortType::Output);
+
+
+                        const BufferPort & external = mBufferGraph[e];
+                        Value * const ptr = getProducedOutputItemsPtr(external.Port.Number); assert (ptr);
+                        Value * itemCount = nullptr;
+                        if (producer == mKernelId) {
+                            if (mMayLoopToEntry && fromKernelEntry) {
+                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                    itemCount = mAlreadyProducedDeferredPhi[outputPort.Port]; assert (itemCount);
+                                } else {
+                                    itemCount = mAlreadyProducedPhi[outputPort.Port]; assert (itemCount);
+                                }
+                            } else {
+                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                    itemCount = mInitiallyProducedDeferredItemCount[streamSet]; assert (itemCount);
+                                } else {
+                                    itemCount = mInitiallyProducedItemCount[streamSet]; assert (itemCount);
+                                }
+                            }
+                        } else {
+                            const auto prefix = makeBufferName(producer, outputPort.Port);
+                            if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                itemCount = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                            } else {
+                                itemCount = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                            }
+                        }
+
+                        b->CreateStore(itemCount, ptr);
+                    }
+                }
+            } else if (LLVM_UNLIKELY(producer == PipelineInput)) { // is input streamset
+                for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    const auto consumer = target(e, mBufferGraph);
+                    assert (consumer >= FirstKernel && consumer <= LastKernel);
+                    if (consumer >= mKernelId && consumer < targetKernelId) {
+                        const BufferPort & external = mBufferGraph[output];
+                        Value * const ptr = getProcessedInputItemsPtr(external.Port.Number); assert (ptr);
+                        const auto prefix = makeBufferName(PipelineInput, external.Port);
+                        Value * const alreadyConsumed = b->getScalarField(prefix + CONSUMED_ITEM_COUNT_SUFFIX); assert (alreadyConsumed);
+                        b->CreateStore(alreadyConsumed, ptr);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 }
 

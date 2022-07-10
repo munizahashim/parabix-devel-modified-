@@ -40,64 +40,54 @@ namespace kernel {
  * @brief identifyAllInternallySynchronizedKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
-    if (mNumOfThreads > 1 || mIsNestedPipeline) {
-        if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
+//    if (mNumOfThreads > 1 || mIsNestedPipeline) {
+//        if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
 
-            const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-            assert (firstOnHybridThread != -1);
-            HybridSyncLock = static_cast<unsigned>(firstOnHybridThread);
+//            const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
+//            assert (firstOnHybridThread != -1);
+//            HybridSyncLock = static_cast<unsigned>(firstOnHybridThread);
 
-            auto maxProducer = PipelineInput;
-            for (const auto kernel : KernelOnHybridThread.set_bits()) {
-                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto producer = parent(source(e, mBufferGraph), mBufferGraph);
-                    assert (producer < kernel);
-                    maxProducer = std::max<unsigned>(maxProducer, producer);
-                }
-            }
-            assert (maxProducer < firstOnHybridThread);
-            FixedDataSyncLock = maxProducer;
+//            auto maxProducer = PipelineInput;
+//            for (const auto kernel : KernelOnHybridThread.set_bits()) {
+//                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+//                    const auto producer = parent(source(e, mBufferGraph), mBufferGraph);
+//                    assert (producer < kernel);
+//                    maxProducer = std::max<unsigned>(maxProducer, producer);
+//                }
+//            }
+//            assert (maxProducer < firstOnHybridThread);
+//            FixedDataSyncLock = maxProducer;
 
-            mRequiresSynchronization.set(HybridSyncLock);
-            mRequiresSynchronization.set(FixedDataSyncLock);
-        }
+//            mRequiresSynchronization.set(HybridSyncLock);
+//            mRequiresSynchronization.set(FixedDataSyncLock);
+//        }
 
-        if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
-            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-                if (KernelOnHybridThread.test(kernel)) {
-                    continue;
-                }
-                mRequiresSynchronization.set(kernel);
-            }
-        }
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readFirstSegmentNumber
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readFirstSegmentNumber(BuilderRef b) {
-    if (mIsNestedPipeline) {
-        mSegNo = b->getExternalSegNo(); assert (mSegNo);
-    }
-    else if (mNumOfThreads == 1) {
-        mSegNo = b->getSize(0);
-    }
+//        if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
+//            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+//                if (KernelOnHybridThread.test(kernel)) {
+//                    continue;
+//                }
+//                mRequiresSynchronization.set(kernel);
+//            }
+//        }
+//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief obtainCurrentSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
+    assert (mSegNo);
     ConstantInt * const ONE = b->getSize(1);
-    if (!mIsNestedPipeline) {
+    if (LLVM_UNLIKELY(mIsNestedPipeline)) {
+        assert (mSegNo == mExternalSegNo);
+    } else {
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         if (LLVM_LIKELY(mNumOfThreads > 1)) {
             Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
             mSegNo = b->CreateAtomicFetchAndAdd(ONE, segNoPtr);
         } else {
         #endif
-            assert (mSegNo);
             PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
             segNo->addIncoming(mSegNo, entryBlock);
             mSegNo = segNo;
@@ -129,11 +119,6 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
     assert (step > 0);
     Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(step));
     cast<PHINode>(mSegNo)->addIncoming(nextSegNo, exitBlock);
-    #else
-    if (LLVM_LIKELY(mIsNestedPipeline || mNumOfThreads > 1)) {
-        return;
-    }
-    cast<PHINode>(mSegNo)->addIncoming(mNextSegNo, exitBlock);
     #endif
 }
 
@@ -158,8 +143,7 @@ LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type) {
-    if (LLVM_LIKELY(mRequiresSynchronization.test(kernelId))) {
-
+    if (mNumOfThreads != 1 || mIsNestedPipeline) {
         assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
@@ -192,6 +176,11 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "# " + prefix + " acquired %ssegment number %" PRIu64, __getSyncLockName(b, type), mSegNo);
         #endif
+    } else {
+        #ifdef PRINT_DEBUG_MESSAGES
+        const auto prefix = makeKernelName(kernelId);
+        debugPrint(b, "# " + prefix + " bypassing segment number %" PRIu64, mSegNo);
+        #endif
     }
 }
 
@@ -201,8 +190,7 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type) {
-    const auto required = mRequiresSynchronization.test(kernelId);
-    if (LLVM_LIKELY(required || mCompilingHybridThread || TraceProducedItemCounts || TraceUnconsumedItemCounts)) {
+    if (mNumOfThreads != 1 || mIsNestedPipeline || TraceProducedItemCounts || TraceUnconsumedItemCounts) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);

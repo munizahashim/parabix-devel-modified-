@@ -32,8 +32,9 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
         const StreamSetPort inputPort = mBufferGraph[e].Port;
         assert (inputPort.Type == PortType::Output);
         Value * const available = getAvailableInputItems(inputPort.Number);
-        setLocallyAvailableItemCount(b, inputPort, available);
-        initializeConsumedItemCount(b, PipelineInput, inputPort, available);
+        const auto streamSet = target(e, mBufferGraph);
+        mLocallyAvailableItems[streamSet] = available;
+        writeTransitoryConsumedItemCount(b, streamSet, available);
     }
 
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {

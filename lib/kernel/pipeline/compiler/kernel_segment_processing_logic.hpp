@@ -39,7 +39,6 @@ void PipelineCompiler::start(BuilderRef b) {
     debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
     #endif
 
-    readFirstSegmentNumber(b);
     #ifdef ENABLE_PAPI
     createEventSetAndStartPAPI(b);
     #endif
@@ -83,14 +82,18 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
-    mKernelIsInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
+    mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually) || recordsAnyHistogramData();
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
+    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
     mAllowDataParallelExecution = mCurrentKernelIsStateFree || mKernelIsInternallySynchronized;
+    #else
+    mAllowDataParallelExecution = mCurrentKernelIsStateFree;
+    #endif
     #endif
     identifyPipelineInputs(mKernelId);
 
@@ -290,7 +293,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
     writeTerminationSignal(b, mTerminatedSignalPhi);
-    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution && mMayLoopToEntry)) {
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
     }
     updatePhisAfterTermination(b);
@@ -903,9 +906,9 @@ void PipelineCompiler::end(BuilderRef b) {
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
     b->SetInsertPoint(mPipelineEnd);
-    writeFinalHybridThreadSynchronizationNumber(b);
-    writeExternalConsumedItemCounts(b);
-    writeExternalProducedItemCounts(b);
+//    writeFinalHybridThreadSynchronizationNumber(b);
+//    writeExternalConsumedItemCounts(b);
+//    writeExternalProducedItemCounts(b);
     if (mCurrentThreadTerminationSignalPtr) {
         b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
     }
@@ -940,12 +943,25 @@ void PipelineCompiler::end(BuilderRef b) {
  * @brief writeExternalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeExternalProducedItemCounts(BuilderRef b) {
-    for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const BufferPort & external = mBufferGraph[e];
-        const auto streamSet = source(e, mBufferGraph);
-        Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
-        b->CreateStore(mLocallyAvailableItems[streamSet], ptr);
-    }
+//    for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+//        const BufferPort & external = mBufferGraph[e];
+//        const auto streamSet = source(e, mBufferGraph);
+//        Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
+//        b->CreateStore(mLocallyAvailableItems[streamSet], ptr);
+//    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief writeExternalConsumedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineCompiler::writeExternalConsumedItemCounts(BuilderRef b) {
+//    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+//        const auto streamSet = target(e, mBufferGraph);
+//        const BufferPort & rd = mBufferGraph[e];
+//        Value * const ptr = getProcessedInputItemsPtr(rd.Port.Number);
+//        Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
+//        b->CreateStore(consumed, ptr);
+//    }
 }
 
 }

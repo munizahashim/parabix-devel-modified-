@@ -1,4 +1,4 @@
-#include "pipeline_compiler.hpp"
+﻿#include "pipeline_compiler.hpp"
 
 #include <llvm/Support/ErrorHandling.h>
 
@@ -22,6 +22,8 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernelThreadLocalHandle = nullptr;
     if (mKernel->hasThreadLocal() && allowThreadLocal) {
         mKernelThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId);
+
+
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
@@ -30,6 +32,9 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
  * @brief computeFullyProcessedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * const terminated) {
+
+    Constant * const sz_MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
+
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto port = br.Port;
@@ -39,34 +44,37 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
         } else {
             processed = mUpdatedProcessedPhi[port];
         }
+
         const Binding & input = br.Binding;
-        Value * const fullyProcessed = truncateBlockSize(b, input, processed, terminated);
+
+        if (LLVM_UNLIKELY(input.hasAttribute(AttrId::BlockSize))) {
+            // If the input rate has a block size attribute then --- for the purpose of determining how many
+            // items have been consumed --- we consider a stream set to be fully processed when an entire
+            // stride has been processed.
+            Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+            processed = b->CreateAnd(processed, ConstantExpr::getNeg(BLOCK_WIDTH));
+        }
+
+        Value * const avail = sz_MAX_INT; // mLocallyAvailableItems[source(e, mBufferGraph)];
+        Value * const fullyProcessed = b->CreateSelect(terminated, avail, processed);
+
         mFullyProcessedItemCount[port] = fullyProcessed;
         if (LLVM_UNLIKELY(CheckAssertions)) {
             const auto streamSet = source(e, mBufferGraph);
-            const auto producer = parent(streamSet, mBufferGraph);
-            if (mCurrentPartitionId == KernelPartitionId[producer]) {
-            // if (bn.Locality == BufferLocality::ThreadLocal) {
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (bn.Locality == BufferLocality::ThreadLocal) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
-                // NOTE: static linear buffers are assumed to be threadlocal.
                 Value * const fullyConsumed = b->CreateICmpEQ(produced, processed);
                 Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
                 Value * const fatalError = b->CreateICmpEQ(mTerminatedAtLoopExitPhi, fatal);
                 Value * const valid = b->CreateOr(fullyConsumed, fatalError);
                 Constant * const bindingName = b->GetString(input.getName());
 
-                Constant * withOrWithout = nullptr;
-                if (mMayLoopToEntry) {
-                    withOrWithout = b->GetString("with");
-                } else {
-                    withOrWithout = b->GetString("without");
-                }
-
                 b->CreateAssert(valid,
                                 "%s.%s: local available item count (%" PRId64 ") does not match "
-                                "its processed item count (%" PRId64 ") in kernel %s loop back support",
+                                "its processed item count (%" PRId64 ")",
                                 mCurrentKernelName, bindingName,
-                                produced, processed, withOrWithout);
+                                produced, processed);
             }
         }
     }
@@ -85,38 +93,26 @@ void PipelineCompiler::computeFullyProducedItemCounts(BuilderRef b, Value * cons
         if (LLVM_UNLIKELY(bn.OutputItemCountId != streamSet)) {
             produced = mLocallyAvailableItems[bn.OutputItemCountId];
         } else {
-            produced = computeFullyProducedItemCount(b, mKernelId, port, mUpdatedProducedPhi[port], terminated);
+            if (mUpdatedProducedDeferredPhi[port]) {
+                produced = mUpdatedProducedDeferredPhi[port];
+            } else {
+                produced = mUpdatedProducedPhi[port];
+            }
+
+            const Binding & output = br.Binding;
+            if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
+                const auto & D = output.findAttribute(AttrId::Delayed);
+                produced = b->CreateSaturatingSub(produced, b->getSize(D.amount()));
+            }
+            if (LLVM_UNLIKELY(output.hasAttribute(AttrId::BlockSize))) {
+                Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+                produced = b->CreateAnd(produced, ConstantExpr::getNeg(BLOCK_WIDTH));
+            }
+            produced = b->CreateSelect(terminated, mUpdatedProducedPhi[port], produced);
         }
         assert (isFromCurrentFunction(b, produced, false));
         mFullyProducedItemCount[port]->addIncoming(produced, mKernelLoopExitPhiCatch);
     }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief computeFullyProducedItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::computeFullyProducedItemCount(BuilderRef b,
-                                                        const size_t kernel,
-                                                        const StreamSetPort port,
-                                                        Value * produced, Value * const terminationSignal) {
-
-    // TODO: we only need to consider the blocksize attribute if it's possible this
-    // stream could be read before being fully written. This might occur if one of
-    // it's consumers has a non-Fixed rate that does not have a matching BlockSize
-    // attribute.
-
-    assert ("produced cannot be null" && produced);
-
-    const Binding & output = getOutputBinding(kernel, port);
-    if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
-        const auto & D = output.findAttribute(AttrId::Delayed);
-        Value * const delayed = b->CreateSaturatingSub(produced, b->getSize(D.amount()));
-        assert (terminationSignal && terminationSignal->getType()->isIntegerTy(1));
-        const auto name = makeBufferName(mKernelId, port) + "_delayedUntilTermination";
-        produced = b->CreateSelect(terminationSignal, produced, delayed, name);
-    }
-    return truncateBlockSize(b, output, produced, terminationSignal);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -141,26 +137,6 @@ Value * PipelineCompiler::subtractLookahead(BuilderRef b, const BufferPort & inp
     Value * const closed = isClosed(b, inputPort.Port);
     Value * const reducedItemCount = b->CreateSaturatingSub(itemCount, lookAhead);
     return b->CreateSelect(closed, itemCount, reducedItemCount);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief maskBlockSize
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::truncateBlockSize(BuilderRef b, const Binding & binding, Value * itemCount, Value * const terminationSignal) const {
-    // TODO: if we determine all of the inputs of a stream have a blocksize attribute, or the output has one,
-    // we can skip masking it on input
-
-
-
-    if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::BlockSize))) {
-        // If the input rate has a block size attribute then --- for the purpose of determining how many
-        // items have been consumed --- we consider a stream set to be fully processed when an entire
-        // stride has been processed.
-        Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
-        Value * const maskedItemCount = b->CreateAnd(itemCount, ConstantExpr::getNeg(BLOCK_WIDTH));
-        itemCount = b->CreateSelect(terminationSignal, itemCount, maskedItemCount);
-    }
-    return itemCount;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -316,7 +292,11 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
  * @brief isDataParallel
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isDataParallel(const size_t kernel) const {
+    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
     return mIsStatelessKernel.test(kernel) || mIsInternallySynchronized.test(kernel);
+    #else
+    return mIsStatelessKernel.test(kernel);
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

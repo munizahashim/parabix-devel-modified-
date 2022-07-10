@@ -300,10 +300,10 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
             mLocallyAvailableItems[streamSet] = produced;
         }
 
-        const ConsumerNode & cn = mConsumerGraph[streamSet];
-        if (cn.Consumed == nullptr) {
-            cn.Consumed = mLocallyAvailableItems[streamSet];
-        }
+//        const ConsumerNode & cn = mConsumerGraph[streamSet];
+//        if (cn.Consumed == nullptr) {
+//            cn.Consumed = mLocallyAvailableItems[streamSet];
+//        }
 
     }
 }
@@ -372,30 +372,24 @@ Value * PipelineCompiler::getLocallyAvailableItemCount(BuilderRef /* b */, const
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getTotalItemCount
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setLocallyAvailableItemCount(BuilderRef /* b */, const StreamSetPort outputPort, Value * const available) {
-    const auto streamSet = getOutputBufferVertex(outputPort);
-    mLocallyAvailableItems[streamSet] = available;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeUpdatedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 
+// #error here?
+
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort inputPort = br.Port;
-        const Binding & binding = br.Binding;
+//        const Binding & binding = br.Binding;
 
-        if (br.IsDeferred || isAddressable(binding)) {
-//            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-//                continue;
-//            }
-        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
-            continue;
-        }
+//        if (br.IsDeferred || isAddressable(binding)) {
+////            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+////                continue;
+////            }
+//        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
+//            continue;
+//        }
 
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -424,15 +418,15 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const StreamSetPort outputPort = br.Port;
-        const Binding & binding = br.Binding;
+//        const Binding & binding = br.Binding;
 
-        if (br.IsDeferred || isAddressable(binding)) {
-//            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-//                continue;
-//            }
-        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
-            continue;
-        }
+//        if (br.IsDeferred || isAddressable(binding)) {
+////            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+////                continue;
+////            }
+//        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
+//            continue;
+//        }
 
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -476,10 +470,22 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
         debugPrint(b, out.str(), fullyProduced);
         #endif
 
-        setLocallyAvailableItemCount(b, outputPort, fullyProduced);
-        initializeConsumedItemCount(b, mKernelId, outputPort, fullyProduced);
+        const auto streamSet = target(e, mBufferGraph);
+        mLocallyAvailableItems[streamSet] = fullyProduced;
+
+        writeTransitoryConsumedItemCount(b, streamSet, fullyProduced);
+
+        // update any external output port(s)
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isExternal())) {
+            for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const BufferPort & external = mBufferGraph[f];
+                Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
+                b->CreateStore(mLocallyAvailableItems[streamSet], ptr);
+            }
+        }
+
         #ifdef PRINT_DEBUG_MESSAGES
-        const auto streamSet = getOutputBufferVertex(outputPort);
         Value * const producedDelta = b->CreateSub(fullyProduced, mInitiallyProducedItemCount[streamSet]);
         debugPrint(b, prefix + "_producedΔ = %" PRIu64, producedDelta);
         #endif

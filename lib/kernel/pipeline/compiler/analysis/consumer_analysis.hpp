@@ -79,13 +79,29 @@ void PipelineAnalysis::makeConsumerGraph() {
             auto & lastConsumer = lastThreadConsumer[type];
             lastConsumer = std::max<unsigned>(lastConsumer, consumer);
 
-            if (KernelPartitionId[consumer] != partitionId) {
+            const auto consumerPartId = KernelPartitionId[consumer];
+            if (consumerPartId != partitionId) {
                 const BufferPort & input = mBufferGraph[ce];
-                add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdatePhi}, mConsumerGraph);
+                add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
             }
         }
 
         assert (lastThreadConsumer[0] != 0 || lastThreadConsumer[1] != 0);
+
+        const auto lastConsumer = std::max(lastThreadConsumer[0], lastThreadConsumer[1]);
+        const auto lastConsumerPartitionId = KernelPartitionId[lastConsumer];
+
+        unsigned flags = ConsumerEdge::WriteConsumedCount;
+        for (const auto ce : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+            const auto consumer = target(ce, mConsumerGraph);
+            const auto jumpId = PartitionJumpTargetId[KernelPartitionId[consumer]];
+            if (jumpId <= lastConsumerPartitionId) {
+                flags |= ConsumerEdge::MayHaveJumpedConsumer;
+                goto found_potentially_jumped_consumer;
+            }
+        }
+
+found_potentially_jumped_consumer:
 
         // Although we may already know the final consumed item count prior
         // to executing the last consumer, we need to defer writing the final
@@ -98,7 +114,6 @@ void PipelineAnalysis::makeConsumerGraph() {
                 ConsumerGraph::edge_descriptor e;
                 bool exists;
                 std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph);
-                const auto flags = ConsumerEdge::WriteConsumedCount;
                 if (exists) {
                     ConsumerEdge & cn = mConsumerGraph[e];
                     cn.Flags |= flags;

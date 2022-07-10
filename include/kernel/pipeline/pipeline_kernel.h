@@ -97,7 +97,7 @@ public:
 
     std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const final;
 
-    virtual ~PipelineKernel();
+    ~PipelineKernel() override;
 
     virtual void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> &) {}
 

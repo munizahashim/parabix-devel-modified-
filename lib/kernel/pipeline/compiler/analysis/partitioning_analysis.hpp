@@ -1037,7 +1037,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
  * marks the end of the processing loop.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::determinePartitionJumpIndices() {
-     mPartitionJumpIndex.resize(PartitionCount);
+     PartitionJumpTargetId.resize(PartitionCount);
 #ifdef DISABLE_PARTITION_JUMPING
     for (unsigned i = 0; i < (PartitionCount - 1); ++i) {
         mPartitionJumpIndex[i] = i + 1;
@@ -1151,7 +1151,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
     }
 
-    mPartitionJumpIndex[0] = 0;
+    PartitionJumpTargetId[0] = 0;
 
     for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
         const BitSet & prior =  rateDomSet[i - 1];
@@ -1175,10 +1175,10 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
         assert (j > i);
         assert (PartitionOnHybridThread.test(j) == threadType || j == (PartitionCount - 1));
-        mPartitionJumpIndex[i] = j;
+        PartitionJumpTargetId[i] = j;
     }
 
-    mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
+    PartitionJumpTargetId[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif
 }

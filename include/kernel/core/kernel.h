@@ -438,7 +438,7 @@ protected:
 
     void initializeInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
 
-    llvm::Value * finalizeInstance(BuilderRef b, llvm::Value * const handle) const;
+    llvm::Value * finalizeInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
 
     llvm::Value * initializeThreadLocalInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
 

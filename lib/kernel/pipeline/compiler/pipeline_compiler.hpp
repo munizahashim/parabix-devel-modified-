@@ -74,9 +74,7 @@ const static std::string ZERO_EXTENDED_BUFFER = "ZeB";
 const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 
 const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
-#ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
-#endif
 
 #define SYNC_LOCK_FULL 0U
 #define SYNC_LOCK_PRE_INVOCATION 1U
@@ -95,8 +93,10 @@ const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
 const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
+const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".ISIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
+const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
@@ -203,7 +203,6 @@ public:
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
-    void createThreadStateForSingleThread(BuilderRef b);
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
@@ -230,10 +229,15 @@ public:
     void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
     void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
 
-    Value * acquireAndReleaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned partitionId);
+    unsigned getFirstKernelInTargetPartition(const unsigned partitionId) const;
+
+    void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition);
+    void releaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned firstKernelInTargetPartition);
 
     void writeInitiallyTerminatedPartitionExit(BuilderRef b);
     void checkForPartitionExit(BuilderRef b);
+
+    void ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry);
 
 // inter-kernel codegen functions
 
@@ -298,7 +302,6 @@ public:
 
     void computeFullyProcessedItemCounts(BuilderRef b, Value * const terminated);
     void computeFullyProducedItemCounts(BuilderRef b, Value * const terminated);
-    Value * computeFullyProducedItemCount(BuilderRef b, const size_t kernel, const StreamSetPort port, Value * produced, Value * const terminationSignal);
 
     void updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b);
     void updatePhisAfterTermination(BuilderRef b);
@@ -325,10 +328,8 @@ public:
     Value * getNumOfWritableStrides(BuilderRef b, const BufferPort & port, Value * const numOfLinearStrides);
     Value * addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const;
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
-    Value * truncateBlockSize(BuilderRef b, const Binding & binding, Value * itemCount, Value * const terminationSignal) const;
 
     Value * getLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort) const;
-    void setLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort, Value * const available);
 
     unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
     Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset) const;
@@ -360,7 +361,7 @@ public:
 // consumer codegen functions
 
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
-    void initializeConsumedItemCount(BuilderRef b, const unsigned kernelId, const StreamSetPort outputPort, Value * const produced);
+    void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
     void initializePipelineInputConsumedPhiNodes(BuilderRef b);
     void readExternalConsumerItemCounts(BuilderRef b);
     void createConsumedPhiNodesAtExit(BuilderRef b);
@@ -368,10 +369,11 @@ public:
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
+    void zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId);
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
-    unsigned getLastConsumerOfStreamSet(const size_t streamSet) const;
     void resetConsumerGraphState();
+    Value * getFinalConsumedCount(const unsigned streamSet) const;
 
 // buffer management codegen functions
 
@@ -448,7 +450,6 @@ public:
 // synchronization functions
 
     void identifyAllInternallySynchronizedKernels();
-    void readFirstSegmentNumber(BuilderRef b);
     void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
@@ -668,9 +669,10 @@ protected:
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
-    BitVector                                   mRequiresSynchronization;
+//    BitVector                                   mRequiresSynchronization;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
+    BitVector                                   mTestConsumedItemCountForZero;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -723,6 +725,7 @@ protected:
     Value *                                     mNumOfLinearStrides = nullptr;
     Value *                                     mCurrentNumOfLinearStrides = nullptr;
     Value *                                     mHasZeroExtendedInput = nullptr;
+    Value *                                     mInternallySynchronizedSubsegmentNumber = nullptr;
     PHINode *                                   mNumOfLinearStridesPhi = nullptr;
     PHINode *                                   mFixedRateFactorPhi = nullptr;
     Value *                                     mCurrentFixedRateFactor = nullptr;
@@ -860,7 +863,11 @@ inline PipelineCompiler::PipelineCompiler(BuilderRef b, PipelineKernel * const p
 PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
+#ifdef FORCE_PIPELINE_ASSERTIONS
+, CheckAssertions(true)
+#else
 , CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
+#endif
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
@@ -900,7 +907,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
 
-, PartitionJumpTargetId(std::move(P.mPartitionJumpIndex))
+, PartitionJumpTargetId(std::move(P.PartitionJumpTargetId))
 , mConsumerGraph(std::move(P.mConsumerGraph))
 , mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
@@ -913,9 +920,10 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
-, mRequiresSynchronization(PipelineOutput + 1)
-, mIsStatelessKernel(PipelineOutput + 1)
-, mIsInternallySynchronized(PipelineOutput + 1)
+//, mRequiresSynchronization(PipelineOutput + 1)
+, mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
+, mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
+, mTestConsumedItemCountForZero(LastStreamSet - FirstStreamSet + 1)
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 

@@ -353,17 +353,18 @@ struct BufferPort {
 using BufferGraph = adjacency_list<vecS, vecS, bidirectionalS, BufferNode, BufferPort>;
 
 struct ConsumerNode {
-    mutable Value * Consumed = nullptr;
-    mutable PHINode * PhiNode = nullptr;
+//    mutable Value * Consumed = nullptr;
+//    mutable PHINode * PhiNode = nullptr;
 };
 
 struct ConsumerEdge {
 
     enum ConsumerTypeFlags : unsigned {
         None = 0
-        , UpdatePhi = 1
+        , UpdateConsumedCount = 1
         , WriteConsumedCount = 2
         , UpdateExternalCount = 4
+        , MayHaveJumpedConsumer = 8
     };
 
     unsigned Port = 0;
