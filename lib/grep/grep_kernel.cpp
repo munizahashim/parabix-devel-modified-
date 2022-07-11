@@ -29,6 +29,7 @@
 #include <re/adt/re_cc.h>
 #include <re/adt/re_name.h>
 #include <re/alphabet/alphabet.h>
+#include <re/analysis/re_analysis.h>
 #include <re/toolchain/toolchain.h>
 #include <re/transforms/re_reverse.h>
 #include <re/transforms/re_transformer.h>
@@ -45,13 +46,75 @@
 #include <kernel/unicode/charclasses.h>
 #include <re/cc/cc_compiler.h>         // for CC_Compiler
 #include <re/cc/cc_compiler_target.h>
+#include <re/cc/cc_kernel.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/compile/re_compiler.h>
+#include <unicode/data/PropertyAliases.h>
+#include <unicode/data/PropertyObjectTable.h>
 
 using namespace kernel;
 using namespace pablo;
 using namespace re;
 using namespace llvm;
+
+namespace kernel {
+ExternalStreamObject::Allocator ExternalStreamObject::mAllocator;
+}
+
+void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    mStreamSet = b->CreateStreamSet(1);
+    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, inputs[0], mStreamSet);
+}
+
+void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    mStreamSet = b->CreateStreamSet(1);
+    std::vector<re::CC *> ccs = {mCharClass};
+    b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], mStreamSet);
+}
+
+void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    mStreamSet = b->CreateStreamSet(1);
+    auto mapping = mRefInfo.twixtREs.find(mRef->getName());
+    if (mapping == mRefInfo.twixtREs.end()) {
+        llvm::report_fatal_error("grep engine: undefined reference!");
+    }
+    auto rg1 = re::getLengthRange(mRef->getCapture(), &cc::Unicode);
+    auto rg2 = re::getLengthRange(mapping->second, &cc::Unicode);
+    int dist = rg1.first + rg2.first;
+    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, inputs[0], mStreamSet);
+}
+
+std::string PropertyBasisExternal::basisName(UCD::property_t p) {
+    std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
+    return pname + "_basis";
+}
+
+void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    if (mProperty == UCD::identity) {
+        mStreamSet = b->CreateStreamSet(21);
+        b->CreateKernelCall<UTF8_Decoder>(inputs[0], mStreamSet);
+    } else {
+        UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
+        if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
+            std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
+            std::vector<re::CC *> ccs;
+            for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
+            mStreamSet = b->CreateStreamSet(ccs.size());
+            b->CreateKernelCall<CharacterClassKernelBuilder>(ccs, inputs[0], mStreamSet);
+        }
+    }
+}
+
+void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    StreamSet * GCB = b->CreateStreamSet(1);
+    GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCB);
+    mStreamSet = GCB;
+}
+
+void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    mStreamSet = b->CreateStreamSet(1);
+    WordBoundaryLogic(b, inputs[0], inputs[1], mStreamSet);
+}
 
 void UTF8_index::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
@@ -614,7 +677,7 @@ void ContextSpan::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("contextStream"), pb.getInteger(0)), pb.createInFile(consecutive));
 }
 
-void kernel::GraphemeClusterLogic(const std::unique_ptr<ProgramBuilder> & P, UTF8_Transformer * t,
+void kernel::GraphemeClusterLogic(ProgBuilderRef P, UTF8_Transformer * t,
                                   StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
     
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
@@ -634,7 +697,7 @@ void kernel::GraphemeClusterLogic(const std::unique_ptr<ProgramBuilder> & P, UTF
     P->CreateKernelCall<ICGrepKernel>(std::move(options));
 }
 
-void kernel::WordBoundaryLogic(const std::unique_ptr<ProgramBuilder> & P, UTF8_Transformer * t,
+void kernel::WordBoundaryLogic(ProgBuilderRef P,
                                   StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
     
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");

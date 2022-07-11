@@ -407,7 +407,7 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
     }
     if (hasComponent(mExternalComponents, Component::WordBoundary)) {
         mWordBoundary_stream = P->CreateStreamSet(1, 1);
-        WordBoundaryLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mWordBoundary_stream);
+        WordBoundaryLogic(P, SourceStream, mU8index, mWordBoundary_stream);
     }
     std::set<int> fixedRefSupport;
     for (auto e : mExternalNames) {
