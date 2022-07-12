@@ -14,8 +14,9 @@
 
 
 namespace IDISA { class IDISA_Builder; }
-namespace re { class RE; }
+namespace re { class CC; class RE; }
 namespace cc { class Alphabet; }
+namespace grep { class GrepEngine; }
 namespace kernel {
 
 
@@ -25,7 +26,7 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        PreDefined, PropertyExternal, CC_External, Reference_External,
+        PreDefined, PropertyExternal, CC_External, RE_External, Reference_External,
         WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis
     };
     inline Kind getKind() const {
@@ -94,6 +95,23 @@ public:
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     re::CC * mCharClass;
+};
+
+class RE_External : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::RE_External;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    RE_External(std::string name, grep::GrepEngine * engine, re::RE * re) :
+        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    std::pair<int, int> getLengthRange() override;
+private:
+    grep::GrepEngine *  mGrepEngine;
+    re::RE * mRE;
 };
 
 class Reference_External : public ExternalStreamObject {

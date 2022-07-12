@@ -71,6 +71,14 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     std::vector<re::CC *> ccs = {mCharClass};
     b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], mStreamSet);
 }
+std::pair<int, int> RE_External::getLengthRange() {
+    return re::getLengthRange(mRE, &cc::Unicode);
+}
+
+void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    mStreamSet = b->CreateStreamSet(1);
+    mStreamSet = mGrepEngine->RunGrep(b, mRE, inputs[0]);
+}
 
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     mStreamSet = b->CreateStreamSet(1);

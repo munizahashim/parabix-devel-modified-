@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2018 International Characters.
+ *  Copyright (c) 2022 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
  */
@@ -139,8 +139,6 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
-    mGCB_stream(nullptr),
-    mWordBoundary_stream(nullptr),
     mUTF8_Transformer(re::NameTransformationMode::None),
     mEngineThread(pthread_self()) {}
 
@@ -290,11 +288,11 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = name_variable_length_CCs(mRE);
     if (hasGraphemeClusterBoundary(mRE)) {
         UnicodeIndexing = true;
-        setComponent(mExternalComponents, Component::GraphemeClusterBoundary);
+        mExternalMap.emplace("\\b{g}", new GraphemeClusterBreak(&mUTF8_Transformer));
     }
     if (hasWordBoundary(mRE)) {
         UnicodeIndexing = true;
-        setComponent(mExternalComponents, Component::WordBoundary);
+        mExternalMap.emplace("\\b", new WordBoundaryExternal());
     }
     if (!validateFixedUTF8(mRE)) {
         setComponent(mExternalComponents, Component::UTF8index);
@@ -356,6 +354,7 @@ StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, Stre
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
+        mExternalMap.emplace("u8_basis", new PreDefined("u8_basis", BasisBits));
     }
     if (hasComponent(mExternalComponents, Component::U21)) {
         mU21 = P->CreateStreamSet(21, 1);
@@ -368,9 +367,6 @@ void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamS
 
     mLineBreakStream = nullptr;
     mU8index = nullptr;
-    mGCB_stream = nullptr;
-    mWordBoundary_stream = nullptr;
-    mPropertyStreamMap.clear();
 
     Scalar * const callbackObject = P->getInputScalar("callbackObject");
     if (mBinaryFilesMode == argv::Text) {
@@ -384,10 +380,13 @@ void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamS
     mU8index = P->CreateStreamSet(1, 1);
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
+        mExternalMap.emplace("UTF8_LB", new PreDefined("UTF8_LB", mLineBreakStream));
+        mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
     }
     else {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
             P->CreateKernelCall<UTF8_index>(SourceStream, mU8index);
+            mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
         }
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
             Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
@@ -400,50 +399,52 @@ void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamS
     }
 }
 
-void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
-    if (hasComponent(mExternalComponents, Component::GraphemeClusterBoundary)) {
-        mGCB_stream = P->CreateStreamSet(1, 1);
-        GraphemeClusterLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mGCB_stream);
-    }
-    if (hasComponent(mExternalComponents, Component::WordBoundary)) {
-        mWordBoundary_stream = P->CreateStreamSet(1, 1);
-        WordBoundaryLogic(P, SourceStream, mU8index, mWordBoundary_stream);
-    }
-    std::set<int> fixedRefSupport;
-    for (auto e : mExternalNames) {
-        re::RE * def = e->getDefinition();
-        auto name = e->getFullName();
-        auto f = mPropertyStreamMap.find(name);
-        if (f == mPropertyStreamMap.end()) {
-            if (isa<re::PropertyExpression>(def)) {
-                //errs() << "preparing external: " << name << "\n";
-                StreamSet * property = P->CreateStreamSet(1, 1);
-                mPropertyStreamMap.emplace(name, property);
-                P->CreateKernelCall<UnicodePropertyKernelBuilder>(e, SourceStream, property);
-            } else if (re::CC * cc = dyn_cast<re::CC>(def)) {
-                StreamSet * ccStrm = P->CreateStreamSet(1, 1);
-                mPropertyStreamMap.emplace(name, ccStrm);
-                std::vector<re::CC *> ccs = {cc};
-                P->CreateKernelCall<CharClassesKernel>(ccs, SourceStream, ccStrm);
-            } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
-                auto mapping = mRefInfo.twixtREs.find(ref->getName());
-                if (mapping == mRefInfo.twixtREs.end()) {
-                    llvm::report_fatal_error("grep engine: undefined reference!");
-                }
-                auto rg1 = getLengthRange(ref->getCapture(), &cc::Unicode);
-                auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
-                if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
-                    int dist = rg1.first + rg2.first;
-                    //llvm::errs() << "Fixed reference distance " << dist << "\n";
-                    if (fixedRefSupport.count(dist) == 0) {
-                        StreamSet * M = P->CreateStreamSet(1, 1);
-                        mPropertyStreamMap.emplace(name, M);
-                        P->CreateKernelCall<FixedDistanceMatchesKernel>(dist, SourceStream, M);
-                        fixedRefSupport.insert(dist);
-                    }
-                }
-            }
+void GrepEngine::prepareExternalObject(re::Name * extName) {
+    auto nameStr = extName->getFullName();
+
+    const auto f = mExternalMap.find(nameStr);
+    if (f == mExternalMap.end()) {
+        // The name has not been prepared in the external map.
+        // Inspect and process the RE definition.
+        re::RE * def = extName->getDefinition();
+        if (def == nullptr) {
+            llvm::report_fatal_error("Undefined external: " + nameStr);
         }
+        if (isa<re::PropertyExpression>(def)) {
+            mExternalMap.emplace(nameStr, new PropertyExternal(extName));
+        } else if (re::CC * cc = dyn_cast<re::CC>(def)) {
+            mExternalMap.emplace(nameStr, new CC_External(nameStr, cc));
+        } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
+            mExternalMap.emplace(nameStr, new Reference_External(mRefInfo, ref));
+        } else {
+            mExternalMap.emplace(nameStr, new RE_External(nameStr, this, def));
+        }
+    }
+}
+
+StreamSet * GrepEngine::resolveExternal(const std::unique_ptr<ProgramBuilder> & P, std::string nameStr) {
+    auto f = mExternalMap.find(nameStr);
+    if (f == mExternalMap.end()) {
+        llvm::report_fatal_error("ExternalMap: undefined external: " + nameStr);
+    }
+    ExternalStreamObject * ext = f->second;
+    if (!ext->isResolved()) {
+        std::vector<std::string> paramNames = ext->getInputNames();
+        std::vector<StreamSet *> paramStreams;
+        for (auto & n : paramNames) {
+            paramStreams.push_back(resolveExternal(P, n));
+        }
+        ext->resolveStreamSet(P, paramStreams);
+    }
+    return ext->getStreamSet();
+}
+
+void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
+    for (auto e : mExternalNames) {
+        prepareExternalObject(e);
+    }
+    for (auto e : mExternalNames) {
+        resolveExternal(P, e->getFullName());
     }
 }
 
@@ -451,56 +452,31 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
 void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
+    // We may end up with multiple instances of a Name, but we should
+    // only add the external once.
+    std::set<std::string> extNames;
     for (const auto & e : externals) {
         auto name = e->getFullName();
-        const auto f = mPropertyStreamMap.find(name);
-        if (f != mPropertyStreamMap.end()) {
-            //errs() << "adding external: " << name << "\n";
+        if (extNames.count(name) == 0) {
+            extNames.insert(name);
+            const auto f = mExternalMap.find(name);
+            if (f == mExternalMap.end()) {
+                llvm::report_fatal_error("External not in mExternalMap: " + name);
+            }
+            ExternalStreamObject * ext = f->second;
+            if (!ext->isResolved()) {
+                llvm::report_fatal_error("Unresolved external");
+            }
+            StreamSet * extStream = ext->getStreamSet();
+            unsigned offset = ext->getOffset();
+            std::pair<int, int> lengthRange = ext->getLengthRange();
             if (indexMask == nullptr) {
-                options->addExternal(name, f->second);
+                options->addExternal(name, extStream, offset, lengthRange);
             } else {
                 StreamSet * iExternal_stream = P->CreateStreamSet(1, 1);
-                FilterByMask(P, indexMask, f->second, iExternal_stream);
-                options->addExternal(name, iExternal_stream);
+                FilterByMask(P, indexMask, extStream, iExternal_stream);
+                options->addExternal(name, iExternal_stream, offset, lengthRange);
             }
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::GraphemeClusterBoundary)) {
-        assert (mGCB_stream);
-        if (indexMask == nullptr) {
-            options->addExternal("\\b{g}", mGCB_stream);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b{g}[U8indexed]", mGCB_stream);
-        } else {
-            StreamSet * iGCB_stream = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mGCB_stream, iGCB_stream);
-            options->addExternal("\\b{g}", iGCB_stream, 1);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b{g}", iGCB_stream);
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::WordBoundary)) {
-        assert (mWordBoundary_stream);
-        if (indexMask == nullptr) {
-            options->addExternal("\\b", mWordBoundary_stream);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b[U8indexed]", mWordBoundary_stream);
-        } else {
-            StreamSet * iWordBoundary_stream = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mWordBoundary_stream, iWordBoundary_stream);
-            options->addExternal("\\b", iWordBoundary_stream, 1);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b", iWordBoundary_stream);
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::UTF8index)) {
-        if (indexMask == nullptr) {
-            options->addExternal("UTF8_index", mU8index);
-        }
-    }
-    if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        if (indexMask == nullptr) {
-            options->addExternal("UTF8_LB", mLineBreakStream);
-        } else {
-            StreamSet * iU8_LB = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mLineBreakStream, iU8_LB);
-            options->addExternal("UTF8_LB", iU8_LB);
         }
     }
 }

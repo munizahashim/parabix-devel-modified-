@@ -21,11 +21,11 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <grep/grep_kernel.h>
 
-namespace re { class CC; }
-namespace re { class RE; }
+namespace re { class CC; class Name; class RE; }
 namespace llvm { namespace cl { class OptionCategory; } }
 namespace kernel { class ProgramBuilder; }
 namespace kernel { class StreamSet; }
+namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
 
 
@@ -109,6 +109,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
+    kernel::StreamSet * RunGrep(const std::unique_ptr<kernel::ProgramBuilder> &P, re::RE * re, kernel::StreamSet * Source);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -121,8 +122,6 @@ protected:
         UTF8index = 2,
         MoveMatchesToEOL = 4,
         MatchSpans = 8,
-        GraphemeClusterBoundary = 16,
-        WordBoundary = 32,
         U21 = 64
     };
     bool hasComponent(Component compon_set, Component c);
@@ -135,11 +134,12 @@ protected:
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // line break stream and the U8 index stream (if required).
-    void grepPrologue(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * SourceStream);
+    void grepPrologue(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
+    void prepareExternalObject(re::Name * extName);
     void prepareExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * resolveExternal(const std::unique_ptr<kernel::ProgramBuilder> & P, std::string nameStr);
     void addExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
-    kernel::StreamSet * RunGrep(const std::unique_ptr<kernel::ProgramBuilder> &P, re::RE * re, kernel::StreamSet * Source);
     kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
@@ -185,12 +185,10 @@ protected:
     Component mExternalComponents;
     Component mInternalComponents;
     const cc::Alphabet * mIndexAlphabet;
-    std::map<std::string, kernel::StreamSet *> mPropertyStreamMap;
+    std::map<std::string, kernel::ExternalStreamObject *> mExternalMap;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
-    kernel::StreamSet * mGCB_stream;
-    kernel::StreamSet * mWordBoundary_stream;
     re::UTF8_Transformer mUTF8_Transformer;
     pthread_t mEngineThread;
 };
