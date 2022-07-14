@@ -81,7 +81,6 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     }
     Value * processedSourceItems = b->getProcessedItemCount("source");
     Value * initialSourceOffset = b->CreateURem(processedSourceItems, BLOCK_WIDTH);
-
     Value * const streamBase = b->getScalarField("base");
 
     SmallVector<Value *, 16> pendingData(mSelectedStreamCount);
@@ -105,7 +104,6 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
         pendingDataPhi[i] = b->CreatePHI(b->getBitBlockType(), incomingCount);
         pendingDataPhi[i]->addIncoming(pendingData[i], entry);
     }
-
     Value * deposit_mask = b->loadInputStreamBlock("marker", ZERO, blockNoPhi);
     Value * nextBlk = b->CreateAdd(blockNoPhi, b->getSize(1));
     Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
@@ -134,6 +132,7 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     // B = b->simd_sllv(fw, b->mvmd_dsll(fw, source, pending, field_offset_hi), shift_fwd);
     // all_source_bits = simd_or(A, B);
     Value * pendingOffset = b->CreateURem(pendingOffsetPhi, BLOCK_WIDTH);
+
     // Value * pendingItems = b->CreateURem(b->CreateSub(bwConst, pendingOffset), bwConst);
     Value * pendingItems = b->CreateSub(BLOCK_WIDTH, pendingOffset);
 

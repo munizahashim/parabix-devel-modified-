@@ -374,9 +374,9 @@ public:
 
     std::vector<llvm::Value *> getDoSegmentProperties(BuilderRef b) const;
 
-    virtual void setDoSegmentProperties(BuilderRef b, const llvm::ArrayRef<llvm::Value *> args);
+    void setDoSegmentProperties(BuilderRef b, const llvm::ArrayRef<llvm::Value *> args);
 
-    virtual void callGenerateDoSegmentMethod(BuilderRef b);
+    void callGenerateDoSegmentMethod(BuilderRef b);
 
     void callGenerateFinalizeThreadLocalMethod(BuilderRef b);
 
@@ -424,6 +424,8 @@ protected:
     llvm::Value *                   mNumOfStrides = nullptr;
     llvm::Value *                   mFixedRateFactor = nullptr;
     llvm::Value *                   mExternalSegNo = nullptr;
+
+    Vec<llvm::Value *>              mInputIsClosed;
 
     Vec<llvm::Value *>              mUpdatableProcessedInputItemPtr;
     Vec<llvm::Value *>              mProcessedInputItemPtr;

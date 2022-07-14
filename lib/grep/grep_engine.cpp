@@ -68,7 +68,6 @@
 #include <toolchain/toolchain.h>
 #include <kernel/util/debug_display.h>
 #include <util/aligned_allocator.h>
-// #include "grep_colourization_pipeline.hpp"
 
 using namespace llvm;
 using namespace cc;
@@ -736,9 +735,9 @@ public:
                          // called functions
                          , {}
                          // stream inputs
-                         , {Bind("SourceCoords", SourceCoords, Deferred()),
+                         , {Bind("SourceCoords", SourceCoords, BoundedRate(0, 1)),
                             Bind("MatchSpans", MatchSpans, Deferred()),
-                            Bind("Basis", Basis, Deferred())}
+                            Bind("Basis", Basis, BoundedRate(0, 1))}
                          // stream outputs
                          , {}
                          // input scalars
@@ -748,6 +747,7 @@ public:
                          // length assertions
                          , {}) {
         addAttribute(InternallySynchronized());
+        addAttribute(MustExplicitlyTerminate());
         addAttribute(SideEffecting());
         // NOTE: the 8x is to accommodate FilterByMask minimum I/O.
         setStride(8 * b->getBitBlockWidth());
@@ -766,21 +766,21 @@ public:
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
         E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
+  //      E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-        //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
+  //      E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+   //     E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
         // Baais bit streams expanded with 0 bits for each string to be inserted.
 
         StreamSet * const ExpandedBasis = E->CreateStreamSet(8);
-        StreamSet * const Basis = getInputStreamSet(1);
+        StreamSet * const Basis = getInputStreamSet(2);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
-        //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+  //      E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * const ExpandedMarks = E->CreateStreamSet(2);
@@ -788,6 +788,7 @@ public:
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+  //      E->CreateKernelCall<DebugDisplayKernel>("ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
@@ -818,7 +819,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
     Scalar * const callbackObject = E->getInputScalar("callbackObject");
 
     if (UseNestedColourizationPipeline) {
-        Kernel * const k = E->CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
+        E->CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
     } else {
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
@@ -831,20 +832,20 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
         E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
+   //     E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-        //E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
+   //     E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-        //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
+  //      E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
         // Baais bit streams expanded with 0 bits for each string to be inserted.
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
-        //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
+   //     E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
@@ -852,6 +853,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+   //     E->CreateKernelCall<DebugDisplayKernel>("ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);

@@ -21,13 +21,13 @@ inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_
  * @brief hasKernelTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializePipelineInputTerminationSignal(BuilderRef b) {
-    // any pipeline input streams are considered produced by the P_{in} vertex.
-    if (out_degree(PipelineInput, mBufferGraph) > 0) {
-        assert (KernelPartitionId[PipelineInput] == 0);
-        Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
-        Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
-        mPartitionTerminationSignal[0] = b->CreateSelect(mIsFinal, completed, unterminated);
-    }
+//    // any pipeline input streams are considered produced by the P_{in} vertex.
+//    if (out_degree(PipelineInput, mBufferGraph) > 0) {
+//        assert (KernelPartitionId[PipelineInput] == 0);
+//        Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
+//        Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
+//        mPartitionTerminationSignal[0] = b->CreateSelect(mIsFinal, completed, unterminated);
+//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -43,6 +43,7 @@ inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Va
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally) const {
     const auto partitionId = KernelPartitionId[kernel];
+
     Value * signal = mPartitionTerminationSignal[partitionId];
     if (signal == nullptr) {
         report_fatal_error("No termination signal for kernel " + std::to_string(kernel));
@@ -54,12 +55,13 @@ Value * PipelineCompiler::hasKernelTerminated(BuilderRef b, const size_t kernel,
         Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
         return b->CreateICmpNE(signal, unterminated);
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief pipelineTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
+Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
 
     Value * hard = mExhaustedInput;
     Value * soft = nullptr;
@@ -125,39 +127,48 @@ void PipelineCompiler::signalAbnormalTermination(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort) const {
+Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally) const {
     const auto buffer = getInputBufferVertex(inputPort);
-    const auto producer = parent(buffer, mBufferGraph);
-    return hasKernelTerminated(b, producer, false);
+    const auto e = in_edge(buffer, mBufferGraph);
+    const auto producer = source(e, mBufferGraph);
+    if (LLVM_UNLIKELY(producer == PipelineInput)) {
+        if (mIsNestedPipeline) {
+            const BufferPort & bp = mBufferGraph[e];
+            return mInputIsClosed[bp.Port.Number];
+        } else {
+            return mIsFinal;
+        }
+    }
+    return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isClosed
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(BuilderRef b, const unsigned streamSet) const {
-    const auto producer = parent(streamSet, mBufferGraph);
-    return hasKernelTerminated(b, producer, false);
-}
+///** ------------------------------------------------------------------------------------------------------------- *
+// * @brief isClosed
+// ** ------------------------------------------------------------------------------------------------------------- */
+//Value * PipelineCompiler::isClosed(BuilderRef b, const unsigned streamSet) const {
+//    const auto producer = parent(streamSet, mBufferGraph);
+//    return hasKernelTerminated(b, producer, false);
+//}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosedNormally
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const {
-    const auto buffer = getInputBufferVertex(inputPort);
-    const auto producer = parent(buffer, mBufferGraph);
-    return hasKernelTerminated(b, producer, kernelCanTerminateAbnormally(producer));
+    return isClosed(b, inputPort, true);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief kernelCanTerminateAbnormally
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::kernelCanTerminateAbnormally(const unsigned kernel) const {
-    for (const Attribute & attr : getKernel(kernel)->getAttributes()) {
-        switch (attr.getKind()) {
-            case AttrId::CanTerminateEarly:
-            case AttrId::MayFatallyTerminate:
-                return true;
-            default: continue;
+    if (kernel != PipelineInput) {
+        for (const Attribute & attr : getKernel(kernel)->getAttributes()) {
+            switch (attr.getKind()) {
+                case AttrId::CanTerminateEarly:
+                case AttrId::MayFatallyTerminate:
+                    return true;
+                default: continue;
+            }
         }
     }
     return false;

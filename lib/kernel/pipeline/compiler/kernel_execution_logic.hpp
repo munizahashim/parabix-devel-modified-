@@ -30,22 +30,23 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
+    if (mKernelIsInternallySynchronized) {
+        // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
+        // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
+        const auto prefix = makeKernelName(mKernelId);
+        Value * const intSegNoPtr = b->getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX);
+        mInternallySynchronizedSubsegmentNumber = b->CreateLoad(intSegNoPtr);
+        Value * const nextSegNo = b->CreateAdd(mInternallySynchronizedSubsegmentNumber, b->getSize(1));
+        b->CreateStore(nextSegNo, intSegNoPtr);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "# " + prefix + " executing subsegment number %" PRIu64, mInternallySynchronizedSubsegmentNumber);
+        #endif
+    }
+
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         if (mCurrentKernelIsStateFree) {
             readAndUpdateInternalProcessedAndProducedItemCounts(b);
-        }
-
-        if (mKernelIsInternallySynchronized) {
-            // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire
-            const auto prefix = makeKernelName(mKernelId);
-            Value * const intSegNoPtr = b->getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX);
-            mInternallySynchronizedSubsegmentNumber = b->CreateLoad(intSegNoPtr);
-            Value * const nextSegNo = b->CreateAdd(mInternallySynchronizedSubsegmentNumber, b->getSize(1));
-            b->CreateStore(nextSegNo, intSegNoPtr);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, "# " + prefix + " executing subsegment number %" PRIu64, mInternallySynchronizedSubsegmentNumber);
-            #endif
         }
 
         BasicBlock * resumeKernelExecution = nullptr;
@@ -298,6 +299,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
+        assert (doSegmentRetVal->getType()->isIntegerTy());
     } else {
         mTerminatedExplicitly = nullptr;
     }
@@ -408,7 +410,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
         }
         addNextArg(mKernelThreadLocalHandle);
     }
-    if (mKernelIsInternallySynchronized) {
+    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
         addNextArg(mInternallySynchronizedSubsegmentNumber);
     }
     addNextArg(mCurrentNumOfLinearStrides);
@@ -433,6 +435,9 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
 
             Value * const addr = mInputVirtualBaseAddressPhi[rt.Port]; assert (addr);
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
+            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+                addNextArg(isClosed(b, StreamSetPort(PortType::Input, i)));
+            }
 
             mReturnedProcessedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.IsDeferred, processed);
 

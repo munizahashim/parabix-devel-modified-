@@ -342,8 +342,8 @@ public:
     void initializePipelineInputTerminationSignal(BuilderRef b);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
-    Value * isClosed(BuilderRef b, const StreamSetPort inputPort) const;
-    Value * isClosed(BuilderRef b, const unsigned streamSet) const;
+    Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
+ //   Value * isClosed(BuilderRef b, const unsigned streamSet) const;
 
     Value * isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;

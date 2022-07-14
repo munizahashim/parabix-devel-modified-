@@ -426,9 +426,12 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
         b->SetInsertPoint(isFinalCheck);
     }
 
-    Value * terminationSignal = mIsFinalInvocationPhi;
-
-    assert (terminationSignal);
+    Value * terminationSignal = nullptr;
+    if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
+        terminationSignal = getTerminationSignal(b, TerminationSignal::None);
+    } else {
+        terminationSignal = mIsFinalInvocationPhi; assert (terminationSignal);
+    }
 
     BasicBlock * const exitBlock = b->GetInsertBlock();
 
@@ -438,6 +441,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
         assert (mProducedItemCount[port]);
         mProducedAtTerminationPhi[port]->addIncoming(mProducedItemCount[port], exitBlock);
     }
+    assert (terminationSignal->getType() == mTerminatedSignalPhi->getType());
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
 
     if (mIsPartitionRoot) {
@@ -886,6 +890,7 @@ void PipelineCompiler::end(BuilderRef b) {
     Value * terminated = nullptr;
     if (mIsNestedPipeline) {
         if (mCurrentThreadTerminationSignalPtr) {
+            assert (canSetTerminateSignal());
             terminated = hasPipelineTerminated(b);
         }
         b->CreateBr(mPipelineEnd);
@@ -906,9 +911,6 @@ void PipelineCompiler::end(BuilderRef b) {
         b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
     }
     b->SetInsertPoint(mPipelineEnd);
-//    writeFinalHybridThreadSynchronizationNumber(b);
-//    writeExternalConsumedItemCounts(b);
-//    writeExternalProducedItemCounts(b);
     if (mCurrentThreadTerminationSignalPtr) {
         b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
     }
@@ -929,12 +931,12 @@ void PipelineCompiler::end(BuilderRef b) {
     stopPAPIAndDestroyEventSet(b);
     #endif
 
-    if (LLVM_UNLIKELY(canSetTerminateSignal())) {
-        Constant * const unterminated = b->getSize(KernelBuilder::TerminationCode::None);
-        Constant * const terminated = b->getSize(KernelBuilder::TerminationCode::Terminated);
-        Value * const retVal = b->CreateSelect(mPipelineProgress, unterminated, terminated);
-        b->setTerminationSignal(retVal);
-    }
+//    if (LLVM_UNLIKELY(canSetTerminateSignal())) {
+//        Constant * const unterminated = b->getSize(KernelBuilder::TerminationCode::None);
+//        Constant * const terminated = b->getSize(KernelBuilder::TerminationCode::Terminated);
+//        Value * const retVal = b->CreateSelect(mPipelineProgress, unterminated, terminated);
+//        b->setTerminationSignal(retVal);
+//    }
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;
 }

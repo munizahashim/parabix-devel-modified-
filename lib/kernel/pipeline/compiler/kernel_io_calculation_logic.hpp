@@ -37,6 +37,16 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
         writeTransitoryConsumedItemCount(b, streamSet, available);
     }
 
+#if 0
+
+    // TODO: this code was originally added in to support an optimization branch
+    // concept but will cause issues a general nested pipeline as there may be many
+    // consumers of an input that process data at differing rates.
+
+    // Supporting an optimization branch requires some sort of distinct adjustment
+    // function to update the pipeline. This update function may also need to zero
+    // out kernel state to ensure we're starting from a clean slate.
+
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
 
         const auto buffer = target(e, mBufferGraph);
@@ -72,6 +82,7 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
         }
     }
 
+#endif
 
 }
 

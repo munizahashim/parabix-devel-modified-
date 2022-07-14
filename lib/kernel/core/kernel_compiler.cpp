@@ -385,13 +385,18 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             b->CreateAssert(getThreadLocalHandle(), "%s: thread local handle cannot be null", b->GetString(getName()));
         }
     }    
-
-    if (mTarget->hasAttribute(AttrId::InternallySynchronized)) {
+    const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
+    if (LLVM_UNLIKELY(internallySynchronized)) {
         mExternalSegNo = nextArg();
     }
     mRawNumOfStrides = nextArg();
-    mIsFinal = b->CreateIsNull(mRawNumOfStrides);
-    mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
+    if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
+        mIsFinal = nullptr;
+        mNumOfStrides = mRawNumOfStrides;
+    } else {
+        mIsFinal = b->CreateIsNull(mRawNumOfStrides);
+        mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
+    }
 
     Rational fixedRateLCM{0};
     mFixedRateFactor = nullptr;
@@ -408,6 +413,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     const auto numOfInputs = getNumOfStreamInputs();
 
+    reset(mInputIsClosed, numOfInputs);
     reset(mProcessedInputItemPtr, numOfInputs);
     reset(mAccessibleInputItems, numOfInputs);
     reset(mAvailableInputItems, numOfInputs);
@@ -471,6 +477,13 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 //            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual %s base address cannot be null",
 //                            b->GetString(getName()), b->GetString(input.getName()), b->GetString("input"));
 //        }
+
+        if (LLVM_UNLIKELY(internallySynchronized)) {
+            mInputIsClosed[i] = nextArg();
+            assert (mInputIsClosed[i]->getType() == b->getInt1Ty());
+        } else {
+            mInputIsClosed[i] = mIsFinal;
+        }
 
         /// ----------------------------------------------------
         /// processed item count
@@ -567,8 +580,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 //            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual %s base address cannot be null",
 //                            b->GetString(getName()), b->GetString(output.getName()), b->GetString("output"));
 //        }
-
-
         /// ----------------------------------------------------
         /// produced item count
         /// ----------------------------------------------------
@@ -664,7 +675,8 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
     if (LLVM_UNLIKELY(mTarget->hasThreadLocal())) {
         props.push_back(mThreadLocalHandle); assert (mThreadLocalHandle);
     }
-    if (mTarget->hasAttribute(AttrId::InternallySynchronized)) {
+    const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
+    if (LLVM_UNLIKELY(internallySynchronized)) {
         props.push_back(mExternalSegNo);
     }
     props.push_back(mNumOfStrides); assert (mNumOfStrides);
@@ -681,6 +693,12 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         /// ----------------------------------------------------
         const auto & buffer = mStreamSetInputBuffers[i];
         props.push_back(b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
+        /// ----------------------------------------------------
+        /// is closed
+        /// ----------------------------------------------------
+        if (LLVM_UNLIKELY(internallySynchronized)) {
+            props.push_back(mInputIsClosed[i]);
+        }
         /// ----------------------------------------------------
         /// processed item count
         /// ----------------------------------------------------
@@ -838,6 +856,8 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
     const auto numOfInputs = getNumOfStreamInputs();
     const auto numOfOutputs = getNumOfStreamOutputs();
 
+    assert (!mTarget->hasAttribute(AttrId::InternallySynchronized));
+
     std::vector<Value *> S;
     S.resize(8 + numOfInputs * 4 + numOfOutputs * 5);
 
@@ -881,6 +901,8 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
  * @brief restoreInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
+
+    assert (!mTarget->hasAttribute(AttrId::InternallySynchronized));
 
     auto o = S.begin();
 

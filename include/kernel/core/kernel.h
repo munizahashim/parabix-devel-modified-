@@ -384,6 +384,14 @@ public:
 
     virtual ~Kernel() ;
 
+    void enablePipelineDebugMessages(const bool value = true) {
+        mEnablePipelineDebugMessages = value;
+    }
+
+    bool hasEnabledPipelineDebugMessages() const {
+        return mEnablePipelineDebugMessages;
+    }
+
 protected:
 
     llvm::Function * getInitializeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
@@ -493,7 +501,7 @@ protected:
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
     bool                        mGenerated = false;
-
+    bool                        mEnablePipelineDebugMessages = false;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;

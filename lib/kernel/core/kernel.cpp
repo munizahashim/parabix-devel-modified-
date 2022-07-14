@@ -686,7 +686,8 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
     if (LLVM_UNLIKELY(hasThreadLocal())) {
         fields.push_back(getThreadLocalStateType()->getPointerTo());  // handle
     }
-    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+    const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+    if (LLVM_UNLIKELY(internallySynchronized)) {
         fields.push_back(sizeTy); // external SegNo
     }
     fields.push_back(sizeTy); // numOfStrides
@@ -700,6 +701,10 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
         const Binding & input = mInputStreamSets[i];
         // virtual base input address
         fields.push_back(voidPtrTy);
+        // is closed
+        if (LLVM_UNLIKELY(internallySynchronized)) {
+            fields.push_back(b->getInt1Ty());
+        }
         // processed input items
         if (isAddressable(input)) {
             fields.push_back(sizePtrTy); // updatable
@@ -789,7 +794,8 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("threadLocal");
         }
-        if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+        if (LLVM_UNLIKELY(internallySynchronized)) {
             setNextArgName("segNo");
         }
         setNextArgName("numOfStrides");
@@ -800,6 +806,9 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {
             const Binding & input = mInputStreamSets[i];
             setNextArgName(input.getName());
+            if (LLVM_UNLIKELY(internallySynchronized)) {
+                setNextArgName(input.getName() + "_closed");
+            }
             if (LLVM_LIKELY(isAddressable(input) || isCountable(input))) {
                 setNextArgName(input.getName() + "_processed");
             }
