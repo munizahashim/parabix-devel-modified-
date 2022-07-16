@@ -28,9 +28,9 @@ namespace kernel { class StreamSet; }
 namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
 
+using ProgBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
 
 namespace grep {
-
 
 extern unsigned ByteCClimit;
 
@@ -109,7 +109,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    kernel::StreamSet * RunGrep(const std::unique_ptr<kernel::ProgramBuilder> &P, re::RE * re, kernel::StreamSet * Source);
+    kernel::StreamSet * RunGrep(ProgBuilderRef P, re::RE * re, kernel::StreamSet * Source);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -129,18 +129,18 @@ protected:
     bool matchesToEOLrequired();
 
     // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * getBasis(ProgBuilderRef P, kernel::StreamSet * ByteStream);
 
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // line break stream and the U8 index stream (if required).
-    void grepPrologue(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * SourceStream);
+    void grepPrologue(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
     void prepareExternalObject(re::Name * extName);
-    void prepareExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * resolveExternal(const std::unique_ptr<kernel::ProgramBuilder> & P, std::string nameStr);
-    void addExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
-    kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
+    void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * resolveExternal(ProgBuilderRef P, std::string nameStr);
+    void addExternalStreams(ProgBuilderRef P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
+    kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
 
@@ -242,7 +242,7 @@ protected:
 class EmitMatchesEngine final : public GrepEngine {
 public:
     EmitMatchesEngine(BaseDriver & driver);
-    void grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream, bool BatchMode = false);
+    void grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream, bool BatchMode = false);
     void grepCodeGen() override;
 private:
     uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) override;
