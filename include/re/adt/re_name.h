@@ -244,7 +244,7 @@ public:
 private:
     PropertyExpression(Kind k, std::string id, PropertyExpression::Operator op, std::string v):
        RE(ClassTypeId::PropertyExpression),
-       mKind(k), mIdentifier(id), mOperator(op), mValue(v), mPropertyCode(-1) {}
+       mKind(k), mIdentifier(id), mOperator(op), mValue(v), mPropertyCode(-1), mResolvedRE(nullptr) {}
     PropertyExpression::Kind mKind;
     std::string mIdentifier;
     PropertyExpression::Operator mOperator;

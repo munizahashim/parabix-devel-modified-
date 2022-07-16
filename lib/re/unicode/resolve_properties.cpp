@@ -183,8 +183,8 @@ struct PropertyReferencePromotion : public RE_Transformer {
     RE * transformPropertyExpression (PropertyExpression * exp) override {
         int prop_code = exp->getPropertyCode();
         if (prop_code < 0) return exp;  // No property code - leave unchanged.
-        auto * propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
-        if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+        const auto & propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
+        if (isa<EnumeratedPropertyObject>(propObj)) {
             RE * defn = exp->getResolvedRE();
             if (defn == nullptr) return exp;
             if (Reference * ref = dyn_cast<Reference>(defn)) {
@@ -274,7 +274,7 @@ struct EnumBasisRequiredCollector : public RE_Inspector {
     void inspectPropertyExpression(PropertyExpression * pe) {
         auto id = static_cast<UCD::property_t>(pe->getPropertyCode());
         PropertyObject * propObj = getPropertyObject(id);
-        if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+        if (isa<EnumeratedPropertyObject>(propObj)) {
             if (pe->getKind() == PropertyExpression::Kind::Boundary) {
                 mEnumSet.insert(id);
             }
@@ -315,7 +315,7 @@ struct EnumeratedPropertyMultiplexer : public RE_Transformer {
             if (op == PropertyExpression::Operator::Eq) {
                 enumCC->insert(val_code);
             } else if (op == PropertyExpression::Operator::NEq) {
-                for (unsigned i = 0; i < obj->GetEnumCount(); i++) {
+                for (int i = 0; i < obj->GetEnumCount(); i++) {
                     if (i != val_code) enumCC->insert(i);
                 }
             }
