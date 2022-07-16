@@ -368,11 +368,7 @@ void ICGrepKernel::generatePabloMethod() {
         PabloAST * extStrm = pb.createExtract(getInputStreamVar(extName), pb.getInteger(0));
         unsigned offset = mOptions->mExternalOffsets[i];
         std::pair<int, int> lgthRange = mOptions->mExternalLengths[i];
-        if ((extName == "\\b{g}") || (extName == "\\b")) {
-            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, 1), std::make_pair(0, 0)));
-        } else {
-            re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), lgthRange));
-        }
+        re_compiler.addPrecompiled(extName, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), lgthRange));
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
     RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
