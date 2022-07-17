@@ -330,6 +330,9 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
+    if (EnableGetMatchSpan) {
+        mRE = name_min_length_alts(mRE);
+    }
     re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
@@ -348,7 +351,7 @@ void GrepEngine::initRE(re::RE * re) {
     }
 }
 
-StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, StreamSet * ByteStream) {
+StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
@@ -363,7 +366,7 @@ StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, Stre
     return Source;
 }
 
-void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
+void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
 
     mLineBreakStream = nullptr;
     mU8index = nullptr;
@@ -422,7 +425,7 @@ void GrepEngine::prepareExternalObject(re::Name * extName) {
     }
 }
 
-StreamSet * GrepEngine::resolveExternal(const std::unique_ptr<ProgramBuilder> & P, std::string nameStr) {
+StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
     auto f = mExternalMap.find(nameStr);
     if (f == mExternalMap.end()) {
         llvm::report_fatal_error("ExternalMap: undefined external: " + nameStr);
@@ -439,7 +442,7 @@ StreamSet * GrepEngine::resolveExternal(const std::unique_ptr<ProgramBuilder> & 
     return ext->getStreamSet();
 }
 
-void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
+void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
     for (auto e : mExternalNames) {
         prepareExternalObject(e);
     }
@@ -449,7 +452,7 @@ void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & 
 }
 
 
-void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
     // We may end up with multiple instances of a Name, but we should
@@ -459,9 +462,11 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
         auto name = e->getFullName();
         if (extNames.count(name) == 0) {
             extNames.insert(name);
-            const auto f = mExternalMap.find(name);
+            auto f = mExternalMap.find(name);
             if (f == mExternalMap.end()) {
-                llvm::report_fatal_error("External not in mExternalMap: " + name);
+                prepareExternalObject(e);
+                resolveExternal(P, name);
+                f = mExternalMap.find(name);
             }
             ExternalStreamObject * ext = f->second;
             if (!ext->isResolved()) {
@@ -481,9 +486,47 @@ void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, s
     }
 }
 
-StreamSet * GrepEngine::RunGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source) {
+StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * MatchResults) {
+    if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
+        std::vector<StreamSet *> allSpans;
+        for (auto & e : *alt) {
+            allSpans.push_back(getMatchSpan(P, e, MatchResults));
+        }
+        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        return mergedSpans;
+    } else if (re::Name * externalName = dyn_cast<re::Name>(r)) {
+        std::string nameStr = externalName->getFullName();
+        //llvm::errs() << "External: " << nameStr << "\n";
+        auto f = mExternalMap.find(nameStr);
+        if (f == mExternalMap.end()) {
+            llvm::errs() << "External not found " << nameStr << "\n";
+            return getMatchSpan(P, externalName->getDefinition(), MatchResults);
+        }
+        ExternalStreamObject * ext = f->second;
+        if (!ext->isResolved()) resolveExternal(P, nameStr);
+        // ensure ext is resolved???
+        StreamSet * match_follows = ext->getStreamSet();
+        // if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
+           // get MatchedLineStarts, then create and return spans
+           //    return ...;
+        // }
+        // else Other special cases
+        // default by min match length
+        int spanLgth = ext->getLengthRange().first;
+        StreamSet * spans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, match_follows, spans);
+        return spans;
+    } else {
+        int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
+        StreamSet * spans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, MatchResults, spans);
+        return spans;
+    }
+}
+
+StreamSet * GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
-    auto lengths = getLengthRange(re, mIndexAlphabet);
     options->setSource(Source);
     StreamSet * indexStream = nullptr;
     if (mIndexAlphabet == &cc::UTF8) {
@@ -519,7 +562,7 @@ StreamSet * GrepEngine::RunGrep(const std::unique_ptr<ProgramBuilder> & P, re::R
     return MatchResults;
 }
 
-StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & P, StreamSet * InputStream) {
+StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
     StreamSet * SourceStream = getBasis(P, InputStream);
 
     grepPrologue(P, SourceStream);
@@ -668,7 +711,7 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
-void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
+void applyColorization(ProgBuilderRef E,
                                           StreamSet * MatchSpans,
                                           StreamSet * Basis,
                                           StreamSet * ColorizedBasis) {
@@ -705,7 +748,7 @@ void applyColorization(const std::unique_ptr<ProgramBuilder> & E,
     E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
 }
 
-void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, StreamSet * ByteStream, bool BatchMode) {
+void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, bool BatchMode) {
     StreamSet * SourceStream = getBasis(E, ByteStream);
 
     grepPrologue(E, SourceStream);
@@ -715,10 +758,15 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
     StreamSet * Matches = RunGrep(E, mRE, SourceStream);
 
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        StreamSet * MatchSpans = E->CreateStreamSet(1, 1);
-        auto lengths = re::getLengthRange(mRE, mIndexAlphabet);
-        E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, Matches, MatchSpans);
-        Matches = MatchSpans;
+        StreamSet * MatchSpans;
+        if (EnableGetMatchSpan) {
+            MatchSpans = getMatchSpan(E, mRE, Matches);
+        } else {
+            MatchSpans = E->CreateStreamSet(1, 1);
+            auto lengths = re::getLengthRange(mRE, mIndexAlphabet);
+            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, Matches, MatchSpans);
+            Matches = MatchSpans;
+        }
         if (mIndexAlphabet == &cc::Unicode) {
             StreamSet * u8initial = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
@@ -727,6 +775,8 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
             StreamSet * Results = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
             Matches = Results;
+        } else {
+            Matches = MatchSpans;
         }
     } else {
         if (mIndexAlphabet == &cc::Unicode) {
@@ -734,7 +784,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
             E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
             StreamSet * Results = E->CreateStreamSet(1, 1);
             SpreadByMask(E, u8index1, Matches, Results);
-        Matches = Results;
+            Matches = Results;
         }
     }
 
@@ -756,19 +806,24 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         MatchedLineEnds = TruncatedMatches;
     }
 
-    if (mColoring && !mInvertMatches) {
+    bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
+    bool needsColoring = mColoring && !mInvertMatches;
 
-        StreamSet * MatchesByLine = E->CreateStreamSet(1, 1);
+    StreamSet * MatchesByLine = nullptr;
+    if (needsColoring | hasContext) {
+        MatchesByLine = E->CreateStreamSet(1, 1);
         FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+    }
+    if (hasContext) {
+        StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
+        E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
+        StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
+        SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
+        MatchedLineEnds = SelectedLines;
+        MatchesByLine = ContextByLine;
+    }
 
-        if ((mAfterContext != 0) || (mBeforeContext != 0)) {
-            StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-            StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
-            MatchedLineEnds = SelectedLines;
-            MatchesByLine = ContextByLine;
-        }
+    if (needsColoring) {
 
         StreamSet * SourceCoords = nullptr;
         if (BatchMode) {
@@ -828,15 +883,6 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else { // Non colorized output
-        if ((mAfterContext != 0) || (mBeforeContext != 0)) {
-            StreamSet * MatchesByLine = E->CreateStreamSet(1, 1);
-            FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
-            StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-            StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
-            MatchedLineEnds = SelectedLines;
-        }
         if (MatchCoordinateBlocks > 0) {
             StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
             E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);

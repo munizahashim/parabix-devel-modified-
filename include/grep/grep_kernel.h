@@ -109,6 +109,8 @@ public:
         ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
+    // RE_Externals are compiled using the ICgrep kernel, which returns offset 1.
+    int getOffset() override {return 1;}
 private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;

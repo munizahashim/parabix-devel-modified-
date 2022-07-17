@@ -138,6 +138,7 @@ protected:
     // Prepare external property and GCB streams, if required.
     void prepareExternalObject(re::Name * extName);
     void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
     kernel::StreamSet * resolveExternal(ProgBuilderRef P, std::string nameStr);
     void addExternalStreams(ProgBuilderRef P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
     kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);

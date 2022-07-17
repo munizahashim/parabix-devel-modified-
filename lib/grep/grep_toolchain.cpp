@@ -38,4 +38,8 @@ bool TraceFiles;
 static cl::opt<bool, true> OptTraceFiles("TraceFiles", cl::location(TraceFiles),
                                          cl::desc("Report files as they are opened."), cl::init(false));
 
+bool EnableGetMatchSpan;
+static cl::opt<bool, true> OptGetMatchSpan("enable-get-match-span", cl::location(EnableGetMatchSpan),
+                                              cl::desc("Enable getMatchSpan."), cl::init(false));
+
 }
