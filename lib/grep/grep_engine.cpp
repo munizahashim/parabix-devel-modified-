@@ -506,7 +506,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         ExternalStreamObject * ext = f->second;
         if (!ext->isResolved()) resolveExternal(P, nameStr);
         // ensure ext is resolved???
-        StreamSet * match_follows = ext->getStreamSet();
+        StreamSet * match_marks = ext->getStreamSet();
         // if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
            // get MatchedLineStarts, then create and return spans
            //    return ...;
@@ -514,18 +514,19 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         // else Other special cases
         // default by min match length
         int spanLgth = ext->getLengthRange().first;
+        if (spanLgth <= 1) return match_marks;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, match_follows, spans);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, 1, match_marks, spans);
         return spans;
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, MatchResults, spans);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, 1, MatchResults, spans);
         return spans;
     }
 }
 
-StreamSet * GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source) {
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     options->setSource(Source);
     StreamSet * indexStream = nullptr;
@@ -556,10 +557,9 @@ StreamSet * GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Sourc
         }
     }
     addExternalStreams(P, options, re, indexStream);
-    StreamSet * const MatchResults = P->CreateStreamSet(1, 1);
-    options->setResults(MatchResults);
-    P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    return MatchResults;
+    options->setResults(Results);
+    Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
+    return cast<ICGrepKernel>(k)->getOffset();
 }
 
 StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
@@ -569,7 +569,8 @@ StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) 
 
     prepareExternalStreams(P, SourceStream);
 
-    StreamSet * Matches = RunGrep(P, mRE, SourceStream);
+    StreamSet * Matches = P->CreateStreamSet();
+    RunGrep(P, mRE, SourceStream, Matches);
 
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
@@ -755,7 +756,8 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
 
     prepareExternalStreams(E, SourceStream);
 
-    StreamSet * Matches = RunGrep(E, mRE, SourceStream);
+    StreamSet * Matches = E->CreateStreamSet();
+    RunGrep(E, mRE, SourceStream, Matches);
 
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * MatchSpans;
@@ -764,7 +766,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
         } else {
             MatchSpans = E->CreateStreamSet(1, 1);
             auto lengths = re::getLengthRange(mRE, mIndexAlphabet);
-            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, Matches, MatchSpans);
+            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, 1, Matches, MatchSpans);
             Matches = MatchSpans;
         }
         if (mIndexAlphabet == &cc::Unicode) {

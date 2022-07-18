@@ -77,7 +77,7 @@ std::pair<int, int> RE_External::getLengthRange() {
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     mStreamSet = b->CreateStreamSet(1);
-    mStreamSet = mGrepEngine->RunGrep(b, mRE, inputs[0]);
+    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], mStreamSet);
 }
 
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
@@ -374,6 +374,7 @@ void ICGrepKernel::generatePabloMethod() {
     RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
     PabloAST * matchResult = matches.stream();
     if (matches.offset() == 0) matchResult = pb.createAdvance(matchResult, 1);
+    mOffset = 1;
     pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
     PabloAST * value = nullptr;
@@ -429,18 +430,17 @@ InvertMatchesKernel::InvertMatchesKernel(BuilderRef b, StreamSet * Matches, Stre
 
 }
 
-FixedMatchSpansKernel::FixedMatchSpansKernel(BuilderRef b, unsigned length, StreamSet * MatchResults, StreamSet * MatchSpans)
-: PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchResults->getNumElements()) + "x1_by" + std::to_string(length),
-{Binding{"MatchResults", MatchResults, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
-mMatchLength(length) {}
+FixedMatchSpansKernel::FixedMatchSpansKernel(BuilderRef b, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
+: PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
+{Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
+mMatchLength(length), mOffset(offset) {}
 
 void FixedMatchSpansKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    Var * matchResults = getInputStreamVar("MatchResults");
-    PabloAST * matchFollows = pb.createExtract(matchResults, pb.getInteger(0));
+    PabloAST * marks = pb.createExtract(getInputStreamVar("MatchMarks"), pb.getInteger(0));
     Var * matchSpansVar = getOutputStreamVar("MatchSpans");
     // starts of all the matches
-    PabloAST * starts = pb.createLookahead(matchFollows, mMatchLength);
+    PabloAST * starts = pb.createLookahead(marks, mMatchLength + mOffset - 1);
     // now find all consecutive positions within mMatchLength of any start.
     unsigned consecutiveCount = 1;
     PabloAST * consecutive = starts;

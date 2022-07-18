@@ -109,7 +109,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    kernel::StreamSet * RunGrep(ProgBuilderRef P, re::RE * re, kernel::StreamSet * Source);
+    unsigned RunGrep(ProgBuilderRef P, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Matches);
 
 protected:
     // Functional components that may be required for grep searches,

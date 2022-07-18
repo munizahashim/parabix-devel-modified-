@@ -48,6 +48,7 @@ RE * name_min_length_alts(RE * r, std::string minLengthPrefix) {
         std::map<int, std::vector<RE *>> minLengthAlts;
         for (auto & e : *alt) {
             auto rg = getLengthRange(e, &cc::Unicode);
+            if (rg.first == 0) return r;  //  zero-length REs cause problems
             auto f = minLengthAlts.find(rg.first);
             if (f == minLengthAlts.end()) {
                 minLengthAlts.emplace(rg.first, std::vector<RE *>{e});

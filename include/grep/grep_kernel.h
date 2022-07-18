@@ -106,14 +106,15 @@ public:
         return false;
     }
     RE_External(std::string name, grep::GrepEngine * engine, re::RE * re) :
-        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re) {}
+        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mOffset(1) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     // RE_Externals are compiled using the ICgrep kernel, which returns offset 1.
-    int getOffset() override {return 1;}
+    int getOffset() override {return mOffset;}
 private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;
+    unsigned mOffset;
 };
 
 class Reference_External : public ExternalStreamObject {
@@ -237,11 +238,13 @@ public:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
     bool hasFamilyName() const override { return true; }
+    unsigned getOffset() {return mOffset;}
 protected:
     void generatePabloMethod() override;
 private:
     std::unique_ptr<GrepKernelOptions>  mOptions;
     std::string                         mSignature;
+    unsigned                            mOffset;
 };
 
 class MatchedLinesKernel : public pablo::PabloKernel {
@@ -260,11 +263,12 @@ private:
 
 class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
-    FixedMatchSpansKernel(BuilderRef builder, unsigned length, StreamSet * MatchFollows, StreamSet * MatchSpans);
+    FixedMatchSpansKernel(BuilderRef builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
     bool hasFamilyName() const override { return true; }
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;
+    unsigned mOffset;
 };
 
 //
