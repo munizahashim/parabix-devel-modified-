@@ -140,7 +140,12 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mLineBreakStream(nullptr),
     mU8index(nullptr),
     mUTF8_Transformer(re::NameTransformationMode::None),
-    mEngineThread(pthread_self()) {}
+    mEngineThread(pthread_self()),
+    mIllustrator(nullptr) {
+        if (codegen::IllustratorDisplay > 0) {
+            mIllustrator = new kernel::ParabixIllustrator(codegen::IllustratorDisplay);
+        }
+    }
 
 GrepEngine::~GrepEngine() { }
 
@@ -353,6 +358,7 @@ void GrepEngine::initRE(re::RE * re) {
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
+    if (mIllustrator) mIllustrator->captureByteData(P, "Source", ByteStream);
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
@@ -383,12 +389,15 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     mU8index = P->CreateStreamSet(1, 1);
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
         mExternalMap.emplace("UTF8_LB", new PreDefined("UTF8_LB", mLineBreakStream));
         mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
     }
     else {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
             P->CreateKernelCall<UTF8_index>(SourceStream, mU8index);
+            if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
             mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
         }
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
@@ -399,6 +408,7 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
     }
 }
 
@@ -613,12 +623,14 @@ void GrepEngine::grepCodeGen() {
                 {Binding{idb->getSizeTy(), "useMMap"},
                 Binding{idb->getInt32Ty(), "fileDescriptor"},
                 Binding{idb->getIntAddrTy(), "callbackObject"},
+                Binding{idb->getIntAddrTy(), "illustratorAddr"},
                 Binding{idb->getSizeTy(), "maxCount"}}
                 ,// output
                 {Binding{idb->getInt64Ty(), "countResult"}});
 
     Scalar * const useMMap = P->getInputScalar("useMMap");
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    if (mIllustrator) mIllustrator->registerIllustrator(P->getInputScalar("illustratorAddr"));
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
     P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
@@ -921,13 +933,16 @@ void EmitMatchesEngine::grepCodeGen() {
                 {Binding{idb->getSizeTy(), "useMMap"},
                 Binding{idb->getInt32Ty(), "fileDescriptor"},
                 Binding{idb->getIntAddrTy(), "callbackObject"},
+                Binding{idb->getIntAddrTy(), "illustratorAddr"},
                 Binding{idb->getSizeTy(), "maxCount"}}
                 ,// output
                 {Binding{idb->getInt64Ty(), "countResult"}});
 
     Scalar * const useMMap = E1->getInputScalar("useMMap");
     Scalar * const fileDescriptor = E1->getInputScalar("fileDescriptor");
+    if (mIllustrator) mIllustrator->registerIllustrator(E1->getInputScalar("illustratorAddr"));
     StreamSet * const ByteStream = E1->CreateStreamSet(1, ENCODING_BITS);
+    
     E1->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
     grepPipeline(E1, ByteStream);
     E1->setOutputScalar("countResult", E1->CreateConstant(idb->getInt64(0)));
@@ -939,12 +954,14 @@ void EmitMatchesEngine::grepCodeGen() {
                     {Binding{idb->getInt8PtrTy(), "buffer"},
                     Binding{idb->getSizeTy(), "length"},
                     Binding{idb->getIntAddrTy(), "callbackObject"},
+                    Binding{idb->getIntAddrTy(), "illustratorAddr"},
                     Binding{idb->getSizeTy(), "maxCount"}}
                     ,// output
                     {Binding{idb->getInt64Ty(), "countResult"}});
 
         Scalar * const buffer = E2->getInputScalar("buffer");
         Scalar * const length = E2->getInputScalar("length");
+        if (mIllustrator) mIllustrator->registerIllustrator(E2->getInputScalar("illustratorAddr"));
         StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
         E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
         grepPipeline(E2, InternalBytes, /* BatchMode = */ true);
@@ -968,7 +985,7 @@ bool canMMap(const std::string & fileName) {
 
 
 uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, size_t maxCount);
+    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, kernel::ParabixIllustrator *, size_t maxCount);
     auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
     uint64_t resultTotal = 0;
 
@@ -977,7 +994,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
         bool useMMap = mPreferMMap && canMMap(fileName);
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
-        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mMaxCount);
+        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mIllustrator, mMaxCount);
         close(fileDescriptor);
         if (handler.binaryFileSignalled()) {
             llvm::errs() << "Binary file " << fileName << "\n";
@@ -987,6 +1004,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
             resultTotal += grepResult;
         }
     }
+    if (mIllustrator) mIllustrator->displayAllCapturedData();
     return resultTotal;
 }
 
@@ -1017,7 +1035,7 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
 
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
     if (fileNames.size() == 1) {
-        typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, EmitMatch *, size_t maxCount);
+        typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, EmitMatch *, kernel::ParabixIllustrator *, size_t maxCount);
         auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
         EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
         accum.setStringStream(&strm);
@@ -1033,13 +1051,14 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             accum.setFileLabel(fileNames[0]);
             useMMap = mPreferMMap && canMMap(fileNames[0]);
         }
-        f(useMMap, fileDescriptor, &accum, mMaxCount);
+        f(useMMap, fileDescriptor, &accum, mIllustrator, mMaxCount);
         close(fileDescriptor);
         if (accum.binaryFileSignalled()) {
             accum.mResultStr->clear();
             accum.mResultStr->str("");
         }
         if (accum.mLineCount > 0) grepMatchFound = true;
+        if (mIllustrator) mIllustrator->displayAllCapturedData();
         return accum.mLineCount;
     } else {
         //llvm::errs() << "filenames.size() = " << fileNames.size() << "\n";
@@ -1110,6 +1129,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         }
         alloc.deallocate(accum.mBatchBuffer, 0);
         if (accum.mLineCount > 0) grepMatchFound = true;
+        if (mIllustrator) mIllustrator->displayAllCapturedData();
         return accum.mLineCount;
     }
 }
