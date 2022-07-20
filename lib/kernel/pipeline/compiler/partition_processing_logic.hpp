@@ -312,8 +312,14 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                     } else {
                         produced = mInitiallyProducedItemCount[streamSet];
                     }
-                } else {
+                } else if (mProducedAtJumpPhi[br.Port]) {
                     produced = mProducedAtJumpPhi[br.Port];
+                } else {
+                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                        produced = mAlreadyProducedDeferredPhi[br.Port];
+                    } else {
+                        produced = mAlreadyProducedPhi[br.Port];
+                    }
                 }
             } else { // if (kernel > mKernelId) {
                 const auto prefix = makeBufferName(kernel, br.Port);
@@ -521,7 +527,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
         assert (PartitionOnHybridThread.test(nextPartitionId) == mCompilingHybridThread);
         const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
 
-        assert (nextPartitionId <= jumpId);       
+        assert (nextPartitionId <= jumpId);
         assert (PartitionOnHybridThread.test(jumpId) == mCompilingHybridThread);
 
         if (LLVM_LIKELY(nextPartitionId != jumpId)) {
@@ -557,17 +563,15 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
             #endif
 
-
-
             b->CreateBr(mNextPartitionEntryPoint);
-        } else {
+            return;
+        } else if (mKernelJumpToNextUsefulPartition) {
             mKernelInitiallyTerminatedExit = b->GetInsertBlock();
             assert (mKernelJumpToNextUsefulPartition != mKernelInitiallyTerminated);
             assert (mExhaustedInputAtJumpPhi);
             mExhaustedInputAtJumpPhi->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
             for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
                 const auto streamSet = target(e, mBufferGraph);
-
                 const auto & br = mBufferGraph[e];
                 Value * produced = nullptr;
                 if (LLVM_UNLIKELY(br.IsDeferred)) {
@@ -580,14 +584,18 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
                 mProducedAtJumpPhi[port]->addIncoming(produced, mKernelInitiallyTerminatedExit);
             }
             b->CreateBr(mKernelJumpToNextUsefulPartition);
+            return;
         }
-
-    } else { // if (!mIsPartitionRoot) {
-
-        mKernelInitiallyTerminatedExit = b->GetInsertBlock();
-        updateKernelExitPhisAfterInitiallyTerminated(b);
-        b->CreateBr(mKernelExit);
     }
+
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
+    }
+
+    mKernelInitiallyTerminatedExit = b->GetInsertBlock();
+    updateKernelExitPhisAfterInitiallyTerminated(b);
+    b->CreateBr(mKernelExit);
 
 }
 

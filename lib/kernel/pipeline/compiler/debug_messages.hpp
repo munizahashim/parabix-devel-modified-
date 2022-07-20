@@ -54,7 +54,6 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(BuilderRef b, Twine format, Arg
     }
     #endif
     out << format << "\n";
-
     SmallVector<Value *, 8> argVals(2);
     argVals[0] = b->getInt32(STDERR_FILENO);
     argVals[1] = b->GetString(out.str());

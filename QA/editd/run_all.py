@@ -20,5 +20,5 @@ if __name__ == "__main__":
     if open(output_home + '/reads2', 'r').read()==expected_f.read():
         print('Edit Distance test succeeded.')
     else:
-        print('Edit Distance test failed.')
+        print('Edit Distance test failed.\n')
         exit(1)

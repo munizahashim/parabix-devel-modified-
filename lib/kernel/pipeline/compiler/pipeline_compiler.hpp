@@ -368,7 +368,7 @@ public:
     void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
-    void setConsumedItemCount(BuilderRef b, const size_t streamSet, not_null<Value *> consumed, const unsigned slot) const;
+    void setConsumedItemCount(BuilderRef b, const size_t streamSet, Value * consumed, const unsigned slot) const;
     void zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId);
     void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);

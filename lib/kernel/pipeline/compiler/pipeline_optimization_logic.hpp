@@ -111,7 +111,13 @@ void PipelineCompiler::simplifyPhiNodes(Module * const m) const {
             Instruction * inst = &bb.front();
             while (isa<PHINode>(inst)) {
                 PHINode * const phi = cast<PHINode>(inst);
-                assert (phi->getNumIncomingValues() == n);
+                #ifndef NDEBUG
+                if (LLVM_UNLIKELY(phi->getNumIncomingValues() != n || n == 0)) {
+                    bb.print(errs(), nullptr, true, false);
+                    errs() << "\n\nIllegal PHINode: ";
+                    phi->print(errs(), true);
+                }
+                #endif
                 inst = inst->getNextNode();
                 if (LLVM_LIKELY(phi->hasNUsesOrMore(1))) {
                     Value * const value = phi->getIncomingValue(0);

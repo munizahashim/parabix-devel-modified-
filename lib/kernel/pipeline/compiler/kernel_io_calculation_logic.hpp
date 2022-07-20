@@ -310,6 +310,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         b->SetInsertPoint(enteringFinalSegment);
 
+
+
         // if we have a potentially zero-extended buffer, use that; otherwise select the normal buffer
         Vec<Value *> truncatedInputVirtualBaseAddress(numOfInputs);
         for (unsigned i = 0; i != numOfInputs; ++i) {
@@ -317,6 +319,23 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             Value * const vba = inputVirtualBaseAddress[i];
             truncatedInputVirtualBaseAddress[i] = ze ? ze : vba;
         }
+
+        for (unsigned i = 0; i != numOfInputs; ++i) {
+            const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Input, i});
+            Value * const ze = zeroExtendedInputVirtualBaseAddress[i];
+            if (ze) {
+
+                #ifdef PRINT_DEBUG_MESSAGES
+                debugPrint(b, prefix + "_zeroExtendedInputVirtualBaseAddress.f = %" PRIx64, zeroExtendedInputVirtualBaseAddress[i]);
+                #endif
+            }
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, prefix + "_inputVirtualBaseAddress.f = %" PRIx64, inputVirtualBaseAddress[i]);
+            #endif
+
+        }
+
+
 
         /// -------------------------------------------------------------------------------------
         /// KERNEL ENTERING FINAL STRIDE
@@ -384,6 +403,14 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
                     }
                     inputVirtualBaseAddress[i] = phi;
                 }
+            }
+
+            for (unsigned i = 0; i != numOfInputs; ++i) {
+                #ifdef PRINT_DEBUG_MESSAGES
+                const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Input, i});
+                debugPrint(b, prefix + "_inputVirtualBaseAddress = %" PRIx64, inputVirtualBaseAddress[i]);
+                #endif
+
             }
         }
     }

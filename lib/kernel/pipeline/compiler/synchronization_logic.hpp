@@ -176,11 +176,6 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "# " + prefix + " acquired %ssegment number %" PRIu64, __getSyncLockName(b, type), mSegNo);
         #endif
-    } else {
-        #ifdef PRINT_DEBUG_MESSAGES
-        const auto prefix = makeKernelName(kernelId);
-        debugPrint(b, "# " + prefix + " bypassing segment number %" PRIu64, mSegNo);
-        #endif
     }
 }
 

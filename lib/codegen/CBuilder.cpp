@@ -1337,10 +1337,10 @@ Value * CBuilder::CreateLog2(Value * value, const Twine Name) {
 }
 
 Constant * CBuilder::GetString(StringRef Str) {
-    Module * const m = getModule();
+    Module * const m = getModule(); assert (m);
     GlobalVariable * ptr = m->getGlobalVariable(Str, true);
     if (ptr == nullptr) {
-        ptr = CreateGlobalString(Str, Str);
+        ptr = CreateGlobalString(Str, Str, 0, m);
     }
     return ConstantExpr::getPointerCast(ptr, getInt8PtrTy());
 }

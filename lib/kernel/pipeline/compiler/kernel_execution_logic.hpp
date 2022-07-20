@@ -51,30 +51,31 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         BasicBlock * resumeKernelExecution = nullptr;
 
+        Value *  waitToRelease = b->CreateIsNotNull(mIsFinalInvocation);
+
         // If we can loop back to the entry, we assume that its to handle the final block.
-        if (mMayLoopToEntry) {
-
+        if (LLVM_UNLIKELY(mMayLoopToEntry)) {
             mHasMoreInput = hasMoreInput(b);
-
-            // if this works correctly, the only time we won't release the pre-invocation lock is when we're
-            // going to end up terminating.
-
-            Value * const waitToRelease = b->CreateOr(mHasMoreInput, b->CreateIsNotNull(mIsFinalInvocation));
-            const auto prefix = makeKernelName(mKernelId);
-            BasicBlock * const releaseSyncLock =
-                b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
-            resumeKernelExecution =
-                b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
-            b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
-
-            b->SetInsertPoint(releaseSyncLock);
+            waitToRelease = b->CreateOr(waitToRelease, mHasMoreInput);
         }
+
+        const auto prefix = makeKernelName(mKernelId);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
+        #endif
+
+        BasicBlock * const releaseSyncLock =
+            b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
+        resumeKernelExecution =
+            b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
+        b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
+
+        b->SetInsertPoint(releaseSyncLock);
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
-        if (mMayLoopToEntry) {
-            b->CreateBr(resumeKernelExecution);
+        b->CreateBr(resumeKernelExecution);
 
-            b->SetInsertPoint(resumeKernelExecution);
-        }
+        b->SetInsertPoint(resumeKernelExecution);
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -434,6 +435,9 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             assert (processed);
 
             Value * const addr = mInputVirtualBaseAddressPhi[rt.Port]; assert (addr);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_addr = %" PRIx64, addr);
+            #endif
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
                 addNextArg(isClosed(b, StreamSetPort(PortType::Input, i)));
@@ -482,10 +486,16 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
             ptr = b->CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
             b->CreateStore(buffer->getBaseAddress(b.get()), ptr);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b.get()));
+            #endif
             addNextArg(b->CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
         } else {
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
+            #endif
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 
@@ -514,7 +524,14 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
     for (unsigned i = 0; i < numOfInputs; ++i) {
         Value * processed = nullptr;
         const auto inputPort = StreamSetPort{PortType::Input, i};
-        const Binding & input = getInputBinding(inputPort);
+        const auto inputEdge = getInput(mKernelId, inputPort);
+
+        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized && mReturnedProcessedItemCountPtr[inputPort])) {
+            const auto streamSet = source(inputEdge, mBufferGraph);
+            mTestConsumedItemCountForZero.test(streamSet - FirstStreamSet);
+        }
+
+        const Binding & input = mBufferGraph[inputEdge].Binding;
         const ProcessingRate & rate = input.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
             processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mCurrentLinearInputItems[inputPort]);
