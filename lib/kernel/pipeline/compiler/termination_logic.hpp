@@ -18,19 +18,6 @@ inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasKernelTerminated
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializePipelineInputTerminationSignal(BuilderRef b) {
-//    // any pipeline input streams are considered produced by the P_{in} vertex.
-//    if (out_degree(PipelineInput, mBufferGraph) > 0) {
-//        assert (KernelPartitionId[PipelineInput] == 0);
-//        Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
-//        Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
-//        mPartitionTerminationSignal[0] = b->CreateSelect(mIsFinal, completed, unterminated);
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief setCurrentTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
@@ -74,29 +61,26 @@ Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
 
     for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
-        const auto type = mTerminationCheck[partitionId];
-        if (type == 0 || PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread) {
-            continue;
-        }
+        if (const auto type = mTerminationCheck[partitionId]) {
+            Value * signal = mPartitionTerminationSignal[partitionId];
+            assert (isFromCurrentFunction(b, signal, false));
 
-        Value * signal = mPartitionTerminationSignal[partitionId];
-        assert (isFromCurrentFunction(b, signal, false));
-
-        if (type & TerminationCheckFlag::Hard) {
-            Value * const final = b->CreateICmpEQ(signal, fatal);
-            if (hard) {
-                hard = b->CreateOr(hard, final);
-            } else {
-                hard = final;
+            if (type & TerminationCheckFlag::Hard) {
+                Value * const final = b->CreateICmpEQ(signal, fatal);
+                if (hard) {
+                    hard = b->CreateOr(hard, final);
+                } else {
+                    hard = final;
+                }
             }
-        }
-        if (type & TerminationCheckFlag::Soft) {
-            assert (signal);
-            Value * const final = b->CreateICmpNE(signal, unterminated);
-            if (soft) {
-                soft = b->CreateAnd(soft, final);
-            } else {
-                soft = final;
+            if (type & TerminationCheckFlag::Soft) {
+                assert (signal);
+                Value * const final = b->CreateICmpNE(signal, unterminated);
+                if (soft) {
+                    soft = b->CreateAnd(soft, final);
+                } else {
+                    soft = final;
+                }
             }
         }
     }
@@ -141,14 +125,6 @@ Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort, 
     }
     return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
 }
-
-///** ------------------------------------------------------------------------------------------------------------- *
-// * @brief isClosed
-// ** ------------------------------------------------------------------------------------------------------------- */
-//Value * PipelineCompiler::isClosed(BuilderRef b, const unsigned streamSet) const {
-//    const auto producer = parent(streamSet, mBufferGraph);
-//    return hasKernelTerminated(b, producer, false);
-//}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosedNormally

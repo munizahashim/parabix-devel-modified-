@@ -97,7 +97,7 @@ const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
-const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
+// const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
@@ -193,7 +193,6 @@ public:
     void end(BuilderRef b);
 
     void readPipelineIOItemCounts(BuilderRef b);
-    void writeExternalProducedItemCounts(BuilderRef b);
 
 // internal pipeline functions
 
@@ -206,7 +205,6 @@ public:
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
-    void initializeForAllKernels();
     void clearInternalState(BuilderRef b);
 
 // partitioning codegen functions
@@ -339,7 +337,6 @@ public:
 // termination codegen functions
 
     void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
-    void initializePipelineInputTerminationSignal(BuilderRef b);
     void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
@@ -362,18 +359,12 @@ public:
 
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
     void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
-    void initializePipelineInputConsumedPhiNodes(BuilderRef b);
     void readExternalConsumerItemCounts(BuilderRef b);
-    void createConsumedPhiNodesAtExit(BuilderRef b);
-    void phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b);
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, Value * consumed, const unsigned slot) const;
     void zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId);
-    void writeExternalConsumedItemCounts(BuilderRef b);
     void readAllConsumerItemCounts(BuilderRef b);
-    void resetConsumerGraphState();
-    Value * getFinalConsumedCount(const unsigned streamSet) const;
 
 // buffer management codegen functions
 
@@ -449,16 +440,11 @@ public:
 
 // synchronization functions
 
-    void identifyAllInternallySynchronizedKernels();
     void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
     Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
-
-    void acquireHybridThreadSynchronizationLock(BuilderRef b);
-    void releaseHybridThreadSynchronizationLock(BuilderRef b);
-    void writeFinalHybridThreadSynchronizationNumber(BuilderRef b);
 
 // family functions
 
@@ -529,8 +515,6 @@ public:
     using PipelineCommonGraphFunctions::getReference;
 
     const StreamSetPort getReference(const StreamSetPort port) const;
-
-    LLVM_READNONE bool hasUsersOnFixedAndHybridThread(const size_t streamSet) const;
 
     using PipelineCommonGraphFunctions::getInputBufferVertex;
     using PipelineCommonGraphFunctions::getInputBuffer;
@@ -617,17 +601,7 @@ protected:
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
 
-    BitVector                                   KernelOnHybridThread;
     BitVector                                   PartitionOnHybridThread;
-
-    // thread state
-    bool                                        mCompilingHybridThread = false;
-    std::vector<unsigned>                       ActiveKernels;
-    std::vector<unsigned>                       ActivePartitions;
-    unsigned                                    ActiveKernelIndex;
-    unsigned                                    ActivePartitionIndex;
-    unsigned                                    FixedDataSyncLock = 0;
-    unsigned                                    HybridSyncLock = 0;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -732,7 +706,7 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
-    std::array<Value *, 2>                      mAnyClosed;
+    Value *                                     mAnyClosed;
     BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
@@ -913,8 +887,8 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
-, KernelOnHybridThread(std::move(P.KernelOnHybridThread))
-, PartitionOnHybridThread(std::move(P.PartitionOnHybridThread))
+//, KernelOnHybridThread(std::move(P.KernelOnHybridThread))
+//, PartitionOnHybridThread(std::move(P.PartitionOnHybridThread))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

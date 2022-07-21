@@ -22,8 +22,6 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernelThreadLocalHandle = nullptr;
     if (mKernel->hasThreadLocal() && allowThreadLocal) {
         mKernelThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId);
-
-
     }
     mCurrentKernelName = mKernelName[mKernelId];
 }
@@ -389,8 +387,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mExhaustedPipelineInputPhi = nullptr;
     mExhaustedInputAtJumpPhi = nullptr;
 
-    mAnyClosed[0] = nullptr;
-    mAnyClosed[1] = nullptr;
+    mAnyClosed = nullptr;
 
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;

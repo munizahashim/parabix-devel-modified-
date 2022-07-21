@@ -53,7 +53,6 @@ void PipelineCompiler::start(BuilderRef b) {
     readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
-    initializePipelineInputTerminationSignal(b);
 
     mKernel = nullptr;
     mKernelId = 0;
@@ -79,8 +78,6 @@ void PipelineCompiler::start(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
-    assert (std::find(ActiveKernels.begin(), ActiveKernels.end(), mKernelId) != ActiveKernels.end());
-    assert (KernelOnHybridThread.test(mKernelId) == mCompilingHybridThread);
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
@@ -133,14 +130,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     mExhaustedPipelineInputAtExit = mExhaustedInput;
 
-#ifndef NDEBUG
-    const auto nextPartitionId = ActivePartitions[ActivePartitionIndex + 1];
-    const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
-//    const auto mIsPartitionRoot = mIsPartitionRoot && (nextPartitionId != jumpId);
-
-    assert (nextPartitionId > mCurrentPartitionId);
-    assert (jumpId >= nextPartitionId);
-#endif
+    assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);
 
     const auto prefix = makeKernelName(mKernelId);
 
@@ -763,8 +753,6 @@ inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
         mTotalNumOfStridesAtExitPhi->addIncoming(mTotalNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
     }
 
-    createConsumedPhiNodesAtExit(b);
-
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, port);
@@ -797,8 +785,6 @@ inline void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(Build
         ConstantInt * const sz_ZERO = b->getSize(0);
         mTotalNumOfStridesAtExitPhi->addIncoming(sz_ZERO, mKernelInitiallyTerminatedExit);
     }
-
-    phiOutConsumedItemCountsAfterInitiallyTerminated(b);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
@@ -901,12 +887,11 @@ void PipelineCompiler::end(BuilderRef b) {
         terminated = hasPipelineTerminated(b);
 
         Value * const done = b->CreateIsNotNull(terminated);
-        if (LLVM_UNLIKELY(CheckAssertions && !mCompilingHybridThread)) {
+        if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
             Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
         }
-        releaseHybridThreadSynchronizationLock(b);
         BasicBlock * const exitBlock = b->GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
         incrementCurrentSegNo(b, exitBlock);
@@ -944,29 +929,5 @@ void PipelineCompiler::end(BuilderRef b) {
     mThreadLocalStreamSetBaseAddress = nullptr;
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief writeExternalProducedItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeExternalProducedItemCounts(BuilderRef b) {
-//    for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-//        const BufferPort & external = mBufferGraph[e];
-//        const auto streamSet = source(e, mBufferGraph);
-//        Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
-//        b->CreateStore(mLocallyAvailableItems[streamSet], ptr);
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief writeExternalConsumedItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::writeExternalConsumedItemCounts(BuilderRef b) {
-//    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-//        const auto streamSet = target(e, mBufferGraph);
-//        const BufferPort & rd = mBufferGraph[e];
-//        Value * const ptr = getProcessedInputItemsPtr(rd.Port.Number);
-//        Value * const consumed = mInitialConsumedItemCount[streamSet]; assert (consumed);
-//        b->CreateStore(consumed, ptr);
-//    }
-}
 
 }

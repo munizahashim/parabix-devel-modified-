@@ -37,43 +37,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyAllInternallySynchronizedKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::identifyAllInternallySynchronizedKernels() {
-//    if (mNumOfThreads > 1 || mIsNestedPipeline) {
-//        if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
-
-//            const auto firstOnHybridThread = KernelOnHybridThread.find_first_in(FirstKernel, PipelineOutput);
-//            assert (firstOnHybridThread != -1);
-//            HybridSyncLock = static_cast<unsigned>(firstOnHybridThread);
-
-//            auto maxProducer = PipelineInput;
-//            for (const auto kernel : KernelOnHybridThread.set_bits()) {
-//                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-//                    const auto producer = parent(source(e, mBufferGraph), mBufferGraph);
-//                    assert (producer < kernel);
-//                    maxProducer = std::max<unsigned>(maxProducer, producer);
-//                }
-//            }
-//            assert (maxProducer < firstOnHybridThread);
-//            FixedDataSyncLock = maxProducer;
-
-//            mRequiresSynchronization.set(HybridSyncLock);
-//            mRequiresSynchronization.set(FixedDataSyncLock);
-//        }
-
-//        if (LLVM_UNLIKELY(mNumOfThreads > (KernelOnHybridThread.any() ? 2U : 1U))) {
-//            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-//                if (KernelOnHybridThread.test(kernel)) {
-//                    continue;
-//                }
-//                mRequiresSynchronization.set(kernel);
-//            }
-//        }
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief obtainCurrentSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
@@ -107,17 +70,7 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
         return;
     }
     assert (mNumOfThreads > 0);
-    unsigned step = 0;
-    if (mCompilingHybridThread) {
-        step = 1;
-    } else {
-        step = mNumOfThreads;
-        if (PartitionOnHybridThread.any()) {
-            step -= 1;
-        }
-    }
-    assert (step > 0);
-    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(step));
+    Value * const nextSegNo = b->CreateAdd(mSegNo, b->getSize(mNumOfThreads));
     cast<PHINode>(mSegNo)->addIncoming(nextSegNo, exitBlock);
     #endif
 }
@@ -144,7 +97,6 @@ LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type) {
     if (mNumOfThreads != 1 || mIsNestedPipeline) {
-        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
@@ -188,7 +140,6 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     if (mNumOfThreads != 1 || mIsNestedPipeline || TraceProducedItemCounts || TraceUnconsumedItemCounts) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
-        assert (KernelOnHybridThread.test(kernelId) == mCompilingHybridThread);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, mSegNo, mNextSegNo,
                                                            AtomicOrdering::Release, AtomicOrdering::Acquire);
@@ -207,53 +158,6 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
         debugPrint(b, prefix + ": released %ssegment number %" PRIu64, __getSyncLockName(b, type), mSegNo);
         #endif
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief acquireCurrentSegment
- *
- * Before the segment is processed, this loads the segment number of the kernel state and ensures the previous
- * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::acquireHybridThreadSynchronizationLock(BuilderRef b) {
-    if (KernelOnHybridThread.any()) {
-        assert (mNumOfThreads > 1);
-
-        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
-        BasicBlock * const waiting = b->CreateBasicBlock("hybrid_sync_waiting" , nextNode);
-        BasicBlock * const waited = b->CreateBasicBlock("hybrid_sync_waited", nextNode);
-
-        const auto syncLock = mCompilingHybridThread ? FixedDataSyncLock : HybridSyncLock;
-        assert (KernelOnHybridThread.test(syncLock) != mCompilingHybridThread);
-        assert (FirstKernel <= syncLock && syncLock <= LastKernel);
-        const auto type = isDataParallel(syncLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        Value * const otherThread = getSynchronizationLockPtrForKernel(b, syncLock, type);
-        b->CreateBr(waiting);
-
-        b->SetInsertPoint(waiting);
-        Value * const thisSegNo = b->CreateAtomicLoadAcquire(otherThread);
-        Value * const ready = b->CreateICmpULE(mSegNo, thisSegNo);
-        Value * const done = b->CreateIsNotNull(readTerminationSignal(b, KernelPartitionId[syncLock]));
-        b->CreateLikelyCondBr(b->CreateOr(ready, done), waited, waiting);
-
-        b->SetInsertPoint(waited);
-    }
-}
-
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief releaseHybridThreadSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::releaseHybridThreadSynchronizationLock(BuilderRef b) {
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief releaseHybridThreadSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeFinalHybridThreadSynchronizationNumber(BuilderRef b) {
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

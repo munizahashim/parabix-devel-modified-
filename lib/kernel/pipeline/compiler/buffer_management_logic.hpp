@@ -277,16 +277,9 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
-        const auto f = in_edge(streamSet, mBufferGraph);
-        const auto producer = source(f, mBufferGraph);
-        const auto partitionId = KernelPartitionId[producer];
-
-        const auto fromOtherThread = PartitionOnHybridThread.test(partitionId) != mCompilingHybridThread;
-
-        if (fromOtherThread) {
-            mPartitionTerminationSignal[partitionId] = readTerminationSignal(b, partitionId);
-        }
-        if (fromOtherThread || mLocallyAvailableItems[streamSet] == nullptr) {
+        if (mLocallyAvailableItems[streamSet] == nullptr) {
+            const auto f = in_edge(streamSet, mBufferGraph);
+            const auto producer = source(f, mBufferGraph);
             const BufferPort & outputPort = mBufferGraph[f];
             assert (outputPort.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(producer, outputPort.Port);
@@ -299,12 +292,6 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
             }
             mLocallyAvailableItems[streamSet] = produced;
         }
-
-//        const ConsumerNode & cn = mConsumerGraph[streamSet];
-//        if (cn.Consumed == nullptr) {
-//            cn.Consumed = mLocallyAvailableItems[streamSet];
-//        }
-
     }
 }
 
@@ -916,10 +903,7 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto fromOtherThread = KernelOnHybridThread.test(producer) != mCompilingHybridThread;
-
-        if (LLVM_UNLIKELY(fromOtherThread && bn.isUnowned() && bn.isInternal())) {
+        if (LLVM_UNLIKELY(bn.isUnowned() && bn.isInternal())) {
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
             assert (producer < mKernelId);

@@ -26,7 +26,6 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
             assert (rd.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(kernelId, rd.Port);
 
-
             if (out_degree(streamSet, mConsumerGraph) > 0) {
                 // Although we can PHI out the thread's current min. consumed summary count for each
                 // buffer, in any complex program, we'll inevitably have general register spill/reloads.
@@ -35,52 +34,17 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
                 mTarget->addNonPersistentScalar(sizeTy, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
             }
 
-//            if (kernelId != PipelineInput || mTraceIndividualConsumedItemCounts) {
-                // If we're tracing the consumer item counts, we need to store one for each
-                // (non-nested) consumer. Any nested consumers will have their own trace.
-                Type * countTy = sizeTy;
-                if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                    countTy = ArrayType::get(sizeTy, numOfIndependentConsumers + 1);
-                }
+            // If we're tracing the consumer item counts, we need to store one for each
+            // (non-nested) consumer. Any nested consumers will have their own trace.
+            Type * countTy = sizeTy;
+            if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+                countTy = ArrayType::get(sizeTy, numOfIndependentConsumers + 1);
+            }
 
-                const auto name = prefix + CONSUMED_ITEM_COUNT_SUFFIX;
-                mTarget->addInternalScalar(countTy, name, groupId);
-
-//                if (LLVM_LIKELY(bn.isOwned() || bn.isInternal() || bn.CrossesHybridThreadBarrier || mTraceIndividualConsumedItemCounts)) {
-//                    mTarget->addInternalScalar(countTy, name, groupId);
-//                } else {
-//                    mTarget->addNonPersistentScalar(countTy, name);
-//                }
-
-//                if (LLVM_UNLIKELY(addInternallySynchronizedInternalCounters)) {
-//                    mTarget->addInternalScalar(countTy, prefix + INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
-//                }
-
-                if (hasUsersOnFixedAndHybridThread(streamSet)) {
-                    assert (mNumOfThreads > 1);
-                    const auto altId = getCacheLineGroupId(PipelineOutput);
-                    mTarget->addInternalScalar(countTy, prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX, altId);
-                }
-//            }
-
+            const auto name = prefix + CONSUMED_ITEM_COUNT_SUFFIX;
+            mTarget->addInternalScalar(countTy, name, groupId);
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasUsersOnFixedAndHybridThread
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::hasUsersOnFixedAndHybridThread(const size_t streamSet) const {
-    const BufferNode & node = mBufferGraph[streamSet];
-    if (LLVM_UNLIKELY(node.CrossesHybridThreadBarrier)) {
-        std::bitset<2> check(0);
-        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto kernel = target(input, mBufferGraph);
-            check.set(KernelOnHybridThread.test(kernel) ? 1 : 0);
-        }
-        return check.all();
-    }
-    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -179,23 +143,12 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         if (LLVM_LIKELY(producer != PipelineInput || mTraceIndividualConsumedItemCounts)) {
             const StreamSetPort port{PortType::Output, c.Port};
             const auto prefix = makeBufferName(producer, port);
-            Value * consumed0 = nullptr;
-            if (hasUsersOnFixedAndHybridThread(streamSet)) {
-                assert (mNumOfThreads > 1);
-                Value * ptr = b->getScalarFieldPtr(prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX);
-                if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                    Constant * const ZERO = b->getInt32(0);
-                    ptr = b->CreateInBoundsGEP(ptr, { ZERO, ZERO } );
-                }
-                consumed0 = b->CreateLoad(ptr, true);
-            }
             Value * ptr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
                 Constant * const ZERO = b->getInt32(0);
                 ptr = b->CreateInBoundsGEP(ptr, { ZERO, ZERO } );
             }
-            Value * const consumed1 = b->CreateLoad(ptr, mNumOfThreads > 1);
-            itemCount = b->CreateUMin(consumed0, consumed1);
+            itemCount = b->CreateLoad(ptr, mNumOfThreads > 1);
         } else {
             Value * const ptr = getProcessedInputItemsPtr(c.Port);
             assert (isFromCurrentFunction(b, ptr, false));
@@ -209,48 +162,10 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeTransitoryConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced) {
+void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced) {
     if (out_degree(streamSet, mConsumerGraph) > 1) {
         b->setScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet), produced);
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief createConsumedPhiNodesAtExit
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::createConsumedPhiNodesAtExit(BuilderRef b) {
-//    IntegerType * const sizeTy = b->getSizeTy();
-//    for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
-//        const ConsumerEdge & c = mConsumerGraph[e];
-//        if (c.Flags & ConsumerEdge::UpdatePhi) {
-//            const auto streamSet = source(e, mConsumerGraph);
-//            const ConsumerNode & cn = mConsumerGraph[streamSet];
-////            assert (isFromCurrentFunction(b, cn.Consumed, true));
-//            if (LLVM_LIKELY(cn.PhiNode == nullptr)) {
-//                const ConsumerEdge & c = mConsumerGraph[e];
-//                const StreamSetPort port(PortType::Input, c.Port);
-//                const auto prefix = makeBufferName(mKernelId, port);
-//                PHINode * const consumedPhi = b->CreatePHI(sizeTy, 2, prefix + "_consumed");
-//                cn.PhiNode = consumedPhi;
-//            }
-//        }
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief phiOutConsumedItemCountsAfterInitiallyTerminated
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::phiOutConsumedItemCountsAfterInitiallyTerminated(BuilderRef b) {
-//    for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
-//        const ConsumerEdge & c = mConsumerGraph[e];
-//        if (c.Flags & ConsumerEdge::UpdatePhi) {
-//            const auto streamSet = source(e, mConsumerGraph);
-//            const ConsumerNode & cn = mConsumerGraph[streamSet];
-//            assert (isFromCurrentFunction(b, cn.PhiNode, false));
-//            assert (isFromCurrentFunction(b, mInitialConsumedItemCount[streamSet], false));
-//            cn.PhiNode->addIncoming(mInitialConsumedItemCount[streamSet], mKernelInitiallyTerminatedExit);
-//        }
-//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -325,17 +240,12 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
     const auto pe = in_edge(streamSet, mBufferGraph);
     const auto producer = source(pe, mBufferGraph);
     const BufferPort & outputPort = mBufferGraph[pe];
-    Value * ptr = nullptr;
 
     assert (isFromCurrentFunction(b, consumed, false));
 
     const auto prefix = makeBufferName(producer, outputPort.Port);
 
-    if (mCompilingHybridThread && hasUsersOnFixedAndHybridThread(streamSet)) {
-        ptr = b->getScalarFieldPtr(prefix + HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX);
-    } else {
-        ptr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
-    }
+    Value * ptr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
         ptr = b->CreateInBoundsGEP(ptr, { b->getInt32(0), b->getInt32(slot) });
     }
@@ -396,35 +306,6 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
             b->CreateStore(sz_ZERO, transConsumedPtr);
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializePipelineInputConsumedPhiNodes
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializePipelineInputConsumedPhiNodes(BuilderRef b) {
-//    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-//        const auto streamSet = target(e, mBufferGraph);
-//        const BufferPort & br = mBufferGraph[e];
-//        mInitialConsumedItemCount[streamSet] = getAvailableInputItems(br.Port.Number);
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief resetConsumerGraphState
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::resetConsumerGraphState() {
-//    for (unsigned i = FirstStreamSet; i <= LastStreamSet; ++i) {
-//        const ConsumerNode & cn = mConsumerGraph[i];
-//        cn.Consumed = nullptr;
-//        cn.PhiNode = nullptr;
-//    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getFinalConsumedCount
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getFinalConsumedCount(const unsigned streamSet) const {
-    return nullptr;
 }
 
 }

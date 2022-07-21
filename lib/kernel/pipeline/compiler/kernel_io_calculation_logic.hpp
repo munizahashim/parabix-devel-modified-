@@ -275,13 +275,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            if (mAnyClosed[0] && mAnyClosed[1]) {
-                isFinalSegment = b->CreateAnd(mAnyClosed[0], mAnyClosed[1]);
-            } else if (mAnyClosed[0]) {
-                isFinalSegment = mAnyClosed[0];
-            } else {
-                isFinalSegment = mAnyClosed[1];
-            }
+            isFinalSegment = mAnyClosed;
             assert ("partition has no inputs?" && isFinalSegment);
         } else {
             isFinalSegment = mFinalPartitionSegment;
@@ -486,13 +480,10 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
     if (mIsPartitionRoot) {
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto threadType = KernelOnHybridThread.test(producer) ? 1 : 0;
-        Value *& anyClosed = mAnyClosed[threadType];
-        if (anyClosed) {
-            anyClosed = b->CreateOr(anyClosed, closed);
+        if (mAnyClosed) {
+            mAnyClosed = b->CreateOr(mAnyClosed, closed);
         } else {
-            anyClosed = closed;
+            mAnyClosed = closed;
         }
     }
     Value * const sufficientInput = b->CreateOr(hasEnough, closed);

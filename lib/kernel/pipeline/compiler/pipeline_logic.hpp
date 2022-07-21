@@ -72,8 +72,6 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // Non-family kernels can be contained within the shared state but family ones
     // must be allocated dynamically.
 
-    identifyAllInternallySynchronizedKernels();
-
     IntegerType * const sizeTy = b->getSizeTy();
 
     #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
@@ -281,7 +279,6 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 
     // TODO: if we detect a fatal error at init, we should not execute
     // the pipeline loop.
-    initializeForAllKernels();
     #ifdef ENABLE_PAPI
     if (!mIsNestedPipeline) {
         initializePAPI(b);
@@ -350,28 +347,22 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 
     }
     resetInternalBufferHandles();
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
-    initializeForAllKernels();
     b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
     allocateOwnedBuffers(b, expectedNumOfStrides, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
-    initializeForAllKernels();
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -381,15 +372,12 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
             callKernelInitializeThreadLocalFunction(b);
         }
     }
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
-    initializeForAllKernels();
     assert (mTarget->hasThreadLocal());
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         ConstantInt * const reqMemory = b->getSize(RequiredThreadLocalStreamSetMemory);
@@ -400,8 +388,6 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
     }
     allocateOwnedBuffers(b, expectedNumOfStrides, false);
     resetInternalBufferHandles();
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -435,8 +421,6 @@ inline void PipelineCompiler::generateKernelMethod(BuilderRef b) {
  * @brief generateSingleThreadKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
-    mCompilingHybridThread = false;
-    initializeForAllKernels();
     if (PipelineHasTerminationSignal) {
         mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
     }
@@ -448,11 +432,10 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
         mSegNo = b->getSize(0);
     }
     #endif
-    ActiveKernelIndex = 0;
     start(b);
     branchToInitialPartition(b);
-    for (; ActiveKernelIndex < ActiveKernels.size() - 1; ++ActiveKernelIndex) {
-        setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+        setActiveKernel(b, i, true);
         executeKernel(b);
     }
     end(b);
@@ -463,8 +446,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
 //        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
 //        b->CreateStore(mSegNo, ptr);
     }
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -587,14 +568,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     FunctionType * const threadFuncType = FunctionType::get(voidPtrTy, {voidPtrTy}, false);
     Function * const fixedDataThreadFunc = Function::Create(threadFuncType, Function::InternalLinkage, threadName, m);
 
-    Function * hybridThreadFunc = nullptr;
-    if (LLVM_UNLIKELY(KernelOnHybridThread.any())) {
-        assert (codegen::EnableHybridThreadModel);
-        SmallVector<char, 256> tmp;
-        const auto hybridThreadName = concat(mTarget->getName(), "_DoHybridSegmentThread", tmp);
-        hybridThreadFunc = Function::Create(threadFuncType, Function::InternalLinkage, hybridThreadName, m);
-    }
-
     Value * const initialSharedState = getHandle();
     Value * const initialThreadLocal = getThreadLocalHandle();
     Value * const initialTerminationSignalPtr = getTerminationSignalPtr();
@@ -607,8 +580,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // (n - 1) threads to handle the subsequent offsets
     assert (mNumOfThreads > 1);
     const auto numOfAdditionalThreads = mNumOfThreads - 1U;
-  //  const auto numOfHybridThreads = (hybridThreadFunc != nullptr ? 1U : 0U);
-  //  const auto numOfFixedDataThreads = numOfAdditionalThreads - numOfHybridThreads;
 
     Function * const pthreadSelfFn = m->getFunction("pthread_self");
     Function * const pthreadCreateFn = m->getFunction("__pipeline_pthread_create_on_cpu");
@@ -628,8 +599,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     PointerType * const intPtrPtrTy = intPtrTy->getPointerTo();
 
     Value * const processThreadId = b->CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
-    // start the normal threads
-    const auto firstThreadedSegNo = hybridThreadFunc ? 0U : 1U;
+    // construct and start the threads
     for (unsigned i = 0; i != numOfAdditionalThreads; ++i) {
         if (mTarget->hasThreadLocal()) {
 
@@ -651,7 +621,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
                 b->CreateCall(allocInternal->getFunctionType(), allocInternal, allocArgs);
             }
         }
-        threadState[i] = constructThreadStructObject(b, processThreadId, threadLocal[i], i + firstThreadedSegNo);
+        threadState[i] = constructThreadStructObject(b, processThreadId, threadLocal[i], i + 1);
         FixedArray<Value *, 2> indices;
         indices[0] = ZERO;
         indices[1] = b->getInt32(i);
@@ -675,9 +645,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     Value * const pty_ZERO = Constant::getNullValue(pThreadTy);
     Value * const processState = constructThreadStructObject(b, pty_ZERO, initialThreadLocal, 0);
 
-    Function * const mainFunc = hybridThreadFunc ? hybridThreadFunc : fixedDataThreadFunc;
-
-    Value * const mainThreadRetVal = b->CreateCall(mainFunc->getFunctionType(), mainFunc, b->CreatePointerCast(processState, voidPtrTy));
+    Value * const mainThreadRetVal = b->CreateCall(fixedDataThreadFunc->getFunctionType(), fixedDataThreadFunc, b->CreatePointerCast(processState, voidPtrTy));
 
     // store where we'll resume compiling the DoSegment method
     const auto resumePoint = b->saveIP();
@@ -691,7 +659,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // -------------------------------------------------------------------------------------------------------------------------
     // MAKE PIPELINE THREAD
     // -------------------------------------------------------------------------------------------------------------------------
-    auto makeThreadFunction = [&](Function * const threadFunc, const bool isHybridThread) {
+    auto makeThreadFunction = [&](Function * const threadFunc) {
         threadFunc->setCallingConv(CallingConv::C);
         auto threadStructArg = threadFunc->arg_begin();
         threadStructArg->setName("threadStruct");
@@ -711,71 +679,17 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         assert (isFromCurrentFunction(b, getHandle()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle()));
 
-        assert (ActiveKernels.empty());
-        assert (ActivePartitions.empty());
-        flat_set<unsigned> partitions;
-        for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-            if (KernelOnHybridThread.test(i) == isHybridThread) {
-                ActiveKernels.push_back(i);
-                partitions.insert(KernelPartitionId[i]);
-            }
-        }
-        ActiveKernels.push_back(PipelineOutput);
-        ActivePartitions.assign(partitions.begin(), partitions.end());
-        assert (KernelPartitionId[PipelineInput] == 0);
-        assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
-        ActivePartitions.push_back(PartitionCount - 1);
 
         // generate the pipeline logic for this thread
-        mCompilingHybridThread = isHybridThread;
-        if (isHybridThread) {
-            KernelOnHybridThread.set(PipelineInput);
-            KernelOnHybridThread.set(PipelineOutput);
-            PartitionOnHybridThread.set(0);
-            PartitionOnHybridThread.set(PartitionCount - 1);
-        } else {
-            KernelOnHybridThread.reset(PipelineInput);
-            KernelOnHybridThread.reset(PipelineOutput);
-            PartitionOnHybridThread.reset(0);
-            PartitionOnHybridThread.reset(PartitionCount - 1);
-        }
-
-        isInputFromAlternateThread.reset();
-        requiresTerminationSignalFromAlternateThread.reset();
-
-        if (KernelOnHybridThread.any()) {
-            for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-                if (KernelOnHybridThread.test(kernel) == mCompilingHybridThread) {
-                    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                        const auto streamSet = source(input, mBufferGraph);
-                        const auto output = in_edge(streamSet, mBufferGraph);
-                        const auto producer = source(output, mBufferGraph);
-                        assert (producer < kernel);
-                        if (KernelOnHybridThread.test(producer) != mCompilingHybridThread) {
-                            isInputFromAlternateThread.set(streamSet);
-                            requiresTerminationSignalFromAlternateThread.set(KernelPartitionId[producer]);
-                        }
-                    }
-                }
-            }
-            assert (KernelPartitionId[PipelineInput] == 0);
-            assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
-        }
-
         start(b);
-        const auto m = ActiveKernels.size() - 1;
-        mCurrentPartitionId = 0;
-        ActiveKernelIndex = 0;
         branchToInitialPartition(b);
-        for (; ActiveKernelIndex < m; ++ActiveKernelIndex) {
-            setActiveKernel(b, ActiveKernels[ActiveKernelIndex], true);
+        for (auto i = FirstKernel; i <= LastKernel; ++i) {
+            setActiveKernel(b, i, true);
             executeKernel(b);
         }
         mKernel = nullptr;
         mKernelId = 0;
         end(b);
-        ActiveKernels.clear();
-        ActivePartitions.clear();
 
         BasicBlock * exitThread  = nullptr;
         BasicBlock * exitFunction  = nullptr;
@@ -799,11 +713,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->CreateRet(retVal);
     };
 
-    makeThreadFunction(fixedDataThreadFunc, false);
-    if (hybridThreadFunc) {
-        clearInternalState(b);
-        makeThreadFunction(hybridThreadFunc, true);
-    }
+    makeThreadFunction(fixedDataThreadFunc);
 
     // -------------------------------------------------------------------------------------------------------------------------
     // MAKE PIPELINE DRIVER CONTINUED
@@ -897,7 +807,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
-    initializeForAllKernels();
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
 
         // get the last segment # used by any kernel in case any reports require it.
@@ -941,8 +850,6 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         shutdownPAPI(b);
     }
     #endif
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1050,7 +957,6 @@ inline Value * PipelineCompiler::isProcessThread(BuilderRef b, Value * const thr
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {    
-    initializeForAllKernels();
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -1084,8 +990,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
     }
-    ActiveKernels.clear();
-    ActivePartitions.clear();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1127,27 +1031,6 @@ void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeForAllKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeForAllKernels() {
-    assert (ActiveKernels.empty());
-    assert (ActivePartitions.empty());
-    KernelOnHybridThread.reset(PipelineInput);
-    KernelOnHybridThread.reset(PipelineOutput);
-    PartitionOnHybridThread.reset(KernelPartitionId[PipelineInput]);
-    PartitionOnHybridThread.reset(KernelPartitionId[PipelineOutput]);
-    ActiveKernels.reserve(LastKernel - PipelineOutput + 1);
-    for (unsigned i = FirstKernel; i <= PipelineOutput; ++i) {
-        ActiveKernels.push_back(i);
-    }
-    ActivePartitions.reserve(PartitionCount);
-    assert (KernelPartitionId[FirstKernel] == 1);
-    for (unsigned i = 1; i < PartitionCount; ++i) {
-        ActivePartitions.push_back(i);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief clearInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::clearInternalState(BuilderRef b) {
@@ -1165,7 +1048,6 @@ void PipelineCompiler::clearInternalState(BuilderRef b) {
     mPartitionPipelineProgressPhi.reset(0, PartitionCount - 1);
 
     resetInternalBufferHandles();
-    resetConsumerGraphState();
 }
 
 }
