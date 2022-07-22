@@ -581,4 +581,41 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
     return true; // otherwise = CC, Any, Start, End, Range
 }
 
+unsigned grepOffset(const RE * re) {
+    if (const Alt * alt = dyn_cast<Alt>(re)) {
+        unsigned altOffset = 0;
+        for (const RE * re : *alt) {
+            altOffset = std::max(altOffset, grepOffset(re));
+        }
+        return altOffset;
+    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
+        if (seq->empty()) return 1;
+        return grepOffset(seq->back());
+    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
+        if (rep->getUB() == Rep::UNBOUNDED_REP) return 1;
+        return grepOffset(rep->getRE());
+    } else if (isa<Start>(re)) {
+        return 1;
+    } else if (isa<End>(re)) {
+        return 1;
+    } else if (isa<Assertion>(re)) {
+        return 1;
+    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
+        return grepOffset(diff->getLH());
+    } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
+        return std::min(grepOffset(e->getLH()), grepOffset(e->getRH()));
+    } else if (isa<Any>(re)) {
+        return 0;
+    } else if (isa<CC>(re)) {
+        return 0;
+    } else if (const Group * g = dyn_cast<Group>(re)) {
+        return grepOffset(g->getRE());
+    } else if (const Name * n = dyn_cast<Name>(re)) {
+        return grepOffset(n->getDefinition());
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return grepOffset(c->getCapturedRE());
+    }
+    return 0; // otherwise
+}
+
 }

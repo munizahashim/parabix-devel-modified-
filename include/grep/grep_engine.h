@@ -249,6 +249,10 @@ public:
     void grepCodeGen() override;
 private:
     uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) override;
+    void applyColorization(ProgBuilderRef E,
+                           kernel::StreamSet * MatchSpans,
+                           kernel::StreamSet * Basis,
+                           kernel::StreamSet * ColorizedBasis);
 };
 
 class CountOnlyEngine final : public GrepEngine {

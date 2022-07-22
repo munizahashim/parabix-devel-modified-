@@ -40,6 +40,7 @@ bool hasEndAnchor(const RE * r);
     
 bool DefiniteLengthBackReferencesOnly(const RE * re);
     
+unsigned grepOffset(const RE * re);
 }
 
 #endif // RE_ANALYSIS_H

@@ -507,7 +507,6 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         return mergedSpans;
     } else if (re::Name * externalName = dyn_cast<re::Name>(r)) {
         std::string nameStr = externalName->getFullName();
-        //llvm::errs() << "External: " << nameStr << "\n";
         auto f = mExternalMap.find(nameStr);
         if (f == mExternalMap.end()) {
             llvm::errs() << "External not found " << nameStr << "\n";
@@ -526,12 +525,12 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         int spanLgth = ext->getLengthRange().first;
         if (spanLgth <= 1) return match_marks;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, 1, match_marks, spans);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, ext->getOffset(), match_marks, spans);
         return spans;
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, 1, MatchResults, spans);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
         return spans;
     }
 }
@@ -724,7 +723,7 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
-void applyColorization(ProgBuilderRef E,
+void EmitMatchesEngine::applyColorization(ProgBuilderRef E,
                                           StreamSet * MatchSpans,
                                           StreamSet * Basis,
                                           StreamSet * ColorizedBasis) {
@@ -747,9 +746,9 @@ void applyColorization(ProgBuilderRef E,
     // bixnum sequentially numbering the string insert positions.
     StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
     E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-    //E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
-    // Baais bit streams expanded with 0 bits for each string to be inserted.
+    //if (mIllustrator) mIllustrator->captureBixNum(E, "InsertIndex", InsertIndex);
 
+    // Baais bit streams expanded with 0 bits for each string to be inserted.
     StreamSet * ExpandedBasis = E->CreateStreamSet(8);
     SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
     //E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
@@ -769,8 +768,8 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
     prepareExternalStreams(E, SourceStream);
 
     StreamSet * Matches = E->CreateStreamSet();
-    RunGrep(E, mRE, SourceStream, Matches);
-
+    unsigned grepOffset = RunGrep(E, mRE, SourceStream, Matches);
+    if (mIllustrator) mIllustrator->captureBitstream(E, "ICGrep Matches", Matches);
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * MatchSpans;
         if (EnableGetMatchSpan) {
@@ -778,17 +777,19 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
         } else {
             MatchSpans = E->CreateStreamSet(1, 1);
             auto lengths = re::getLengthRange(mRE, mIndexAlphabet);
-            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, 1, Matches, MatchSpans);
+            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, grepOffset, Matches, MatchSpans);
             Matches = MatchSpans;
         }
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
         if (mIndexAlphabet == &cc::Unicode) {
             StreamSet * u8initial = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
             StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
             SpreadByMask(E, u8initial, MatchSpans, ExpandedSpans);
-            StreamSet * Results = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
-            Matches = Results;
+            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, FilledSpans);
+            ///E->CreateKernelCall<DebugDisplayKernel>("FilledSpans", FilledSpans);
+            Matches = FilledSpans;
         } else {
             Matches = MatchSpans;
         }
@@ -822,11 +823,12 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
 
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     bool needsColoring = mColoring && !mInvertMatches;
-
+    if (mIllustrator) mIllustrator->captureBitstream(E, "MatchedLineEnds", MatchedLineEnds);
     StreamSet * MatchesByLine = nullptr;
     if (needsColoring | hasContext) {
         MatchesByLine = E->CreateStreamSet(1, 1);
         FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchesByLine", MatchesByLine);
     }
     if (hasContext) {
         StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
@@ -838,7 +840,6 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
     }
 
     if (needsColoring) {
-
         StreamSet * SourceCoords = nullptr;
         if (BatchMode) {
             //llvm::errs() << "Batch mode calling BatchCoordinatesKernel\n";
@@ -856,6 +857,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
 
         StreamSet * LineStarts = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, LineStarts);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", LineStarts);
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
         SpreadByMask(E, LineStarts, MatchesByLine, MatchedLineStarts);
 

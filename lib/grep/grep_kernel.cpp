@@ -340,7 +340,8 @@ options->scalarInputBindings(),
 options->scalarOutputBindings()),
 mOptions(std::move(options)),
 mSignature(mOptions->makeSignature()) {
-    addAttribute(InfrequentlyUsed());    
+    addAttribute(InfrequentlyUsed());
+    mOffset = grepOffset(mOptions->mRE);
 }
 
 StringRef ICGrepKernel::getSignature() const {
@@ -373,8 +374,10 @@ void ICGrepKernel::generatePabloMethod() {
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
     RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
     PabloAST * matchResult = matches.stream();
-    if (matches.offset() == 0) matchResult = pb.createAdvance(matchResult, 1);
-    mOffset = 1;
+    if (matches.offset() != mOffset) {
+        llvm::errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
+        llvm::report_fatal_error("matches.offset() != mOffset");
+    }
     pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
     PabloAST * value = nullptr;
@@ -712,4 +715,3 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     P->CreateKernelCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
-
