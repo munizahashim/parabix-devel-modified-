@@ -340,12 +340,8 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 out << "subgraph cluster" << partitionId << " {\n"
                        "label=\"Partition #" << partitionId  << "\";"
                        "fontcolor=\"red\";"
-                       "style=\"rounded,dashed,bold\";";
-                if (PartitionOnHybridThread.test(partitionId)) {
-                    out << "color=\"blue\";";
-                } else {
-                    out << "color=\"red\";";
-                }
+                       "style=\"rounded,dashed,bold\";"
+                       "color=\"red\";";
                 out <<  "\n";
                 closePartition = true;
                 currentPartition = partitionId;

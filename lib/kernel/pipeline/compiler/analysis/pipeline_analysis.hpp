@@ -46,8 +46,6 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         P.generateInitialBufferGraph();
 
-        P.identifyKernelsOnHybridThread();
-
         P.identifyOutputNodeIds();
 
         P.identifyInterPartitionSymbolicRates();
@@ -68,7 +66,6 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
         P.determineBufferSize(b);
         P.determineBufferLayout(b, rng);
 
-        P.identifyCrossHybridThreadStreamSets();
         P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
@@ -198,7 +195,6 @@ private:
 
     // consumer analysis functions
 
-    void identifyCrossHybridThreadStreamSets();
     void makeConsumerGraph();
 
     // dataflow analysis functions
@@ -224,16 +220,9 @@ private:
 
     void annotateBufferGraphWithAddAttributes();
 
-    // IO analysis functions
-
-    void identifyKernelsOnHybridThread();
-
     // Input truncation analysis functions
 
     void makeInputTruncationGraph();
-
-
-
 
 public:
 
@@ -289,9 +278,6 @@ public:
     std::vector<unsigned>           StrideStepLength;
 
     BufferGraph                     mBufferGraph;
-
-    BitVector                       KernelOnHybridThread;
-    BitVector                       PartitionOnHybridThread;
 
     std::vector<unsigned>           PartitionJumpTargetId;
 

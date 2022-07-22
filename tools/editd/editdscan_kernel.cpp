@@ -98,9 +98,6 @@ BlockOrientedKernel(b, "editdScanMatch" + std::to_string(matchResults->getNumEle
 mNumElements(matchResults->getNumElements()),
 mScanwordBitWidth(b->getSizeTy()->getBitWidth()) {
     addAttribute(SideEffecting());
-    if (codegen::EnableHybridThreadModel) {
-        addAttribute(IsolateOnHybridThread());
-    }
 }
 
 }

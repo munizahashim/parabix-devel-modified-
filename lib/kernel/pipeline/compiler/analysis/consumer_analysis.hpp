@@ -8,31 +8,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyCrossHybridThreadStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::identifyCrossHybridThreadStreamSets() {
-    flat_set<unsigned> crossThreadStreamSets;
-    for (unsigned kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-        if (LLVM_UNLIKELY(KernelOnHybridThread.test(kernel))) {
-            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                BufferNode & streamSet = mBufferGraph[source(e, mBufferGraph)];
-                streamSet.CrossesHybridThreadBarrier = true;
-                assert (streamSet.Locality == BufferLocality::GloballyShared);
-            }
-            for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto buffer = target(e, mBufferGraph);
-                BufferNode & streamSet = mBufferGraph[target(e, mBufferGraph)];
-                if (LLVM_LIKELY(out_degree(buffer, mBufferGraph) > 0)) {
-                    streamSet.CrossesHybridThreadBarrier = true;
-                    assert (streamSet.Locality == BufferLocality::GloballyShared);
-                }
-            }
-
-        }
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeConsumerGraph
  *
  * Copy the buffer graph but amalgamate any multi-edges into a single one
@@ -47,12 +22,10 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         const BufferNode & streamSetNode = mBufferGraph[streamSet];
         if (streamSetNode.Locality != BufferLocality::GloballyShared) {
-            assert (!streamSetNode.CrossesHybridThreadBarrier);
             continue;
         }
 
         if (LLVM_UNLIKELY(out_degree(streamSet, mBufferGraph) == 0)) {
-            assert (!streamSetNode.CrossesHybridThreadBarrier);
             continue;
         }
 
@@ -67,16 +40,13 @@ void PipelineAnalysis::makeConsumerGraph() {
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
 
-        std::array<unsigned, 2> lastThreadConsumer = { PipelineInput, PipelineInput };
+        auto lastConsumer = PipelineInput;
 
         unsigned index = 0;
 
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
 
-            const auto onHybrid = KernelOnHybridThread.test(consumer);
-            const auto type = onHybrid ? 1 : 0;
-            auto & lastConsumer = lastThreadConsumer[type];
             lastConsumer = std::max<unsigned>(lastConsumer, consumer);
 
             const auto consumerPartId = KernelPartitionId[consumer];
@@ -86,9 +56,8 @@ void PipelineAnalysis::makeConsumerGraph() {
             }
         }
 
-        assert (lastThreadConsumer[0] != 0 || lastThreadConsumer[1] != 0);
+        assert (lastConsumer != 0);
 
-        const auto lastConsumer = std::max(lastThreadConsumer[0], lastThreadConsumer[1]);
         const auto lastConsumerPartitionId = KernelPartitionId[lastConsumer];
 
         unsigned flags = ConsumerEdge::WriteConsumedCount;
@@ -107,19 +76,15 @@ found_potentially_jumped_consumer:
         // to executing the last consumer, we need to defer writing the final
         // consumed item count until the very last consumer reads the data.
 
-        for (unsigned type = 0; type < 2; ++type) {
-            // const auto lastConsumer = LastKernel;
-            auto lastConsumer = lastThreadConsumer[type];
-            if (lastConsumer) {
-                ConsumerGraph::edge_descriptor e;
-                bool exists;
-                std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph);
-                if (exists) {
-                    ConsumerEdge & cn = mConsumerGraph[e];
-                    cn.Flags |= flags;
-                } else {
-                    add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, ++index, flags}, mConsumerGraph);
-                }
+        if (lastConsumer) {
+            ConsumerGraph::edge_descriptor e;
+            bool exists;
+            std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph);
+            if (exists) {
+                ConsumerEdge & cn = mConsumerGraph[e];
+                cn.Flags |= flags;
+            } else {
+                add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, ++index, flags}, mConsumerGraph);
             }
         }
     }

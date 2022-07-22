@@ -651,10 +651,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             if (kernelObj != mPipelineKernel) {
                 for (const Attribute & attr : kernelObj->getAttributes()) {
                     switch (attr.getKind()) {
-                        case AttrId::IsolateOnHybridThread:
-                            if (mPipelineKernel->getNumOfThreads() == 1 || !codegen::EnableHybridThreadModel) {
-                                break;
-                            }
                         case AttrId::InternallySynchronized:
                             // although in some cases, an internally synchronized kernel does not need to be
                             // isolated to its own partition, we must guarantee that the kernel does not
@@ -1079,14 +1075,12 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         const auto producer = source(output, mBufferGraph);
         const auto pid = KernelPartitionId[producer];
 
-        const auto threadType = PartitionOnHybridThread.test(pid);
-
         auto rateId = nextRateId;
         nextRateId += hasVarOutput ? 1 : 0;
         for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(input, mBufferGraph);
             const auto cid = KernelPartitionId[consumer];
-            if (cid != pid && PartitionOnHybridThread.test(cid) == threadType) {
+            if (cid != pid) {
                 add_edge(pid, cid, J);
                 if (hasVarOutput) {
                     addRateId(cid, rateId);
@@ -1120,15 +1114,11 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     BitSet intersection;
     expandCapacity(intersection);
 
-    auto priorThreadType = PartitionOnHybridThread.test(1);
-
     for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
         auto & ds = rateDomSet[i];
 
-        const auto currentThreadType = PartitionOnHybridThread.test(i);
-        if (out_degree(i, J) == 0 || priorThreadType != currentThreadType) {
+        if (out_degree(i, J) == 0) {
             ds.reset();
-            priorThreadType = currentThreadType;
         } else {
             if (in_degree(i, J) > 0) {
                 intersection.set();
@@ -1157,7 +1147,6 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         const BitSet & prior =  rateDomSet[i - 1];
         const BitSet & current =  rateDomSet[i];
         auto j = i + 1U;
-        const auto threadType = PartitionOnHybridThread.test(i);
         if (prior != current && in_degree(i, J) > 0) {
             assert (current.any());
             for (; j < (PartitionCount - 1); ++j) {
@@ -1166,15 +1155,8 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
                     break;
                 }
             }
-        } else {
-            for (; j < (PartitionCount - 1); ++j) {
-                if (PartitionOnHybridThread.test(j) == threadType) {
-                    break;
-                }
-            }
         }
         assert (j > i);
-        assert (PartitionOnHybridThread.test(j) == threadType || j == (PartitionCount - 1));
         PartitionJumpTargetId[i] = j;
     }
 

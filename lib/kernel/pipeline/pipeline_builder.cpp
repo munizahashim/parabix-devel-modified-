@@ -349,9 +349,6 @@ Kernel * PipelineBuilder::makeKernel() {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
         out << "-TL";
     }
-    if (LLVM_UNLIKELY(codegen::EnableHybridThreadModel)) {
-        out << "+HT";
-    }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {

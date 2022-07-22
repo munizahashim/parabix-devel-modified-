@@ -239,9 +239,6 @@ FieldCompressKernel::FieldCompressKernel(BuilderRef b,
         mInputStreamSets.push_back({kv.second, kv.first, FixedRate(), ZeroExtended()});
     }
     // setStride(4 * b->getBitBlockWidth());
-    if (codegen::EnableHybridThreadModel) {
-        addAttribute(IsolateOnHybridThread());
-    }
 }
 
 void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) {

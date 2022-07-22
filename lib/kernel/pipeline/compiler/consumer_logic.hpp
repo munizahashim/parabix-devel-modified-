@@ -91,7 +91,6 @@ inline void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
             const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
             const auto producer = parent(streamSet, mBufferGraph);
             if (LLVM_UNLIKELY((numOfIndependentConsumers != 0) || (producer == PipelineInput))) {
-                assert (!bn.CrossesHybridThreadBarrier);
                 Value * const consumed = getConsumedOutputItems(externalPort.Port.Number); assert (consumed);
                 setConsumedItemCount(b, streamSet, consumed, 0);
             }
@@ -107,8 +106,6 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
     Value * itemCount = nullptr;
 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
-
-        assert (!mBufferGraph[streamSet].CrossesHybridThreadBarrier);
 
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate.

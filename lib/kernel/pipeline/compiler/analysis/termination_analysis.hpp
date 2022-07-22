@@ -23,13 +23,12 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     for (auto consumer = FirstKernel; consumer <= PipelineOutput; ++consumer) {
         const auto cid = KernelPartitionId[consumer];
-        const auto threadType = KernelOnHybridThread.test(consumer);
         for (const auto e : make_iterator_range(in_edges(consumer, mBufferGraph))) {
             const auto buffer = source(e, mBufferGraph);
             const auto producer = parent(buffer, mBufferGraph);
             const auto pid = KernelPartitionId[producer];
             assert (pid <= cid);
-            if (pid != cid && KernelOnHybridThread.test(producer) == threadType) {
+            if (pid != cid) {
                 add_edge(pid, cid, G);
             }
         }

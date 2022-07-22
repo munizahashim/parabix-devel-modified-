@@ -113,7 +113,7 @@ WordCountKernel::WordCountKernel (BuilderRef b, StreamSet * const countable)
     {},
     {},
     {Bind(b->getSizeTy(), "lineCount"), Bind(b->getSizeTy(), "wordCount"), Bind(b->getSizeTy(), "charCount")}) {
- addAttribute(IsolateOnHybridThread());
+
 }
 
 void WordCountKernel::generatePabloMethod() {

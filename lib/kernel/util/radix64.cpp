@@ -277,9 +277,7 @@ expand3_4Kernel::expand3_4Kernel(BuilderRef b, StreamSet *input, StreamSet *expa
 {Binding{"sourceStream", input, FixedRate(3)}},
 {Binding{"expand34Stream", expandedOutput, FixedRate(4)}},
 {}, {}, {}) {
-    if (codegen::EnableHybridThreadModel) {
-        addAttribute(IsolateOnHybridThread());
-    }
+
 }
 
 radix64Kernel::radix64Kernel(BuilderRef b, StreamSet * input, StreamSet * output)

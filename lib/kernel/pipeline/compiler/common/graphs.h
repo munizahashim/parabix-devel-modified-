@@ -261,7 +261,6 @@ struct BufferNode {
     StreamSetBuffer * Buffer = nullptr;
     unsigned Type = 0;
     bool IsLinear = false;
-    bool CrossesHybridThreadBarrier = false;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 

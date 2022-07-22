@@ -41,7 +41,6 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(SideEffecting);
         NAME(Family);
         NAME(InternallySynchronized);
-        NAME(IsolateOnHybridThread);
         NAME(InfrequentlyUsed);
         NAME(Linear);
         NAME(None);

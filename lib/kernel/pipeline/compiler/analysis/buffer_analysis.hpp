@@ -853,7 +853,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
             // analyze any consumption rates.
 
-            if (bn.Locality == BufferLocality::GloballyShared || bn.CrossesHybridThreadBarrier) {
+            if (bn.Locality == BufferLocality::GloballyShared) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                 // determine this.
@@ -866,7 +866,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             } else {
                 auto bufferSize = bn.RequiredCapacity;
-                if (bn.Locality == BufferLocality::PartitionLocal || bn.CrossesHybridThreadBarrier) {
+                if (bn.Locality == BufferLocality::PartitionLocal) {
                     bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                     bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
