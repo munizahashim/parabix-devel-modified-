@@ -1046,10 +1046,8 @@ void PipelineCompiler::clearInternalState(BuilderRef b) {
 
     mPartitionEntryPoint.reset(0, PartitionCount);
     mPartitionTerminationSignal.reset(0, PartitionCount - 1);
-    mExhaustedPipelineInputAtPartitionEntry.reset(0, PartitionCount - 1);
 
     mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
-
 
     std::fill_n(mPartitionProducedItemCountPhi.data(), mPartitionProducedItemCountPhi.num_elements(), nullptr);
     std::fill_n(mPartitionConsumedItemCountPhi.data(), mPartitionConsumedItemCountPhi.num_elements(), nullptr);

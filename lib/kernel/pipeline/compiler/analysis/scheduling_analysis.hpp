@@ -1329,8 +1329,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 SN.Size = bytesPerItem;
 
                 const ProcessingRate & rate = b.getRate();
-                const auto itemsPerStride = rate.getUpperBound() * strideSize;
-                assert (itemsPerStride > Rational{0});
+                const auto itemsPerStride = std::max(rate.getUpperBound() * strideSize, Rational{1});
                 add_edge(i, j, itemsPerStride, G);
             }
         }

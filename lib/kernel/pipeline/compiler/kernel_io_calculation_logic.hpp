@@ -130,6 +130,9 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
+    BufferGraph::in_edge_iterator ei, ei_end;
+    std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
+
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
         if (port.CanModifySegmentLength) {
@@ -510,15 +513,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_hasInputData = %" PRIu8, test);
     #endif
 
-    if (mExhaustedPipelineInputPhi && !TraceIO) {
-        Value * exhausted = mExhaustedInput;
-        if (LLVM_UNLIKELY(mHasPipelineInput.test(inputPort.Number))) {
-            exhausted = b->getTrue();
-        }
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        mExhaustedPipelineInputPhi->addIncoming(exhausted, exitBlock);
-    }
-
     b->CreateLikelyCondBr(test, hasInputData, insufficentIO);
 
     // When tracing blocking I/O, test all I/O streams but do not execute
@@ -567,10 +561,6 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
         BasicBlock * const target = b->CreateBasicBlock(prefix + "_hasOutputSpace", mKernelLoopCall);
         assert (mKernelInsufficientInput);
         b->CreateCondBr(hasEnough, target, mKernelInsufficientInput);
-        if (mExhaustedPipelineInputPhi) {
-            BasicBlock * const exitBlock = b->GetInsertBlock();
-            mExhaustedPipelineInputPhi->addIncoming(mExhaustedInput, exitBlock);
-        }
 
         b->SetInsertPoint(target);
     }

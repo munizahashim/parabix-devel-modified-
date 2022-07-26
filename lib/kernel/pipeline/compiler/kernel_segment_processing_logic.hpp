@@ -69,7 +69,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
     Constant * const i1_FALSE = b->getFalse();
     mPipelineProgress = i1_FALSE;
-    mExhaustedInput = i1_FALSE;
     obtainCurrentSegmentNumber(b, entryBlock);
 }
 
@@ -126,8 +125,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         }
     }
     assert (mNextPartitionEntryPoint);
-
-    mExhaustedPipelineInputAtExit = mExhaustedInput;
 
     assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);
 
@@ -228,8 +225,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     // kernel if any stream is insufficient.
     if (mMayHaveInsufficientIO && TraceIO) {
         b->CreateUnlikelyCondBr(mBranchToLoopExit, mKernelInsufficientInput, mKernelLoopCall);
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        mExhaustedPipelineInputPhi->addIncoming(mExhaustedInput, exitBlock);
     } else {
         b->CreateBr(mKernelLoopCall);
     }
@@ -350,9 +345,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }
     recordProducedItemCountDeltas(b);
-
     // chain the progress state so that the next one carries on from this one
-    mExhaustedInput = mExhaustedPipelineInputAtExit;
     mPipelineProgress = mAnyProgressedAtExitPhi;
     if (mIsPartitionRoot) {
         assert (mTotalNumOfStridesAtExitPhi);
@@ -468,7 +461,6 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     }
     mTerminatedAtLoopExitPhi->addIncoming(terminationSignal, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(i1_TRUE, exitBlock);
-    mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedInput, exitBlock);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -599,12 +591,11 @@ inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef
     assert (mKernelJumpToNextUsefulPartition);
     b->SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto prefix = makeKernelName(mKernelId);
-    Type * const boolTy = b->getInt1Ty();
-    mExhaustedInputAtJumpPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInputAtJumpPhi");
+    IntegerType * const sizeTy = b->getSizeTy();
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, port);
-        mProducedAtJumpPhi[port] = b->CreatePHI(b->getSizeTy(), 2, prefix + "_producedAtJumpPhi");
+        mProducedAtJumpPhi[port] = b->CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
 }
 
@@ -612,10 +603,7 @@ inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef
  * @brief initializeKernelInsufficientIOExitPhis
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void PipelineCompiler::initializeKernelInsufficientIOExitPhis(BuilderRef b) {
-    b->SetInsertPoint(mKernelInsufficientInput);
-    const auto prefix = makeKernelName(mKernelId);
-    IntegerType * const boolTy = b->getInt1Ty();
-    mExhaustedPipelineInputPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInput");
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -644,7 +632,6 @@ inline void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
     }
     mTerminatedAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_terminatedAtLoopExit");
     mAnyProgressedAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_anyProgressAtLoopExit");
-    mExhaustedPipelineInputAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_exhaustedInputAtLoopExit");
     if (mIsPartitionRoot) {
         mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
         mFinalPartitionSegmentAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_finalPartitionSegmentAtLoopExitPhi");
@@ -720,8 +707,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
     }
 
     if (mMayLoopToEntry || !mIsPartitionRoot || !mKernelJumpToNextUsefulPartition) {
-        assert (mExhaustedPipelineInputPhi);
-        mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
         assert (mAlreadyProgressedPhi);
         mAnyProgressedAtLoopExitPhi->addIncoming(mAlreadyProgressedPhi, exitBlock);
         mTerminatedAtLoopExitPhi->addIncoming(mInitialTerminationSignal, exitBlock);
@@ -729,7 +714,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
 
     if (mKernelJumpToNextUsefulPartition) {
         assert (mIsPartitionRoot);
-        mExhaustedInputAtJumpPhi->addIncoming(mExhaustedPipelineInputPhi, exitBlock);
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto & br = mBufferGraph[e];
             const auto port = br.Port;
@@ -777,10 +761,6 @@ inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
     progress->addIncoming(mAnyProgressedAtLoopExitPhi, mKernelLoopExitPhiCatch);
     mAnyProgressedAtExitPhi = progress;
 
-    PHINode * const exhausted = b->CreatePHI(boolTy, 2, prefix + "_exhaustedPipelineInputAtKernelExit");
-    exhausted->addIncoming(mExhaustedPipelineInputAtLoopExitPhi, mKernelLoopExitPhiCatch);
-    mExhaustedPipelineInputAtExit = exhausted;
-
     if (mIsPartitionRoot) {
         mFinalPartitionSegmentAtExitPhi = b->CreatePHI(boolTy, 2, prefix + "_anyProgressAtKernelExit");
         mFinalPartitionSegmentAtExitPhi->addIncoming(mFinalPartitionSegmentAtLoopExitPhi, mKernelLoopExitPhiCatch);
@@ -813,7 +793,6 @@ inline void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(Build
     }
 
     mAnyProgressedAtExitPhi->addIncoming(mPipelineProgress, mKernelInitiallyTerminatedExit);
-    cast<PHINode>(mExhaustedPipelineInputAtExit)->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
     if (mIsPartitionRoot) {
         mTotalNumOfStridesAtExitPhi->addIncoming(b->getSize(0), mKernelInitiallyTerminatedExit);
         mFinalPartitionSegmentAtExitPhi->addIncoming(b->getTrue(), mKernelInitiallyTerminatedExit);
@@ -827,7 +806,6 @@ inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
     BasicBlock * const exitBlock = b->GetInsertBlock();
     mTerminatedAtLoopExitPhi->addIncoming(mTerminatedSignalPhi, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);
-    mExhaustedPipelineInputAtLoopExitPhi->addIncoming(mExhaustedInput, exitBlock);
     if (mIsPartitionRoot) {
         Value * finalNumOfStrides = mUpdatedNumOfStrides; assert (mUpdatedNumOfStrides);
         if (mFinalPartialStrideFixedRateRemainderPhi) {
@@ -914,6 +892,9 @@ void PipelineCompiler::end(BuilderRef b) {
     b->SetInsertPoint(mPipelineEnd);
     if (mCurrentThreadTerminationSignalPtr) {
         assert (canSetTerminateSignal());
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "# pipeline terminated = %" PRIu64 " for %" PRIx64, terminated, getHandle());
+        #endif
         b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
     }
     // free any truncated input buffers

@@ -384,8 +384,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;
-    mExhaustedPipelineInputPhi = nullptr;
-    mExhaustedInputAtJumpPhi = nullptr;
 
     mAnyClosed = nullptr;
 

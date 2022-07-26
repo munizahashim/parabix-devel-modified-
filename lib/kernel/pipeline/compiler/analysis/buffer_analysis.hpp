@@ -55,17 +55,22 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             Rational ub{rate.getUpperBound()};
             if (LLVM_UNLIKELY(rate.isGreedy())) {
                 if (LLVM_UNLIKELY(port.Type == PortType::Output)) {
-                    SmallVector<char, 0> tmp;
-                    raw_svector_ostream out(tmp);
-                    out << "Greedy rate cannot be applied an output port: "
-                        << kernelObj->getName() << "." << binding.getName();
-                    report_fatal_error(out.str());
-                }
-                const auto e = in_edge(streamSet, mBufferGraph);
-                const BufferPort & producerBr = mBufferGraph[e];
-                ub = std::max(lb, producerBr.Maximum);
-                if (lb.numerator() == 0) {
-                    numOfZeroBoundGreedyInputs++;
+                    if (LLVM_LIKELY(kernel == PipelineInput)) {
+                        ub = std::max(std::max(ub, Rational{1}), lb);
+                    } else {
+                        SmallVector<char, 0> tmp;
+                        raw_svector_ostream out(tmp);
+                        out << "Greedy rate cannot be applied an output port: "
+                            << kernelObj->getName() << "." << binding.getName();
+                        report_fatal_error(out.str());
+                    }
+                } else {
+                    const auto e = in_edge(streamSet, mBufferGraph);
+                    const BufferPort & producerBr = mBufferGraph[e];
+                    ub = std::max(lb, producerBr.Maximum);
+                    if (lb.numerator() == 0) {
+                        numOfZeroBoundGreedyInputs++;
+                    }
                 }
             } else {
                 const auto strideLength = kernelObj->getStride();

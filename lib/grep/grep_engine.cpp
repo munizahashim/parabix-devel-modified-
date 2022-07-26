@@ -735,8 +735,8 @@ public:
                          // called functions
                          , {}
                          // stream inputs
-                         , {Bind("SourceCoords", SourceCoords, BoundedRate(0, 1)),
-                            Bind("MatchSpans", MatchSpans, Deferred()),
+                         , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
+                            Bind("MatchSpans", MatchSpans, FixedRate(8), Deferred()),
                             Bind("Basis", Basis, BoundedRate(0, 1))}
                          // stream outputs
                          , {}
@@ -749,8 +749,12 @@ public:
         addAttribute(InternallySynchronized());
         addAttribute(MustExplicitlyTerminate());
         addAttribute(SideEffecting());
-        // NOTE: the 8x is to accommodate FilterByMask minimum I/O.
-        setStride(8 * b->getBitBlockWidth());
+        // TODO: study the I/O settings to see what the best balance is for memory vs. throughput.
+
+        // TODO: I'm not sure how safe the greedyrate is here. When compiling the nested kernel,
+        // the pipeline compiler doesn't really understand how to treat the greedy input rate
+        // as a "production" rate. The simulator inside needs more information to understand it
+        // as a dataflow rate but current modelling system isn't very good for that.
     }
 
     void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> & E) final {

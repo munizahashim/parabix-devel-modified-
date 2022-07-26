@@ -621,7 +621,6 @@ protected:
     bool                                        mUsingNewSynchronizationVariable = false;
     unsigned                                    mCurrentNestedSynchronizationVariable = 0;
     #endif
-    Value *                                     mExhaustedInput = nullptr;
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mCurrentThreadTerminationSignalPtr = nullptr;
@@ -636,7 +635,6 @@ protected:
     BasicBlock *                                mKernelTerminated = nullptr;
     BasicBlock *                                mKernelInsufficientInput = nullptr;
     BasicBlock *                                mKernelJumpToNextUsefulPartition = nullptr;
-    PHINode *                                   mExhaustedInputAtJumpPhi = nullptr;
     BasicBlock *                                mKernelLoopExit = nullptr;
     BasicBlock *                                mKernelLoopExitPhiCatch = nullptr;
     BasicBlock *                                mKernelExit = nullptr;
@@ -676,7 +674,6 @@ protected:
     BasicBlock *                                mCurrentPartitionEntryGuard = nullptr;
     BasicBlock *                                mNextPartitionEntryPoint = nullptr;
     FixedVector<Value *>                        mPartitionTerminationSignal;
-    FixedVector<PHINode *>                      mExhaustedPipelineInputAtPartitionEntry;
     FixedVector<Value *>                        mInitialConsumedItemCount;
 
     PartitionPhiNodeTable                       mPartitionProducedItemCountPhi;
@@ -698,9 +695,6 @@ protected:
     PHINode *                                   mAnyProgressedAtLoopExitPhi = nullptr;
     PHINode *                                   mAnyProgressedAtExitPhi = nullptr;
     PHINode *                                   mAlreadyProgressedPhi = nullptr;
-    PHINode *                                   mExhaustedPipelineInputPhi = nullptr;
-    PHINode *                                   mExhaustedPipelineInputAtLoopExitPhi = nullptr;
-    Value *                                     mExhaustedPipelineInputAtExit = nullptr;
     PHINode *                                   mExecutedAtLeastOnceAtLoopEntryPhi = nullptr;
     PHINode *                                   mTerminatedSignalPhi = nullptr;
     PHINode *                                   mTerminatedAtLoopExitPhi = nullptr;
@@ -908,7 +902,6 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 
 , mPartitionTerminationSignal(PartitionCount, mAllocator)
-, mExhaustedPipelineInputAtPartitionEntry(PartitionCount, mAllocator)
 , mInitialConsumedItemCount(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mPartitionProducedItemCountPhi(extents[PartitionCount][LastStreamSet - FirstStreamSet + 1])

@@ -1158,10 +1158,11 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                         llvm_unreachable("cannot find partialsum ref port?");
                     };
 
-                    auto makePartitionPort = [&]() -> PartitionPort {
+                    auto makePartitionPort = [&](const bool isInput) -> PartitionPort {
                         unsigned lb = 0, ub = 0;
                         // auto distReps = reps;
-                        switch (rate.getKind()) {
+                        auto kindId = rate.getKind();
+                        switch (kindId) {
                             case RateId::Fixed:
                             case RateId::Bounded:
                                 BEGIN_SCOPED_REGION
@@ -1183,6 +1184,22 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                                 END_SCOPED_REGION
                                 break;
                             case RateId::Greedy:
+                                if (LLVM_LIKELY(isInput)) {
+                                    assert (rate.getLowerBound().denominator() == 1);
+                                    lb = rate.getLowerBound().numerator();
+                                } else {
+                                    // The only legal case for this here is if this is the "output" produced by
+                                    // the pipeline input kernel. This needs to be better considered so that the
+                                    // programmer can supply the correct information to it.
+                                    const auto a = baseNumOfItems * rate.getLowerBound();
+                                    assert (a.denominator() == 1);
+                                    lb = a.numerator();
+                                    const auto b = baseNumOfItems * (rate.getLowerBound() + Rational{1});
+                                    assert (b.denominator() == 1);
+                                    ub = b.numerator();
+                                    kindId = RateId::Bounded;
+                                }
+                                break;
                             case RateId::Unknown:
                                 assert (rate.getLowerBound().denominator() == 1);
                                 lb = rate.getLowerBound().numerator();
@@ -1190,7 +1207,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                             default:
                                 llvm_unreachable("unhandled processing rate type in variable rate simulator");
                         }
-                        return PartitionPort{rate.getKind(), lb, ub, delay, refId, stepLength, baseNumOfItems, binding.getDistribution()};
+                        return PartitionPort{kindId, lb, ub, delay, refId, stepLength, baseNumOfItems, binding.getDistribution()};
                     };
 
 //                    auto makeBlockSizePartitionPort = [&]() -> PartitionPort {
@@ -1223,7 +1240,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                             refId = getPartialSumRefId(portNode.Binding);
                         }
                         // if we already have a matching countable rate, use that intead.
-                        const auto port = makePartitionPort();
+                        const auto port = makePartitionPort(true);
                         if (rate.isFixed() || rate.isPartialSum()) {
                             for (const auto e : make_iterator_range(in_edges(partitionId, G))) {
                                 const auto u = source(e, G);
@@ -1239,7 +1256,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                         if (LLVM_UNLIKELY(rate.isPartialSum())) {
                             updatePartialSumProbabilityDistribution(e);
                         }
-                        assert ("sanity check" && G[e] == makePartitionPort());
+                        assert ("sanity check" && G[e] == makePartitionPort(true));
                     } else { // is an output
                         assert (streamSetMap.find(portNode.StreamSet) == streamSetMap.end());
                         if (LLVM_UNLIKELY(rate.isRelative())) {
@@ -1256,7 +1273,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                             if (rate.isPartialSum()) {
                                 refId = getPartialSumRefId(portNode.Binding);
                             }
-                            const auto port = makePartitionPort();
+                            const auto port = makePartitionPort(false);
                             // if we already have a fixed rate output with the same outgoing rate,
                             // fuse the output streamsets to simplify the simulator.
                             for (const auto e : make_iterator_range(out_edges(partitionId, G))) {
@@ -1271,11 +1288,11 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                         }
                         streamSet = add_vertex(blockSize, G);
                         BEGIN_SCOPED_REGION
-                        const auto e = add_edge(partitionId, streamSet, makePartitionPort(), G).first;
+                        const auto e = add_edge(partitionId, streamSet, makePartitionPort(false), G).first;
                         if (LLVM_UNLIKELY(rate.isPartialSum())) {
                             updatePartialSumProbabilityDistribution(e);
                         }
-                        assert ("sanity check" && G[e] == makePartitionPort());
+                        assert ("sanity check" && G[e] == makePartitionPort(false));
                         END_SCOPED_REGION
 fuse_existing_streamset:
                         assert (in_degree(streamSet, G) == 1);

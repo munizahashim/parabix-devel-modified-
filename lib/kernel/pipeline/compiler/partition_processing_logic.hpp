@@ -28,8 +28,7 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
         b->SetInsertPoint(mPartitionEntryPoint[i]);
         const auto prefix = std::to_string(i);
         mPartitionPipelineProgressPhi[i] = b->CreatePHI(boolTy, PartitionCount, prefix + ".pipelineProgress");
-        mExhaustedPipelineInputAtPartitionEntry[i] = b->CreatePHI(boolTy, PartitionCount, prefix + ".exhaustedInput");
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter && i < (PartitionCount - 1))) {
             mPartitionStartTimePhi[i] = b->CreatePHI(sizeTy, PartitionCount, prefix + ".startTimeCycleCounter");
         }
     }
@@ -337,16 +336,6 @@ void PipelineCompiler::phiOutPartitionStatusFlags(BuilderRef b, const unsigned t
     Value * const progress = mPipelineProgress;
     assert (isFromCurrentFunction(b, progress, false));
     progressPhi->addIncoming(progress, exitPoint);
-
-    PHINode * const exhaustedInputPhi = mExhaustedPipelineInputAtPartitionEntry[targetPartitionId];
-    if (exhaustedInputPhi) {
-        if (fromKernelEntryBlock) {
-            exhaustedInputPhi->addIncoming(mExhaustedInput, exitPoint);
-        } else {
-            Value * const exhausted = mIsBounded ? mExhaustedInputAtJumpPhi : mExhaustedInput;
-            exhaustedInputPhi->addIncoming(exhausted, exitPoint); assert (exhausted);
-        }
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -507,8 +496,6 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
         #endif
 
         mKernelInitiallyTerminatedExit = b->GetInsertBlock();
-        assert (mExhaustedInputAtJumpPhi);
-        mExhaustedInputAtJumpPhi->addIncoming(mExhaustedInput, mKernelInitiallyTerminatedExit);
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & br = mBufferGraph[e];
@@ -654,15 +641,9 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         #endif
         // Since there may be multiple paths into this kernel, phi out the start time
         // for each path.
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId < (PartitionCount - 1))) {
             mPartitionStartTimePhi[nextPartitionId]->addIncoming(mKernelStartTime, exitBlock);
             mKernelStartTime = mPartitionStartTimePhi[nextPartitionId];
-        }
-
-        PHINode * const exhaustedInputPhi = mExhaustedPipelineInputAtPartitionEntry[nextPartitionId];
-        if (exhaustedInputPhi) {
-            exhaustedInputPhi->addIncoming(mExhaustedInput, exitBlock);
-            mExhaustedInput = exhaustedInputPhi;
         }
 
         const auto n = LastStreamSet - FirstStreamSet + 1U;
