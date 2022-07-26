@@ -714,13 +714,6 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         b->CreateBr(lastTestExit);
 
         b->SetInsertPoint(lastTestExit);
-//        Value * hasMore = enoughInputPhi;
-//        if (LLVM_UNLIKELY(firstTest)) {
-//            hasMore = notAtSegmentLimit;
-//        } else {
-//            hasMore = enoughInputPhi;
-//        }
-//        return hasMore;
         return enoughInputPhi;
     } else {
         //  (final segment OR up<max) AND NOT final stride
@@ -891,7 +884,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // TODO: can we determine which locks will always dominate another?
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);

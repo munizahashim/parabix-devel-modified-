@@ -100,6 +100,9 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+    unsigned nestedSynchronizationVariableCount = 0;
+    #endif
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
@@ -112,6 +115,12 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         #endif
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
+        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+        if (isRoot && PartitionJumpTargetId[partitionId] == (PartitionCount - 1)) {
+            mTarget->addInternalScalar(sizeTy,
+                NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX + std::to_string(++nestedSynchronizationVariableCount), getCacheLineGroupId(i));
+        }
+        #endif
     }
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);

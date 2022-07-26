@@ -440,7 +440,6 @@ void PipelineAnalysis::identifyOwnedBuffers() {
 
     // fill in any known managed buffers
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-        const Kernel * const kernelObj = getKernel(kernel);
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
             if (LLVM_UNLIKELY(rate.IsManaged)) {

@@ -75,6 +75,9 @@ const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 
 const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
+#ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
+#endif
 
 #define SYNC_LOCK_FULL 0U
 #define SYNC_LOCK_PRE_INVOCATION 1U
@@ -97,7 +100,6 @@ const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
-// const static std::string HYBRID_THREAD_CONSUMED_ITEM_COUNT_SUFFIX = ".CHN";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
@@ -225,12 +227,14 @@ public:
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(BuilderRef b) const;
 
     void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
-    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
+    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntry);
+
+    void phiOutPartitionStateAndReleaseSynchronizationLocks(BuilderRef b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
 
     unsigned getFirstKernelInTargetPartition(const unsigned partitionId) const;
 
-    void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition);
-    void releaseAllSynchronizationLocksUntil(BuilderRef b, const unsigned firstKernelInTargetPartition);
+    void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition, Value * const segNo);
+    void releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel);
 
     void writeInitiallyTerminatedPartitionExit(BuilderRef b);
     void checkForPartitionExit(BuilderRef b);
@@ -442,9 +446,12 @@ public:
 
     void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
-    void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
-    void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType);
+    void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
+    void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+    Value * obtainNextSegmentNumber(BuilderRef b);
+    #endif
 
 // family functions
 
@@ -591,7 +598,6 @@ protected:
     const KernelIdVector                        KernelPartitionId;
     const std::vector<unsigned>                 StrideStepLength;
     const std::vector<unsigned>                 MaximumNumOfStrides;
-
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -609,7 +615,12 @@ protected:
     Value *                                     mKernelSharedHandle = nullptr;
     Value *                                     mKernelThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
-    Value *                                     mNextSegNo = nullptr;
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+    Value *                                     mBaseSegNo = nullptr;
+    PHINode *                                   mPartitionExitSegNoPhi = nullptr;
+    bool                                        mUsingNewSynchronizationVariable = false;
+    unsigned                                    mCurrentNestedSynchronizationVariable = 0;
+    #endif
     Value *                                     mExhaustedInput = nullptr;
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
@@ -643,7 +654,6 @@ protected:
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
-//    BitVector                                   mRequiresSynchronization;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
     BitVector                                   mTestConsumedItemCountForZero;
@@ -720,7 +730,7 @@ protected:
     bool                                        mIsPartitionRoot = false;
     bool                                        mIsOptimizationBranch = false;
     bool                                        mMayLoopToEntry = false;
-    bool                                        mCheckInputChannels = false;
+    bool                                        mMayHaveInsufficientIO = false;
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
@@ -887,14 +897,10 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
-//, KernelOnHybridThread(std::move(P.KernelOnHybridThread))
-//, PartitionOnHybridThread(std::move(P.PartitionOnHybridThread))
-
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
-//, mRequiresSynchronization(PipelineOutput + 1)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
 , mTestConsumedItemCountForZero(LastStreamSet - FirstStreamSet + 1)

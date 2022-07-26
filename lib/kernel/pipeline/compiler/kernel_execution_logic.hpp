@@ -72,7 +72,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
 
         b->SetInsertPoint(releaseSyncLock);
-        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION);
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
         b->CreateBr(resumeKernelExecution);
 
         b->SetInsertPoint(resumeKernelExecution);
@@ -306,7 +306,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     }
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION);
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {

@@ -56,6 +56,10 @@ struct PipelineAnalysis : public PipelineCommonGraphFunctions {
 
         P.determinePartitionJumpIndices();
 
+        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+        P.identifyPartitionGuidedSynchronizationVariables();
+        #endif
+
         P.annotateBufferGraphWithAddAttributes();
 
         // Finish annotating the buffer graph
@@ -151,7 +155,9 @@ private:
 
     void determinePartitionJumpIndices();
 
-    void makePartitionJumpTree();
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+    void identifyPartitionGuidedSynchronizationVariables();
+    #endif
 
     // scheduling analysis
 
