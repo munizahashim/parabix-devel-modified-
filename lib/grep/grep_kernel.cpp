@@ -36,6 +36,9 @@
 #include <re/analysis/collect_ccs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/re_multiplex.h>
+#include <kernel/streamutils/deletion.h>
+#include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/streams_merge.h>
 #include <kernel/unicode/boundary_kernels.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
@@ -61,27 +64,45 @@ namespace kernel {
 ExternalStreamObject::Allocator ExternalStreamObject::mAllocator;
 }
 
+void ExternalStreamObject::setIndexing(ProgBuilderRef b, StreamSet * indxStrm) {
+    if (mIndexStream == indxStrm) return;
+    mIndexStream = indxStrm;
+    if (mStreamSet != nullptr) installStreamSet(b, mStreamSet);
+}
+
+void ExternalStreamObject::installStreamSet(ProgBuilderRef b, StreamSet * s) {
+    if (mIndexStream == nullptr) {
+        mStreamSet = s;
+        return;
+    }
+    StreamSet * filtered = b->CreateStreamSet(s->getNumElements());
+    FilterByMask(b, mIndexStream, s, filtered);
+    mStreamSet = filtered;
+}
+
 void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    mStreamSet = b->CreateStreamSet(1);
-    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, inputs[0], mStreamSet);
+    StreamSet * pStrm  = b->CreateStreamSet(1);
+    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
+    installStreamSet(b, pStrm);
 }
 
 void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    mStreamSet = b->CreateStreamSet(1);
+    StreamSet * ccStrm = b->CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
-    b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], mStreamSet);
+    b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
+    installStreamSet(b, ccStrm);
 }
 std::pair<int, int> RE_External::getLengthRange() {
     return re::getLengthRange(mRE, &cc::Unicode);
 }
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    mStreamSet = b->CreateStreamSet(1);
-    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], mStreamSet);
+    StreamSet * reStrm  = b->CreateStreamSet(1);
+    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    installStreamSet(b, reStrm);
 }
 
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    mStreamSet = b->CreateStreamSet(1);
     auto mapping = mRefInfo.twixtREs.find(mRef->getName());
     if (mapping == mRefInfo.twixtREs.end()) {
         llvm::report_fatal_error("grep engine: undefined reference!");
@@ -89,7 +110,9 @@ void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSe
     auto rg1 = re::getLengthRange(mRef->getCapture(), &cc::Unicode);
     auto rg2 = re::getLengthRange(mapping->second, &cc::Unicode);
     int dist = rg1.first + rg2.first;
-    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, inputs[0], mStreamSet);
+    StreamSet * distStrm = b->CreateStreamSet(1);
+    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, inputs[0], distStrm);
+    installStreamSet(b, distStrm);
 }
 
 std::string PropertyBasisExternal::basisName(UCD::property_t p) {
@@ -99,16 +122,18 @@ std::string PropertyBasisExternal::basisName(UCD::property_t p) {
 
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     if (mProperty == UCD::identity) {
-        mStreamSet = b->CreateStreamSet(21);
-        b->CreateKernelCall<UTF8_Decoder>(inputs[0], mStreamSet);
+        StreamSet * u21 = b->CreateStreamSet(21);
+        b->CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
+        installStreamSet(b, u21);
     } else {
         UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
         if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
             std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
             std::vector<re::CC *> ccs;
             for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
-            mStreamSet = b->CreateStreamSet(ccs.size());
-            b->CreateKernelCall<CharacterClassKernelBuilder>(ccs, inputs[0], mStreamSet);
+            StreamSet * basis = b->CreateStreamSet(ccs.size());
+            b->CreateKernelCall<CharacterClassKernelBuilder>(ccs, inputs[0], basis);
+            installStreamSet(b, basis);
         }
     }
 }
@@ -116,12 +141,13 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
 void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * GCB = b->CreateStreamSet(1);
     GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCB);
-    mStreamSet = GCB;
+    installStreamSet(b, GCB);
 }
 
 void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    mStreamSet = b->CreateStreamSet(1);
-    WordBoundaryLogic(b, inputs[0], inputs[1], mStreamSet);
+    StreamSet * wb = b->CreateStreamSet(1);
+    WordBoundaryLogic(b, inputs[0], inputs[1], wb);
+    installStreamSet(b, wb);
 }
 
 void UTF8_index::generatePabloMethod() {
@@ -715,3 +741,28 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     P->CreateKernelCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
+/*
+void PrefixSuffixSpan(ProgBuilderRef P,
+                                  StreamSet * Prefix, StreamSet * Suffix, StreamSet * Span, int offset) {
+    std::vector<StreamSet *> marks = {Prefix, Suffix};
+    StreamSet * mask = P->CreateStreamSet();
+    P->CreateKernelCall<StreamsMerge>(marks, mask);
+    StreamSet * filteredSuffix = P->CreateStreamSet();
+    FilterByMask(P, mask, Suffix, filteredSuffix);
+    StreamSet * filteredPrefix = P->CreateStreamSet();
+    P->CreateKernelCall<LookaheadKernel>(filteredSuffix, 1, filteredPrefix);
+    StreamSet * pfxMarks = P->CreateStreamSet();
+    SpreadByMask(P, mask, filteredPrefix, pfxMarks);
+    StreamSet * starts = nullptr;
+    if (offset < 0) {
+        starts = P->CreateStreamSet();
+        P->CreateKernelCall<AdvanceKernel>(pfxMarks, starts, -offset);
+    } else if (offset > 0) {
+        starts = P->CreateStreamSet();
+        P->CreateKernelCall<LookaheadKernel>(pfxMarks, starts, offset);
+    } else {
+        starts = pfxMarks;
+    }
+    P->CreateKernelCall<MarksToSpans>(starts, Suffix, Span);
+}
+*/

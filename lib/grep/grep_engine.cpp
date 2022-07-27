@@ -456,6 +456,18 @@ void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStre
     for (auto e : mExternalNames) {
         prepareExternalObject(e);
     }
+    if (UnicodeIndexing) {
+        std::set<std::string> extNames;
+        for (auto e : mExternalNames) {
+            std::string name = e->getFullName();
+            if (extNames.count(name) == 0) {
+                extNames.insert(name);
+                auto f = mExternalMap.find(name);
+                f->second->setIndexing(P, mU8index);
+                //llvm::errs() << "Setting indexing for: " << name << "\n";
+            }
+        }
+    }
     for (auto e : mExternalNames) {
         resolveExternal(P, e->getFullName());
     }
@@ -485,13 +497,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
             StreamSet * extStream = ext->getStreamSet();
             unsigned offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
-            if (indexMask == nullptr) {
-                options->addExternal(name, extStream, offset, lengthRange);
-            } else {
-                StreamSet * iExternal_stream = P->CreateStreamSet(1, 1);
-                FilterByMask(P, indexMask, extStream, iExternal_stream);
-                options->addExternal(name, iExternal_stream, offset, lengthRange);
-            }
+            options->addExternal(name, extStream, offset, lengthRange);
         }
     }
 }
@@ -756,6 +762,9 @@ void EmitMatchesEngine::applyColorization(ProgBuilderRef E,
     // Map the match start/end marks to their positions in the expanded basis.
     StreamSet * ExpandedMarks = E->CreateStreamSet(2);
     SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+    if (mIllustrator) mIllustrator->captureBitstream(E, "SpreadMask", SpreadMask);
+    if (mIllustrator) mIllustrator->captureBixNum(E, "InsertMarks", InsertMarks);
+    if (mIllustrator) mIllustrator->captureBixNum(E, "ExpandedMarks", ExpandedMarks);
 
     E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
 }
@@ -774,6 +783,8 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
         StreamSet * MatchSpans;
         if (EnableGetMatchSpan) {
             MatchSpans = getMatchSpan(E, mRE, Matches);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "GetMatchSpans", MatchSpans);
         } else {
             MatchSpans = E->CreateStreamSet(1, 1);
             auto lengths = re::getLengthRange(mRE, mIndexAlphabet);

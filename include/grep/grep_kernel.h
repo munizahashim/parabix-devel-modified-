@@ -39,11 +39,12 @@ public:
     virtual std::pair<int, int> getLengthRange() {return std::make_pair(1,1);}
     virtual int getOffset() {return 0;}  //default offset unless overridden.
     bool isResolved() {return mStreamSet != nullptr;}
+    void setIndexing(ProgBuilderRef b, StreamSet * indexStrm);
 protected:
     static Allocator mAllocator;
     ExternalStreamObject(Kind k, std::string name, std::vector<std::string> inputNames) :
-        mStreamSet(nullptr), mKind(k), mStreamSetName(name), mInputStreamNames(inputNames) {}
-    StreamSet * mStreamSet;
+        mKind(k), mStreamSetName(name), mInputStreamNames(inputNames), mIndexStream(nullptr), mStreamSet(nullptr)  {}
+    void installStreamSet(ProgBuilderRef b, StreamSet * s);
 public:
     void* operator new (std::size_t size) noexcept {
         return mAllocator.allocate<uint8_t>(size);
@@ -52,6 +53,9 @@ private:
     Kind mKind;
     std::string mStreamSetName;
     std::vector<std::string> mInputStreamNames;
+    StreamSet * mIndexStream;
+protected:
+    StreamSet * mStreamSet;
 };
 
 class PreDefined : public ExternalStreamObject {
