@@ -98,6 +98,8 @@ std::pair<int, int> RE_External::getLengthRange() {
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
+    // Inputs to RE compiler are already adjusted to the correct index stream.
+    setIndexing(b, nullptr);
     mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
     installStreamSet(b, reStrm);
 }
