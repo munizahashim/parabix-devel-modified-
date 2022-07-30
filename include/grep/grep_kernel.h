@@ -7,6 +7,7 @@
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <re/alphabet/alphabet.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
@@ -15,7 +16,6 @@
 
 namespace IDISA { class IDISA_Builder; }
 namespace re { class CC; class RE; }
-namespace cc { class Alphabet; }
 namespace grep { class GrepEngine; }
 namespace kernel {
 
@@ -27,7 +27,7 @@ public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
         PreDefined, PropertyExternal, CC_External, RE_External, Reference_External,
-        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis
+        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed
     };
     inline Kind getKind() const {
         return mKind;
@@ -185,6 +185,21 @@ public:
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     UCD::property_t mProperty;
+};
+
+class MultiplexedExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::Multiplexed;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    MultiplexedExternal(cc::MultiplexedAlphabet * mpx) :
+    ExternalStreamObject(Kind::Multiplexed, mpx->getName(), {"u8_basis"}), mAlphabet(mpx) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    cc::MultiplexedAlphabet * mAlphabet;
 };
 
 class UTF8_index : public pablo::PabloKernel {

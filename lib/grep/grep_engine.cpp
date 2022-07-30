@@ -313,6 +313,7 @@ void GrepEngine::initRE(re::RE * re) {
         if (!UnicodeSets.empty()) {
             auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
             mRE = transformCCs(mpx, mRE);
+            mExternalMap.emplace(mpx->getName(), new MultiplexedExternal(mpx));
         }
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
@@ -473,8 +474,29 @@ void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStre
     }
 }
 
-
 void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+    auto alphabets = re::collectAlphabets(regexp);
+    for (auto & a : alphabets) {
+        std::string alphabetName = a->getName();
+        //llvm::errs() << "found alphabet: " << alphabetName << "\n";
+        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
+            auto f = mExternalMap.find(alphabetName);
+            if (f == mExternalMap.end()) {
+                llvm::report_fatal_error("Cannot find alphabet");
+            }
+            ExternalStreamObject * ext = f->second;
+            if (MultiplexedExternal * m = dyn_cast<MultiplexedExternal>(ext)) {
+                if (!m->isResolved()) {
+                    m->setIndexing(P, mU8index);
+                    resolveExternal(P, alphabetName);
+                }
+                StreamSet * alphabetBasis = m->getStreamSet();
+                options->addAlphabet(mpx, alphabetBasis);
+            } else {
+                llvm::report_fatal_error("Expecting multiplexed alphabet: " + alphabetName);
+            }
+        }
+    }
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
     // We may end up with multiple instances of a Name, but we should
@@ -555,22 +577,6 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
         indexStream = mU8index;
     }
     options->setRE(re);
-    auto alphabets = re::collectAlphabets(re);
-    for (auto & a : alphabets) {
-        //llvm::errs() << "found: " << a->getName() << "\n";
-        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            auto mpx_basis = mpx->getMultiplexedCCs();
-            StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
-            P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
-            if (mIndexAlphabet == &cc::UTF8) {
-                options->addAlphabet(mpx, u8CharClasses);
-            } else {
-                StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
-                FilterByMask(P, mU8index, u8CharClasses, CharClasses);
-                options->addAlphabet(mpx, CharClasses);
-            }
-        }
-    }
     addExternalStreams(P, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
@@ -792,14 +798,16 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
             Matches = MatchSpans;
         }
         if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
-        if (mIndexAlphabet == &cc::Unicode) {
+        if (UnicodeIndexing) {
             StreamSet * u8initial = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
             StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
             SpreadByMask(E, u8initial, MatchSpans, ExpandedSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "ExpandedSpans", ExpandedSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "u8initial", u8initial);
             StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, FilledSpans);
-            ///E->CreateKernelCall<DebugDisplayKernel>("FilledSpans", FilledSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "FilledSpans", FilledSpans);
             Matches = FilledSpans;
         } else {
             Matches = MatchSpans;

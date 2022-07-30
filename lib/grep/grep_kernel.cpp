@@ -138,6 +138,13 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
     }
 }
 
+void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    auto mpx_basis = mAlphabet->getMultiplexedCCs();
+    StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
+    b->CreateKernelCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
+    installStreamSet(b, u8CharClasses);
+}
+
 void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * GCB = b->CreateStreamSet(1);
     GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCB);
