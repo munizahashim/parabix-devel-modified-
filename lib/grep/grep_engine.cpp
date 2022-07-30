@@ -491,7 +491,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
                     resolveExternal(P, alphabetName);
                 }
                 StreamSet * alphabetBasis = m->getStreamSet();
-                mIllustrator->captureBixNum(P, alphabetName, alphabetBasis);
+                if (mIllustrator) mIllustrator->captureBixNum(P, alphabetName, alphabetBasis);
                 options->addAlphabet(mpx, alphabetBasis);
             } else {
                 llvm::report_fatal_error("Expecting multiplexed alphabet: " + alphabetName);
@@ -521,7 +521,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
             unsigned offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
-            mIllustrator->captureBitstream(P, name + "_ext", extStream);
+            if (mIllustrator) mIllustrator->captureBitstream(P, name + "_ext", extStream);
         }
     }
 }
@@ -533,7 +533,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         for (auto & e : *alt) {
             auto a = getMatchSpan(P, e, MatchResults);
             std::string ct = std::to_string(i);
-            mIllustrator->captureBitstream(P, ct, a);
+            if (mIllustrator) mIllustrator->captureBitstream(P, ct, a);
             allSpans.push_back(a);
             i++;
         }
@@ -585,7 +585,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
     addExternalStreams(P, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    mIllustrator->captureBitstream(P, "rungrep", Results);
+    if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
     return cast<ICGrepKernel>(k)->getOffset();
 }
 
