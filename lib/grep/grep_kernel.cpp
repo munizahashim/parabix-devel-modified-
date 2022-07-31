@@ -93,7 +93,7 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     installStreamSet(b, ccStrm);
 }
 std::pair<int, int> RE_External::getLengthRange() {
-    return re::getLengthRange(mRE, &cc::Unicode);
+    return re::getLengthRange(mRE, mIndexAlphabet);
 }
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {

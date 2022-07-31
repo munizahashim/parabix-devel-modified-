@@ -15,6 +15,7 @@
 
 
 namespace IDISA { class IDISA_Builder; }
+namespace cc { class Alphabet; }
 namespace re { class CC; class RE; }
 namespace grep { class GrepEngine; }
 namespace kernel {
@@ -109,8 +110,8 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    RE_External(std::string name, grep::GrepEngine * engine, re::RE * re) :
-        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mOffset(1) {}
+    RE_External(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mOffset(1), mIndexAlphabet(a) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     // RE_Externals are compiled using the ICgrep kernel, which returns offset 1.
@@ -119,6 +120,7 @@ private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;
     unsigned mOffset;
+    const cc::Alphabet * mIndexAlphabet;
 };
 
 class Reference_External : public ExternalStreamObject {

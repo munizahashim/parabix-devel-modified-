@@ -42,12 +42,12 @@ RE * name_variable_length_CCs(RE * r, unsigned UTF_bits) {
     return VariableLengthCCNamer(UTF_bits).transformRE(r);
 }
 
-RE * name_min_length_alts(RE * r, std::string minLengthPrefix) {
+RE * name_min_length_alts(RE * r, const cc::Alphabet * a, std::string minLengthPrefix) {
     if (Alt * alt = dyn_cast<Alt>(r)) {
         std::vector<RE *> namedAlts;
         std::map<int, std::vector<RE *>> minLengthAlts;
         for (auto & e : *alt) {
-            auto rg = getLengthRange(e, &cc::Unicode);
+            auto rg = getLengthRange(e, a);
             if (rg.first == 0) return r;  //  zero-length REs cause problems
             auto f = minLengthAlts.find(rg.first);
             if (f == minLengthAlts.end()) {

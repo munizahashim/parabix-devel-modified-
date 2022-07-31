@@ -337,7 +337,7 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (EnableGetMatchSpan) {
-        mRE = name_min_length_alts(mRE);
+        mRE = name_min_length_alts(mRE, mIndexAlphabet);
     }
     re::gatherNames(mRE, mExternalNames);
 
@@ -431,7 +431,7 @@ void GrepEngine::prepareExternalObject(re::Name * extName) {
         } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
             mExternalMap.emplace(nameStr, new Reference_External(mRefInfo, ref));
         } else {
-            mExternalMap.emplace(nameStr, new RE_External(nameStr, this, def));
+            mExternalMap.emplace(nameStr, new RE_External(nameStr, this, def, mIndexAlphabet));
         }
     }
 }
