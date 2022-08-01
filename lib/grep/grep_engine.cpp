@@ -336,9 +336,7 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    if (EnableGetMatchSpan) {
-        mRE = name_min_length_alts(mRE, mIndexAlphabet);
-    }
+    mRE = name_min_length_alts(mRE, mIndexAlphabet);
     re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
@@ -789,20 +787,12 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
     prepareExternalStreams(E, SourceStream);
 
     StreamSet * Matches = E->CreateStreamSet();
-    unsigned grepOffset = RunGrep(E, mRE, SourceStream, Matches);
+    RunGrep(E, mRE, SourceStream, Matches);
     if (mIllustrator) mIllustrator->captureBitstream(E, "ICGrep Matches", Matches);
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * MatchSpans;
-        if (EnableGetMatchSpan) {
-            MatchSpans = getMatchSpan(E, mRE, Matches);
-            if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
-            if (mIllustrator) mIllustrator->captureBitstream(E, "GetMatchSpans", MatchSpans);
-        } else {
-            MatchSpans = E->CreateStreamSet(1, 1);
-            auto lengths = re::getLengthRange(mRE, mIndexAlphabet);
-            E->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, grepOffset, Matches, MatchSpans);
-            Matches = MatchSpans;
-        }
+        MatchSpans = getMatchSpan(E, mRE, Matches);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
         if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
         if (UnicodeIndexing) {
             StreamSet * u8initial = E->CreateStreamSet(1, 1);
