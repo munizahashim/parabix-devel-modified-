@@ -650,27 +650,21 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             inputRate.CanModifySegmentLength = true;
             #else
             if (isPartitionRoot) {
-//                const auto id = inputRate.SymbolicRateId;
-//                assert (id > 0);
-//                const auto alreadyTested = fixedPartitionInputs.insert(id).second;
-//                inputRate.CanModifySegmentLength = alreadyTested;
                 inputRate.CanModifySegmentLength = true;
             } else {
                 const auto streamSet = source(e, mBufferGraph);
                 const BufferNode & N = mBufferGraph[streamSet];
-                inputRate.CanModifySegmentLength = (!N.IsLinear);
+                inputRate.CanModifySegmentLength = !N.IsLinear;
             }
             #endif
         }
-//        if (isPartitionRoot) {
-//            fixedPartitionInputs.clear();
-//        }
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
-            if (LLVM_LIKELY(N.isOwned() && N.Locality != BufferLocality::ThreadLocal)) {
-                outputRate.CanModifySegmentLength = (!N.IsLinear); // || N.CrossesHybridThreadBarrier;
+            // if (LLVM_LIKELY(N.isOwned() && N.Locality != BufferLocality::ThreadLocal)) {
+            if (LLVM_UNLIKELY(N.isUnowned())) {
+                outputRate.CanModifySegmentLength = !N.IsLinear;
             }
         }
     }

@@ -43,9 +43,6 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
         const auto prefix = makeKernelName(kernelId);
         IntegerType * const int64Ty = b->getInt64Ty();
 
-        // total # of segments processed by kernel
-        mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_SEGMENT_COUNT_SUFFIX, groupId);
-
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
 
@@ -73,17 +70,20 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
 
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
-        const auto numOfInputs = numOfStreamInputs(kernelId);
-        for (unsigned i = 0; i < numOfInputs; ++i) {
-            const auto prefix = makeBufferName(kernelId, StreamSetPort{PortType::Input, i});
-            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const auto & bp = mBufferGraph[e];
+            if (bp.CanModifySegmentLength) {
+                const auto prefix = makeBufferName(kernelId, bp.Port);
+                mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
+            }
         }
-        const auto numOfOutputs = numOfStreamOutputs(kernelId);
-        for (unsigned i = 0; i < numOfOutputs; ++i) {
-            const auto prefix = makeBufferName(kernelId, StreamSetPort{PortType::Output, i});
-            mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
+        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+            const auto & bp = mBufferGraph[e];
+            if (bp.CanModifySegmentLength) {
+                const auto prefix = makeBufferName(kernelId, bp.Port);
+                mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
+            }
         }
-
     }
 }
 
@@ -105,10 +105,9 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         Value * const end = b->CreateReadCycleCounter();
         Value * const duration = b->CreateSub(end, start);
-        const auto prefix = makeKernelName(kernelId);
 
-        const auto field = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
-        Value * const ptr = b->getScalarFieldPtr(field);
+        const auto prefix = makeKernelName(kernelId);
+        Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
         FixedArray<Value *, 2> index;
         index[0] = b->getInt32(0);
         index[1] = b->getInt32(type);
@@ -117,7 +116,7 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
         Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
         b->CreateStore(sumUpdatedCount, sumCounterPtr);
 
-        if (type == TOTAL_TIME) {
+        if (type == CycleCounter::TOTAL_TIME) {
             index[1] = b->getInt32(SQ_SUM_TOTAL_TIME);
             Value * const sqSumCounterPtr = b->CreateGEP(ptr, index);
             Value * const sqSumRunningCount = b->CreateLoad(sqSumCounterPtr);
@@ -136,6 +135,45 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
 
     }
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateOptionalCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const {
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        Value * const end = b->CreateReadCycleCounter();
+        Value * const duration = b->CreateSub(end, start);
+        const auto prefix = makeKernelName(kernelId);
+        Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
+        FixedArray<Value *, 2> index;
+        index[0] = b->getInt32(0);
+        index[1] = b->getInt32(ifTrue);
+        Value * const sumCounterPtrA = b->CreateGEP(ptr, index);
+        index[1] = b->getInt32(ifFalse);
+        Value * const sumCounterPtrB = b->CreateGEP(ptr, index);
+        Value * const sumCounterPtr = b->CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
+
+        Value * const sumRunningCount = b->CreateLoad(sumCounterPtr);
+        Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
+        b->CreateStore(sumUpdatedCount, sumCounterPtr);
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateOptionalCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateTotalCycleCounterTime(BuilderRef b) const {
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        Value * const end = b->CreateReadCycleCounter();
+        Value * const duration = b->CreateSub(end, mPipelineStartTime);
+        // total is thread local but gets summed at the end; no need to worry about
+        // multiple threads updating it.
+        Value * const ptr = getScalarFieldPtr(b.get(), STATISTICS_CYCLE_COUNT_TOTAL);
+        Value * const updated = b->CreateAdd(b->CreateLoad(ptr), duration);
+        b->CreateStore(updated, ptr);
+    }
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief selectPrincipleCycleCountBinding
@@ -165,7 +203,9 @@ extern "C"
 BOOST_NOINLINE
 void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
                                            const char ** kernelNames,
-                                           const uint64_t * const values) {
+                                           const uint64_t * const values,
+                                           const uint64_t totalCycles,
+                                           const uint64_t baseItemCount) {
 
                          // totals contains the final event counts for the program;
                          // values has numOfKernels * numOfEvents * numOfMeasurements
@@ -181,11 +221,14 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
 
     // TODO: cycle counter reporting oddly on colours=always?
 
-    uint64_t totalCycleCount = 0;
     uint64_t maxItemCount = 0;
     uint64_t maxCycleCount = 0;
 
-    long double maxCyclesPerItem = 0.0L;
+    long double baseCyclesPerItem = 0L;
+    if (baseItemCount) {
+        baseCyclesPerItem = ((long double)(totalCycles) / (long double)(baseItemCount));
+    }
+    auto maxCyclesPerItem = baseCyclesPerItem;
 
     #ifndef NDEBUG
     const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
@@ -201,7 +244,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
             const auto cyclesPerItem = ((long double)(cycleCount) / (long double)(itemCount));
             maxCyclesPerItem = std::max(cyclesPerItem, maxCyclesPerItem);
         }
-        totalCycleCount += cycleCount;
+        assert (cycleCount <= totalCycles);
         maxCycleCount = std::max(maxCycleCount, cycleCount);
     }
 
@@ -238,7 +281,14 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
 
     unsigned k = 0;
 
-    const long double fTotalCycleCount = totalCycleCount;
+    const long double fTotal = totalCycles;
+
+    boost::format percfmt("%5.1f");
+    boost::format ratefmt("%.1f");
+    boost::format covfmt(" +- %4.1f\n");
+
+    std::array<uint64_t, NUM_OF_CYCLE_COUNTERS + 1> subtotals;
+    std::fill_n(subtotals.begin(), NUM_OF_CYCLE_COUNTERS + 1, 0);
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
 
@@ -262,7 +312,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         if (intItemCount > 0) {
             const auto cyclesPerItem = (fSubTotal / (long double)(intItemCount));
             assert (cyclesPerItem <= maxCyclesPerItem);
-            out << right_justify((boost::format("%.1f") % cyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
+            out << right_justify((ratefmt % cyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
         } else {
             out << center_justify("--", maxCyclesPerItemLength + 1);
         }
@@ -272,36 +322,69 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         for (unsigned j = KERNEL_SYNCHRONIZATION; j < KERNEL_EXECUTION; ++j) {
             assert (k < REQ_INTEGERS);
             const auto v = values[k++];
+            subtotals[j] += v;
             knownOverheads += v;
             const double cycPerc = (((long double)v) * 100.0L) / fSubTotal;
-            out << (boost::format("%5.1f") % cycPerc).str() << ' ';
+            out << (percfmt % cycPerc).str() << ' ';
         }
         assert (k < REQ_INTEGERS);
         const auto intExecTime = values[k++];
         knownOverheads += intExecTime;
-        const double overheadPerc = (((long double)(intSubTotal - knownOverheads)) * 100.0L) / fSubTotal;
-        out << (boost::format("%5.1f") % overheadPerc).str() << ' ';
-        const double execTimePerc = (((long double)intExecTime) * 100.0L) / fSubTotal;
-        out << (boost::format("%5.1f") % execTimePerc).str() << ' ';
+        assert (knownOverheads <= intSubTotal);
 
+        const auto intOverhead = (intSubTotal - knownOverheads);
+
+        subtotals[4] += intOverhead;
+        subtotals[5] += intExecTime;
+
+        const double overheadPerc = (((long double)intOverhead) * 100.0L) / fSubTotal;
+        out << (percfmt % overheadPerc).str() << ' ';
+
+
+
+        const double execTimePerc = (((long double)intExecTime) * 100.0L) / fSubTotal;
+        out << (percfmt % execTimePerc).str() << ' ';
         assert (values[k] == intSubTotal);
         ++k;
 
-        const auto perc = (fSubTotal * 100.0L) / fTotalCycleCount;
-        out << (boost::format("%5.1f") % perc).str();
+        subtotals[6] += intSubTotal;
+
+        const auto perc = (fSubTotal * 100.0L) / fTotal;
+        out << (percfmt % perc).str();
         assert (k < REQ_INTEGERS);
         const long double fSqrTotalCycles = values[k++];
         assert (k < REQ_INTEGERS);
         const uint64_t n = values[k++];
         const long double N = n;
         const auto x = std::max((fSqrTotalCycles * N) - (fSubTotal * fSubTotal), 0.0L);
-        const auto avgStddev = (std::sqrt(x) * 100.0L) / (N * fTotalCycleCount);
-        out << (boost::format(" +- %4.1f\n") % avgStddev).str();
+        const auto avgStddev = (std::sqrt(x) * 100.0L) / (N * fTotal);
+        out << (covfmt % avgStddev).str();
 
     }
     assert (k == REQ_INTEGERS);
+
+    out << "\n";
+    out.indent(maxKernelIdLength + maxNameLength + maxCycleCountLength + 7);
+    out << "TOTAL:";
+
+    if (baseItemCount > 0) {
+        assert (baseCyclesPerItem <= maxCyclesPerItem);
+        out << right_justify((ratefmt % baseCyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
+    } else {
+        out << center_justify("--", maxCyclesPerItemLength + 1);
+    }
+
+    for (unsigned j = 0; j <= NUM_OF_CYCLE_COUNTERS; ++j) {
+        const auto v = subtotals[j];
+        assert (v <= totalCycles);
+        const double cycPerc = (((long double)(v * 100)) / fTotal);
+        out << (percfmt % cycPerc).str() << ' ';
+    }
+
+    out << '\n';
+
 }
-}
+} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printOptionalCycleCounter
@@ -352,6 +435,9 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 
         Value * currentN = nullptr;
 
+        Value * baseItemCount = nullptr;
+
+
         for (unsigned i = 0; i < numOfKernels; ++i) {
             const auto prefix = makeKernelName(FirstKernel + i);
 
@@ -361,6 +447,15 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 
             const auto binding = selectPrincipleCycleCountBinding(FirstKernel + i);
             Value * const items = b->getScalarField(makeBufferName(FirstKernel + i, binding) + ITEM_COUNT_SUFFIX);
+            if (in_degree(FirstKernel + i, mBufferGraph) == 0) {
+                if (baseItemCount == nullptr) {
+                    baseItemCount = items;
+                } else {
+                    Value * const eq = b->CreateICmpEQ(baseItemCount, items);
+                    baseItemCount = b->CreateSelect(eq, baseItemCount, INT64_ZERO);
+                }
+            }
+
             assert (k < REQ_INTEGERS);
             Value * const itemsPtr = b->CreateGEP(values, b->getInt32(k++));
             b->CreateStore(items, itemsPtr);
@@ -388,30 +483,18 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
         }
         assert (k == REQ_INTEGERS);
 
-        FixedArray<Value *, 3> args;
+        FixedArray<Value *, 5> args;
         args[0] = ConstantInt::get(intTy, numOfKernels);
         args[1] = arrayOfKernelNames;
         args[2] = values;
+        args[3] = b->getScalarField(STATISTICS_CYCLE_COUNT_TOTAL);
+        args[4] = (baseItemCount == nullptr) ? INT64_ZERO : baseItemCount;
 
         Function * const reportPrinter = b->getModule()->getFunction("__print_pipeline_cycle_counter_report");
         assert (reportPrinter);
         b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
         b->CreateFree(values);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief incrementNumberOfSegmentsCounter
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::incrementNumberOfSegmentsCounter(BuilderRef b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
-        const auto fieldName =
-            makeKernelName(mKernelId) + STATISTICS_SEGMENT_COUNT_SUFFIX;
-        Value * const counterPtr = b->getScalarFieldPtr(fieldName);
-        Value * const runningCount = b->CreateLoad(counterPtr);
-        Value * const updatedCount = b->CreateAdd(runningCount, b->getInt64(1));
-        b->CreateStore(updatedCount, counterPtr);
     }
 }
 
@@ -558,7 +641,8 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(BuilderRef b) {
 
             const auto prefix = makeKernelName(i);
             // total # of segments processed by kernel
-            Value * const totalNumberOfSegments = b->getScalarField(prefix + STATISTICS_SEGMENT_COUNT_SUFFIX);
+            const auto & lockType = LOGICAL_SEGMENT_SUFFIX[isDataParallel(i) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL];
+            Value * const totalNumberOfSegments = b->getScalarField(prefix + lockType);
             Value * const fTotalNumberOfSegments = b->CreateUIToFP(totalNumberOfSegments, doubleTy);
 
             const Kernel * const kernel = getKernel(i);
@@ -567,68 +651,72 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(BuilderRef b) {
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
 
                 const BufferPort & binding = mBufferGraph[e];
-                args.push_back(STDERR);
-                if (kernelName) {
-                    args.push_back(firstLine);
-                    args.push_back(b->getInt32(i));
-                    args.push_back(kernelName);
-                    kernelName = nullptr;
-                } else {
-                    args.push_back(remainingLines);
+                if (binding.CanModifySegmentLength) {
+                    args.push_back(STDERR);
+                    if (kernelName) {
+                        args.push_back(firstLine);
+                        args.push_back(b->getInt32(i));
+                        args.push_back(kernelName);
+                        kernelName = nullptr;
+                    } else {
+                        args.push_back(remainingLines);
+                    }
+                    args.push_back(I);
+                    const auto inputPort = binding.Port.Number;
+                    args.push_back(b->getInt32(inputPort));
+                    const Binding & ref = binding.Binding;
+
+                    args.push_back(b->GetString(ref.getName()));
+
+                    args.push_back(b->getInt32(source(e, mBufferGraph)));
+
+                    const auto prefix = makeBufferName(i, binding.Port);
+                    Value * const blockedCount = b->getScalarField(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
+                    args.push_back(blockedCount);
+
+                    Value * const fBlockedCount = b->CreateUIToFP(blockedCount, doubleTy);
+                    Value * const fBlockedCount100 = b->CreateFMul(fBlockedCount, fOneHundred);
+                    args.push_back(b->CreateFDiv(fBlockedCount100, fTotalNumberOfSegments));
+
+                    b->CreateCall(fTy, Dprintf, args);
+
+                    args.clear();
                 }
-                args.push_back(I);
-                const auto inputPort = binding.Port.Number;
-                args.push_back(b->getInt32(inputPort));
-                const Binding & ref = binding.Binding;
-
-                args.push_back(b->GetString(ref.getName()));
-
-                args.push_back(b->getInt32(source(e, mBufferGraph)));
-
-                const auto prefix = makeBufferName(i, binding.Port);
-                Value * const blockedCount = b->getScalarField(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
-                args.push_back(blockedCount);
-
-                Value * const fBlockedCount = b->CreateUIToFP(blockedCount, doubleTy);
-                Value * const fBlockedCount100 = b->CreateFMul(fBlockedCount, fOneHundred);
-                args.push_back(b->CreateFDiv(fBlockedCount100, fTotalNumberOfSegments));
-
-                b->CreateCall(fTy, Dprintf, args);
-
-                args.clear();
             }
 
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
 
                 const BufferPort & binding = mBufferGraph[e];
-                args.push_back(STDERR);
-                if (kernelName) {
-                    args.push_back(firstLine);
-                    args.push_back(b->getInt32(i));
-                    args.push_back(kernelName);
-                    kernelName = nullptr;
-                } else {
-                    args.push_back(remainingLines);
+                if (binding.CanModifySegmentLength) {
+                    args.push_back(STDERR);
+                    if (kernelName) {
+                        args.push_back(firstLine);
+                        args.push_back(b->getInt32(i));
+                        args.push_back(kernelName);
+                        kernelName = nullptr;
+                    } else {
+                        args.push_back(remainingLines);
+                    }
+                    args.push_back(O);
+                    const auto outputPort = binding.Port.Number;
+                    args.push_back(b->getInt32(outputPort));
+                    const Binding & ref = binding.Binding;
+                    args.push_back(b->GetString(ref.getName()));
+
+                    args.push_back(b->getInt32(target(e, mBufferGraph)));
+
+                    const auto prefix = makeBufferName(i, binding.Port);
+                    Value * const blockedCount = b->getScalarField(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
+                    args.push_back(blockedCount);
+
+                    Value * const fBlockedCount = b->CreateUIToFP(blockedCount, doubleTy);
+                    Value * const fBlockedCount100 = b->CreateFMul(fBlockedCount, fOneHundred);
+                    args.push_back(b->CreateFDiv(fBlockedCount100, fTotalNumberOfSegments));
+
+                    b->CreateCall(fTy, Dprintf, args);
+
+                    args.clear();
                 }
-                args.push_back(O);
-                const auto outputPort = binding.Port.Number;
-                args.push_back(b->getInt32(outputPort));
-                const Binding & ref = binding.Binding;
-                args.push_back(b->GetString(ref.getName()));
-
-                args.push_back(b->getInt32(target(e, mBufferGraph)));
-
-                const auto prefix = makeBufferName(i, binding.Port);
-                Value * const blockedCount = b->getScalarField(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
-                args.push_back(blockedCount);
-
-                Value * const fBlockedCount = b->CreateUIToFP(blockedCount, doubleTy);
-                Value * const fBlockedCount100 = b->CreateFMul(fBlockedCount, fOneHundred);
-                args.push_back(b->CreateFDiv(fBlockedCount100, fTotalNumberOfSegments));
-
-                b->CreateCall(fTy, Dprintf, args);
-
-                args.clear();
             }
 
         }
@@ -648,16 +736,16 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
 
         IntegerType * const sizeTy = b->getSizeTy();
-        IntegerType * const boolTy = b->getInt1Ty();
+   //     IntegerType * const boolTy = b->getInt1Ty();
 
         Constant * const ZERO = b->getInt32(0);
         Constant * const ONE = b->getInt32(1);
 
-        ConstantInt * const SZ_ZERO = b->getSize(0);
-        ConstantInt * const SZ_ONE = b->getSize(1);
+        ConstantInt * const sz_ZERO = b->getSize(0);
+        ConstantInt * const sz_ONE = b->getSize(1);
 
-        ConstantInt * const i1_FALSE = b->getFalse();
-        ConstantInt * const i1_TRUE = b->getTrue();
+  //      ConstantInt * const i1_FALSE = b->getFalse();
+  //      ConstantInt * const i1_TRUE = b->getTrue();
 
         Function * Dprintf = b->GetDprintf();
         FunctionType * fTy = Dprintf->getFunctionType();
@@ -667,15 +755,25 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
         raw_svector_ostream format(buffer);
         format << "BLOCKED I/O PER SEGMENT:\n\n";
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            const Kernel * const kernel = getKernel(i);
-            std::string temp = kernel->getName();
-            boost::replace_all(temp, "\"", "\\\"");
-            format << ",\"" << i << " " << temp << "\"";
-            const auto numOfInputs = in_degree(i, mBufferGraph);
-            const auto numOfOutputs = out_degree(i, mBufferGraph);
-            const auto numOfPorts = numOfInputs + numOfOutputs;
-            for (unsigned j = 1; j < numOfPorts; ++j) {
-                format.write(',');
+            unsigned count = 0;
+            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    ++count;
+                }
+            }
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    ++count;
+                }
+            }
+            if (count) {
+                const Kernel * const kernel = getKernel(i);
+                std::string temp = kernel->getName();
+                boost::replace_all(temp, "\"", "\\\"");
+                format << ",\"" << i << " " << temp << "\"";
+                for (unsigned j = 1; j < count; ++j) {
+                    format.write(',');
+                }
             }
         }
         format << "\n";
@@ -691,15 +789,29 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
         buffer.clear();
         format << "SEG #";
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            unsigned j = 0;
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                format << ",I" << j << ':' << source(e, mBufferGraph);
-                ++j;
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    goto has_ports;
+                }
             }
-            j = 0;
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                format << ",O" << j << ':' << target(e, mBufferGraph);
-                ++j;
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    goto has_ports;
+                }
+            }
+            continue;
+has_ports:
+            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
+                const auto & bp = mBufferGraph[e];
+                if (bp.CanModifySegmentLength) {
+                    format << ",I" << bp.Port.Number << ':' << source(e, mBufferGraph);
+                }
+            }
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                const auto & bp = mBufferGraph[e];
+                if (bp.CanModifySegmentLength) {
+                    format << ",O" << bp.Port.Number << ':' << source(e, mBufferGraph);
+                }
             }
         }
         format << '\n';
@@ -711,64 +823,102 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
         format << "%" PRIu64; // seg #
         unsigned fieldCount = 0;
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            const auto numOfInputs = in_degree(i, mBufferGraph);
-            const auto numOfOutputs = out_degree(i, mBufferGraph);
-            const auto numOfPorts = numOfInputs + numOfOutputs;
-            fieldCount += numOfPorts;
-            for (unsigned j = 0; j < numOfPorts; ++j) {
+            unsigned count = 0;
+            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    ++count;
+                }
+            }
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                if (mBufferGraph[e].CanModifySegmentLength) {
+                    ++count;
+                }
+            }
+            fieldCount += count;
+            for (unsigned j = 0; j < count; ++j) {
                 format << ",%" PRIu64; // strides
             }
         }
         format << "\n";
 
         // Print each kernel line
-        SmallVector<Value *, 64> args(fieldCount + 3);
-        args[0] = STDERR;
-        args[1] = b->GetString(format.str());
+//        SmallVector<Value *, 64> lastLineArgs(fieldCount + 3);
+//        lastLineArgs[0] = STDERR;
+//        lastLineArgs[1] = b->GetString(format.str());
+
+//        SmallVector<Value *, 64> currentLineArgs(fieldCount + 3);
+//        currentLineArgs[0] = STDERR;
+//        currentLineArgs[1] = b->GetString(format.str());
 
         // Pre load all of pointers to the the trace log out of the pipeline state.
 
         SmallVector<Value *, 64> traceLogArray(fieldCount);
         SmallVector<Value *, 64> traceLengthArray(fieldCount);
-        SmallVector<PHINode *, 64> currentIndex(fieldCount);
-        SmallVector<Value *, 64> updatedIndex(fieldCount);
 
         for (unsigned i = FirstKernel, j = 0; i <= LastKernel; ++i) {
-            const auto numOfInputs = in_degree(i, mBufferGraph);
-            const auto numOfOutputs = out_degree(i, mBufferGraph);
-            for (unsigned k = 0; k < numOfInputs; ++k, ++j) {
-                const auto prefix = makeBufferName(i, StreamSetPort{PortType::Input, k});
-                Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
-                traceLogArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ZERO}));
-                traceLengthArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ONE}));
-            }
 
-            for (unsigned k = 0; k < numOfOutputs; ++k, ++j) {
-                const auto prefix = makeBufferName(i, StreamSetPort{PortType::Output, k});
-                Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
-                traceLogArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ZERO}));
-                traceLengthArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ONE}));
+            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
+                const auto & bp = mBufferGraph[e];
+                if (bp.CanModifySegmentLength) {
+                    const auto prefix = makeBufferName(i, bp.Port);
+                    Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
+                    assert (j < fieldCount);
+                    traceLogArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ZERO}));
+                    traceLengthArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ONE}));
+                    j++;
+                }
+            }
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                const auto & bp = mBufferGraph[e];
+                if (bp.CanModifySegmentLength) {
+                    const auto prefix = makeBufferName(i, bp.Port);
+                    Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
+                    assert (j < fieldCount);
+                    traceLogArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ZERO}));
+                    traceLengthArray[j] = b->CreateLoad(b->CreateGEP(historyPtr, {ZERO, ONE}));
+                    j++;
+                }
             }
         }
 
         // Start printing the data lines
 
+        // To only print out when the line changes, we store the values for the last line
+        // we printed as well as its line number. If the last line was not printed,
+        // we print it and the new line out; otherwise we only print out the new line.
+
+        SmallVector<PHINode *, 64> currentIndex(fieldCount);
+        SmallVector<Value *, 64> updatedIndex(fieldCount);
+        SmallVector<PHINode *, 64> lastPrintedValue(fieldCount);
+
         BasicBlock * const loopEntry = b->GetInsertBlock();
         BasicBlock * const loopStart = b->CreateBasicBlock("reportStridesPerSegment");
+        BasicBlock * const doWriteLine = b->CreateBasicBlock("writeLine");
+
+        BasicBlock * const printLastLine = b->CreateBasicBlock("printLastLine");
+        BasicBlock * const printCurrentLine = b->CreateBasicBlock("printCurrentLine");
+
+        BasicBlock * const checkNext = b->CreateBasicBlock("checkNext");
         b->CreateBr(loopStart);
 
         b->SetInsertPoint(loopStart);
         PHINode * const segNo = b->CreatePHI(sizeTy, 2);
-        segNo->addIncoming(SZ_ZERO, loopEntry);
+        segNo->addIncoming(sz_ZERO, loopEntry);
+        PHINode * const lastPrintedSegNo = b->CreatePHI(sizeTy, 2);
+        lastPrintedSegNo->addIncoming(sz_ZERO, loopEntry);
+
         for (unsigned i = 0; i < fieldCount; ++i) {
             PHINode * const index = b->CreatePHI(sizeTy, 2);
-            index->addIncoming(SZ_ZERO, loopEntry);
+            index->addIncoming(sz_ZERO, loopEntry);
             currentIndex[i] = index;
+            PHINode * const val = b->CreatePHI(sizeTy, 2);
+            val->addIncoming(sz_ONE, loopEntry);
+            lastPrintedValue[i] = val;
         }
 
-        args[2] = segNo;
+        SmallVector<Value *, 64> currentVal(fieldCount + 3);
 
-        Value * writeLine = i1_FALSE;
+        Value * writeLine = b->CreateICmpEQ(segNo, mSegNo);
         for (unsigned i = 0; i < fieldCount; ++i) {
 
             BasicBlock * const entry = b->GetInsertBlock();
@@ -783,7 +933,7 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
             b->CreateCondBr(b->CreateICmpEQ(segNo, nextSegNo), update, next);
 
             b->SetInsertPoint(update);
-            Value * const currentIndex1 = b->CreateAdd(currentIndex[i], SZ_ONE);
+            Value * const currentIndex1 = b->CreateAdd(currentIndex[i], sz_ONE);
             b->CreateBr(next);
 
             b->SetInsertPoint(next);
@@ -793,36 +943,60 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
             nextIndex->addIncoming(currentIndex1, update);
             updatedIndex[i] = nextIndex;
 
-            PHINode * const blockedValue = b->CreatePHI(sizeTy, 3);
-            blockedValue->addIncoming(SZ_ZERO, entry);
-            blockedValue->addIncoming(SZ_ZERO, check);
-            blockedValue->addIncoming(SZ_ONE, update);
+            PHINode * const val = b->CreatePHI(sizeTy, 3);
+            val->addIncoming(sz_ZERO, entry);
+            val->addIncoming(sz_ZERO, check);
+            val->addIncoming(sz_ONE, update);
 
-            PHINode * const nextWriteLine = b->CreatePHI(boolTy, 3);
-            nextWriteLine->addIncoming(writeLine, entry);
-            nextWriteLine->addIncoming(writeLine, check);
-            nextWriteLine->addIncoming(i1_TRUE, update);
-            writeLine = nextWriteLine;
+            currentVal[i] = val;
 
-            args[i + 3] = blockedValue;
+            lastPrintedValue[i]->addIncoming(val, checkNext);
+
+            Value * const changed = b->CreateICmpNE(val, lastPrintedValue[i]);
+            writeLine = b->CreateOr(writeLine, changed);
         }
 
-        BasicBlock * const doWriteLine = b->CreateBasicBlock("writeLine");
-        BasicBlock * const checkNext = b->CreateBasicBlock("checkNext");
+        Value * const nextSegNo = b->CreateAdd(segNo, sz_ONE);
 
+        BasicBlock * const blockedValueListExit = b->GetInsertBlock();
         b->CreateCondBr(writeLine, doWriteLine, checkNext);
 
         b->SetInsertPoint(doWriteLine);
+        Value * const writeLast = b->CreateICmpNE(lastPrintedSegNo, segNo);
+        b->CreateCondBr(writeLast, printLastLine, printCurrentLine);
+
+        b->SetInsertPoint(printLastLine);
+        SmallVector<Value *, 64> args(fieldCount + 3);
+        args[0] = STDERR;
+        args[1] = b->GetString(format.str());
+        args[2] = b->CreateSub(segNo, sz_ONE);
+        for (unsigned i = 0; i < fieldCount; ++i) {
+            args[i + 3] = lastPrintedValue[i];
+        }
+        b->CreateCall(fTy, Dprintf, args);
+        b->CreateBr(printCurrentLine);
+
+        b->SetInsertPoint(printCurrentLine);
+        args[2] = segNo;
+        for (unsigned i = 0; i < fieldCount; ++i) {
+            args[i + 3] = currentVal[i];
+        }
         b->CreateCall(fTy, Dprintf, args);
         b->CreateBr(checkNext);
 
         b->SetInsertPoint(checkNext);
         BasicBlock * const loopExit = b->CreateBasicBlock("reportStridesPerSegmentExit");
         BasicBlock * const loopEnd = b->GetInsertBlock();
-        segNo->addIncoming(b->CreateAdd(segNo, SZ_ONE), loopEnd);
         for (unsigned i = 0; i < fieldCount; ++i) {
             currentIndex[i]->addIncoming(updatedIndex[i], loopEnd);
         }
+        PHINode * const printedSegNo = b->CreatePHI(sizeTy, 2);
+        printedSegNo->addIncoming(nextSegNo, printCurrentLine);
+        printedSegNo->addIncoming(lastPrintedSegNo, blockedValueListExit);
+        lastPrintedSegNo->addIncoming(printedSegNo, loopEnd);
+
+        segNo->addIncoming(nextSegNo, loopEnd);
+
         Value * const notDone = b->CreateICmpNE(segNo, mSegNo);
         b->CreateLikelyCondBr(notDone, loopStart, loopExit);
 

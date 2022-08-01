@@ -122,7 +122,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     // left to process (either due to some data being divided across a buffer boundary or because another stream
     // has less data (relatively speaking) than the closed stream.
 
-    if (LLVM_UNLIKELY(TraceIO)) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         mBranchToLoopExit = b->getFalse();
     }
 
@@ -175,13 +175,19 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
 
+    Value * numOfLinearOutputStrides = numOfLinearStrides;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (port.CanModifySegmentLength) {
             Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
-            numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
+            numOfLinearOutputStrides = b->CreateUMin(numOfLinearOutputStrides, strides);
         }
     }
+    if (numOfLinearOutputStrides != numOfLinearStrides) {
+        Value * const cond = b->CreateIsNull(numOfLinearOutputStrides);
+        numOfLinearStrides = b->CreateSelect(cond, numOfLinearStrides, numOfLinearOutputStrides);
+    }
+
 
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
@@ -505,7 +511,10 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     if (LLVM_UNLIKELY(TraceIO)) {
         // do not record the block if this not the first execution of the
         // kernel but ensure that the system knows at least one failed.
-        test = b->CreateOr(sufficientInput, mExecutedAtLeastOnceAtLoopEntryPhi);
+        test = sufficientInput;
+        if (mExecutedAtLeastOnceAtLoopEntryPhi) {
+            test = b->CreateOr(test, mExecutedAtLeastOnceAtLoopEntryPhi);
+        }
         insufficient = b->CreateOr(mBranchToLoopExit, b->CreateNot(sufficientInput));
     }
 
@@ -882,9 +891,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     BasicBlock * const afterCopyBackOrExpand = b->CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
+    Value * mustExpand = nullptr;
+
     if (buffer->isLinear()) {
 
-        Value * const mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
+        mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
@@ -908,11 +919,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
     if (isa<DynamicBuffer>(buffer)) {
+        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+            recordBufferExpansionHistory(b, outputPort, buffer);
+        }
         if (mNumOfThreads != 1 || mIsNestedPipeline) {
             b->CreateStore(priorBuffer, priorBufferPtr);
-            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-                recordBufferExpansionHistory(b, outputPort, buffer);
-            }
         } else {
             b->CreateFree(priorBuffer);
         }
@@ -920,7 +931,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     b->CreateBr(afterCopyBackOrExpand);
 
     b->SetInsertPoint(afterCopyBackOrExpand);
-    updateCycleCounter(b, mKernelId, cycleCounterStart, BUFFER_EXPANSION);
+
+    Value * cycleCounterType = nullptr;
+    if (mustExpand) {
+        updateCycleCounter(b, mKernelId, cycleCounterStart, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+    } else {
+        updateCycleCounter(b, mKernelId, cycleCounterStart, CycleCounter::BUFFER_EXPANSION);
+    }
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
     #endif

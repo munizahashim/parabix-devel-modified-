@@ -1,4 +1,4 @@
-#ifndef PIPELINE_COMPILER_HPP
+﻿#ifndef PIPELINE_COMPILER_HPP
 #define PIPELINE_COMPILER_HPP
 
 #include <kernel/pipeline/pipeline_kernel.h>
@@ -103,13 +103,15 @@ const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
+const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_COUNT_SUFFIX;
+
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
 const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY = "!PCS";
 const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX = "!PCI";
 const static std::string STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY = "tPCS";
 #endif
-const static std::string STATISTICS_SEGMENT_COUNT_SUFFIX = ".SSC";
+
 const static std::string STATISTICS_BLOCKING_IO_SUFFIX = ".SBY";
 const static std::string STATISTICS_BLOCKING_IO_HISTORY_SUFFIX = ".SHY";
 const static std::string STATISTICS_BUFFER_EXPANSION_SUFFIX = ".SBX";
@@ -394,10 +396,11 @@ public:
     void addCycleCounterProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
     Value * startCycleCounter(BuilderRef b);
     void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, const CycleCounter type) const;
+    void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
+    void updateTotalCycleCounterTime(BuilderRef b) const;
 
     static void linkInstrumentationFunctions(BuilderRef b);
 
-    void incrementNumberOfSegmentsCounter(BuilderRef b) const;
     void recordBlockingIO(BuilderRef b, const StreamSetPort port) const;
 
     void printOptionalCycleCounter(BuilderRef b);
@@ -553,15 +556,15 @@ public:
 
 protected:
 
-    SimulationAllocator							mAllocator;
+    SimulationAllocator				mAllocator;
 
-    const bool                       			CheckAssertions;
+    const bool                       		CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
-    const bool                       			mTraceIndividualConsumedItemCounts;
+    const bool                       		mTraceIndividualConsumedItemCounts;
     const bool                                  mGenerateTransferredItemCountHistogram;
 
-    const unsigned								mNumOfThreads;
+    const unsigned				mNumOfThreads;
 
     const LengthAssertions &                    mLengthAssertions;
 
@@ -786,6 +789,7 @@ protected:
 
 
     // cycle counter state
+    Value *                                     mPipelineStartTime = nullptr;
     Value *                                     mKernelStartTime = nullptr;
     Value *                                     mAcquireAndReleaseStartTime = nullptr;
     FixedVector<PHINode *>                      mPartitionStartTimePhi;

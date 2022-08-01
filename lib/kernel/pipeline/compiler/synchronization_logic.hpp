@@ -40,23 +40,29 @@ namespace kernel {
  * @brief obtainCurrentSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
-    assert (mSegNo);
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo);
     } else {
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
+        ConstantInt * const sz_ONE = b->getSize(1);
         if (LLVM_LIKELY(mNumOfThreads > 1)) {
             Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
+            // NOTE: this must be atomic or the pipeline will deadlock when some thread
+            // fetches a number before the prior one to fetch the same number updates it.
             mSegNo = b->CreateAtomicFetchAndAdd(sz_ONE, segNoPtr);
         } else {
+            Value * const initialSegNo = sz_ONE;
+        #else
+            Value * const initialSegNo = mSegNo; assert (mSegNo);
         #endif
-            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
-            segNo->addIncoming(mSegNo, entryBlock);
+            PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
+            segNo->addIncoming(initialSegNo, entryBlock);
             mSegNo = segNo;
         #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         }
         #endif
     }
+    assert (mSegNo);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mBaseSegNo = mSegNo;
     mCurrentNestedSynchronizationVariable = 0;
@@ -67,7 +73,11 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
+    #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
+    if (LLVM_UNLIKELY(mNumOfThreads != 1)) {
+        return;
+    }
+    #endif
     if (LLVM_LIKELY(mIsNestedPipeline)) {
         return;
     }
@@ -79,7 +89,6 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
     #endif
     Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(mNumOfThreads));
     cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
-    #endif
 }
 
 namespace  {
@@ -146,7 +155,7 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (mNumOfThreads != 1 || mIsNestedPipeline || TraceProducedItemCounts || TraceUnconsumedItemCounts) {
+    if (mNumOfThreads != 1 || mIsNestedPipeline || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
         const auto prefix = makeKernelName(kernelId);
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
 

@@ -920,7 +920,6 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
         if (func == nullptr) {
 
             IntegerType * const sizeTy = b->getSizeTy();
-            PointerType * const sizePtrTy = sizeTy->getPointerTo(mAddressSpace);
             FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {myHandle->getType(), sizeTy, sizeTy}, false);
 
             const auto ip = b->saveIP();
@@ -972,7 +971,6 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             assert (virtualBase->getType()->getPointerElementType() == mType);
 
             DataLayout DL(b->getModule());
-            Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
 
             const auto sizeTyWidth = sizeTy->getBitWidth() / 8;
 

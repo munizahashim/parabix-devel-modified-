@@ -25,6 +25,8 @@ void PipelineCompiler::start(BuilderRef b) {
         mRethrowException = b->WriteDefaultRethrowBlock();
     }
 
+    mPipelineStartTime = startCycleCounter(b);
+
     #ifdef PRINT_DEBUG_MESSAGES
     debugInit(b);
     if (mIsNestedPipeline) {
@@ -67,8 +69,7 @@ void PipelineCompiler::start(BuilderRef b) {
     b->SetInsertPoint(mPipelineLoop);
     mMadeProgressInLastSegment = b->CreatePHI(b->getInt1Ty(), 2, "madeProgressInLastSegment");
     mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
-    Constant * const i1_FALSE = b->getFalse();
-    mPipelineProgress = i1_FALSE;
+    mPipelineProgress = b->getFalse();
     obtainCurrentSegmentNumber(b, entryBlock);
 }
 
@@ -106,18 +107,21 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
             break;
         }
     }
-    mMayHaveInsufficientIO = checkInputChannels;
+
+    bool checkOutputChannels = false;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (port.CanModifySegmentLength) {
-            mMayHaveInsufficientIO = true;
+            checkOutputChannels = true;
             break;
         }
     }
 
+    mMayHaveInsufficientIO = checkInputChannels || checkOutputChannels;
+
     mMayLoopToEntry = mIsOptimizationBranch;
     if (LLVM_LIKELY(!mKernelIsInternallySynchronized)) {
-        if (mHasExplicitFinalPartialStride || (checkInputChannels && hasAtLeastOneNonGreedyInput())) {
+        if (mHasExplicitFinalPartialStride || (checkInputChannels && hasAtLeastOneNonGreedyInput()) || checkOutputChannels) {
             mMayLoopToEntry = true;
         }
         if (StrideStepLength[FirstKernelInPartition] > StrideStepLength[mKernelId]) {
@@ -128,13 +132,15 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);
 
+    assert (mMayLoopToEntry || mKernelId != 3);
+
     const auto prefix = makeKernelName(mKernelId);
 
     // TODO: if a kernel has circular buffers and the produced/consumption rate is not synchronous
     // and the GCD of the stride step length of the producer/consumer is 1 but the stride step length
     // of the consumer is > 1, we may get a scenario in which the partition root needs to check the
     // raw produced item counts rather than the accessible ones to determine the segment length.
-    // We could bypass this by having a larger overflow region but doing so would cause us to memcpy
+    // We coumMayLoopToEntryld bypass this by having a larger overflow region but doing so would cause us to memcpy
     // more data than necessary.
 
     /// -------------------------------------------------------------------------------------
@@ -182,8 +188,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     readProducedItemCounts(b);
     readConsumedItemCounts(b);
     prepareLinearThreadLocalOutputBuffers(b);
-
-    incrementNumberOfSegmentsCounter(b);
     recordUnconsumedItemCounts(b);
 
     detemineMaximumNumberOfStrides(b);
@@ -702,8 +706,10 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
             }
         }
 
-        mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
-        mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
+        if (mIsPartitionRoot) {
+            mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
+            mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
+        }
     }
 
     if (mMayLoopToEntry || !mIsPartitionRoot || !mKernelJumpToNextUsefulPartition) {
@@ -727,7 +733,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
             mProducedAtJumpPhi[port]->addIncoming(produced, exitBlock);
         }
     }
-
 }
 
 
@@ -913,6 +918,8 @@ void PipelineCompiler::end(BuilderRef b) {
     #ifdef ENABLE_PAPI
     stopPAPIAndDestroyEventSet(b);
     #endif
+
+    updateTotalCycleCounterTime(b);
 
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;

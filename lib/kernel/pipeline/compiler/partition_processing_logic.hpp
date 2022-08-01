@@ -20,16 +20,18 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
     mPartitionEntryPoint[PartitionCount] = mPipelineEnd;
     #endif
 
-    const auto ip = b->saveIP();
     IntegerType * const boolTy = b->getInt1Ty();
     IntegerType * const sizeTy = b->getInt64Ty();
 
     for (unsigned i = 2; i < PartitionCount; ++i) {
-        b->SetInsertPoint(mPartitionEntryPoint[i]);
-        const auto prefix = std::to_string(i);
-        mPartitionPipelineProgressPhi[i] = b->CreatePHI(boolTy, PartitionCount, prefix + ".pipelineProgress");
-        if (LLVM_UNLIKELY(EnableCycleCounter && i < (PartitionCount - 1))) {
-            mPartitionStartTimePhi[i] = b->CreatePHI(sizeTy, PartitionCount, prefix + ".startTimeCycleCounter");
+        mPartitionPipelineProgressPhi[i] =
+            PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+    }
+
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        for (unsigned i = 2; i < (PartitionCount - 1); ++i) {
+            mPartitionStartTimePhi[i] =
+                PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
         }
     }
 
@@ -125,7 +127,7 @@ inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
         partitionId = KernelPartitionId[kernel];
     }
-    b->restoreIP(ip);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -169,7 +171,9 @@ BasicBlock * PipelineCompiler::getPartitionExitPoint(BuilderRef /* b */) {
 inline void PipelineCompiler::checkForPartitionEntry(BuilderRef b) {
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
     mIsPartitionRoot = false;
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mUsingNewSynchronizationVariable = false;
+    #endif
     const auto partitionId = KernelPartitionId[mKernelId];
     if (partitionId != mCurrentPartitionId) {
         mIsPartitionRoot = true;
@@ -411,9 +415,12 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     acquireSynchronizationLock(b, targetLock, type, segNo);
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        mPartitionStartTimePhi[KernelPartitionId[firstKernelInTargetPartition]]->addIncoming(startTime, exitBlock);
+        const auto partId = KernelPartitionId[firstKernelInTargetPartition];
+        if (partId < (PartitionCount - 1)) {
+            updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+            BasicBlock * const exitBlock = b->GetInsertBlock();
+            mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
+        }
     }
 }
 
@@ -580,8 +587,8 @@ inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
 
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
 
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * nextSegNo = mSegNo;
+    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     if (LLVM_UNLIKELY(mUsingNewSynchronizationVariable)) {
         assert (mIsPartitionRoot);
         nextSegNo = obtainNextSegmentNumber(b);

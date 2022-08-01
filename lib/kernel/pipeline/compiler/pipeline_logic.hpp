@@ -122,6 +122,10 @@ inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         }
         #endif
     }
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        mTarget->addThreadLocalScalar(b->getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
+                                      getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
+    }
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
@@ -744,8 +748,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     if (LLVM_LIKELY(mTarget->isStateful())) {
         threadLocalArgs.push_back(initialSharedState);
     }
-    if (LLVM_LIKELY(mTarget->isStateful())) {
-        threadLocalArgs.push_back(threadLocal[0]);
+    if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
+        threadLocalArgs.push_back(initialThreadLocal);
     }
 
     Value * finalTerminationSignal = nullptr;

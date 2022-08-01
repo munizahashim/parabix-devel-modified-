@@ -26,7 +26,7 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
             assert (rd.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(kernelId, rd.Port);
 
-            if (out_degree(streamSet, mConsumerGraph) > 0) {
+            if (out_degree(streamSet, mConsumerGraph) != 0) {
                 // Although we can PHI out the thread's current min. consumed summary count for each
                 // buffer, in any complex program, we'll inevitably have general register spill/reloads.
                 // By keeping these as stack-allocated variables, the LLVM compiler will hopefully be
@@ -160,7 +160,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
  * @brief writeTransitoryConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced) {
-    if (out_degree(streamSet, mConsumerGraph) > 1) {
+    if (out_degree(streamSet, mConsumerGraph) != 0) {
         b->setScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet), produced);
     }
 }
