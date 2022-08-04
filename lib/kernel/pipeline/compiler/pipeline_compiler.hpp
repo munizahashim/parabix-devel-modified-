@@ -91,7 +91,6 @@ const static std::string DEBUG_FD = ".DFd";
 
 const static std::array<std::string, 2> OPT_BR_INFIX = { ".0", ".1" };
 
-const static std::string ITERATION_COUNT_SUFFIX = ".ITC";
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
 const static std::string ITEM_COUNT_SUFFIX = ".IN";
@@ -121,6 +120,7 @@ const static std::string STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX = ".SPIC";
 const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
 
 const static std::string STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TICH";
+const static std::string STATISTICS_TRANSFERRED_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDCH";
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
@@ -497,6 +497,8 @@ public:
     void updateTransferredItemsForHistogramData(BuilderRef b);
     void printHistogramReport(BuilderRef b);
 
+    static void linkHistogramFunctions(BuilderRef b);
+
 // debug message functions
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -551,6 +553,7 @@ public:
   //  void verifyBufferRelationships() const;
 
     bool hasAtLeastOneNonGreedyInput() const;
+    bool hasAnyGreedyInput(const unsigned kernelId) const;
     bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
 
@@ -724,6 +727,7 @@ protected:
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
     bool                                        mHasExplicitFinalPartialStride = false;
+    bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
     bool                                        mIsOptimizationBranch = false;
     bool                                        mMayLoopToEntry = false;

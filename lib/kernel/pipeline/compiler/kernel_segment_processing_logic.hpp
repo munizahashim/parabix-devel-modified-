@@ -84,7 +84,9 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
-    mExecuteStridesIndividually = mKernel->hasAttribute(AttrId::ExecuteStridesIndividually) || recordsAnyHistogramData();
+    mRecordHistogramData = recordsAnyHistogramData();
+    mExecuteStridesIndividually =
+        mKernel->hasAttribute(AttrId::ExecuteStridesIndividually) || (mRecordHistogramData && !hasAnyGreedyInput(mKernelId));
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION

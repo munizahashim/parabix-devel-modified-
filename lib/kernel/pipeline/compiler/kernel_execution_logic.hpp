@@ -257,11 +257,11 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         readReturnedOutputVirtualBaseAddresses(b);
     }
 
-    if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
+    if (LLVM_LIKELY(mRecordHistogramData)) {
+        updateTransferredItemsForHistogramData(b);
+    }
 
-        if (LLVM_LIKELY(mGenerateTransferredItemCountHistogram)) {
-            updateTransferredItemsForHistogramData(b);
-        }
+    if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
 
         BasicBlock * const individualStrideBodyExit = b->GetInsertBlock();
         const auto prefix = makeKernelName(mKernelId);

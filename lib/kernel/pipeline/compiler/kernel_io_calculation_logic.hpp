@@ -932,7 +932,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     b->SetInsertPoint(afterCopyBackOrExpand);
 
-    Value * cycleCounterType = nullptr;
     if (mustExpand) {
         updateCycleCounter(b, mKernelId, cycleCounterStart, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
     } else {

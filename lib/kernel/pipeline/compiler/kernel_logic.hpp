@@ -287,6 +287,20 @@ bool PipelineCompiler::hasAtLeastOneNonGreedyInput() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasAtLeastOneNonGreedyInput
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::hasAnyGreedyInput(const unsigned kernelId) const {
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & bp = mBufferGraph[e];
+        const Binding & binding = bp.Binding;
+        if (binding.getRate().isGreedy()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief isDataParallel
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isDataParallel(const size_t kernel) const {

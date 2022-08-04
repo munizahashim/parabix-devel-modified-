@@ -117,8 +117,9 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
     }
     #endif
     #ifndef USE_2020_PIPELINE_COMPILER
-    if (codegen::AnyDebugOptionIsSet()) {
+    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
+        PipelineCompiler::linkHistogramFunctions(b);
     }
     #endif
 }
