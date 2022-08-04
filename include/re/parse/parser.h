@@ -12,7 +12,7 @@
 #include <re/adt/re_cc.h>
 #include <re/adt/re_name.h>
 
-namespace re { class Name; class Capture;}
+namespace re { class Name; class Capture; class Reference;}
 
 namespace re {
 
@@ -179,7 +179,7 @@ protected:
 
     RE * parse_capture_body();
     
-    RE * parse_back_reference();
+    Reference * parse_back_reference();
     
     virtual bool isSetEscapeChar(char c);
 

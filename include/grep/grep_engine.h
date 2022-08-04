@@ -15,22 +15,23 @@
 #include <set>
 #include <boost/filesystem.hpp>
 #include <re/analysis/capture-ref.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/parse/GLOB_parser.h>
 #include <kernel/core/callback.h>
 #include <kernel/util/linebreak_kernel.h>
+#include <kernel/util/debug_display.h>
 #include <grep/grep_kernel.h>
 
-namespace re { class CC; }
-namespace re { class RE; }
+namespace re { class CC; class Name; class RE; }
 namespace llvm { namespace cl { class OptionCategory; } }
 namespace kernel { class ProgramBuilder; }
 namespace kernel { class StreamSet; }
+namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
 
+using ProgBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
 
 namespace grep {
-
 
 extern unsigned ByteCClimit;
 
@@ -109,6 +110,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
+    unsigned RunGrep(ProgBuilderRef P, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Matches);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -121,26 +123,26 @@ protected:
         UTF8index = 2,
         MoveMatchesToEOL = 4,
         MatchSpans = 8,
-        GraphemeClusterBoundary = 16,
-        WordBoundary = 32
+        U21 = 64
     };
     bool hasComponent(Component compon_set, Component c);
     void setComponent(Component & compon_set, Component c);
     bool matchesToEOLrequired();
 
     // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * getBasis(ProgBuilderRef P, kernel::StreamSet * ByteStream);
 
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // line break stream and the U8 index stream (if required).
-    void grepPrologue(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * SourceStream);
+    void grepPrologue(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
-    void prepareExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * SourceStream);
-    void addExternalStreams(const std::unique_ptr<kernel::ProgramBuilder> & P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
-    void U8indexedGrep(const std::unique_ptr<kernel::ProgramBuilder> &P, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Results);
-    void UnicodeIndexedGrep(const std::unique_ptr<kernel::ProgramBuilder> &P, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Results);
-    kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream);
+    void prepareExternalObject(re::Name * extName);
+    void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
+    kernel::StreamSet * resolveExternal(ProgBuilderRef P, std::string nameStr);
+    void addExternalStreams(ProgBuilderRef P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
+    kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
     void applyColorization(const std::unique_ptr<kernel::ProgramBuilder> & E,
@@ -183,19 +185,18 @@ protected:
     re:: RE * mRE;
     std::set<re::Name *> mExternalNames;
     re::CC * mBreakCC;
-    re::RE * mPrefixRE;
-    re::RE * mSuffixRE;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;
     Component mInternalComponents;
-    std::map<std::string, kernel::StreamSet *> mPropertyStreamMap;
+    const cc::Alphabet * mIndexAlphabet;
+    std::map<std::string, kernel::ExternalStreamObject *> mExternalMap;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
-    kernel::StreamSet * mGCB_stream;
-    kernel::StreamSet * mWordBoundary_stream;
+    kernel::StreamSet * mU21;
     re::UTF8_Transformer mUTF8_Transformer;
     pthread_t mEngineThread;
+    kernel::ParabixIllustrator * mIllustrator;
 };
 
 
@@ -247,7 +248,7 @@ protected:
 class EmitMatchesEngine final : public GrepEngine {
 public:
     EmitMatchesEngine(BaseDriver & driver);
-    void grepPipeline(const std::unique_ptr<kernel::ProgramBuilder> &P, kernel::StreamSet * ByteStream, bool BatchMode = false);
+    void grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream, bool BatchMode = false);
     void grepCodeGen() override;
 private:
     uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) override;

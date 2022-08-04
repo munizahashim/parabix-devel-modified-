@@ -10,7 +10,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/re_cc.h>
 #include <re/adt/printer_re.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <unicode/core/unicode_set.h>
 
 namespace cc {
@@ -32,7 +32,7 @@ namespace cc {
 
 using bitset = boost::dynamic_bitset<>;
 
-std::map<UCD::codepoint_t, bitset> computeBreakpoints(const std::vector<re::CC *> & CCs) {
+std::map<UCD::codepoint_t, bitset> computeBreakpoints(const CC_Set & CCs) {
     std::map<UCD::codepoint_t, bitset> breakpoints;
     for (unsigned i = 0; i < CCs.size(); i++) {
         for (const auto range : *CCs[i]) {
@@ -53,9 +53,9 @@ std::map<UCD::codepoint_t, bitset> computeBreakpoints(const std::vector<re::CC *
     return breakpoints;
 }
 
-void doMultiplexCCs(const std::vector<re::CC *> & CCs,
+void doMultiplexCCs(const CC_Set & CCs,
                     std::vector<std::vector<unsigned>> & exclusiveSetIDs,
-                    std::vector<re::CC *> & multiplexedCCs) {
+                    CC_Set & multiplexedCCs) {
     
     const auto breakpoints = computeBreakpoints(CCs);
     // Initialize the exclusiveSetIDs to have one empty vector per source CC.
@@ -114,7 +114,7 @@ void doMultiplexCCs(const std::vector<re::CC *> & CCs,
 
 
 
-MultiplexedAlphabet::MultiplexedAlphabet(const std::string alphabetName, const std::vector<re::CC *> CCs)
+MultiplexedAlphabet::MultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs)
 : Alphabet(std::move(alphabetName), ClassTypeId::MultiplexedAlphabet)
 , mUnicodeSets(std::move(CCs)) {
     if (!mUnicodeSets.empty()) {

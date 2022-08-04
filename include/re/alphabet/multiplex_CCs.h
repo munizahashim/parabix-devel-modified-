@@ -11,10 +11,10 @@ namespace re { class CC; }
 
 namespace cc {
 
+using CC_Set = std::vector<re::CC *>;
+
 class MultiplexedAlphabet final : public Alphabet {
 public:
-    MultiplexedAlphabet(const std::string alphabetName, const std::vector<re::CC *> CCs);
-
     static inline bool classof(const Alphabet * a) {
         return a->getClassTypeId() == ClassTypeId::MultiplexedAlphabet;
     }
@@ -30,22 +30,30 @@ public:
         return mExclusiveSetIDs;
     }
     
-    const std::vector<re::CC *> & getMultiplexedCCs() const {
+    const CC_Set & getMultiplexedCCs() const {
         return mMultiplexedCCs;
     }
     
     re::CC * transformCC(const re::CC * sourceCC) const;
     
     re::CC * invertCC(const re::CC * transformedCC) const;
+
+    friend MultiplexedAlphabet * makeMultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs);
+protected:
+    MultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs);
+
 private:
     const Alphabet * mSourceAlphabet;
-    const std::vector<re::CC *> mUnicodeSets;
+    const CC_Set mUnicodeSets;
     std::vector<std::vector<unsigned>> mExclusiveSetIDs;
-    std::vector<re::CC *> mMultiplexedCCs;
+    CC_Set mMultiplexedCCs;
 
     unsigned long findTargetCCIndex(const re::CC * sourceCC) const;
 };
 
+inline MultiplexedAlphabet * makeMultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs) {
+    return new MultiplexedAlphabet(alphabetName, CCs);
+}
 }
 
 

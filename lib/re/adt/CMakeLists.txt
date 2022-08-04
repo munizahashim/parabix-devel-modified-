@@ -18,7 +18,8 @@ SRC
     re_rep.cpp
     memoization.cpp
     re_utility.cpp
+    alphabet/alphabet.cpp
+    alphabet/multiplex_CCs.cpp
 DEPS
-    re.alphabet
     re.toolchain
 )

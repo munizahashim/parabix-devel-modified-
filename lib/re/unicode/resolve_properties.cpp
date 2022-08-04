@@ -9,8 +9,11 @@
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_name.h>
+#include <re/alphabet/multiplex_CCs.h>
+#include <re/analysis/re_inspector.h>
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
+#include <re/transforms/re_transformer.h>
 #include <re/unicode/boundaries.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjects.h>
@@ -41,7 +44,7 @@ private:
     PropertyObject * mPropObj;
     
 };
-    
+
 RE * PropertyResolver::resolveCC (std::string value, bool is_negated) {
     RE * resolved = nullptr;
     if ((value.length() > 0) && (value[0] == '/')) {
@@ -142,20 +145,20 @@ struct PropertyLinker : public RE_Transformer {
             if (valcode >= 0) {
                 // Found a script.
                 exp->setValueString(scObj->GetValueFullName(valcode));
-                exp->setPropertyIdentifier(getPropertyEnumName(sc));
+                exp->setPropertyIdentifier(getPropertyFullName(sc));
                 exp->setPropertyCode(sc);
                 return exp;
             }
             if (canon == "ascii") {  // block:ascii special case
                 exp->setValueString("ascii");
-                exp->setPropertyIdentifier(getPropertyEnumName(blk));
+                exp->setPropertyIdentifier(getPropertyFullName(blk));
                 exp->setPropertyCode(blk);
                 return exp;
             }
             if (canon == "assigned") {  // cn:n special case
                 // general category != unassigned
                 exp->setValueString("unassigned");
-                exp->setPropertyIdentifier(getPropertyEnumName(gc));
+                exp->setPropertyIdentifier(getPropertyFullName(gc));
                 exp->setOperator(PropertyExpression::Operator::NEq);
                 exp->setPropertyCode(gc);
                 return exp;
@@ -173,6 +176,28 @@ struct PropertyLinker : public RE_Transformer {
 
 RE * linkProperties(RE * r) {
     return PropertyLinker().transformRE(r);
+}
+
+struct PropertyReferencePromotion : public RE_Transformer {
+    PropertyReferencePromotion() : RE_Transformer("PropertyReferencePromotion") {}
+    RE * transformPropertyExpression (PropertyExpression * exp) override {
+        int prop_code = exp->getPropertyCode();
+        if (prop_code < 0) return exp;  // No property code - leave unchanged.
+        const auto & propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
+        if (isa<EnumeratedPropertyObject>(propObj)) {
+            RE * defn = exp->getResolvedRE();
+            if (defn == nullptr) return exp;
+            if (Reference * ref = dyn_cast<Reference>(defn)) {
+                ref -> setReferencedProperty(static_cast<UCD::property_t>(prop_code));
+                return ref;
+            }
+        }
+        return exp;
+    }
+};
+
+RE * promotePropertyReferences(RE * r) {
+    return PropertyReferencePromotion().transformRE(r);
 }
 
 struct PropertyStandardization : public RE_Transformer {
@@ -241,6 +266,84 @@ RE * inlineSimpleProperties(RE * r) {
     return SimplePropertyInliner().transformRE(r);
 }
 
+using PropertySet = std::set<UCD::property_t>;
+struct EnumBasisRequiredCollector : public RE_Inspector {
+    EnumBasisRequiredCollector(PropertySet & enums) : RE_Inspector(),
+    mEnumSet(enums) {}
+
+    void inspectPropertyExpression(PropertyExpression * pe) {
+        auto id = static_cast<UCD::property_t>(pe->getPropertyCode());
+        PropertyObject * propObj = getPropertyObject(id);
+        if (isa<EnumeratedPropertyObject>(propObj)) {
+            if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+                mEnumSet.insert(id);
+            }
+            RE * defn = pe->getResolvedRE();
+            if (defn && isa<Reference>(defn)) {
+                mEnumSet.insert(id);
+            }
+        }
+    }
+
+    PropertySet mEnumSet;
+};
+
+PropertySet propertiesRequiringBasisSet(RE * r) {
+    PropertySet ps;
+    EnumBasisRequiredCollector(ps).inspectRE(r);
+    return ps;
+}
+
+using PropertyAlphabetMap = std::map<UCD::property_t, cc::Alphabet *>;
+
+struct EnumeratedPropertyMultiplexer : public RE_Transformer {
+    EnumeratedPropertyMultiplexer(PropertyAlphabetMap & propertiesToMultiplex)
+        : RE_Transformer("EnumeratedPropertyMultiplexer"), mPropertiesToMultiplex(propertiesToMultiplex) {}
+    RE * transformPropertyExpression (PropertyExpression * exp) override {
+        auto id = static_cast<UCD::property_t>(exp->getPropertyCode());
+        auto f = mPropertiesToMultiplex.find(id);
+        if (f == mPropertiesToMultiplex.end()) return exp;
+        cc::Alphabet * enumAlphabet = f->second;
+        PropertyExpression::Operator op = exp->getOperator();
+        std::string val_str = exp->getValueString();
+        PropertyObject * propObj = getPropertyObject(id);
+        if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+            std::string propName = getPropertyFullName(id);
+            int val_code = obj->GetPropertyValueEnumCode(val_str);
+            if (val_code < 0) return exp;  // TODO: deal with recursive regexp
+            re::CC * enumCC = makeCC(enumAlphabet);
+            if (op == PropertyExpression::Operator::Eq) {
+                enumCC->insert(val_code);
+            } else if (op == PropertyExpression::Operator::NEq) {
+                for (int i = 0; i < obj->GetEnumCount(); i++) {
+                    if (i != val_code) enumCC->insert(i);
+                }
+            }
+            return enumCC;
+        }
+        return exp;
+    }
+private:
+    PropertyAlphabetMap mPropertiesToMultiplex;
+};
+
+RE * enumeratedPropertiesToCCs(PropertySet propertyCodes, RE * r) {
+    PropertyAlphabetMap propertyMap;
+    for (auto c : propertyCodes) {
+        PropertyObject * propObj = getPropertyObject(c);
+        if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+            std::string alphabetName = "UCD:" + getPropertyFullName(c);
+            auto enumCount = obj->GetEnumCount();
+            std::vector<CC *> enumCCs;
+            for (int i = 0; i < enumCount; i++) {
+                enumCCs.push_back(re::makeCC(obj->GetCodepointSet(i)));
+            }
+            propertyMap.emplace(c, cc::makeMultiplexedAlphabet(alphabetName, enumCCs));
+        }
+    }
+    return EnumeratedPropertyMultiplexer(propertyMap).transformRE(r);
+}
+
 struct PropertyExternalizer : public RE_Transformer {
     PropertyExternalizer() : RE_Transformer("PropertyExternalizer") {}
     RE * transformPropertyExpression (PropertyExpression * exp) override {
@@ -284,6 +387,9 @@ RE * externalizeAnyNodes(RE * r) {
 
 RE * linkAndResolve(RE * r, GrepLinesFunctionType grep) {
     RE * linked = linkProperties(r);
+    linked = promotePropertyReferences(r);
+    PropertySet ps = propertiesRequiringBasisSet(linked);
+    linked = enumeratedPropertiesToCCs(ps, linked);
     RE * std = standardizeProperties(linked);
     return resolveProperties(std, grep);
 }

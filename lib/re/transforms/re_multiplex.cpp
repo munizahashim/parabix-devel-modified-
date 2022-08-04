@@ -3,9 +3,10 @@
 #include <functional>
 #include <re/adt/adt.h>
 #include <re/alphabet/alphabet.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 

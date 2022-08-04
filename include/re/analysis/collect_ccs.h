@@ -11,8 +11,15 @@ namespace re {
 class RE;
 class CC;
 
-std::vector<CC *> collectCCs(RE * const re, const cc::Alphabet & a,
-                             re::NameProcessingMode m = re::NameProcessingMode::None);
+using CC_Set = std::vector<CC *>;
+
+CC_Set collectCCs(RE * const re, const cc::Alphabet & a,
+                  re::NameProcessingMode m = re::NameProcessingMode::None);
+
+
+using Alphabet_Set = std::set<const cc::Alphabet *>;
+
+Alphabet_Set collectAlphabets(RE * const re);
 
 }
 #endif

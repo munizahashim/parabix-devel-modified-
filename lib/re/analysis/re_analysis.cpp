@@ -5,7 +5,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
 #include <re/adt/printer_re.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
@@ -474,23 +474,6 @@ bool byteTestsWithinLimit(RE * re, unsigned limit) {
     return btc_object.testCount <= btc_object.testLimit;
 }
 
-bool hasTriCCwithinLimit(RE * r, unsigned byteCClimit, RE * & prefixRE, RE * & suffixRE) {
-    if (const Seq * seq = dyn_cast<Seq>(r)) {
-        if (seq->size() < 4) return false;
-        if (!isa<CC>(seq->front())) return false;
-        if (!isa<CC>((*seq)[1])) return false;
-        if (!isa<CC>((*seq)[2])) return false;
-        prefixRE = makeSeq(seq->begin(), seq->begin()+3);
-        if (byteTestsWithinLimit(prefixRE, byteCClimit)) {
-            suffixRE = makeSeq(seq->begin()+3, seq->end());
-            return true;
-        }
-        return false;
-    }
-    return false;
-}
-
-
 bool hasStartAnchor(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         for (const RE * re : *alt) {
@@ -596,6 +579,43 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
         return DefiniteLengthBackReferencesOnly(r->getCapture());
     }
     return true; // otherwise = CC, Any, Start, End, Range
+}
+
+unsigned grepOffset(const RE * re) {
+    if (const Alt * alt = dyn_cast<Alt>(re)) {
+        unsigned altOffset = 0;
+        for (const RE * re : *alt) {
+            altOffset = std::max(altOffset, grepOffset(re));
+        }
+        return altOffset;
+    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
+        if (seq->empty()) return 1;
+        return grepOffset(seq->back());
+    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
+        if (rep->getUB() == Rep::UNBOUNDED_REP) return 1;
+        return grepOffset(rep->getRE());
+    } else if (isa<Start>(re)) {
+        return 1;
+    } else if (isa<End>(re)) {
+        return 1;
+    } else if (isa<Assertion>(re)) {
+        return 1;
+    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
+        return grepOffset(diff->getLH());
+    } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
+        return std::min(grepOffset(e->getLH()), grepOffset(e->getRH()));
+    } else if (isa<Any>(re)) {
+        return 0;
+    } else if (isa<CC>(re)) {
+        return 0;
+    } else if (const Group * g = dyn_cast<Group>(re)) {
+        return grepOffset(g->getRE());
+    } else if (const Name * n = dyn_cast<Name>(re)) {
+        return grepOffset(n->getDefinition());
+    } else if (const Capture * c = dyn_cast<Capture>(re)) {
+        return grepOffset(c->getCapturedRE());
+    }
+    return 0; // otherwise
 }
 
 }

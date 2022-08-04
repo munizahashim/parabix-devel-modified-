@@ -9,7 +9,9 @@
 #include <llvm/Support/ErrorHandling.h>
 
 namespace cc {
-    
+
+Alphabet::Allocator Alphabet::mAllocator;
+
 UnicodeMappableAlphabet::UnicodeMappableAlphabet(const std::string alphabetName,
                                                  unsigned unicodeCommon,
                                                  std::vector <UCD::codepoint_t> aboveCommon)
