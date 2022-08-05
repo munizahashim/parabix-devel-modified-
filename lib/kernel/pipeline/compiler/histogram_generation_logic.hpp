@@ -56,7 +56,7 @@ void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelI
         }
         // fixed rate doesn't need to be tracked as the only one that wouldn't be the exact rate would be
         // the final partial one but that isn't a very interesting value to model.
-        if (pr.isFixed()) {
+        if (!anyGreedy && pr.isFixed()) {
             return;
         }
         const auto prefix = makeBufferName(kernelId, br.Port);
@@ -69,6 +69,7 @@ void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelI
         } else {
             histTy = ArrayType::get(i64Ty, ceiling(br.Maximum) + 1);
         }
+
 
         mTarget->addInternalScalar(histTy, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX, groupId);
 
@@ -103,8 +104,9 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
         if (func == nullptr) {
 
             PointerType * const entryPtrTy = cast<PointerType>(initialEntry->getType());
-
+            PointerType * const voidPtrTy = b->getVoidPtrTy();
             IntegerType * const sizeTy = b->getSizeTy();
+
             FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {entryPtrTy, sizeTy}, false);
 
             ConstantInt * const i32_ZERO = b->getInt32(0);
@@ -178,8 +180,8 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             offset[1] = i32_ONE;
             b->CreateStore(sz_ONE, b->CreateGEP(newEntry, offset));
             offset[1] = i32_TWO;
-            b->CreateStore(b->CreatePointerCast(nextEntry, b->getVoidPtrTy()), b->CreateGEP(newEntry, offset));
-            b->CreateStore(b->CreatePointerCast(newEntry, b->getVoidPtrTy()), b->CreateGEP(currentEntry, offset));
+            b->CreateStore(b->CreatePointerCast(nextEntry, voidPtrTy), b->CreateGEP(newEntry, offset));
+            b->CreateStore(b->CreatePointerCast(newEntry, voidPtrTy), b->CreateGEP(currentEntry, offset));
             b->CreateRetVoid();
 
             b->SetInsertPoint(updateEntry);
@@ -211,34 +213,23 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             Value * const base = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
             Value * diff = nullptr;
             if (br.Port.Type == PortType::Input) {
-                b->CreateAssert(b->CreateICmpUGE(mProcessedDeferredItemCount[br.Port], mCurrentProcessedDeferredItemCountPhi[br.Port]), "a");
-                diff = b->CreateSub(mProcessedDeferredItemCount[br.Port], mCurrentProcessedDeferredItemCountPhi[br.Port]);
+                diff = b->CreateSub(mCurrentProcessedItemCountPhi[br.Port], mCurrentProcessedDeferredItemCountPhi[br.Port]);
             } else {
-                b->CreateAssert(b->CreateICmpUGE(mProducedDeferredItemCount[br.Port], mCurrentProducedDeferredItemCountPhi[br.Port]), "b");
-                diff = b->CreateSub(mProducedDeferredItemCount[br.Port], mCurrentProducedDeferredItemCountPhi[br.Port]);
+                diff = b->CreateSub(mCurrentProducedItemCountPhi[br.Port], mCurrentProducedDeferredItemCountPhi[br.Port]);
             }
             recordDynamicEntry(base, diff);
         }
         // fixed rate doesn't need to be tracked as the only one that wouldn't be the exact rate would be
         // the final partial one but that isn't a very interesting value to model.
-        if (pr.isFixed()) {
+        if (!anyGreedy && pr.isFixed()) {
             return;
         }
         const auto prefix = makeBufferName(mKernelId, br.Port);
         Value * const base = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
         Value * diff = nullptr;
         if (br.Port.Type == PortType::Input) {
-
-            b->CreateAssert(b->CreateICmpUGE(mProcessedItemCount[br.Port], mCurrentProcessedItemCountPhi[br.Port]),
-                    "c %s %" PRIu64 " vs. %" PRIu64,
-                    b->GetString(prefix),
-                    mProcessedItemCount[br.Port], mCurrentProcessedItemCountPhi[br.Port]);
-
             diff = b->CreateSub(mProcessedItemCount[br.Port], mCurrentProcessedItemCountPhi[br.Port]);
         } else {
-
-            b->CreateAssert(b->CreateICmpUGE(mProducedItemCount[br.Port], mCurrentProducedItemCountPhi[br.Port]), "d");
-
             diff = b->CreateSub(mProducedItemCount[br.Port], mCurrentProducedItemCountPhi[br.Port]);
         }
 
@@ -280,12 +271,6 @@ struct HistogramPortListEntry {
     uint64_t Frequency;
     HistogramPortListEntry * Next;
 };
-
-//enum HistogramPortDataFlag {
-//    Input = 0,
-//    Output = 1,
-//    Deferred = 2
-//};
 
 struct HistogramPortData {
     uint32_t PortType;
@@ -331,6 +316,8 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
                 for (auto e = root; e; e = e->Next) {
                     t = std::max(t, e->Position);
                     maxFrequency = std::max(maxFrequency, e->Frequency);
+                    e = e->Next;
+                    if (!e) break;
                 }
                 return t;
             };
@@ -394,6 +381,24 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
     hkdFields[3] = hpdTy->getPointerTo(); // PortData
     StructType * const hkdTy = StructType::get(b->getContext(), hkdFields);
 
+    #ifndef NDEBUG
+    BEGIN_SCOPED_REGION
+    DataLayout dl(b->getModule());
+    auto getTypeSize = [&dl](Type * const type) -> size_t {
+        if (type == nullptr) {
+            return 0UL;
+        }
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+        return dl.getTypeAllocSize(type);
+        #else
+        return dl.getTypeAllocSize(type).getFixedSize();
+        #endif
+    };
+    assert (getTypeSize(hpdTy) == sizeof(HistogramPortData));
+    assert (getTypeSize(hkdTy) == sizeof(HistogramKernelData));
+    END_SCOPED_REGION
+    #endif
+
     ConstantInt * const i32_ZERO = b->getInt32(0);
     ConstantInt * const i32_ONE = b->getInt32(1);
     ConstantInt * const i32_TWO = b->getInt32(2);
@@ -426,11 +431,13 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
     Value * const kernelData = b->CreateAlignedMalloc(hkdTy, b->getSize(numOfKernels), 0, b->getCacheAlignment());
 
     for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
+        const auto anyGreedy = hasAnyGreedyInput(kernelId);
+
         unsigned numOfPorts = 0;
         for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
             const Binding & bind =  br.Binding;
-            if (bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
+            if (anyGreedy || bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
                 numOfPorts++;
             }
         }
@@ -438,7 +445,7 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
             const Binding & bind =  br.Binding;
-            if (bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
+            if (anyGreedy || bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
                 numOfPorts++;
             }
         }
@@ -446,8 +453,6 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
         if (numOfPorts == 0) {
             continue;
         }
-
-        const auto anyGreedy = hasAnyGreedyInput(kernelId);
 
         FixedArray<Value *, 2> offset;
         offset[0] = b->getInt32(index++);
@@ -463,11 +468,11 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
 
         unsigned portIndex = 0;
 
-        auto writeListPortEntry = [&](const BufferPort & br) {
+        auto writePortEntry = [&](const BufferPort & br) {
             const Binding & bind =  br.Binding;
             const ProcessingRate & pr = bind.getRate();
 
-            if (LLVM_LIKELY(pr.isFixed() && !bind.hasAttribute(AttrId::Deferred))) {
+            if (LLVM_LIKELY(!anyGreedy && pr.isFixed() && !bind.hasAttribute(AttrId::Deferred))) {
                 return;
             }
 
@@ -481,49 +486,55 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
             offset[1] = i32_TWO;
             b->CreateStore(b->GetString(bind.getName()), b->CreateGEP(portData, offset));
 
+            const auto prefix = makeBufferName(kernelId, br.Port);
+
             Value * nonDeferred = nullptr;
-            if (pr.isFixed()) {
+            if (!anyGreedy && pr.isFixed()) {
                 nonDeferred = ConstantPointerNull::get(voidPtrTy);
             } else {
-                const auto prefix = makeBufferName(kernelId, br.Port);
                 nonDeferred = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
                 nonDeferred = b->CreatePointerCast(nonDeferred, voidPtrTy);
             }
+
+            b->CallPrintInt(prefix + ": nonDeferred", nonDeferred);
 
             uint64_t maxSize = 0;
             if (pr.isFixed() || anyGreedy || pr.isUnknown()) {
                 maxSize = 0;
             } else {
-                maxSize = ceiling(br.Maximum);
+                maxSize = ceiling(br.Maximum) + 1;
             }
             offset[1] = i32_THREE;
             b->CreateStore(b->getInt64(maxSize), b->CreateGEP(portData, offset));
+
             offset[1] = i32_FOUR;
             b->CreateStore(nonDeferred, b->CreateGEP(portData, offset));
 
             Value * deferred = nullptr;
 
             if (LLVM_UNLIKELY(bind.hasAttribute(AttrId::Deferred))) {
-                const auto prefix = makeBufferName(kernelId, br.Port);
                 deferred = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
                 deferred = b->CreatePointerCast(deferred, voidPtrTy);
             } else {
                 deferred = ConstantPointerNull::get(voidPtrTy);
             }
 
+            b->CallPrintInt(prefix + ": deferred", deferred);
+
             offset[1] = i32_FIVE;
             b->CreateStore(deferred, b->CreateGEP(portData, offset));
         };
 
         for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-            writeListPortEntry(mBufferGraph[e]);
+            writePortEntry(mBufferGraph[e]);
         }
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            writeListPortEntry(mBufferGraph[e]);
+            writePortEntry(mBufferGraph[e]);
         }
         assert (portIndex == numOfPorts);
     }
 
+    // call the report function
     FixedArray<Value *, 2> args;
     args[0] = b->CreatePointerCast(kernelData, voidPtrTy);
     args[1] = b->getInt64(numOfKernels);
@@ -531,6 +542,33 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
     assert (reportPrinter);
     b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
+
+
+    // memory cleanup
+    for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
+        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            const Binding & bind =  br.Binding;
+            if (bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
+                goto free_port_data;
+            }
+        }
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            const Binding & bind =  br.Binding;
+            if (bind.hasAttribute(AttrId::Deferred) || !bind.getRate().isFixed()) {
+                goto free_port_data;
+            }
+        }
+        continue;
+free_port_data:
+        FixedArray<Value *, 2> offset;
+        offset[0] = b->getInt32(index++);
+        offset[1] = i32_ZERO;
+        offset[1] = i32_THREE;
+        b->CreateFree(b->CreateLoad(b->CreateGEP(kernelData, offset)));
+    }
+    b->CreateFree(kernelData);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
