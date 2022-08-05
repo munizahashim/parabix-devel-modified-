@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017 International Characters.
+ *  Copyright (c) 2022 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  */
 #ifndef GREP_KERNEL_H
@@ -7,13 +7,201 @@
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <re/alphabet/alphabet.h>
+#include <re/alphabet/multiplex_CCs.h>
+#include <re/analysis/capture-ref.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <util/slab_allocator.h>
+
 
 namespace IDISA { class IDISA_Builder; }
-namespace re { class RE; }
 namespace cc { class Alphabet; }
+namespace re { class CC; class RE; }
+namespace grep { class GrepEngine; }
 namespace kernel {
+
+using ProgBuilderRef = const std::unique_ptr<ProgramBuilder> &;
+
+class ExternalStreamObject {
+public:
+    using Allocator = SlabAllocator<ExternalStreamObject *>;
+    enum class Kind : unsigned {
+        PreDefined, PropertyExternal, CC_External, RE_External, Reference_External,
+        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed
+    };
+    inline Kind getKind() const {
+        return mKind;
+    }
+    std::string getName() {return mStreamSetName;}
+    StreamSet * getStreamSet() {return mStreamSet;}
+    std::vector<std::string> getInputNames() {return mInputStreamNames;}
+    virtual void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) = 0;
+    virtual std::pair<int, int> getLengthRange() {return std::make_pair(1,1);}
+    virtual int getOffset() {return 0;}  //default offset unless overridden.
+    bool isResolved() {return mStreamSet != nullptr;}
+    void setIndexing(ProgBuilderRef b, StreamSet * indexStrm);
+protected:
+    static Allocator mAllocator;
+    ExternalStreamObject(Kind k, std::string name, std::vector<std::string> inputNames) :
+        mKind(k), mStreamSetName(name), mInputStreamNames(inputNames), mIndexStream(nullptr), mStreamSet(nullptr)  {}
+    void installStreamSet(ProgBuilderRef b, StreamSet * s);
+public:
+    void* operator new (std::size_t size) noexcept {
+        return mAllocator.allocate<uint8_t>(size);
+    }
+private:
+    Kind mKind;
+    std::string mStreamSetName;
+    std::vector<std::string> mInputStreamNames;
+    StreamSet * mIndexStream;
+protected:
+    StreamSet * mStreamSet;
+};
+
+class PreDefined : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::PreDefined;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    PreDefined(std::string ssName, StreamSet * predefined) :
+        ExternalStreamObject(Kind::PreDefined, ssName, {}) {mStreamSet = predefined;}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override {}
+};
+
+class PropertyExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::PropertyExternal;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    PropertyExternal(re::Name * n) :
+        ExternalStreamObject(Kind::PropertyExternal, n->getFullName(), {"u8_basis"}), mName(n) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    re::Name * mName;
+};
+
+class CC_External : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::CC_External;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    CC_External(std::string name, re::CC * cc) :
+        ExternalStreamObject(Kind::CC_External, name, {"u8_basis"}), mCharClass(cc) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    re::CC * mCharClass;
+};
+
+class RE_External : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::RE_External;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    RE_External(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mOffset(1), mIndexAlphabet(a) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    std::pair<int, int> getLengthRange() override;
+    // RE_Externals are compiled using the ICgrep kernel, which returns offset 1.
+    int getOffset() override {return mOffset;}
+private:
+    grep::GrepEngine *  mGrepEngine;
+    re::RE * mRE;
+    unsigned mOffset;
+    const cc::Alphabet * mIndexAlphabet;
+};
+
+class Reference_External : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::Reference_External;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    Reference_External(re::ReferenceInfo & refInfo, re::Reference * ref) :
+        ExternalStreamObject(Kind::Reference_External, ref->getName(), {"u8_basis"}),
+        mRefInfo(refInfo), mRef(ref) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    re::ReferenceInfo & mRefInfo;
+    re::Reference * mRef;
+};
+
+class GraphemeClusterBreak : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::GraphemeClusterBreak;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    GraphemeClusterBreak(re::UTF8_Transformer * t) :
+        ExternalStreamObject(Kind::GraphemeClusterBreak, "\\b{g}",
+                             {"u8_basis", "u8index"}), mUTF8_transformer(t) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
+    int getOffset() override {return 1;}
+private:
+    re::UTF8_Transformer * mUTF8_transformer;
+};
+
+class WordBoundaryExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::WordBoundaryExternal;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    WordBoundaryExternal() :
+        ExternalStreamObject(Kind::WordBoundaryExternal, "\\b", {"u8_basis", "u8index"}) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
+    int getOffset() override {return 1;}
+};
+
+class PropertyBasisExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::PropertyBasis;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    PropertyBasisExternal(ProgBuilderRef b, StreamSet * input, UCD::property_t p) :
+    ExternalStreamObject(Kind::PropertyBasis, basisName(p), {"u8_basis"}), mProperty(p) {}
+    static std::string basisName(UCD::property_t p);
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    UCD::property_t mProperty;
+};
+
+class MultiplexedExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::Multiplexed;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    MultiplexedExternal(cc::MultiplexedAlphabet * mpx) :
+    ExternalStreamObject(Kind::Multiplexed, mpx->getName(), {"u8_basis"}), mAlphabet(mpx) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    cc::MultiplexedAlphabet * mAlphabet;
+};
 
 class UTF8_index : public pablo::PabloKernel {
 public:
@@ -26,18 +214,18 @@ enum class GrepCombiningType {None, Exclude, Include};
 class GrepKernelOptions {
     friend class ICGrepKernel;
 public:
-    using Alphabets = std::vector<std::pair<std::shared_ptr<cc::Alphabet>, StreamSet *>>;
+    using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
     GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8, re::EncodingTransformer * encodingTransformer = nullptr);
     void setIndexingTransformer(re::EncodingTransformer *, StreamSet * indexStream);
     void setSource(StreamSet * s);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
-
-    void addExternal(std::string name, StreamSet * strm, unsigned offset = 0, unsigned lgth = 1);
-
-    void addAlphabet(std::shared_ptr<cc::Alphabet> a, StreamSet * basis);
+    void addExternal(std::string name,
+                     StreamSet * strm,
+                     unsigned offset = 0,
+                     std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
+    void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
-    void setPrefixRE(re::RE * re);
 
 protected:
     Bindings streamSetInputBindings();
@@ -57,10 +245,9 @@ private:
     StreamSet *                 mResults = nullptr;
     Bindings                    mExternalBindings;
     std::vector<unsigned>       mExternalOffsets;
-    std::vector<unsigned>       mExternalLengths;
+    std::vector<std::pair<int, int>>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
-    re::RE *                    mPrefixRE = nullptr;
 };
 
 
@@ -71,11 +258,13 @@ public:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
     bool hasFamilyName() const override { return true; }
+    unsigned getOffset() {return mOffset;}
 protected:
     void generatePabloMethod() override;
 private:
     std::unique_ptr<GrepKernelOptions>  mOptions;
     std::string                         mSignature;
+    unsigned                            mOffset;
 };
 
 class MatchedLinesKernel : public pablo::PabloKernel {
@@ -94,11 +283,12 @@ private:
 
 class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
-    FixedMatchSpansKernel(BuilderRef builder, unsigned length, StreamSet * MatchFollows, StreamSet * MatchSpans);
+    FixedMatchSpansKernel(BuilderRef builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
     bool hasFamilyName() const override { return true; }
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;
+    unsigned mOffset;
 };
 
 //
@@ -165,12 +355,11 @@ private:
     const unsigned          mAfterContext;
 };
 
-void GraphemeClusterLogic(const std::unique_ptr<ProgramBuilder> & P,
+void GraphemeClusterLogic(ProgBuilderRef P,
                           re::UTF8_Transformer * t,
                           StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream);
 
-void WordBoundaryLogic(const std::unique_ptr<ProgramBuilder> & P,
-                          re::UTF8_Transformer * t,
+void WordBoundaryLogic(ProgBuilderRef P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream);
 
 }

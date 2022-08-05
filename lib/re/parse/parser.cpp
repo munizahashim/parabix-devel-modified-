@@ -261,7 +261,7 @@ RE * RE_Parser::parse_capture_body() {
     return capture;
 }
     
-RE * RE_Parser::parse_back_reference() {
+Reference * RE_Parser::parse_back_reference() {
     mCursor++;
     std::string backref = std::string(mCursor.pos()-2, mCursor.pos());
     auto f = mCaptureMap.find(backref);
@@ -269,7 +269,7 @@ RE * RE_Parser::parse_back_reference() {
         Capture * captured = f->second.first;
         unsigned instanceCount = f->second.second;
         //llvm::errs() << "instanceCount:" << instanceCount << "\n";
-        RE * ref = makeReference(backref, captured, instanceCount);
+        Reference * ref = makeReference(backref, captured, instanceCount);
         f->second = std::make_pair(captured, instanceCount+1);
         return ref;
     }
@@ -483,14 +483,14 @@ std::string RE_Parser::canonicalize(const cursor_t begin, const cursor_t end) {
 
 RE * RE_Parser::parsePropertyExpression(PropertyExpression::Kind k) {
     const auto start = mCursor.pos();
-    while (mCursor.more() && !atany("}:=<>")) {
+    while (mCursor.more() && !atany("}:=")) {
         get1();
     }
     const auto prop_end = mCursor.pos();
     std::string prop = canonicalize(start, prop_end);
     while (accept(' ') || accept('\t')) {/* skip whitespace, do nothing */}
     PropertyExpression::Operator op;
-    if (atany("<>=:")) {
+    if (atany("!=:")) {
         // We have a property-name op value expression
         if (accept('=') || accept(':')) op = PropertyExpression::Operator::Eq;
         else if (accept("!=")) op = PropertyExpression::Operator::NEq;
@@ -535,6 +535,13 @@ RE * RE_Parser::parsePropertyExpression(PropertyExpression::Kind k) {
             }
             ++mCursor;
             return makePropertyExpression(k, prop, op, std::string(val_start, current));
+        }
+        if (accept('\\')) {
+            // property-value is a property reference
+            Reference * ref = parse_back_reference();
+            PropertyExpression * propref = makePropertyExpression(k, prop, op, ref->getName());
+            propref->setResolvedRE(ref);
+            return propref;
         }
         else {
             // property-value is normal string

@@ -96,6 +96,7 @@ extern std::string ProgramName;
 extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
 extern unsigned Z3_Timeout;
+extern int IllustratorDisplay;
 
 void ParseCommandLineOptions(int argc, const char *const *argv, std::initializer_list<const llvm::cl::OptionCategory *> hiding = {});
 

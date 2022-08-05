@@ -11,7 +11,6 @@ SRC
     cc_compiler.cpp
     cc_kernel.cpp
     GB_18030_data.cpp
-    multiplex_CCs.cpp
 DEPS
     pablo
     re.adt

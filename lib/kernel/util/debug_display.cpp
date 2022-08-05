@@ -156,23 +156,19 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
 }
 
 void ParabixIllustrator::displayAllCapturedData() {
-    unsigned fullPages = mStreamData[0].size() / mDisplayWidth;
-    unsigned partialPage = mStreamData[0].size() % mDisplayWidth;
-
-    for (unsigned page = 0; page < fullPages; page++) {
+    unsigned pages = (mStreamData[0].size() + mDisplayWidth - 1)/ mDisplayWidth;
+    for (unsigned page = 0; page < pages; page++) {
         unsigned pagePos = mDisplayWidth * page;
         for (unsigned i = 0; i < mStreamData.size(); i++) {
             std::cerr << std::setw(mMaxStreamNameSize) << mStreamNames[i]  << " | ";
-            std::cerr << mStreamData[i].substr(pagePos, mDisplayWidth) << "\n";
+            int avail = mStreamData[i].size() - pagePos;
+            if (avail > 0) {
+                unsigned width = std::min(static_cast<unsigned>(avail), mDisplayWidth);
+                std::cerr << mStreamData[i].substr(pagePos, width);
+            }
+            std::cerr << "\n";
         }
         std::cerr << "\n";
-    }
-    if (partialPage > 0) {
-        unsigned pagePos = mDisplayWidth * fullPages;
-        for (unsigned i = 0; i < mStreamData.size(); i++) {
-            std::cerr << std::setw(mMaxStreamNameSize) << mStreamNames[i] << " | ";
-            std::cerr << mStreamData[i].substr(pagePos, partialPage) << "\n";
-        }
     }
 }
 

@@ -192,6 +192,10 @@ std::string TraceOption = "";
 static cl::opt<std::string, true> TraceValueOption("trace", cl::location(TraceOption),
                                             cl::desc("Trace the values of variables beginning with the given prefix."), cl::value_desc("prefix"), cl::cat(CodeGenOptions));
 
+int IllustratorDisplay;
+static cl::opt<int, true> OptIllustrator("illustrator-width", cl::location(IllustratorDisplay),
+                                                 cl::desc("Enable bitstream illustrator with the given display width."), cl::init(0), cl::cat(CodeGenOptions));
+
 std::string CCCOption = "";
 static cl::opt<std::string, true> CCTypeOption("ccc-type", cl::location(CCCOption), cl::init("binary"),
                                             cl::desc("The character class compiler"), cl::value_desc("[binary, ternary]"));
@@ -253,6 +257,7 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     if (DebugOptions.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;
+    if (IllustratorDisplay > 0) return true;
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (ShowASMOption != OmittedOption) return true;
     #endif

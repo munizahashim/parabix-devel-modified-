@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2018 International Characters.
+ *  Copyright (c) 2022 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
  */
@@ -52,7 +52,7 @@
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/collect_ccs.h>
 #include <re/cc/cc_kernel.h>
-#include <re/cc/multiplex_CCs.h>
+#include <re/alphabet/multiplex_CCs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/replaceCC.h>
@@ -136,12 +136,16 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mGrepRecordBreak(GrepRecordBreakKind::LF),
     mExternalComponents(static_cast<Component>(0)),
     mInternalComponents(static_cast<Component>(0)),
+    mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
-    mGCB_stream(nullptr),
-    mWordBoundary_stream(nullptr),
     mUTF8_Transformer(re::NameTransformationMode::None),
-    mEngineThread(pthread_self()) {}
+    mEngineThread(pthread_self()),
+    mIllustrator(nullptr) {
+        if (codegen::IllustratorDisplay > 0) {
+            mIllustrator = new kernel::ParabixIllustrator(codegen::IllustratorDisplay);
+        }
+    }
 
 GrepEngine::~GrepEngine() { }
 
@@ -272,13 +276,16 @@ void GrepEngine::initRE(re::RE * re) {
     }
 
     mRE = re;
+
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
+
     mRefInfo = re::buildReferenceInfo(mRE);
     mRE = fixedReferenceTransform(mRefInfo, mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
+        setComponent(mExternalComponents, Component::S2P);
+        setComponent(mExternalComponents, Component::U21);
     }
-
-    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
     mRE = resolveAnchors(mRE, anchorRE);
@@ -286,11 +293,11 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = name_variable_length_CCs(mRE);
     if (hasGraphemeClusterBoundary(mRE)) {
         UnicodeIndexing = true;
-        setComponent(mExternalComponents, Component::GraphemeClusterBoundary);
+        mExternalMap.emplace("\\b{g}", new GraphemeClusterBreak(&mUTF8_Transformer));
     }
     if (hasWordBoundary(mRE)) {
         UnicodeIndexing = true;
-        setComponent(mExternalComponents, Component::WordBoundary);
+        mExternalMap.emplace("\\b", new WordBoundaryExternal());
     }
     if (!validateFixedUTF8(mRE)) {
         setComponent(mExternalComponents, Component::UTF8index);
@@ -299,8 +306,15 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (UnicodeIndexing) {
+        mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::UTF8index);
+        const auto UnicodeSets = re::collectCCs(mRE, *mIndexAlphabet);
+        if (!UnicodeSets.empty()) {
+            auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
+            mRE = transformCCs(mpx, mRE);
+            mExternalMap.emplace(mpx->getName(), new MultiplexedExternal(mpx));
+        }
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);
@@ -322,17 +336,14 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
+    mRE = name_min_length_alts(mRE, mIndexAlphabet);
     re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
     // can bypass transposition and use the Direct CC compiler.
-    mPrefixRE = nullptr;
-    mSuffixRE = nullptr;
     if ((mGrepRecordBreak != GrepRecordBreakKind::Unicode) && mExternalNames.empty() && !UnicodeIndexing) {
         if (byteTestsWithinLimit(mRE, ByteCClimit)) {
             return;  // skip transposition
-        } else if (hasTriCCwithinLimit(mRE, ByteCClimit, mPrefixRE, mSuffixRE)) {
-            return;  // skip transposition and set mPrefixRE, mSuffixRE
         } else {
             setComponent(mExternalComponents, Component::S2P);
         }
@@ -344,22 +355,26 @@ void GrepEngine::initRE(re::RE * re) {
     }
 }
 
-StreamSet * GrepEngine::getBasis(const std::unique_ptr<ProgramBuilder> & P, StreamSet * ByteStream) {
+StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
+    StreamSet * Source = ByteStream;
+    if (mIllustrator) mIllustrator->captureByteData(P, "Source", ByteStream);
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
-        return BasisBits;
+        Source = BasisBits;
+        mExternalMap.emplace("u8_basis", new PreDefined("u8_basis", BasisBits));
     }
-    else return ByteStream;
+    if (hasComponent(mExternalComponents, Component::U21)) {
+        mU21 = P->CreateStreamSet(21, 1);
+        P->CreateKernelCall<UTF8_Decoder>(Source, mU21);
+    }
+    return Source;
 }
 
-void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
+void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
 
     mLineBreakStream = nullptr;
     mU8index = nullptr;
-    mGCB_stream = nullptr;
-    mWordBoundary_stream = nullptr;
-    mPropertyStreamMap.clear();
 
     Scalar * const callbackObject = P->getInputScalar("callbackObject");
     if (mBinaryFilesMode == argv::Text) {
@@ -373,10 +388,16 @@ void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamS
     mU8index = P->CreateStreamSet(1, 1);
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
+        mExternalMap.emplace("UTF8_LB", new PreDefined("UTF8_LB", mLineBreakStream));
+        mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
     }
     else {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
             P->CreateKernelCall<UTF8_index>(SourceStream, mU8index);
+            if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
+            mExternalMap.emplace("u8index", new PreDefined("u8index", mU8index));
         }
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
             Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
@@ -386,204 +407,204 @@ void GrepEngine::grepPrologue(const std::unique_ptr<ProgramBuilder> & P, StreamS
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
     }
 }
 
-void GrepEngine::prepareExternalStreams(const std::unique_ptr<ProgramBuilder> & P, StreamSet * SourceStream) {
-    if (hasComponent(mExternalComponents, Component::GraphemeClusterBoundary)) {
-        mGCB_stream = P->CreateStreamSet(1, 1);
-        GraphemeClusterLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mGCB_stream);
-    }
-    if (hasComponent(mExternalComponents, Component::WordBoundary)) {
-        mWordBoundary_stream = P->CreateStreamSet(1, 1);
-        WordBoundaryLogic(P, &mUTF8_Transformer, SourceStream, mU8index, mWordBoundary_stream);
-    }
-    StreamSet * U21_basis = nullptr;
-    std::set<int> fixedRefSupport;
-    for (auto e : mExternalNames) {
-        re::RE * def = e->getDefinition();
-        auto name = e->getFullName();
-        auto f = mPropertyStreamMap.find(name);
-        if (f == mPropertyStreamMap.end()) {
-            if (isa<re::PropertyExpression>(def)) {
-                //errs() << "preparing external: " << name << "\n";
-                StreamSet * property = P->CreateStreamSet(1, 1);
-                mPropertyStreamMap.emplace(name, property);
-                P->CreateKernelCall<UnicodePropertyKernelBuilder>(e, SourceStream, property);
-            } else if (re::CC * cc = dyn_cast<re::CC>(def)) {
-                StreamSet * ccStrm = P->CreateStreamSet(1, 1);
-                mPropertyStreamMap.emplace(name, ccStrm);
-                std::vector<re::CC *> ccs = {cc};
-                P->CreateKernelCall<CharClassesKernel>(ccs, SourceStream, ccStrm);
-            } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
-                auto mapping = mRefInfo.twixtREs.find(ref->getName());
-                if (mapping == mRefInfo.twixtREs.end()) {
-                    llvm::report_fatal_error("grep engine: undefined reference!");
-                }
-                auto rg1 = getLengthRange(ref->getCapture(), &cc::Unicode);
-                auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
-                if ((rg1.first == rg1.second) && (rg2.first == rg2.second)) {
-                    int dist = rg1.first + rg2.first;
-                    //llvm::errs() << "Fixed reference distance " << dist << "\n";
-                    if (fixedRefSupport.count(dist) == 0) {
-                        if (!U21_basis) {
-                            U21_basis = P->CreateStreamSet(21, 1);
-                            P->CreateKernelCall<UTF8_Decoder>(SourceStream, U21_basis);
-                        }
-                        StreamSet * M = P->CreateStreamSet(1, 1);
-                        mPropertyStreamMap.emplace(name, M);
-                        P->CreateKernelCall<FixedDistanceMatchesKernel>(dist, U21_basis, M);
-                        fixedRefSupport.insert(dist);
-                    }
-                }
-            }
+void GrepEngine::prepareExternalObject(re::Name * extName) {
+    auto nameStr = extName->getFullName();
+
+    const auto f = mExternalMap.find(nameStr);
+    if (f == mExternalMap.end()) {
+        // The name has not been prepared in the external map.
+        // Inspect and process the RE definition.
+        re::RE * def = extName->getDefinition();
+        if (def == nullptr) {
+            llvm::report_fatal_error("Undefined external: " + nameStr);
+        }
+        if (isa<re::PropertyExpression>(def)) {
+            mExternalMap.emplace(nameStr, new PropertyExternal(extName));
+        } else if (re::CC * cc = dyn_cast<re::CC>(def)) {
+            mExternalMap.emplace(nameStr, new CC_External(nameStr, cc));
+        } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
+            mExternalMap.emplace(nameStr, new Reference_External(mRefInfo, ref));
+        } else {
+            mExternalMap.emplace(nameStr, new RE_External(nameStr, this, def, mIndexAlphabet));
         }
     }
 }
 
+StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
+    auto f = mExternalMap.find(nameStr);
+    if (f == mExternalMap.end()) {
+        llvm::report_fatal_error("ExternalMap: undefined external: " + nameStr);
+    }
+    ExternalStreamObject * ext = f->second;
+    if (!ext->isResolved()) {
+        std::vector<std::string> paramNames = ext->getInputNames();
+        std::vector<StreamSet *> paramStreams;
+        for (auto & n : paramNames) {
+            paramStreams.push_back(resolveExternal(P, n));
+        }
+        ext->resolveStreamSet(P, paramStreams);
+    }
+    return ext->getStreamSet();
+}
 
-void GrepEngine::addExternalStreams(const std::unique_ptr<ProgramBuilder> & P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
+    for (auto e : mExternalNames) {
+        prepareExternalObject(e);
+    }
+    if (UnicodeIndexing) {
+        std::set<std::string> extNames;
+        for (auto e : mExternalNames) {
+            std::string name = e->getFullName();
+            if (extNames.count(name) == 0) {
+                extNames.insert(name);
+                auto f = mExternalMap.find(name);
+                f->second->setIndexing(P, mU8index);
+                //llvm::errs() << "Setting indexing for: " << name << "\n";
+            }
+        }
+    }
+    for (auto e : mExternalNames) {
+        resolveExternal(P, e->getFullName());
+    }
+}
+
+void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+    auto alphabets = re::collectAlphabets(regexp);
+    for (auto & a : alphabets) {
+        std::string alphabetName = a->getName();
+        //llvm::errs() << "found alphabet: " << alphabetName << "\n";
+        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
+            auto f = mExternalMap.find(alphabetName);
+            if (f == mExternalMap.end()) {
+                llvm::report_fatal_error("Cannot find alphabet");
+            }
+            ExternalStreamObject * ext = f->second;
+            if (MultiplexedExternal * m = dyn_cast<MultiplexedExternal>(ext)) {
+                if (!m->isResolved()) {
+                    m->setIndexing(P, mU8index);
+                    resolveExternal(P, alphabetName);
+                }
+                StreamSet * alphabetBasis = m->getStreamSet();
+                if (mIllustrator) mIllustrator->captureBixNum(P, alphabetName, alphabetBasis);
+                options->addAlphabet(mpx, alphabetBasis);
+            } else {
+                llvm::report_fatal_error("Expecting multiplexed alphabet: " + alphabetName);
+            }
+        }
+    }
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
+    // We may end up with multiple instances of a Name, but we should
+    // only add the external once.
+    std::set<std::string> extNames;
     for (const auto & e : externals) {
         auto name = e->getFullName();
-        const auto f = mPropertyStreamMap.find(name);
-        if (f != mPropertyStreamMap.end()) {
-            //errs() << "adding external: " << name << "\n";
-            if (indexMask == nullptr) {
-                options->addExternal(name, f->second);
-            } else {
-                StreamSet * iExternal_stream = P->CreateStreamSet(1, 1);
-                FilterByMask(P, indexMask, f->second, iExternal_stream);
-                options->addExternal(name, iExternal_stream);
+        if (extNames.count(name) == 0) {
+            extNames.insert(name);
+            auto f = mExternalMap.find(name);
+            if (f == mExternalMap.end()) {
+                prepareExternalObject(e);
+                resolveExternal(P, name);
+                f = mExternalMap.find(name);
             }
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::GraphemeClusterBoundary)) {
-        assert (mGCB_stream);
-        if (indexMask == nullptr) {
-            options->addExternal("\\b{g}", mGCB_stream);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b{g}[U8indexed]", mGCB_stream);
-        } else {
-            StreamSet * iGCB_stream = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mGCB_stream, iGCB_stream);
-            options->addExternal("\\b{g}", iGCB_stream, 1);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b{g}", iGCB_stream);
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::WordBoundary)) {
-        assert (mWordBoundary_stream);
-        if (indexMask == nullptr) {
-            options->addExternal("\\b", mWordBoundary_stream);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b[U8indexed]", mWordBoundary_stream);
-        } else {
-            StreamSet * iWordBoundary_stream = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mWordBoundary_stream, iWordBoundary_stream);
-            options->addExternal("\\b", iWordBoundary_stream, 1);
-            //P->CreateKernelCall<DebugDisplayKernel>("\\b", iWordBoundary_stream);
-        }
-    }
-    if (hasComponent(mExternalComponents, Component::UTF8index)) {
-        if (indexMask == nullptr) {
-            options->addExternal("UTF8_index", mU8index);
-        }
-    }
-    if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        if (indexMask == nullptr) {
-            options->addExternal("UTF8_LB", mLineBreakStream);
-        } else {
-            StreamSet * iU8_LB = P->CreateStreamSet(1, 1);
-            FilterByMask(P, indexMask, mLineBreakStream, iU8_LB);
-            options->addExternal("UTF8_LB", iU8_LB);
+            ExternalStreamObject * ext = f->second;
+            if (!ext->isResolved()) {
+                llvm::report_fatal_error("Unresolved external");
+            }
+            StreamSet * extStream = ext->getStreamSet();
+            unsigned offset = ext->getOffset();
+            std::pair<int, int> lengthRange = ext->getLengthRange();
+            options->addExternal(name, extStream, offset, lengthRange);
+            if (mIllustrator) mIllustrator->captureBitstream(P, name + "_ext", extStream);
         }
     }
 }
 
-void GrepEngine::UnicodeIndexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(&cc::Unicode);
-    auto lengths = getLengthRange(re, &cc::Unicode);
-    const auto UnicodeSets = re::collectCCs(re, cc::Unicode);
-    if (UnicodeSets.empty()) {
-        // All inputs will be externals.   Do not register a source stream.
-        options->setRE(re);
+StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * MatchResults) {
+    if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
+        std::vector<StreamSet *> allSpans;
+        int i = 0;
+        for (auto & e : *alt) {
+            auto a = getMatchSpan(P, e, MatchResults);
+            std::string ct = std::to_string(i);
+            if (mIllustrator) mIllustrator->captureBitstream(P, ct, a);
+            allSpans.push_back(a);
+            i++;
+        }
+        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        return mergedSpans;
+    } else if (re::Name * externalName = dyn_cast<re::Name>(r)) {
+        std::string nameStr = externalName->getFullName();
+        auto f = mExternalMap.find(nameStr);
+        if (f == mExternalMap.end()) {
+            llvm::errs() << "External not found " << nameStr << "\n";
+            return getMatchSpan(P, externalName->getDefinition(), MatchResults);
+        }
+        ExternalStreamObject * ext = f->second;
+        if (!ext->isResolved()) resolveExternal(P, nameStr);
+        // ensure ext is resolved???
+        StreamSet * match_marks = ext->getStreamSet();
+        // if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
+           // get MatchedLineStarts, then create and return spans
+           //    return ...;
+        // }
+        // else Other special cases
+        // default by min match length
+        int spanLgth = ext->getLengthRange().first;
+        if (spanLgth <= 1) return match_marks;
+        StreamSet * spans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, ext->getOffset(), match_marks, spans);
+        return spans;
     } else {
-        auto mpx = std::make_shared<MultiplexedAlphabet>("mpx", UnicodeSets);
-        re = transformCCs(mpx, re);
-        options->setRE(re);
-        auto mpx_basis = mpx->getMultiplexedCCs();
-        StreamSet * const u8CharClasses = P->CreateStreamSet(mpx_basis.size());
-        StreamSet * const CharClasses = P->CreateStreamSet(mpx_basis.size());
-        P->CreateKernelCall<CharClassesKernel>(mpx_basis, Source, u8CharClasses);
-        FilterByMask(P, mU8index, u8CharClasses, CharClasses);
-        options->setSource(CharClasses);
-        options->addAlphabet(mpx, CharClasses);
-    }
-    StreamSet * const MatchResults = P->CreateStreamSet(1, 1);
-    options->setResults(MatchResults);
-    addExternalStreams(P, options, re, mU8index);
-    P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    StreamSet * u8index1 = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        StreamSet * u8initial = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
-        StreamSet * MatchSpans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, MatchSpans);
-        StreamSet * ExpandedSpans = P->CreateStreamSet(1, 1);
-        SpreadByMask(P, u8initial, MatchSpans, ExpandedSpans);
-        P->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, Results);
-    } else {
-        SpreadByMask(P, u8index1, MatchResults, Results);
+        int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
+        StreamSet * spans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
+        return spans;
     }
 }
 
-void GrepEngine::U8indexedGrep(const std::unique_ptr<ProgramBuilder> & P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
-    auto lengths = getLengthRange(re, &cc::UTF8);
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, StreamSet * Results) {
+    auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     options->setSource(Source);
-    StreamSet * MatchResults = nullptr;
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        MatchResults = P->CreateStreamSet(1, 1);
-        options->setResults(MatchResults);
-    } else {
-        options->setResults(Results);
-    }
-    if (hasComponent(mExternalComponents, Component::UTF8index)) {
-        options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
-        if (mSuffixRE != nullptr) {
-            options->setPrefixRE(mPrefixRE);
-            options->setRE(mSuffixRE);
+    StreamSet * indexStream = nullptr;
+    if (mIndexAlphabet == &cc::UTF8) {
+        if (hasComponent(mExternalComponents, Component::UTF8index)) {
+            options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
         } else {
-            options->setRE(re);
-        }
-    } else {
-        if (mSuffixRE != nullptr) {
-            options->setPrefixRE(toUTF8(mPrefixRE));
-            options->setRE(toUTF8(mSuffixRE));
-        } else {
-            options->setRE(toUTF8(re));
+            re = toUTF8(re);
         }
     }
-    addExternalStreams(P, options, re);
-    P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        P->CreateKernelCall<FixedMatchSpansKernel>(lengths.first, MatchResults, Results);
-    }
+    options->setRE(re);
+    addExternalStreams(P, options, re, indexStream);
+    options->setResults(Results);
+    Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
+    if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
+    return cast<ICGrepKernel>(k)->getOffset();
 }
 
-StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & P, StreamSet * InputStream) {
+StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
     StreamSet * SourceStream = getBasis(P, InputStream);
 
     grepPrologue(P, SourceStream);
 
     prepareExternalStreams(P, SourceStream);
 
-    StreamSet * Matches = P->CreateStreamSet(1, 1);
-        if (UnicodeIndexing) {
-            UnicodeIndexedGrep(P, mRE, SourceStream, Matches);
-        } else {
-            U8indexedGrep(P, mRE, SourceStream, Matches);
-        }
+    StreamSet * Matches = P->CreateStreamSet();
+    RunGrep(P, mRE, SourceStream, Matches);
+
+    if (mIndexAlphabet == &cc::Unicode) {
+        StreamSet * u8index1 = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * Results = P->CreateStreamSet(1, 1);
+        SpreadByMask(P, u8index1, Matches, Results);
+        Matches = Results;
+    }
+
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
         P->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
@@ -617,12 +638,14 @@ void GrepEngine::grepCodeGen() {
                 {Binding{idb->getSizeTy(), "useMMap"},
                 Binding{idb->getInt32Ty(), "fileDescriptor"},
                 Binding{idb->getIntAddrTy(), "callbackObject"},
+                Binding{idb->getIntAddrTy(), "illustratorAddr"},
                 Binding{idb->getSizeTy(), "maxCount"}}
                 ,// output
                 {Binding{idb->getInt64Ty(), "countResult"}});
 
     Scalar * const useMMap = P->getInputScalar("useMMap");
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    if (mIllustrator) mIllustrator->registerIllustrator(P->getInputScalar("illustratorAddr"));
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
     P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
@@ -715,8 +738,6 @@ void EmitMatch::accumulate_match (const size_t lineNum, char * line_start, char 
 void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
-
-
 
 class GrepColourizationPipeline : public PipelineKernel {
 public:
@@ -878,22 +899,45 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
 }
 
-
-
-
-void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, StreamSet * ByteStream, bool BatchMode) {
+void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, bool BatchMode) {
     StreamSet * SourceStream = getBasis(E, ByteStream);
 
     grepPrologue(E, SourceStream);
 
     prepareExternalStreams(E, SourceStream);
 
-    StreamSet * Matches = E->CreateStreamSet(1, 1);
-    if (UnicodeIndexing) {
-        UnicodeIndexedGrep(E, mRE, SourceStream, Matches);
+    StreamSet * Matches = E->CreateStreamSet();
+    RunGrep(E, mRE, SourceStream, Matches);
+    if (mIllustrator) mIllustrator->captureBitstream(E, "ICGrep Matches", Matches);
+    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
+        StreamSet * MatchSpans;
+        MatchSpans = getMatchSpan(E, mRE, Matches);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
+        if (UnicodeIndexing) {
+            StreamSet * u8initial = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<LineStartsKernel>(mU8index, u8initial);
+            StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
+            SpreadByMask(E, u8initial, MatchSpans, ExpandedSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "ExpandedSpans", ExpandedSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "u8initial", u8initial);
+            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<U8Spans>(ExpandedSpans, mU8index, FilledSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "FilledSpans", FilledSpans);
+            Matches = FilledSpans;
+        } else {
+            Matches = MatchSpans;
+        }
     } else {
-        U8indexedGrep(E, mRE, SourceStream, Matches);
+        if (mIndexAlphabet == &cc::Unicode) {
+            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
+            StreamSet * Results = E->CreateStreamSet(1, 1);
+            SpreadByMask(E, u8index1, Matches, Results);
+            Matches = Results;
+        }
     }
+
     StreamSet * MatchedLineEnds = Matches;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = E->CreateStreamSet();
@@ -912,20 +956,25 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         MatchedLineEnds = TruncatedMatches;
     }
 
-    if (mColoring && !mInvertMatches) {
-
-        StreamSet * MatchesByLine = E->CreateStreamSet(1, 1);
+    bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
+    bool needsColoring = mColoring && !mInvertMatches;
+    if (mIllustrator) mIllustrator->captureBitstream(E, "MatchedLineEnds", MatchedLineEnds);
+    StreamSet * MatchesByLine = nullptr;
+    if (needsColoring | hasContext) {
+        MatchesByLine = E->CreateStreamSet(1, 1);
         FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchesByLine", MatchesByLine);
+    }
+    if (hasContext) {
+        StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
+        E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
+        StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
+        SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
+        MatchedLineEnds = SelectedLines;
+        MatchesByLine = ContextByLine;
+    }
 
-        if ((mAfterContext != 0) || (mBeforeContext != 0)) {
-            StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-            StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
-            MatchedLineEnds = SelectedLines;
-            MatchesByLine = ContextByLine;
-        }
-
+    if (needsColoring) {
         StreamSet * SourceCoords = nullptr;
         if (BatchMode) {
             //llvm::errs() << "Batch mode calling BatchCoordinatesKernel\n";
@@ -943,6 +992,7 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
 
         StreamSet * LineStarts = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, LineStarts);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", LineStarts);
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
         SpreadByMask(E, LineStarts, MatchesByLine, MatchedLineStarts);
 
@@ -967,15 +1017,6 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<ProgramBuilder> & E, 
         applyColorization(E, SourceCoords, FilteredMatchSpans, FilteredBasis);
 
     } else { // Non colorized output
-        if ((mAfterContext != 0) || (mBeforeContext != 0)) {
-            StreamSet * MatchesByLine = E->CreateStreamSet(1, 1);
-            FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
-            StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-            StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
-            MatchedLineEnds = SelectedLines;
-        }
         if (MatchCoordinateBlocks > 0) {
             StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
             E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);
@@ -1012,13 +1053,16 @@ void EmitMatchesEngine::grepCodeGen() {
                 {Binding{idb->getSizeTy(), "useMMap"},
                 Binding{idb->getInt32Ty(), "fileDescriptor"},
                 Binding{idb->getIntAddrTy(), "callbackObject"},
+                Binding{idb->getIntAddrTy(), "illustratorAddr"},
                 Binding{idb->getSizeTy(), "maxCount"}}
                 ,// output
                 {Binding{idb->getInt64Ty(), "countResult"}});
 
     Scalar * const useMMap = E1->getInputScalar("useMMap");
     Scalar * const fileDescriptor = E1->getInputScalar("fileDescriptor");
+    if (mIllustrator) mIllustrator->registerIllustrator(E1->getInputScalar("illustratorAddr"));
     StreamSet * const ByteStream = E1->CreateStreamSet(1, ENCODING_BITS);
+    
     E1->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
     grepPipeline(E1, ByteStream);
     E1->setOutputScalar("countResult", E1->CreateConstant(idb->getInt64(0)));
@@ -1030,12 +1074,14 @@ void EmitMatchesEngine::grepCodeGen() {
                     {Binding{idb->getInt8PtrTy(), "buffer"},
                     Binding{idb->getSizeTy(), "length"},
                     Binding{idb->getIntAddrTy(), "callbackObject"},
+                    Binding{idb->getIntAddrTy(), "illustratorAddr"},
                     Binding{idb->getSizeTy(), "maxCount"}}
                     ,// output
                     {Binding{idb->getInt64Ty(), "countResult"}});
 
         Scalar * const buffer = E2->getInputScalar("buffer");
         Scalar * const length = E2->getInputScalar("length");
+        if (mIllustrator) mIllustrator->registerIllustrator(E2->getInputScalar("illustratorAddr"));
         StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
         E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
         grepPipeline(E2, InternalBytes, /* BatchMode = */ true);
@@ -1059,7 +1105,7 @@ bool canMMap(const std::string & fileName) {
 
 
 uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, size_t maxCount);
+    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, kernel::ParabixIllustrator *, size_t maxCount);
     auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
     uint64_t resultTotal = 0;
 
@@ -1068,7 +1114,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
         bool useMMap = mPreferMMap && canMMap(fileName);
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
-        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mMaxCount);
+        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mIllustrator, mMaxCount);
         close(fileDescriptor);
         if (handler.binaryFileSignalled()) {
             llvm::errs() << "Binary file " << fileName << "\n";
@@ -1078,6 +1124,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
             resultTotal += grepResult;
         }
     }
+    if (mIllustrator) mIllustrator->displayAllCapturedData();
     return resultTotal;
 }
 
@@ -1108,7 +1155,7 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
 
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
     if (fileNames.size() == 1) {
-        typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, EmitMatch *, size_t maxCount);
+        typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, EmitMatch *, kernel::ParabixIllustrator *, size_t maxCount);
         auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
         EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
         accum.setStringStream(&strm);
@@ -1125,13 +1172,14 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             useMMap = mPreferMMap && canMMap(fileNames[0]);
         }
         assert (f);
-        f(useMMap, fileDescriptor, &accum, mMaxCount);
+        f(useMMap, fileDescriptor, &accum, mIllustrator, mMaxCount);
         close(fileDescriptor);
         if (accum.binaryFileSignalled()) {
             accum.mResultStr->clear();
             accum.mResultStr->str("");
         }
         if (accum.mLineCount > 0) grepMatchFound = true;
+        if (mIllustrator) mIllustrator->displayAllCapturedData();
         return accum.mLineCount;
     } else {
         //llvm::errs() << "filenames.size() = " << fileNames.size() << "\n";
@@ -1202,6 +1250,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         }
         alloc.deallocate(accum.mBatchBuffer, 0);
         if (accum.mLineCount > 0) grepMatchFound = true;
+        if (mIllustrator) mIllustrator->displayAllCapturedData();
         return accum.mLineCount;
     }
 }

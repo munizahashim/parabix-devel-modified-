@@ -83,21 +83,27 @@ class RE_Compiler {
 
     //
     // The regular expression compiler may include one or more externally
-    // defined Names.   Each name has a length, expressed in terms of the
-    // matching units defined by the index stream, and may also have a
-    // nonzero offset.   Note that external names that correspond to Unicode
-    // boundaries or other zero-width assertions will have a length of 0.
+    // defined Names.  Each name has a length range and may also have a
+    // nonzero offset.   The length range indicates the range of string
+    // lengths that are considered to be matched by the named RE object.
+    // Normally, the min and max values of the range must be the same for
+    // successful compilation, but but variable length ranges may be used
+    // as the first element of a regular expression.  The offset is
+    // normally zero, indicating that the marker is placed on the last
+    // matched character of the named object.   An offset of 1 is used
+    // when the length is zero or potentially zero (e.g., zero-width assertions).
     //
     class ExternalStream {
     public:
-        ExternalStream(Marker m, unsigned lgth = 1) :
-            mMarker(m), mLength(lgth) {}
+        ExternalStream(Marker m, std::pair<int, int> lengthRange) :
+            mMarker(m), mLengthRange(lengthRange) {}
         ExternalStream & operator = (const ExternalStream &) = default;
-        unsigned length() {return mLength;}
+        unsigned minLength() {return mLengthRange.first;}
+        unsigned maxLength() {return mLengthRange.second;}
         Marker & marker() {return mMarker;}
     private:
         Marker mMarker;
-        unsigned mLength;
+        std::pair<int, int> mLengthRange;
     };
 
     void addPrecompiled(std::string externalName, ExternalStream s);

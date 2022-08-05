@@ -80,7 +80,7 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const int property_en
         // Special logic for the age property:  \p{age=x.y} includes
         // all codepoints defined as of version x.y, i.e., whose age
         // property is numerically less than or equal to x.y.
-        for (uint64_t a = 1; a <= property_enum_val; a++) {
+        for (int a = 1; a <= property_enum_val; a++) {
             s.insert(*(property_value_sets[a]));
         }
         return s;
