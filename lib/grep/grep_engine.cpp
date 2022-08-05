@@ -584,7 +584,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
     options->setResults(Results);
     Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
     if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
-    return cast<ICGrepKernel>(k)->getOffset();
+    return static_cast<ICGrepKernel *>(k)->getOffset();
 }
 
 StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {

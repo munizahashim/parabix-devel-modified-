@@ -134,8 +134,6 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 
     assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);
 
-    assert (mMayLoopToEntry || mKernelId != 3);
-
     const auto prefix = makeKernelName(mKernelId);
 
     // TODO: if a kernel has circular buffers and the produced/consumption rate is not synchronous
