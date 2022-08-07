@@ -236,7 +236,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
-    if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram)) {
+    if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         addHistogramProperties(b, kernelId, groupId);
     }
 
@@ -838,7 +838,10 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         printProducedItemCountDeltas(b);
         printUnconsumedItemCounts(b);
         if (mGenerateTransferredItemCountHistogram) {
-            printHistogramReport(b);
+            printHistogramReport(b, HistogramReportType::TransferredItems);
+        }
+        if (mGenerateDeferredItemCountHistogram) {
+            printHistogramReport(b, HistogramReportType::DeferredItems);
         }
     }
 
@@ -855,6 +858,9 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
             params.push_back(mKernelThreadLocalHandle);
         }
         mScalarValue[i] = callKernelFinalizeFunction(b, params);
+    }
+    if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
+        freeHistogramProperties(b);
     }
     releaseOwnedBuffers(b, true);
     resetInternalBufferHandles();

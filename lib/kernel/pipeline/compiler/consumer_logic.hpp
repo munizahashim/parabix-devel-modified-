@@ -17,7 +17,6 @@ inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const un
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
         // If the out-degree for this buffer is zero, then we've proven that its consumption rate
         // is identical to its production rate.
         const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);

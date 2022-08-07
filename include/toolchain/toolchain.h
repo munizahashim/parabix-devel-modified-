@@ -40,6 +40,7 @@ enum DebugFlags {
     TraceUnconsumedItemCounts,
     TraceBlockedIO,
     GenerateTransferredItemCountHistogram,
+    GenerateDeferredItemCountHistogram,
     EnableAsserts,
     EnablePipelineAsserts,
     EnableMProtect,

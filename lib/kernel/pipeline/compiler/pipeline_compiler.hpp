@@ -120,7 +120,7 @@ const static std::string STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX = ".SPIC";
 const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
 
 const static std::string STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TICH";
-const static std::string STATISTICS_TRANSFERRED_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDCH";
+const static std::string STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDCH";
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
@@ -135,6 +135,8 @@ using BufferPortMap = flat_set<std::pair<unsigned, unsigned>>;
 using PartitionJumpPhiOutMap = flat_map<std::pair<unsigned, unsigned>, Value *>;
 
 using PartitionPhiNodeTable = multi_array<PHINode *, 2>;
+
+enum HistogramReportType { TransferredItems, DeferredItems };
 
 class PipelineCompiler final : public KernelCompiler, public PipelineCommonGraphFunctions {
 
@@ -494,8 +496,9 @@ public:
 
     bool recordsAnyHistogramData() const;
     void addHistogramProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
+    void freeHistogramProperties(BuilderRef b);
     void updateTransferredItemsForHistogramData(BuilderRef b);
-    void printHistogramReport(BuilderRef b);
+    void printHistogramReport(BuilderRef b, HistogramReportType type) const;
 
     static void linkHistogramFunctions(BuilderRef b);
 
@@ -559,15 +562,16 @@ public:
 
 protected:
 
-    SimulationAllocator				mAllocator;
+    SimulationAllocator                         mAllocator;
 
-    const bool                       		CheckAssertions;
+    const bool                                  CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
-    const bool                       		mTraceIndividualConsumedItemCounts;
+    const bool                                  mTraceIndividualConsumedItemCounts;
     const bool                                  mGenerateTransferredItemCountHistogram;
+    const bool                                  mGenerateDeferredItemCountHistogram;
 
-    const unsigned				mNumOfThreads;
+    const unsigned                              mNumOfThreads;
 
     const LengthAssertions &                    mLengthAssertions;
 
@@ -858,6 +862,7 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
+, mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mNumOfThreads(pipelineKernel->getNumOfThreads())
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)

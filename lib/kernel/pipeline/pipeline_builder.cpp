@@ -331,23 +331,28 @@ Kernel * PipelineBuilder::makeKernel() {
     if (mExternallySynchronized) {
         out << 'E';
     }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableCycleCounter))) {
-        out << "+CYC";
-    }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
-        out << "+BIC";
-    }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
-        out << "+DB";
-    }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-        out << "+SS";
-    }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
-        out << "+GTH";
-    }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
-        out << "-TL";
+    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
+        if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
+            out << "+CYC";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+            out << "+BIC";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+            out << "+DB";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+            out << "+SS";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
+            out << "+GTH";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
+            out << "+GDH";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
+            out << "-TL";
+        }
     }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
