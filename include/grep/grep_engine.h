@@ -189,6 +189,7 @@ protected:
     const cc::Alphabet * mIndexAlphabet;
     std::map<std::string, kernel::ExternalStreamObject *> mExternalMap;
     kernel::StreamSet * mLineBreakStream;
+    kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
     re::UTF8_Transformer mUTF8_Transformer;

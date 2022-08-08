@@ -104,6 +104,18 @@ void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     installStreamSet(b, reStrm);
 }
 
+std::pair<int, int> StartAnchoredExternal::getLengthRange() {
+    return re::getLengthRange(mRE, mIndexAlphabet);
+}
+
+void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    StreamSet * reStrm  = b->CreateStreamSet(1);
+    // Inputs to RE compiler are already adjusted to the correct index stream.
+    setIndexing(b, nullptr);
+    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    installStreamSet(b, reStrm);
+}
+
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     auto mapping = mRefInfo.twixtREs.find(mRef->getName());
     if (mapping == mRefInfo.twixtREs.end()) {
@@ -281,7 +293,6 @@ unsigned round_up_to_blocksize(unsigned offset) {
     unsigned lookahead_blocks = (codegen::BlockSize - 1 + offset)/codegen::BlockSize;
     return lookahead_blocks * codegen::BlockSize;
 }
-
 
 void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, std::pair<int, int> lengthRange) {
     if (offset == 0) {
@@ -750,28 +761,53 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     P->CreateKernelCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
-/*
-void PrefixSuffixSpan(ProgBuilderRef P,
-                                  StreamSet * Prefix, StreamSet * Suffix, StreamSet * Span, int offset) {
+
+LongestMatchMarks::LongestMatchMarks(BuilderRef b, StreamSet * start_ends, StreamSet * marks)
+: PabloKernel(b, "LongestMatchMarks",
+              {Binding{"start_ends", start_ends, FixedRate(1), LookAhead(1)}},
+              {Binding{"marks", marks}}) {}
+
+void LongestMatchMarks::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * starts_ends = pb.createExtract(getInputStreamVar("start_ends"), pb.getInteger(0));
+    PabloAST * end_follow = pb.createLookahead(starts_ends, 1);
+    PabloAST * span_starts = pb.createAnd(pb.createNot(starts_ends), end_follow, "span_starts");
+    PabloAST * span_ends = pb.createAnd(starts_ends, end_follow, "span_ends");
+    Var * marksVar = getOutputStreamVar("marks");
+    pb.createAssign(pb.createExtract(marksVar, pb.getInteger(0)), span_starts);
+    pb.createAssign(pb.createExtract(marksVar, pb.getInteger(1)), span_ends);
+}
+
+InclusiveSpans::InclusiveSpans(BuilderRef b, StreamSet * marks, StreamSet * spans, unsigned start_offset = 0)
+: PabloKernel(b, "InclusiveSpans@" + std::to_string(start_offset),
+              {Binding{"marks", marks, FixedRate(1), LookAhead(round_up_to_blocksize(start_offset))}},
+              {Binding{"spans", spans}}),
+    mOffset(start_offset) {
+}
+
+void InclusiveSpans::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * marksVar = getInputStreamVar("marks");
+    PabloAST * starts = pb.createExtract(marksVar, pb.getInteger(0));
+    if (mOffset > 0) {
+        starts = pb.createLookahead(starts, mOffset);
+    }
+    PabloAST * ends = pb.createExtract(marksVar, pb.getInteger(1));
+    PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {starts, ends});
+    pb.createAssign(pb.createExtract(getOutputStreamVar("spans"), pb.getInteger(0)), spans);
+}
+
+void kernel::PrefixSuffixSpan(ProgBuilderRef P,
+                      StreamSet * Prefix, StreamSet * Suffix, StreamSet * Spans, unsigned offset) {
     std::vector<StreamSet *> marks = {Prefix, Suffix};
     StreamSet * mask = P->CreateStreamSet();
     P->CreateKernelCall<StreamsMerge>(marks, mask);
     StreamSet * filteredSuffix = P->CreateStreamSet();
     FilterByMask(P, mask, Suffix, filteredSuffix);
-    StreamSet * filteredPrefix = P->CreateStreamSet();
-    P->CreateKernelCall<LookaheadKernel>(filteredSuffix, 1, filteredPrefix);
-    StreamSet * pfxMarks = P->CreateStreamSet();
-    SpreadByMask(P, mask, filteredPrefix, pfxMarks);
-    StreamSet * starts = nullptr;
-    if (offset < 0) {
-        starts = P->CreateStreamSet();
-        P->CreateKernelCall<AdvanceKernel>(pfxMarks, starts, -offset);
-    } else if (offset > 0) {
-        starts = P->CreateStreamSet();
-        P->CreateKernelCall<LookaheadKernel>(pfxMarks, starts, offset);
-    } else {
-        starts = pfxMarks;
-    }
-    P->CreateKernelCall<MarksToSpans>(starts, Suffix, Span);
+    StreamSet * matchMarks = P->CreateStreamSet(2);
+    P->CreateKernelCall<LongestMatchMarks>(filteredSuffix, matchMarks);
+    StreamSet * spanMarks = P->CreateStreamSet(2);
+    SpreadByMask(P, mask, matchMarks, spanMarks);
+    P->CreateKernelCall<InclusiveSpans>(spanMarks, Spans, offset);
 }
-*/
+

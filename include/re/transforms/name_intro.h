@@ -15,7 +15,8 @@ class RE;
 
 RE * name_variable_length_CCs(RE * r, unsigned UTF_bits = 8);
 
-RE * name_min_length_alts(RE * r, const cc::Alphabet * a, std::string pfx = "minLgth");
+RE * name_fixed_length_alts(RE * r, const cc::Alphabet * a, std::string pfx = "lgth");
 
+RE * name_start_anchored_alts(RE * r);
 }
 

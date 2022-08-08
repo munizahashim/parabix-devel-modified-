@@ -138,6 +138,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mInternalComponents(static_cast<Component>(0)),
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
+    mLineStarts(nullptr),
     mU8index(nullptr),
     mUTF8_Transformer(re::NameTransformationMode::None),
     mEngineThread(pthread_self()),
@@ -336,7 +337,7 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    mRE = name_min_length_alts(mRE, mIndexAlphabet);
+    mRE = name_fixed_length_alts(mRE, mIndexAlphabet);
     re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
@@ -408,6 +409,10 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
         if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
+    }
+    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
+        mLineStarts = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<LineStartsKernel>(mLineBreakStream, mLineStarts);
     }
 }
 
@@ -549,10 +554,13 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         if (!ext->isResolved()) resolveExternal(P, nameStr);
         // ensure ext is resolved???
         StreamSet * match_marks = ext->getStreamSet();
-        // if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
-           // get MatchedLineStarts, then create and return spans
-           //    return ...;
-        // }
+        if (mIllustrator) mIllustrator->captureBitstream(P, "match_marks", match_marks);
+        if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
+            StreamSet * spans = P->CreateStreamSet(1, 1);
+            PrefixSuffixSpan(P, mLineStarts, match_marks, spans);
+            if (mIllustrator) mIllustrator->captureBitstream(P, "spans", spans);
+            return spans;
+        }
         // else Other special cases
         // default by min match length
         int spanLgth = ext->getLengthRange().first;
@@ -870,11 +878,9 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
             E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, 1);
         }
 
-        StreamSet * LineStarts = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, LineStarts);
-        if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", LineStarts);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", mLineStarts);
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
-        SpreadByMask(E, LineStarts, MatchesByLine, MatchedLineStarts);
+        SpreadByMask(E, mLineStarts, MatchesByLine, MatchedLineStarts);
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);

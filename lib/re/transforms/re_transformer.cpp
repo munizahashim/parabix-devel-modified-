@@ -68,7 +68,7 @@ RE * RE_Transformer::transformName(Name * nm) {
     }
     RE * t = transform(defn);
     if (t == defn) return nm;
-    return t;
+    return t; //makeName(nm->getFullName(), t);
 }
 
 RE * RE_Transformer::transformCapture(Capture * c) {
