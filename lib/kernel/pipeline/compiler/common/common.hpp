@@ -20,12 +20,6 @@ namespace kernel {
 using namespace boost;
 using namespace llvm;
 
-#if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
-    typedef int64_t Z3_int64;
-#else
-    typedef long long int        Z3_int64;
-#endif
-
 template <typename T, unsigned n = 16>
 using Vec = SmallVector<T, n>;
 

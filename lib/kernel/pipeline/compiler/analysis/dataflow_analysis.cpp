@@ -1,13 +1,18 @@
 #include "pipeline_analysis.hpp"
 #include <toolchain/toolchain.h>
+#include <z3.h>
+
+#if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
+    typedef int64_t Z3_int64;
+#else
+    typedef long long int        Z3_int64;
+#endif
 
 namespace kernel {
 
 void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P) {
 
     const auto numOfPartitions = num_vertices(P);
-
-
 
     const auto cfg = Z3_mk_config();
     Z3_set_param_value(cfg, "model", "true");

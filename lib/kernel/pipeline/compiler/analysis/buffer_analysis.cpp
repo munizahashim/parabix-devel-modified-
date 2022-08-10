@@ -18,11 +18,6 @@
 
 namespace kernel {
 
-inline static unsigned ceil_udiv(const unsigned x, const unsigned y) {
-    assert (is_power_2(y));
-    return (((x - 1) | (y - 1)) + 1) / y;
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitialBufferGraph
  ** ------------------------------------------------------------------------------------------------------------- */

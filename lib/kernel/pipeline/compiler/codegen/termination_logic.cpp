@@ -1,4 +1,5 @@
 #include "../pipeline_compiler.hpp"
+#include <llvm/Transforms/Utils/Local.h>
 
 namespace kernel {
 

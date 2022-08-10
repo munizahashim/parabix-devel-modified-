@@ -1,4 +1,5 @@
 #include "../pipeline_compiler.hpp"
+#include <kernel/pipeline/optimizationbranch.h>
 
 namespace kernel {
 

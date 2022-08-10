@@ -1,17 +1,6 @@
 #ifndef PIPELINE_KERNEL_ANALYSIS_HPP
 #define PIPELINE_KERNEL_ANALYSIS_HPP
 
-#include <algorithm>
-#include <queue>
-#include <z3.h>
-#include <assert.h>
-
-#include <kernel/core/kernel.h>
-#include <kernel/core/relationship.h>
-#include <kernel/core/streamset.h>
-#include <kernel/core/kernel_builder.h>
-
-#include <llvm/Support/Format.h>
 #include "../common/common.hpp"
 #include <kernel/pipeline/pipeline_builder.h>
 

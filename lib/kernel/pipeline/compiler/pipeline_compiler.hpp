@@ -3,22 +3,12 @@
 
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/core/kernel_compiler.h>
-#include <kernel/pipeline/optimizationbranch.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Intrinsics.h>
-#include <llvm/Support/ErrorHandling.h>
-#include <llvm/Transforms/Utils/Local.h>
-#include <llvm/ADT/STLExtras.h>
-#include <boost/multi_array.hpp>
-#include <boost/utility/value_init.hpp>
-#include <boost/format.hpp>
 
 #include "config.h"
 #include "common/common.hpp"
 #include "common/graphs.h"
 
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/dominator_tree.hpp>
+#include <boost/multi_array.hpp>
 
 using namespace boost;
 using namespace boost::adaptors;
