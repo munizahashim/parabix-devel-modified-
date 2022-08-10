@@ -2,7 +2,8 @@
 #define SCHEDULING_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
-
+#include "evolutionary_algorithm.hpp"
+#include "lexographic_ordering.hpp"
 #include <chrono>
 #include <llvm/Support/Format.h>
 #include <fstream>

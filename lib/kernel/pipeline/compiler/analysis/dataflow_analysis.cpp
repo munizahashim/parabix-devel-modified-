@@ -1,6 +1,3 @@
-#ifndef DATAFLOW_ANALYSIS_HPP
-#define DATAFLOW_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
 #include <toolchain/toolchain.h>
 
@@ -338,5 +335,3 @@ void PipelineAnalysis::calculatePartialSumStepFactors() {
 }
 
 } // end of kernel namespace
-
-#endif // DATAFLOW_ANALYSIS_HPP

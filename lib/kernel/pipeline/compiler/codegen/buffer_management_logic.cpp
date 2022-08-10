@@ -1,16 +1,11 @@
-#ifndef BUFFER_ALLOCATION_HPP
-#define BUFFER_ALLOCATION_HPP
-
-#include "pipeline_compiler.hpp"
-
-#include <llvm/Support/ErrorHandling.h>
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addHandlesToPipelineKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId, const unsigned groupId) {
+void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId, const unsigned groupId) {
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
@@ -919,5 +914,3 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
 }
 
 } // end of kernel namespace
-
-#endif // BUFFER_ALLOCATION_HPP

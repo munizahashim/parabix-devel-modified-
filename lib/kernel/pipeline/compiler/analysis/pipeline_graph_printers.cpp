@@ -2,7 +2,6 @@
 #define PIPELINE_GRAPH_PRINTER_HPP
 
 #include "pipeline_analysis.hpp"
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/graph/strong_components.hpp>
 
 #define USE_SIMPLE_BUFFER_GRAPH

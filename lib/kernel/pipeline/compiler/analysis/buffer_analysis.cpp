@@ -1,7 +1,5 @@
-#ifndef BUFFER_ANALYSIS_HPP
-#define BUFFER_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
 
 // TODO: any buffers that exist only to satisfy the output dependencies are unnecessary.
 // We could prune away kernels if none of their outputs are needed but we'd want some
@@ -880,7 +878,4 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
 }
 
-
 }
-
-#endif

@@ -10,7 +10,6 @@
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/ADT/STLExtras.h>
 #include <boost/multi_array.hpp>
-#include <boost/intrusive/detail/math.hpp>
 #include <boost/utility/value_init.hpp>
 #include <boost/format.hpp>
 
@@ -20,16 +19,11 @@
 
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/dominator_tree.hpp>
-#include <boost/graph/bron_kerbosch_all_cliques.hpp>
 
 using namespace boost;
 using namespace boost::adaptors;
 using boost::container::flat_set;
 using boost::container::flat_map;
-using boost::intrusive::detail::floor_log2;
-using boost::intrusive::detail::ceil_log2;
-using boost::intrusive::detail::ceil_pow2;
-using boost::intrusive::detail::is_pow2;
 using namespace llvm;
 using IDISA::FixedVectorType;
 
@@ -832,7 +826,6 @@ protected:
     OwningVector<Binding>                       mInternalBindings;
     OwningVector<StreamSetBuffer>               mInternalBuffers;
 
-
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -845,12 +838,10 @@ inline PipelineCompiler::PipelineCompiler(BuilderRef b, PipelineKernel * const p
     // resolve it correctly and clang requires -O2 or better.
 }
 
-
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
+inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
 #ifdef FORCE_PIPELINE_ASSERTIONS
@@ -985,68 +976,21 @@ PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, Pipeli
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief makeKernelName
- ** ------------------------------------------------------------------------------------------------------------- */
-inline LLVM_READNONE std::string PipelineCompiler::makeKernelName(const size_t kernelIndex) const {
-    std::string tmp;
-    raw_string_ostream out(tmp);
-    out << kernelIndex;
-    #ifdef PRINT_DEBUG_MESSAGES
-    out << '.' << getKernel(kernelIndex)->getName();
-    #endif
-    out.flush();
-    return tmp;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makeBufferName
- ** ------------------------------------------------------------------------------------------------------------- */
-LLVM_READNONE std::string PipelineCompiler::makeBufferName(const size_t kernelIndex, const StreamSetPort port) const {
-    std::string tmp;
-    raw_string_ostream out(tmp);
-    out << kernelIndex;
-    #ifdef PRINT_DEBUG_MESSAGES
-    out << '.' << getKernel(kernelIndex)->getName()
-        << '.' << getBinding(kernelIndex, port).getName();
-    #else
-    if (port.Type == PortType::Input) {
-        out << 'I';
-    } else { // if (port.Type == PortType::Output) {
-        out << 'O';
-    }
-    out.write_hex(port.Number);
-    #endif
-    out.flush();
-    return tmp;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getItemWidth
  ** ------------------------------------------------------------------------------------------------------------- */
-LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
+inline LLVM_READNONE unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
     }
     return cast<IntegerType>(cast<FixedVectorType>(ty)->getElementType())->getBitWidth();
 }
 
+#ifndef NDEBUG
+bool isFromCurrentFunction(BuilderRef b, const Value * const value, const bool allowNull = true);
+#endif
+
 } // end of namespace
 
-#include "analysis/pipeline_analysis.hpp"
-#include "buffer_management_logic.hpp"
-#include "termination_logic.hpp"
-#include "consumer_logic.hpp"
-#include "partition_processing_logic.hpp"
-#include "kernel_segment_processing_logic.hpp"
-#include "cycle_counter_logic.hpp"
-#include "pipeline_logic.hpp"
-#include "scalar_logic.hpp"
-#include "synchronization_logic.hpp"
 #include "debug_messages.hpp"
-#include "codegen/buffer_manipulation_logic.hpp"
-#include "codegen/optimization_branch_logic.hpp"
-#include "pipeline_optimization_logic.hpp"
-#include "papi_instrumentation_logic.hpp"
-#include "histogram_generation_logic.hpp"
 
 #endif // PIPELINE_COMPILER_HPP

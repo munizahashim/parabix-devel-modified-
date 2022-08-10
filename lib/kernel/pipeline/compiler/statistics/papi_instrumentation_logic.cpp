@@ -1,14 +1,12 @@
-#if !defined(PAPI_INSTRUMENTATION_LOGIC_HPP) && defined(ENABLE_PAPI)
-#define PAPI_INSTRUMENTATION_LOGIC_HPP
+#ifdef ENABLE_PAPI
 
+#include "../pipeline_compiler.hpp"
 #include <papi.h>
 #include <boost/tokenizer.hpp>
 #include <boost/format.hpp>
 #include <codegen/TypeBuilder.h>
 
 // TODO: merge cycle counter with papi?
-
-#include "pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -841,7 +839,6 @@ void PipelineCompiler::linkPAPILibrary(BuilderRef b) {
     }
 }
 
-
 }
 
-#endif // PAPI_INSTRUMENTATION_LOGIC_HPP
+#endif // #ifdef ENABLE_PAPI

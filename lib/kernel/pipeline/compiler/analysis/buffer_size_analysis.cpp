@@ -1,7 +1,5 @@
-#ifndef BUFFER_SIZE_ANALYSIS_HPP
-#define BUFFER_SIZE_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
+#include "evolutionary_algorithm.hpp"
 #include <boost/icl/interval_set.hpp>
 
 using boost::icl::interval_set;
@@ -396,5 +394,3 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
 }
 
 } // end of kernel namespace
-
-#endif // BUFFER_SIZE_ANALYSIS_HPP

@@ -2,7 +2,10 @@
 #define VARIABLE_RATE_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
+#include "../internal/popcount_kernel.h"
 #include <boost/math/distributions/skew_normal.hpp>
+#include <boost/graph/bron_kerbosch_all_cliques.hpp>
 #include <chrono>
 
 #include <util/slab_allocator.h>

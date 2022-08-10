@@ -1,14 +1,11 @@
-#ifndef TERMINATION_LOGIC_HPP
-#define TERMINATION_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addTerminationProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
+void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
     const auto id = KernelPartitionId[kernelId];
     IntegerType * const sizeTy = b->getSizeTy();
     mTarget->addInternalScalar(sizeTy, TERMINATION_PREFIX + std::to_string(id), groupId);
@@ -20,7 +17,7 @@ inline void PipelineCompiler::addTerminationProperties(BuilderRef b, const size_
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setCurrentTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
+void PipelineCompiler::setCurrentTerminationSignal(BuilderRef /* b */, Value * const signal) {
     assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
     mPartitionTerminationSignal[mCurrentPartitionId] = signal;
 }
@@ -175,7 +172,7 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned partitionId) {
+Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned partitionId) {
     const auto name = TERMINATION_PREFIX + std::to_string(partitionId);
     Value * const ptr = b->getScalarFieldPtr(name);
     return b->CreateLoad(ptr, true, name);
@@ -317,5 +314,3 @@ void PipelineCompiler::verifyPostInvocationTerminationSignal(BuilderRef b) {
 }
 
 }
-
-#endif // TERMINATION_LOGIC_HPP

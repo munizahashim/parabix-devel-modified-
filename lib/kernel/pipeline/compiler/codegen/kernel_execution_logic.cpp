@@ -1,7 +1,4 @@
-#ifndef KERNEL_EXECUTION_LOGIC_HPP
-#define KERNEL_EXECUTION_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -710,6 +707,3 @@ void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(Build
 }
 
 }
-
-
-#endif // KERNEL_EXECUTION_LOGIC_HPP

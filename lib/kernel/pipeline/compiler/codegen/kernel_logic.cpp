@@ -1,6 +1,4 @@
-﻿#include "pipeline_compiler.hpp"
-
-#include <llvm/Support/ErrorHandling.h>
+﻿#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -314,63 +312,63 @@ bool PipelineCompiler::isDataParallel(const size_t kernel) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isCurrentKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
-inline bool PipelineCompiler::isCurrentKernelStateFree() const {
+bool PipelineCompiler::isCurrentKernelStateFree() const {
     return PipelineCommonGraphFunctions::isKernelStateFree(mKernelId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBufferVertex
  ** ------------------------------------------------------------------------------------------------------------- */
-inline unsigned PipelineCompiler::getInputBufferVertex(const StreamSetPort inputPort) const {
+unsigned PipelineCompiler::getInputBufferVertex(const StreamSetPort inputPort) const {
     return PipelineCommonGraphFunctions::getInputBufferVertex(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-inline StreamSetBuffer * PipelineCompiler::getInputBuffer(const StreamSetPort inputPort) const {
+StreamSetBuffer * PipelineCompiler::getInputBuffer(const StreamSetPort inputPort) const {
     return PipelineCommonGraphFunctions::getInputBuffer(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBinding
  ** ------------------------------------------------------------------------------------------------------------- */
-inline const Binding & PipelineCompiler::getInputBinding(const StreamSetPort inputPort) const {
+const Binding & PipelineCompiler::getInputBinding(const StreamSetPort inputPort) const {
     return PipelineCommonGraphFunctions::getInputBinding(mKernelId, inputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBufferVertex
  ** ------------------------------------------------------------------------------------------------------------- */
-inline unsigned PipelineCompiler::getOutputBufferVertex(const StreamSetPort outputPort) const {
+unsigned PipelineCompiler::getOutputBufferVertex(const StreamSetPort outputPort) const {
     return PipelineCommonGraphFunctions::getOutputBufferVertex(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBinding
  ** ------------------------------------------------------------------------------------------------------------- */
-inline const Binding & PipelineCompiler::getOutputBinding(const StreamSetPort outputPort) const {
+const Binding & PipelineCompiler::getOutputBinding(const StreamSetPort outputPort) const {
     return PipelineCommonGraphFunctions::getOutputBinding(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getOutputBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-inline StreamSetBuffer * PipelineCompiler::getOutputBuffer(const StreamSetPort outputPort) const {
+StreamSetBuffer * PipelineCompiler::getOutputBuffer(const StreamSetPort outputPort) const {
     return PipelineCommonGraphFunctions::getOutputBuffer(mKernelId, outputPort);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getBinding
  ** ------------------------------------------------------------------------------------------------------------- */
-inline const Binding & PipelineCompiler::getBinding(const StreamSetPort port) const {
+const Binding & PipelineCompiler::getBinding(const StreamSetPort port) const {
     return PipelineCommonGraphFunctions::getBinding(mKernelId, port);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getReference
  ** ------------------------------------------------------------------------------------------------------------- */
-inline const StreamSetPort PipelineCompiler::getReference(const StreamSetPort port) const {
+const StreamSetPort PipelineCompiler::getReference(const StreamSetPort port) const {
     return PipelineCommonGraphFunctions::getReference(mKernelId, port);
 }
 
@@ -378,7 +376,7 @@ inline const StreamSetPort PipelineCompiler::getReference(const StreamSetPort po
  * @brief reset
  ** ------------------------------------------------------------------------------------------------------------- */
 template <typename Vec>
-inline void reset(Vec & vec, const size_t n) {
+void reset(Vec & vec, const size_t n) {
     vec.resize(n);
     std::memset(vec.data(), 0, n * sizeof(typename Vec::value_type));
 }
@@ -478,5 +476,72 @@ void PipelineCompiler::initializeKernelAssertions(BuilderRef b) {
         tmp.clear();
     }
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeKernelName
+ ** ------------------------------------------------------------------------------------------------------------- */
+LLVM_READNONE std::string PipelineCompiler::makeKernelName(const size_t kernelIndex) const {
+    std::string tmp;
+    raw_string_ostream out(tmp);
+    out << kernelIndex;
+    #ifdef PRINT_DEBUG_MESSAGES
+    out << '.' << getKernel(kernelIndex)->getName();
+    #endif
+    out.flush();
+    return tmp;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeBufferName
+ ** ------------------------------------------------------------------------------------------------------------- */
+LLVM_READNONE std::string PipelineCompiler::makeBufferName(const size_t kernelIndex, const StreamSetPort port) const {
+    std::string tmp;
+    raw_string_ostream out(tmp);
+    out << kernelIndex;
+    #ifdef PRINT_DEBUG_MESSAGES
+    out << '.' << getKernel(kernelIndex)->getName()
+        << '.' << getBinding(kernelIndex, port).getName();
+    #else
+    if (port.Type == PortType::Input) {
+        out << 'I';
+    } else { // if (port.Type == PortType::Output) {
+        out << 'O';
+    }
+    out.write_hex(port.Number);
+    #endif
+    out.flush();
+    return tmp;
+}
+
+#ifndef NDEBUG
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isFromCurrentFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool isFromCurrentFunction(BuilderRef b, const Value * const value, const bool allowNull) {
+    assert (value || allowNull);
+    if (value == nullptr) {
+        return allowNull;
+    }
+    BasicBlock * const ip = b->GetInsertBlock();
+    assert (ip);
+    if (isa<Constant>(value)) {
+        return true;
+    }
+    const Function * const builderFunction = ip->getParent();
+    assert (builderFunction);
+    const Function * function = builderFunction;
+    if (isa<Argument>(value)) {
+        function = cast<Argument>(value)->getParent();
+    } else if (isa<Instruction>(value)) {
+        function = cast<Instruction>(value)->getParent()->getParent();
+    }
+    assert (function);
+    if (LLVM_UNLIKELY(&b->getContext() != &value->getContext())) {
+        return false;
+    }
+    return (builderFunction == function);
+}
+#endif
 
 }

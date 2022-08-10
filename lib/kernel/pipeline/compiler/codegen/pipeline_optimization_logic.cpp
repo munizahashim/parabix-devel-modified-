@@ -1,7 +1,4 @@
-#ifndef PIPELINE_OPTIMIZATION_LOGIC_HPP
-#define PIPELINE_OPTIMIZATION_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Transforms/IPO.h>
@@ -162,5 +159,3 @@ keep_phi_node:  bool canonicalize = false;
 }
 
 }
-
-#endif // PIPELINE_OPTIMIZATION_LOGIC_HPP

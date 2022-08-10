@@ -23,6 +23,7 @@ enable_testing()
 option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
+option(ENABLE_CERN_ROOT "Enable CERN ROOT data analysis framework" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
 option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
@@ -124,6 +125,16 @@ message(STATUS "Report PAPI tests was not enabled")
 endif()
 endif()
 
+### Import dependenct: CERN ROOT   ###
+
+if (ENABLE_CERN_ROOT)
+find_package(ROOT REQUIRED)
+if (ROOT_FOUND)
+message(STATUS "Found CERN ROOT in: ${ROOT_INCLUDE_DIRS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT ${ROOT_CXX_FLAGS} -frtti")
+include_directories(${ROOT_INCLUDE_DIRS})
+endif()
+endif()
 
 ###   Project Configuration   ###
 
@@ -169,13 +180,6 @@ endif()
 UNSET(HAS_EXECINFO CACHE)
 UNSET(HAS_MACH_VM_TYPES CACHE)
 
-# Disable RunTime Type Information
-if(MSVC) # using Visual Studio C++
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR-")
-else() # using Clang, GCC, Intel C++, etc
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-endif()
-
 # Disable Dual ABI support
 if(DISABLE_DUAL_ABI)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
@@ -192,7 +196,6 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=gold")
     endif()
 endif()
-
 
 # Use address sanitizer if desiered
 unset(HAS_ADDRESS_SANITIZER)
@@ -242,10 +245,17 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -g2 -ggdb -fvisibility=default -fno-omit-frame-pointer -fno-optimize-sibling-calls")
 
+# Disable RunTime Type Information
+if(MSVC) # using Visual Studio C++
+    set(NO_RTTI "/GR-")
+else() # using Clang, GCC, Intel C++, etc
+    set(NO_RTTI "-fno-rtti")
+endif()
+
 function(parabix_add_module)
     cmake_parse_arguments(
         ARG             # resultant argument prefix
-        "USES_Z3"       # boolean args
+        "USES_Z3;USES_ROOT"       # boolean args
         "NAME"          # mono-valued arguments:
                         #   NAME: target name
         "SRC;DEPS"      # multi-valued arguments:
@@ -268,9 +278,13 @@ function(parabix_add_module)
         endif()
         parabix_set_library_name(${ARG_NAME})
         target_link_libraries(${ARG_NAME} ${ARG_DEPS})
+        target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
         if (ARG_USES_Z3)
             target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
         endif()
+#        if (ARG_USES_ROOT AND ENABLE_CERN_ROOT)
+#            target_link_libraries(${ARG_NAME} ${ROOT_LIBRARIES})
+#        endif()
         if (ENABLE_PAPI)
             target_link_libraries(${ARG_NAME} ${PAPI_LIBRARIES})
         endif()
@@ -295,6 +309,7 @@ function(parabix_add_executable)
         message(FATAL_ERROR "parabix_add_executable: A target name is required")
     endif()
     add_executable(${ARG_NAME} ${ARG_SRC})
+    target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
     if(ARTIFACT_MODE STREQUAL "Single")
         target_link_libraries(${ARG_NAME} ${PARABIX_MONO_TARGET})
     else()

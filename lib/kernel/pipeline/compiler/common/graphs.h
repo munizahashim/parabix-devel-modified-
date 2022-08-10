@@ -5,7 +5,9 @@
 #include <boost/graph/adjacency_matrix.hpp>
 #include <boost/container/flat_set.hpp>
 #include <boost/container/flat_map.hpp>
-#include "../pipeline_compiler.hpp"
+
+#include <kernel/pipeline/pipeline_kernel.h>
+#include <kernel/core/kernel_compiler.h>
 #include <kernel/core/refwrapper.h>
 #include <util/extended_boost_graph_containers.h>
 #include <toolchain/toolchain.h>
@@ -21,6 +23,7 @@ using namespace boost::math;
 #include <llvm/ADT/BitVector.h>
 #include <llvm/Support/raw_ostream.h>
 #include <util/small_flat_set.hpp>
+
 
 using namespace boost;
 using namespace llvm;

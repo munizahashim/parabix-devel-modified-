@@ -1,14 +1,11 @@
-#ifndef PARTITION_PROCESSING_LOGIC_HPP
-#define PARTITION_PROCESSING_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePartitionEntryPoints
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {    
+void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     for (unsigned i = 1; i < PartitionCount; ++i) {
         mPartitionEntryPoint[i] = b->CreateBasicBlock("Partition" + std::to_string(i), mPipelineEnd);
@@ -168,7 +165,7 @@ BasicBlock * PipelineCompiler::getPartitionExitPoint(BuilderRef /* b */) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief checkForPartitionEntry
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::checkForPartitionEntry(BuilderRef b) {
+void PipelineCompiler::checkForPartitionEntry(BuilderRef b) {
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
     mIsPartitionRoot = false;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -583,7 +580,7 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief checkForPartitionExit
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
+void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
 
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
 
@@ -745,5 +742,3 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
 }
 
 } // end of namespace kernel
-
-#endif

@@ -1,6 +1,3 @@
-#ifndef CONSUMER_ANALYSIS_HPP
-#define CONSUMER_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
 #include <boost/tokenizer.hpp>
 #include <boost/format.hpp>
@@ -139,5 +136,3 @@ found_potentially_jumped_consumer:
 }
 
 }
-
-#endif // CONSUMER_ANALYSIS_HPP

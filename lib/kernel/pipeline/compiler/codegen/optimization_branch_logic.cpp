@@ -1,6 +1,3 @@
-#ifndef OPTIMIZATION_BRANCH_LOGIC_HPP
-#define OPTIMIZATION_BRANCH_LOGIC_HPP
-
 #include "../pipeline_compiler.hpp"
 
 namespace kernel {
@@ -211,5 +208,3 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
 }
 
 }
-
-#endif // OPTIMIZATION_BRANCH_LOGIC_HPP

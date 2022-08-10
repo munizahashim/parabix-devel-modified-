@@ -1,7 +1,5 @@
-﻿#ifndef TERMINATION_ANALYSIS_HPP
-#define TERMINATION_ANALYSIS_HPP
-
-#include "pipeline_analysis.hpp"
+﻿#include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
 
 namespace kernel {
 
@@ -180,5 +178,3 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
 }
 
 }
-
-#endif // TERMINATION_ANALYSIS_HPP

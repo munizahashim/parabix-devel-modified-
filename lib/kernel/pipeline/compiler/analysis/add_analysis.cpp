@@ -1,6 +1,3 @@
-#ifndef ADD_ANALYSIS_HPP
-#define ADD_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
 
 namespace kernel {
@@ -87,5 +84,3 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
 }
 
 }
-
-#endif // ADD_ANALYSIS_HPP

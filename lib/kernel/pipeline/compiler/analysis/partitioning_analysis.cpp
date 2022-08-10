@@ -1,7 +1,5 @@
-#ifndef PARTITIONING_ANALYSIS_HPP
-#define PARTITIONING_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
 #include <toolchain/toolchain.h>
 #include <util/slab_allocator.h>
 
@@ -1186,5 +1184,3 @@ void PipelineAnalysis::identifyPartitionGuidedSynchronizationVariables() {
 #endif
 
 } // end of namespace kernel
-
-#endif // PARTITIONING_ANALYSIS_HPP

@@ -1,14 +1,11 @@
-#ifndef CONSUMER_LOGIC_HPP
-#define CONSUMER_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addConsumerKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned kernelId) {
+void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned kernelId) {
     IntegerType * const sizeTy = b->getSizeTy();
 
 //    const auto addInternallySynchronizedInternalCounters = mIsInternallySynchronized.test(kernelId) && !mIsStatelessKernel.test(kernelId) ;
@@ -81,7 +78,7 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readExternalConsumerItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
+void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -167,7 +164,7 @@ void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsi
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeMinimumConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
+void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
         if (c.Flags & ConsumerEdge::UpdateConsumedCount) {
@@ -305,5 +302,3 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
 }
 
 }
-
-#endif // CONSUMER_LOGIC_HPP

@@ -1,8 +1,4 @@
-﻿#include "pipeline_compiler.hpp"
-#include "kernel_logic.hpp"
-#include "kernel_io_calculation_logic.hpp"
-#include "kernel_execution_logic.hpp"
-#include "kernel_family_logic.hpp"
+﻿#include "../pipeline_compiler.hpp"
 
 // TODO: if we have multiple copies of the same type of kernel executing sequentially, we could avoid
 // generating an "execution call" for each and instead pass in different handles/item counts. This
@@ -76,7 +72,7 @@ void PipelineCompiler::start(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::executeKernel(BuilderRef b) {
+void PipelineCompiler::executeKernel(BuilderRef b) {
 
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
@@ -368,7 +364,7 @@ inline void PipelineCompiler::executeKernel(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief normalCompletionCheck
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
+void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 
     ConstantInt * const i1_TRUE = b->getTrue();
 
@@ -470,7 +466,7 @@ inline void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelLoopEntryPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
     IntegerType * const sizeTy = b->getSizeTy();
     IntegerType * const boolTy = b->getInt1Ty();
 
@@ -539,7 +535,7 @@ inline void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelCheckOutputSpacePhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
     b->SetInsertPoint(mKernelCheckOutputSpace);
     IntegerType * const sizeTy = b->getSizeTy();
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -573,7 +569,7 @@ inline void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b)
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelTerminatedPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
     b->SetInsertPoint(mKernelTerminated);
     Type * const sizeTy = b->getSizeTy();
     const auto prefix = makeKernelName(mKernelId);
@@ -591,7 +587,7 @@ inline void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelTerminatedPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef b) {
+void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef b) {
     assert (mKernelJumpToNextUsefulPartition);
     b->SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto prefix = makeKernelName(mKernelId);
@@ -606,14 +602,14 @@ inline void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelInsufficientIOExitPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelInsufficientIOExitPhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelInsufficientIOExitPhis(BuilderRef b) {
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelLoopExitPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
     b->SetInsertPoint(mKernelLoopExit);
     const auto prefix = makeKernelName(mKernelId);
     IntegerType * const sizeTy = b->getSizeTy();
@@ -739,7 +735,7 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelExitPhis
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
+void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
     b->SetInsertPoint(mKernelExit);
     const auto prefix = makeKernelName(mKernelId);
     IntegerType * const sizeTy = b->getSizeTy();
@@ -776,7 +772,7 @@ inline void PipelineCompiler::initializeKernelExitPhis(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateKernelExitPhisAfterInitiallyTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b) {
+void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b) {
     Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
     mTerminatedAtExitPhi->addIncoming(completed, mKernelInitiallyTerminatedExit);
 
@@ -807,7 +803,7 @@ inline void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(Build
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updatePhiCountAfterTermination
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
+void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
     BasicBlock * const exitBlock = b->GetInsertBlock();
     mTerminatedAtLoopExitPhi->addIncoming(mTerminatedSignalPhi, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);

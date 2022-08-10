@@ -1,10 +1,10 @@
-﻿#ifndef HISTOGRAM_GENERATION_LOGIC_HPP
-#define HISTOGRAM_GENERATION_LOGIC_HPP
+﻿#include "../pipeline_compiler.hpp"
 
-#include "pipeline_compiler.hpp"
+//#ifdef ENABLE_CERN_ROOT
+//#include <TH1.h>
+//#endif
 
 namespace kernel {
-
 
 namespace {
 
@@ -29,6 +29,9 @@ struct HistogramKernelData {
     HistogramPortData * PortData;
 };
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief __print_pipeline_histogram_report
+ ** ------------------------------------------------------------------------------------------------------------- */
 void __print_pipeline_histogram_report(const void * const data, const uint64_t numOfKernels, uint32_t reportType) {
 
     uint32_t maxKernelId = 0;
@@ -158,12 +161,136 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
     out << '\n';
 }
 
+#ifdef ENABLE_CERN_ROOT
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief __analyze_histogram_processing_rates
+ ** ------------------------------------------------------------------------------------------------------------- */
+void __analyze_histogram_processing_rates(const void * const data, const uint64_t numOfKernels, uint32_t reportType) {
+
+    uint32_t maxKernelId = 0;
+    size_t maxKernelNameLength = 11;
+    size_t maxBindingNameLength = 12;
+    uint32_t maxPortNum = 0;
+    uint64_t maxItemCount = 0;
+    uint64_t maxFrequency = 0;
+
+    const auto kernelData = static_cast<const HistogramKernelData *>(data);
+
+    for (unsigned i = 0; i < numOfKernels; ++i) {
+        const auto & K = kernelData[i];
+        maxKernelId = std::max(maxKernelId, K.Id);
+        maxKernelNameLength = std::max(maxKernelNameLength, strlen(K.KernelName));
+        const auto numOfPorts = K.NumOfPorts;
+        for (unsigned j = 0; j < numOfPorts; ++j) {
+            const HistogramPortData & pd = K.PortData[j];
+            maxPortNum = std::max(maxPortNum, pd.PortNum);
+            maxBindingNameLength = std::max(maxBindingNameLength, strlen(pd.BindingName));
+            if (pd.Size == 0) {
+                auto e = static_cast<const HistogramPortListEntry *>(pd.Data); assert (e);
+                do {
+                    maxItemCount = std::max(maxItemCount, e->ItemCount);
+                    maxFrequency = std::max(maxFrequency, e->Frequency);
+                    e = e->Next;
+                } while (e);
+            } else {
+                const auto c = pd.Size;
+                maxItemCount = std::max(maxItemCount, c);
+                const auto L = static_cast<const uint64_t *>(pd.Data);
+                for (unsigned k = 0; k < c; ++k) {
+                    maxFrequency = std::max(maxFrequency, L[k]);
+                }
+            }
+
+        }
+    }
+
+    auto ceil_log10 = [](const uint64_t v) {
+        if (v < 10) {
+            return 1U;
+        }
+        return (unsigned)std::ceil(std::log10(v));
+    };
+
+    const auto maxKernelIdLength = ceil_log10(maxKernelId);
+    const auto maxPortNumLength =  std::max(4U, ceil_log10(maxPortNum));
+    const auto cw = (reportType == HistogramReportType::TransferredItems) ? 11U : 8U;
+    const auto maxItemCountLength = std::max(cw, ceil_log10(maxItemCount));
+    const auto maxFrequencyLength = std::max(9U, ceil_log10(maxFrequency));
+
+    auto & out = errs();
+    if (reportType == HistogramReportType::TransferredItems) {
+        out << "TRANSFERRED ITEMS HISTOGRAM:\n\n";
+    } else if (reportType == HistogramReportType::DeferredItems) {
+        out << "DEFERRED FROM TRANSFERRED ITEM COUNT DISTANCE HISTOGRAM:\n\n";
+    }
+
+    out << left_justify("#", maxKernelIdLength + 1); // kernel #
+    out << left_justify("Kernel", maxKernelNameLength + 1);
+    out << left_justify("Binding", maxBindingNameLength + 1);
+    out << left_justify("Port", maxPortNumLength + 2);
+    if (reportType == HistogramReportType::TransferredItems) {
+        out << left_justify("Transferred", maxItemCountLength + 1);
+    } else if (reportType == HistogramReportType::DeferredItems) {
+        out << left_justify("Deferred", maxItemCountLength + 1);
+    }
+    out << left_justify("Frequency", maxFrequencyLength + 1);
+    out << "\n\n";
+
+    for (unsigned i = 0; i < numOfKernels; ++i) {
+        const auto & K = kernelData[i];
+
+        const auto id = std::to_string(K.Id);
+
+        const StringRef kernelName = StringRef(K.KernelName, std::strlen(K.KernelName));
+
+        const auto numOfPorts = K.NumOfPorts;
+        for (unsigned j = 0; j < numOfPorts; ++j) {
+            const HistogramPortData & pd = K.PortData[j];
+
+            const StringRef bindingName = StringRef(pd.BindingName, std::strlen(pd.BindingName));
+
+            const auto portType = (pd.PortType == (uint32_t)PortType::Input) ? "I" : "O";
+            const auto portNum = std::to_string(pd.PortNum);
+
+
+            const auto arrayLength = pd.Size;
+            if (arrayLength == 0) {
+                const HistogramPortListEntry * node = static_cast<const HistogramPortListEntry *>(pd.Data); assert (node);
+                // only the root node might have a frequency of 0
+                if (node->Frequency == 0) {
+                    node = node->Next;
+                }
+                while (node) {
+                    assert (node->Frequency > 0);
+
+                    node = node->Next;
+                }
+            } else {
+                const uint64_t * const array = static_cast<const uint64_t *>(pd.Data);
+                for (uint64_t i = 0; i < arrayLength; ++i) {
+                    const auto f = array[i];
+                    if (f) {
+
+                    }
+                }
+            }
+
+        }
+    }
+
+    out << '\n';
+}
+
+
+#endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordsAnyHistogramData
  ** ------------------------------------------------------------------------------------------------------------- */
-inline bool PipelineCompiler::recordsAnyHistogramData() const {
+bool PipelineCompiler::recordsAnyHistogramData() const {
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
@@ -1039,5 +1166,3 @@ void PipelineCompiler::printHistogramReport(BuilderRef b) {
 #endif
 
 }
-
-#endif // HISTOGRAM_GENERATION_LOGIC_HPP

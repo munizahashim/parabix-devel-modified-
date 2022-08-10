@@ -1,7 +1,4 @@
-#ifndef SCALAR_LOGIC_HPP
-#define SCALAR_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -79,5 +76,3 @@ Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
 }
 
 }
-
-#endif // SCALAR_LOGIC_HPP

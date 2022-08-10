@@ -1,7 +1,4 @@
-#ifndef SYNCHRONIZATION_LOGIC_HPP
-#define SYNCHRONIZATION_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 // Suppose T1 and T2 are two pipeline threads where all segment processing
 // of kernel Ki in T1 logically happens before Ki in T2.
@@ -113,7 +110,7 @@ LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type, Value * const segNo) {
     if (mNumOfThreads != 1 || mIsNestedPipeline) {
-        // TODO: make this an inline function?
+        // TODO: make this an function?
 
         const auto prefix = makeKernelName(kernelId);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
@@ -184,7 +181,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
+Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
     return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
 }
 
@@ -208,5 +205,3 @@ Value * PipelineCompiler::obtainNextSegmentNumber(BuilderRef b) {
 #endif
 
 }
-
-#endif // SYNCHRONIZATION_LOGIC_HPP

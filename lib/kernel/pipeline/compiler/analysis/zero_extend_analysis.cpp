@@ -1,10 +1,7 @@
-#ifndef ZERO_EXTEND_ANALYSIS_HPP
-#define ZERO_EXTEND_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
 
 namespace kernel {
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyZeroExtendedStreamSets
@@ -101,5 +98,3 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
 }
 
 }
-
-#endif // ZERO_EXTEND_ANALYSIS_HPP

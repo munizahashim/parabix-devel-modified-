@@ -1,7 +1,4 @@
-#ifndef KERNEL_FAMILY_LOGIC_HPP
-#define KERNEL_FAMILY_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -253,5 +250,3 @@ Value * PipelineCompiler::getFamilyFunctionFromKernelState(BuilderRef b, Type * 
 }
 
 }
-
-#endif

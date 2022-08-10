@@ -1,7 +1,4 @@
-#ifndef PIPELINE_LOGIC_HPP
-#define PIPELINE_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include <pthread.h>
 
 #if BOOST_OS_LINUX
@@ -29,12 +26,12 @@ namespace kernel {
 // function argument, the size is 64-bits. More investigation is needed to determine which
 // versions of LLVM are affected by this bug.
 
-inline LLVM_READNONE bool allocateOnHeap(BuilderRef b) {
+LLVM_READNONE bool allocateOnHeap(BuilderRef b) {
     DataLayout DL(b->getModule());
     return (DL.getPointerSizeInBits() != b->getSizeTy()->getBitWidth());
 }
 
-inline Value * makeStateObject(BuilderRef b, Type * type) {
+Value * makeStateObject(BuilderRef b, Type * type) {
     Value * ptr = nullptr;
     if (LLVM_UNLIKELY(allocateOnHeap(b))) {
         ptr = b->CreatePageAlignedMalloc(type);
@@ -45,7 +42,7 @@ inline Value * makeStateObject(BuilderRef b, Type * type) {
     return ptr;
 }
 
-inline void destroyStateObject(BuilderRef b, Value * threadState) {
+void destroyStateObject(BuilderRef b, Value * threadState) {
     if (LLVM_UNLIKELY(allocateOnHeap(b))) {
         b->CreateFree(threadState);
     }
@@ -64,7 +61,7 @@ void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPipelineKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
+void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // TODO: look into improving cache locality/false sharing of this struct
 
     // TODO: create a non-persistent / pass through input scalar type to allow the
@@ -406,7 +403,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::generateKernelMethod(BuilderRef b) {
+void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     initializeKernelAssertions(b);
     // verifyBufferRelationships();
     mScalarValue.reset(FirstKernel, LastScalar);
@@ -464,7 +461,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief concat
  ** ------------------------------------------------------------------------------------------------------------- */
-inline StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) {
+StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) {
     Twine C = A + B;
     tmp.clear();
     C.toVector(tmp);
@@ -874,7 +871,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadStateType
  ** ------------------------------------------------------------------------------------------------------------- */
-inline StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
+StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
     FixedArray<Type *, THREAD_STRUCT_SIZE> fields;
     LLVMContext & C = b->getContext();
 
@@ -902,7 +899,7 @@ inline StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructThreadStructObject
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::constructThreadStructObject(BuilderRef b, Value * const threadId, Value * const threadLocal, const unsigned threadNum) {
+Value * PipelineCompiler::constructThreadStructObject(BuilderRef b, Value * const threadId, Value * const threadLocal, const unsigned threadNum) {
     StructType * const threadStructType = getThreadStuctType(b);
     Value * const threadState = makeStateObject(b, threadStructType);
     setThreadLocalHandle(threadLocal);
@@ -931,7 +928,7 @@ inline Value * PipelineCompiler::constructThreadStructObject(BuilderRef b, Value
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readThreadStuctObject
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) {
+void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) {
     assert (mNumOfThreads > 1);
 
     FixedArray<Value *, 3> indices3;
@@ -964,7 +961,7 @@ inline void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * thread
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isProcessThread
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * PipelineCompiler::isProcessThread(BuilderRef b, Value * const threadState) const {
+Value * PipelineCompiler::isProcessThread(BuilderRef b, Value * const threadState) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b->getInt32(0);
     indices[1] = b->getInt32(PROCESS_THREAD_ID);
@@ -1068,5 +1065,3 @@ void PipelineCompiler::clearInternalState(BuilderRef b) {
 }
 
 }
-
-#endif // PIPELINE_LOGIC_HPP

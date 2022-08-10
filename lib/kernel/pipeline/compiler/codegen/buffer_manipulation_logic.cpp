@@ -1,6 +1,3 @@
-#ifndef BUFFER_MANIPULATION_LOGIC_HPP
-#define BUFFER_MANIPULATION_LOGIC_HPP
-
 #include "../pipeline_compiler.hpp"
 
 using namespace IDISA;
@@ -542,5 +539,3 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
 }
 
 }
-
-#endif // BUFFER_MANIPULATION_LOGIC_HPP

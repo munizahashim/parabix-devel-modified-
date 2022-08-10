@@ -1,8 +1,4 @@
-#ifndef IO_CALCULATION_LOGIC_HPP
-#define IO_CALCULATION_LOGIC_HPP
-
-#include "pipeline_compiler.hpp"
-#include <llvm/Support/ErrorHandling.h>
+#include "../pipeline_compiler.hpp"
 
 // TODO: add in assertions to prove whether all countable rate pipeline I/O was satisfied in the single iteration
 // Is it sufficient to verify symbolic rate of the pipeline matches the rate of the I/O?
@@ -1851,5 +1847,3 @@ void PipelineCompiler::updatePHINodesForLoopExit(BuilderRef b) {
 #endif
 
 }
-
-#endif // IO_CALCULATION_LOGIC_HPP
