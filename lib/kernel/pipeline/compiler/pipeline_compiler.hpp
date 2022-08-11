@@ -1,10 +1,11 @@
 ﻿#ifndef PIPELINE_COMPILER_HPP
 #define PIPELINE_COMPILER_HPP
 
+#include "config.h"
+
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/core/kernel_compiler.h>
 
-#include "config.h"
 #include "common/common.hpp"
 #include "common/graphs.h"
 
@@ -492,9 +493,6 @@ public:
     void debugInit(BuilderRef b);
     template <typename ... Args>
     void debugPrint(BuilderRef b, Twine format, Args ...args) const;
-    void debugHalt(BuilderRef b) const;
-    void debugResume(BuilderRef b) const;
-    void debugClose(BuilderRef b);
     #endif
 
 // misc. functions

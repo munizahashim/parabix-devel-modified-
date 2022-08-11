@@ -45,6 +45,7 @@ SRC
     compiler/internal/regionselectionkernel.cpp
     compiler/statistics/cycle_counter_logic.cpp
     compiler/statistics/histogram_generation_logic.cpp
+    compiler/statistics/papi_instrumentation_logic.cpp
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp
     pipeline_kernel.cpp

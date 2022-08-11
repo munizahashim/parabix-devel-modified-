@@ -1119,14 +1119,14 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
-            Value * expandedBuffer = b->CreatePageAlignedMalloc(mType, mallocCapacity, mAddressSpace);
+            Value * const mallocSize = b->CreateMul(mallocCapacity, CHUNK_SIZE);
+            Value * expandedBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(mallocSize), mType->getPointerTo());
             expandedBuffer = b->CreateInBoundsGEP(expandedBuffer, underflow);
 
             Value * const unreadDataPtr = b->CreateInBoundsGEP(virtualBase, consumedChunks);
             b->CreateMemCpy(expandedBuffer, unreadDataPtr, bytesToCopy, blockSize);
 
             b->CreateAlignedStore(newInternalCapacity, intCapacityField, sizeTyWidth);
-
 
             indices[1] = b->getInt32(MallocedAddress);
             Value * const mallocedAddressField = b->CreateInBoundsGEP(handle, indices);
@@ -1160,7 +1160,8 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
             Value * const requiredCapacity = b->CreateAdd(newCapacity, additionalCapacity);
 
-            Value * newBuffer = b->CreatePageAlignedMalloc(mType, requiredCapacity, mAddressSpace);
+            Value * const mallocSize = b->CreateMul(requiredCapacity, CHUNK_SIZE);
+            Value * newBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(mallocSize), mType->getPointerTo());
             newBuffer = b->CreateInBoundsGEP(newBuffer, underflow);
 
             Value * const consumedOffset = b->CreateURem(consumedChunks, internalCapacity);

@@ -202,7 +202,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
             const BufferPort & rd = mBufferGraph[pe];
             assert (rd.Port.Type == PortType::Output);
             const auto prefix = makeBufferName(p, rd.Port);
-            if (!nonLocal && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+            if (LLVM_LIKELY(!nonLocal && (mNumOfThreads != 1 || mIsNestedPipeline))) {
                 Value * const ptr = b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
                 b->CreateFree(ptr);
             }

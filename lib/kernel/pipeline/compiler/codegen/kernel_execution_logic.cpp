@@ -19,10 +19,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     mKernelDoSegmentFunctionType = doSegFuncType;
     #endif
 
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugHalt(b);
-    #endif
-
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
@@ -291,10 +287,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->SetInsertPoint(individualStrideLoopExit);
     }
 
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugResume(b);
-    #endif
-
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
         assert (doSegmentRetVal->getType()->isIntegerTy());
@@ -532,7 +524,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         const ProcessingRate & rate = input.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
             processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mCurrentLinearInputItems[inputPort]);
-            assert (input.isDeferred() ^ mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr);
+            assert (input.isDeferred() ^ (mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr));
             if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                 assert (mReturnedProcessedItemCountPtr[inputPort]);
                 mProcessedDeferredItemCount[inputPort] = b->CreateLoad(mReturnedProcessedItemCountPtr[inputPort]);
@@ -583,7 +575,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         const ProcessingRate & rate = output.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
             produced = b->CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
-            assert (output.isDeferred() ^ mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr);
+            assert (output.isDeferred() ^ (mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr));
             if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                 assert (mReturnedProducedItemCountPtr[outputPort]);
                 mProducedDeferredItemCount[outputPort] = b->CreateLoad(mReturnedProducedItemCountPtr[outputPort]);

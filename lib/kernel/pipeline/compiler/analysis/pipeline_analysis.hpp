@@ -1,6 +1,7 @@
 #ifndef PIPELINE_KERNEL_ANALYSIS_HPP
 #define PIPELINE_KERNEL_ANALYSIS_HPP
 
+#include "../config.h"
 #include "../common/common.hpp"
 #include <kernel/pipeline/pipeline_builder.h>
 

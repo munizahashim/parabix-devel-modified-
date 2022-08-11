@@ -909,7 +909,6 @@ void PipelineCompiler::end(BuilderRef b) {
     } else {
         debugPrint(b, "================================================= END %" PRIx64, getHandle());
     }
-    debugClose(b);
     #endif
 
     #ifdef ENABLE_PAPI
