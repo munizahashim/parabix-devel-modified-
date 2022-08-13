@@ -41,6 +41,10 @@ enum DebugFlags {
     TraceBlockedIO,
     GenerateTransferredItemCountHistogram,
     GenerateDeferredItemCountHistogram,
+    #ifdef ENABLE_CERN_ROOT
+    AnalyzeTransferredItemCounts,
+    AnalyzeDeferredItemCounts,
+    #endif
     EnableAsserts,
     EnablePipelineAsserts,
     EnableMProtect,

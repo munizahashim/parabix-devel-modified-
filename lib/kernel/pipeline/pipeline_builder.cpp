@@ -350,6 +350,14 @@ Kernel * PipelineBuilder::makeKernel() {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
             out << "+GDH";
         }
+        #ifdef ENABLE_CERN_ROOT
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::AnalyzeTransferredItemCounts))) {
+            out << "+ATH";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::AnalyzeDeferredItemCounts))) {
+            out << "+ADH";
+        }
+        #endif
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
             out << "-TL";
         }

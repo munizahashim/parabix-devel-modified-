@@ -23,7 +23,6 @@ enable_testing()
 option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
-option(ENABLE_CERN_ROOT "Enable CERN ROOT data analysis framework" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
 option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
@@ -32,7 +31,7 @@ option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
 
 # Build Artifact Configuration
 set(ARTIFACT_MODE "Multiple" CACHE STRING "Build framework into a single artifact (Single) or multiple artifacts (Multiple)")
-set(ARTIFACT_TYPE "Static" CACHE STRING "Build frameword as shared (Shared) or static (Static) libraries")
+set(ARTIFACT_TYPE "Shared" CACHE STRING "Build framework as shared (Shared) or static (Static) libraries")
 
 # Validate framework build style
 set(VALID_BUILD_MODE "Single" "Multiple")
@@ -127,13 +126,11 @@ endif()
 
 ### Import dependenct: CERN ROOT   ###
 
-if (ENABLE_CERN_ROOT)
-find_package(ROOT REQUIRED)
+find_package(ROOT)
 if (ROOT_FOUND)
 message(STATUS "Found CERN ROOT in: ${ROOT_INCLUDE_DIRS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT ${ROOT_CXX_FLAGS} -frtti")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT")
 include_directories(${ROOT_INCLUDE_DIRS})
-endif()
 endif()
 
 ###   Project Configuration   ###
@@ -248,15 +245,17 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -g
 
 # Disable RunTime Type Information
 if(MSVC) # using Visual Studio C++
+    set(RTTI "/GR")
     set(NO_RTTI "/GR-")
 else() # using Clang, GCC, Intel C++, etc
+    set(RTTI "-frtti")
     set(NO_RTTI "-fno-rtti")
 endif()
 
 function(parabix_add_module)
     cmake_parse_arguments(
         ARG             # resultant argument prefix
-        "USES_Z3;USES_ROOT"       # boolean args
+        "USES_Z3;USES_CERNROOT;REQUIRES_RTTI"       # boolean args
         "NAME"          # mono-valued arguments:
                         #   NAME: target name
         "SRC;DEPS"      # multi-valued arguments:
@@ -279,13 +278,19 @@ function(parabix_add_module)
         endif()
         parabix_set_library_name(${ARG_NAME})
         target_link_libraries(${ARG_NAME} ${ARG_DEPS})
-        target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
+        if (ARG_REQUIRES_RTTI)
+            target_compile_options(${ARG_NAME} PRIVATE ${RTTI})
+        else()
+            target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
+        endif()
         if (ARG_USES_Z3)
             target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
         endif()
-#        if (ARG_USES_ROOT AND ENABLE_CERN_ROOT)
-#            target_link_libraries(${ARG_NAME} ${ROOT_LIBRARIES})
-#        endif()
+        if (ARG_USES_CERNROOT AND ROOT_FOUND)
+            target_link_libraries(${ARG_NAME} ${ROOT_LIBRARIES})
+            string(REPLACE " " ";" REPLACED_FLAGS ${ROOT_CXX_FLAGS})
+            target_compile_options(${ARG_NAME} PRIVATE ${REPLACED_FLAGS})
+        endif()
         if (ENABLE_PAPI)
             target_link_libraries(${ARG_NAME} ${PAPI_LIBRARIES})
         endif()
@@ -354,6 +359,9 @@ add_subdirectory(lib/grep)
 add_subdirectory(lib/idisa)
 add_subdirectory(lib/kernel/core)
 add_subdirectory(lib/kernel/pipeline)
+if (ROOT_FOUND)
+add_subdirectory(lib/kernel/pipeline/compiler/statistics/cern-root)
+endif()
 add_subdirectory(lib/objcache)
 add_subdirectory(lib/pablo)
 add_subdirectory(lib/pablo/bixnum)

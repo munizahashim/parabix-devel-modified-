@@ -1,38 +1,17 @@
 ﻿#include "../pipeline_compiler.hpp"
-
-//#ifdef ENABLE_CERN_ROOT
-//#include <TH1.h>
-//#endif
+#include "cern-root/root_histogram_analysis.h"
 
 namespace kernel {
 
 namespace {
 
-struct HistogramPortListEntry {
-    uint64_t ItemCount;
-    uint64_t Frequency;
-    HistogramPortListEntry * Next;
-};
-
-struct HistogramPortData {
-    uint32_t PortType;
-    uint32_t PortNum;
-    const char * BindingName;
-    uint64_t Size;
-    void * Data; // if Size = 0, this points to a HistogramPortListEntry; otherwise its an 64-bit array of length size.
-};
-
-struct HistogramKernelData {
-    uint32_t Id;
-    uint32_t NumOfPorts;
-    const char * KernelName;
-    HistogramPortData * PortData;
-};
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief __print_pipeline_histogram_report
  ** ------------------------------------------------------------------------------------------------------------- */
-void __print_pipeline_histogram_report(const void * const data, const uint64_t numOfKernels, uint32_t reportType) {
+
+extern "C" {
+
+void __print_pipeline_histogram_report(const HistogramKernelData * const data, const uint64_t numOfKernels, uint32_t reportType) {
 
     uint32_t maxKernelId = 0;
     size_t maxKernelNameLength = 11;
@@ -41,10 +20,8 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
     uint64_t maxItemCount = 0;
     uint64_t maxFrequency = 0;
 
-    const auto kernelData = static_cast<const HistogramKernelData *>(data);
-
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto & K = kernelData[i];
+        const auto & K = data[i];
         maxKernelId = std::max(maxKernelId, K.Id);
         maxKernelNameLength = std::max(maxKernelNameLength, strlen(K.KernelName));
         const auto numOfPorts = K.NumOfPorts;
@@ -53,12 +30,12 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
             maxPortNum = std::max(maxPortNum, pd.PortNum);
             maxBindingNameLength = std::max(maxBindingNameLength, strlen(pd.BindingName));
             if (pd.Size == 0) {
-                auto e = static_cast<const HistogramPortListEntry *>(pd.Data); assert (e);
-                do {
+                auto e = static_cast<const HistogramPortListEntry *>(pd.Data);
+                while (e) {
                     maxItemCount = std::max(maxItemCount, e->ItemCount);
                     maxFrequency = std::max(maxFrequency, e->Frequency);
                     e = e->Next;
-                } while (e);
+                }
             } else {
                 const auto c = pd.Size;
                 maxItemCount = std::max(maxItemCount, c);
@@ -104,7 +81,7 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
     out << "\n\n";
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto & K = kernelData[i];
+        const auto & K = data[i];
 
         const auto id = std::to_string(K.Id);
 
@@ -137,7 +114,7 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
             if (arrayLength == 0) {
                 const HistogramPortListEntry * node = static_cast<const HistogramPortListEntry *>(pd.Data); assert (node);
                 // only the root node might have a frequency of 0
-                if (node->Frequency == 0) {
+                if (node && node->Frequency == 0) {
                     node = node->Next;
                 }
                 while (node) {
@@ -161,131 +138,9 @@ void __print_pipeline_histogram_report(const void * const data, const uint64_t n
     out << '\n';
 }
 
-#ifdef ENABLE_CERN_ROOT
+} // end of extern "C"
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief __analyze_histogram_processing_rates
- ** ------------------------------------------------------------------------------------------------------------- */
-void __analyze_histogram_processing_rates(const void * const data, const uint64_t numOfKernels, uint32_t reportType) {
-
-    uint32_t maxKernelId = 0;
-    size_t maxKernelNameLength = 11;
-    size_t maxBindingNameLength = 12;
-    uint32_t maxPortNum = 0;
-    uint64_t maxItemCount = 0;
-    uint64_t maxFrequency = 0;
-
-    const auto kernelData = static_cast<const HistogramKernelData *>(data);
-
-    for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto & K = kernelData[i];
-        maxKernelId = std::max(maxKernelId, K.Id);
-        maxKernelNameLength = std::max(maxKernelNameLength, strlen(K.KernelName));
-        const auto numOfPorts = K.NumOfPorts;
-        for (unsigned j = 0; j < numOfPorts; ++j) {
-            const HistogramPortData & pd = K.PortData[j];
-            maxPortNum = std::max(maxPortNum, pd.PortNum);
-            maxBindingNameLength = std::max(maxBindingNameLength, strlen(pd.BindingName));
-            if (pd.Size == 0) {
-                auto e = static_cast<const HistogramPortListEntry *>(pd.Data); assert (e);
-                do {
-                    maxItemCount = std::max(maxItemCount, e->ItemCount);
-                    maxFrequency = std::max(maxFrequency, e->Frequency);
-                    e = e->Next;
-                } while (e);
-            } else {
-                const auto c = pd.Size;
-                maxItemCount = std::max(maxItemCount, c);
-                const auto L = static_cast<const uint64_t *>(pd.Data);
-                for (unsigned k = 0; k < c; ++k) {
-                    maxFrequency = std::max(maxFrequency, L[k]);
-                }
-            }
-
-        }
-    }
-
-    auto ceil_log10 = [](const uint64_t v) {
-        if (v < 10) {
-            return 1U;
-        }
-        return (unsigned)std::ceil(std::log10(v));
-    };
-
-    const auto maxKernelIdLength = ceil_log10(maxKernelId);
-    const auto maxPortNumLength =  std::max(4U, ceil_log10(maxPortNum));
-    const auto cw = (reportType == HistogramReportType::TransferredItems) ? 11U : 8U;
-    const auto maxItemCountLength = std::max(cw, ceil_log10(maxItemCount));
-    const auto maxFrequencyLength = std::max(9U, ceil_log10(maxFrequency));
-
-    auto & out = errs();
-    if (reportType == HistogramReportType::TransferredItems) {
-        out << "TRANSFERRED ITEMS HISTOGRAM:\n\n";
-    } else if (reportType == HistogramReportType::DeferredItems) {
-        out << "DEFERRED FROM TRANSFERRED ITEM COUNT DISTANCE HISTOGRAM:\n\n";
-    }
-
-    out << left_justify("#", maxKernelIdLength + 1); // kernel #
-    out << left_justify("Kernel", maxKernelNameLength + 1);
-    out << left_justify("Binding", maxBindingNameLength + 1);
-    out << left_justify("Port", maxPortNumLength + 2);
-    if (reportType == HistogramReportType::TransferredItems) {
-        out << left_justify("Transferred", maxItemCountLength + 1);
-    } else if (reportType == HistogramReportType::DeferredItems) {
-        out << left_justify("Deferred", maxItemCountLength + 1);
-    }
-    out << left_justify("Frequency", maxFrequencyLength + 1);
-    out << "\n\n";
-
-    for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto & K = kernelData[i];
-
-        const auto id = std::to_string(K.Id);
-
-        const StringRef kernelName = StringRef(K.KernelName, std::strlen(K.KernelName));
-
-        const auto numOfPorts = K.NumOfPorts;
-        for (unsigned j = 0; j < numOfPorts; ++j) {
-            const HistogramPortData & pd = K.PortData[j];
-
-            const StringRef bindingName = StringRef(pd.BindingName, std::strlen(pd.BindingName));
-
-            const auto portType = (pd.PortType == (uint32_t)PortType::Input) ? "I" : "O";
-            const auto portNum = std::to_string(pd.PortNum);
-
-
-            const auto arrayLength = pd.Size;
-            if (arrayLength == 0) {
-                const HistogramPortListEntry * node = static_cast<const HistogramPortListEntry *>(pd.Data); assert (node);
-                // only the root node might have a frequency of 0
-                if (node->Frequency == 0) {
-                    node = node->Next;
-                }
-                while (node) {
-                    assert (node->Frequency > 0);
-
-                    node = node->Next;
-                }
-            } else {
-                const uint64_t * const array = static_cast<const uint64_t *>(pd.Data);
-                for (uint64_t i = 0; i < arrayLength; ++i) {
-                    const auto f = array[i];
-                    if (f) {
-
-                    }
-                }
-            }
-
-        }
-    }
-
-    out << '\n';
-}
-
-
-#endif
-
-}
+} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordsAnyHistogramData
@@ -881,9 +736,33 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
     args[0] = b->CreatePointerCast(kernelData, voidPtrTy);
     args[1] = b->getInt64(numOfKernels);
     args[2] = b->getInt32((unsigned)type);
-    Function * const reportPrinter = b->getModule()->getFunction("__print_pipeline_histogram_report");
-    assert (reportPrinter);
-    b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
+
+//    , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram) || DebugOptionIsSet(codegen::AnalyzeTransferredItemCounts))
+//    , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram) || DebugOptionIsSet(codegen::AnalyzeDeferredItemCounts))
+
+    Module * const m = b->getModule();
+
+    #ifdef ENABLE_CERN_ROOT
+    const auto PrintCode = (type == HistogramReportType::TransferredItems) ?
+        codegen::GenerateTransferredItemCountHistogram : codegen::GenerateDeferredItemCountHistogram;
+    if (DebugOptionIsSet(PrintCode)) {
+    #endif
+        Function * const reportPrinter = m->getFunction("__print_pipeline_histogram_report");
+        assert (reportPrinter);
+        b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
+    #ifdef ENABLE_CERN_ROOT
+    }
+    #endif
+
+    #ifdef ENABLE_CERN_ROOT
+    const auto AnalyzeCode = (type == HistogramReportType::TransferredItems) ?
+        codegen::AnalyzeTransferredItemCounts : codegen::AnalyzeDeferredItemCounts;
+    if (DebugOptionIsSet(AnalyzeCode)) {
+        Function * const analyzeFunc = m->getFunction("cern_root_analyze_histogram_data");
+        assert (analyzeFunc);
+        b->CreateCall(analyzeFunc->getFunctionType(), analyzeFunc, args);
+    }
+    #endif
 
     // memory cleanup
     for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
@@ -932,237 +811,11 @@ free_port_data:
  * @brief linkHistogramFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::linkHistogramFunctions(BuilderRef b) {
-    b->LinkFunction("__print_pipeline_histogram_report", __print_pipeline_histogram_report);
+    FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {b->getVoidPtrTy(), b->getInt64Ty(), b->getInt32Ty()}, false);
+    b->LinkFunction("__print_pipeline_histogram_report", funcTy, (void*)__print_pipeline_histogram_report);
+    #ifdef ENABLE_CERN_ROOT
+    b->LinkFunction("cern_root_analyze_histogram_data", funcTy, (void*)cern_root_analyze_histogram_data);
+    #endif
 }
-
-#if 0
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief printHistogramReport
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::printHistogramReport(BuilderRef b) {
-
-    assert (mGenerateTransferredItemCountHistogram);
-
-    size_t kernelNameLength = 11;
-    size_t bindingNameLength = 12;
-    unsigned maxPortNumber = 9;
-    unsigned maxTransferredItemCount = 9;
-    unsigned maxKernelId = 9;
-
-    bool anyDeferred = false;
-
-    for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
-
-        bool reportKernelName = false;
-
-        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & bind =  br.Binding;
-            if (bind.hasAttribute(AttrId::Deferred)) {
-                anyDeferred = true;
-            } else if (bind.getRate().isFixed()) {
-                continue;
-            }
-            reportKernelName = true;
-            bindingNameLength = std::max(bindingNameLength, bind.getName().size());
-            maxPortNumber = std::max(maxPortNumber, br.Port.Number);
-            maxTransferredItemCount = std::max(maxTransferredItemCount, ceiling(br.Maximum));
-        }
-
-        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            const BufferPort & br = mBufferGraph[e];
-            if (__trackPort(br)) {
-                reportKernelName = true;
-                const Binding & bind =  br.Binding;
-                auto len = bind.getName().size();
-                if (bind.hasAttribute(AttrId::Deferred)) {
-                    len += 11; // " (deferred)"
-                }
-                bindingNameLength = std::max(bindingNameLength, len);
-                maxPortNumber = std::max(maxPortNumber, br.Port.Number);
-                maxTransferredItemCount = std::max(maxTransferredItemCount, ceiling(br.Maximum));
-            }
-        }
-
-        if (reportKernelName) {
-            kernelNameLength = std::max(kernelNameLength, getKernel(kernelId)->getName().size());
-            maxKernelId = kernelId;
-        }
-
-    }
-
-    const auto kernelIdLength = std::ceil(std::log10(maxKernelId));
-
-    const auto portLength = std::max<unsigned>(6, std::ceil(std::log10(maxPortNumber)));
-
-    const auto transferredLength = std::max<unsigned>(13, std::ceil(std::log10(maxTransferredItemCount)));
-
-    // Kernel Name, Binding Name, Port #, Transferred #, Frequency
-
-    Function * Dprintf = b->GetDprintf();
-    FunctionType * fTy = Dprintf->getFunctionType();
-
-    Constant * const STDERR = b->getInt32(STDERR_FILENO);
-
-    BEGIN_SCOPED_REGION
-
-    std::string tmp;
-    raw_string_ostream fmt(tmp);
-
-    fmt << "%-" << kernelIdLength << "s "
-           "%-" << kernelNameLength << "s %-" << bindingNameLength << "s "
-           "%-" << (portLength + 1) << "s %-" << transferredLength << "s %s\n";
-
-    FixedArray<Value *, 8> args;
-    args[0] = STDERR;
-
-    args[1] = b->GetString(fmt.str());
-    args[2] = b->GetString("#");
-    args[3] = b->GetString("Kernel Name");
-    args[4] = b->GetString("Binding Name");
-    args[5] = b->GetString("Port #");
-    args[6] = b->GetString("Transferred #");
-    args[7] = b->GetString("Frequency");
-
-    b->CreateCall(fTy, Dprintf, args);
-
-    END_SCOPED_REGION
-
-    FixedArray<Value *, 9> args;
-    args[0] = STDERR;
-
-    BEGIN_SCOPED_REGION
-
-    std::string tmp;
-    raw_string_ostream fmt(tmp);
-
-    fmt << "%-" << kernelIdLength << "d "
-           "%-" << kernelNameLength << "s %-" << bindingNameLength << "s "
-           "%c%-" << portLength << "d %-" << transferredLength << "d %d\n";
-
-    args[1] = b->GetString(fmt.str());
-
-    END_SCOPED_REGION
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    ConstantInt * const sz_ZERO = b->getSize(0);
-    ConstantInt * const sz_ONE = b->getSize(1);
-
-    for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
-
-
-
-
-        auto printLine = [&](const BufferPort & br) {
-
-            args[2] = b->getSize(kernelId);
-            args[3] = b->GetString(getKernel(kernelId)->getName());
-            args[4] = b->GetString(br.Binding.get().getName());
-            if (br.Port.Type == PortType::Input) {
-                args[5] = b->getInt8('I');
-            } else {
-                args[5] = b->getInt8('O');
-            }
-
-            args[6] = b->getSize(br.Port.Number);
-
-            BasicBlock * const loopEntry = b->GetInsertBlock();
-            BasicBlock * const loopBody = b->CreateBasicBlock("");
-            BasicBlock * const printEntry = b->CreateBasicBlock("");
-            BasicBlock * const printExit = b->CreateBasicBlock("");
-            BasicBlock * const loopExit = b->CreateBasicBlock("");
-
-            const auto prefix = makeBufferName(kernelId, br.Port);
-            Value * const history = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
-
-            ArrayType * ty = cast<ArrayType>(history->getType()->getPointerElementType());
-            Value * const maxSize = b->getSize(ty->getArrayNumElements() - 1);
-
-            b->CreateBr(loopBody);
-            b->SetInsertPoint(loopBody);
-            PHINode * const index = b->CreatePHI(sizeTy, 2);
-            index->addIncoming(sz_ZERO, loopEntry);
-
-            FixedArray<Value *, 2> offset;
-            offset[0] = sz_ZERO;
-            offset[1] = index;
-            Value * const val = b->CreateLoad(b->CreateGEP(history, offset));
-            b->CreateCondBr(b->CreateICmpNE(val, sz_ZERO), printEntry, printExit);
-
-            b->SetInsertPoint(printEntry);
-
-            args[7] = index;
-            args[8] = val;
-            b->CreateCall(fTy, Dprintf, args);
-
-            b->CreateBr(printExit);
-
-            b->SetInsertPoint(printExit);
-            Value * const nextIndex = b->CreateAdd(index, sz_ONE);
-            index->addIncoming(nextIndex, printExit);
-            b->CreateCondBr(b->CreateICmpEQ(nextIndex, maxSize), loopExit, loopBody);
-
-            b->SetInsertPoint(loopExit);
-        };
-
-        auto checkPort = [&](const BufferPort & br) {
-
-
-
-            const Binding & bd = br.Binding;
-            const ProcessingRate & pr = bd.getRate();
-            if (LLVM_UNLIKELY(bd.hasAttribute(AttrId::Deferred))) {
-                const auto prefix = makeBufferName(mKernelId, br.Port);
-                FixedArray<Value *, 6> args;
-                Value * const history = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
-                args[1] = b->getSize(kernelId);
-                args[2] = b->GetString(getKernel(kernelId)->getName());
-                args[3] = b->GetString(bd.getName() + " (deferred)");
-                if (br.Port.Type == PortType::Input) {
-                    args[4] = b->getInt8('I');
-                } else {
-                    args[4] = b->getInt8('O');
-                }
-                args[5] = b->getSize(br.Port.Number);
-
-            }
-            if (pr.isFixed()) return;
-
-            const auto prefix = makeBufferName(kernelId, br.Port);
-            FixedArray<Value *, 6> args;
-            args[0] = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
-            args[1] = b->getSize(kernelId);
-            args[2] = b->GetString(getKernel(kernelId)->getName());
-            args[3] = b->GetString(bd.getName());
-            if (br.Port.Type == PortType::Input) {
-                args[4] = b->getInt8('I');
-            } else {
-                args[4] = b->getInt8('O');
-            }
-            args[5] = b->getSize(br.Port.Number);
-
-        };
-
-
-        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-            const BufferPort & br = mBufferGraph[e];
-            if (__trackPort(br)) {
-                printLine(br);
-            }
-        }
-
-        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            const BufferPort & br = mBufferGraph[e];
-            if (__trackPort(br)) {
-                printLine(br);
-            }
-        }
-
-    }
-
-}
-
-#endif
 
 }

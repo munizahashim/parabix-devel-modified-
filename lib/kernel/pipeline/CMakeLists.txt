@@ -3,9 +3,15 @@
 
 # module: kernel.pipeline
 
+if (ROOT_FOUND)
+    set(CERN_ROOT_LIB kernel.pipeline.cernroot)
+endif()
+if (ENABLE_PAPI)
+    set(PAPI_CPP compiler/statistics/papi_instrumentation_logic.cpp)
+endif()
+
 parabix_add_module(
 USES_Z3
-USES_ROOT
 NAME
     kernel.pipeline
 SRC
@@ -45,10 +51,11 @@ SRC
     compiler/internal/regionselectionkernel.cpp
     compiler/statistics/cycle_counter_logic.cpp
     compiler/statistics/histogram_generation_logic.cpp
-    compiler/statistics/papi_instrumentation_logic.cpp
+    ${PAPI_CPP}
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp
     pipeline_kernel.cpp
 DEPS
     objcache
+    ${CERN_ROOT_LIB}
 )

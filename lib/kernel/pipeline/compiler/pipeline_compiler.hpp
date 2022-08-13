@@ -826,6 +826,17 @@ inline PipelineCompiler::PipelineCompiler(BuilderRef b, PipelineKernel * const p
     // resolve it correctly and clang requires -O2 or better.
 }
 
+#ifdef ENABLE_CERN_ROOT
+#define TRANSFERRED_ITEMS \
+    DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram) \
+    || DebugOptionIsSet(codegen::AnalyzeTransferredItemCount)
+
+#else
+#define TRANSFERRED_ITEMS \
+    DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram)
+
+#endif
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -840,8 +851,13 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
+#ifdef ENABLE_CERN_ROOT
+, mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram) || DebugOptionIsSet(codegen::AnalyzeTransferredItemCounts))
+, mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram) || DebugOptionIsSet(codegen::AnalyzeDeferredItemCounts))
+#else
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
+#endif
 , mNumOfThreads(pipelineKernel->getNumOfThreads())
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
