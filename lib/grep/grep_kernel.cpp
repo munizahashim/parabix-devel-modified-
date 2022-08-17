@@ -117,7 +117,9 @@ void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
 }
 
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    auto mapping = mRefInfo.twixtREs.find(mRef->getName());
+    std::string instanceName = mRef->getInstanceName();
+    auto mapping = mRefInfo.twixtREs.find(instanceName);
+    llvm::errs() << instanceName  << "\n";
     if (mapping == mRefInfo.twixtREs.end()) {
         llvm::report_fatal_error("grep engine: undefined reference!");
     }

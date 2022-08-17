@@ -368,6 +368,7 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     if (hasComponent(mExternalComponents, Component::U21)) {
         mU21 = P->CreateStreamSet(21, 1);
         P->CreateKernelCall<UTF8_Decoder>(Source, mU21);
+        mExternalMap.emplace("u21_basis", new PreDefined("u21_basis", mU21));
     }
     return Source;
 }

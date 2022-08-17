@@ -21,16 +21,32 @@ using namespace llvm;
 
 namespace re {
 
-class VariableLengthCCNamer final : public RE_Transformer {
+Name * NameIntroduction::createName(std::string name, RE * defn) {
+    auto f = mNameMap.find(name);
+    if (f == mNameMap.end()) {
+        mNameMap.emplace(name, defn);
+        return makeName(name, defn);
+    } else {
+        return makeName(name, f->second);
+    }
+}
+
+void NameIntroduction::showProcessing() {
+    for (auto m: mNameMap) {
+        llvm::errs() << "Name " << m.first << " ==> " << Printer_RE::PrintRE(m.second) << "\n";
+    }
+}
+
+class VariableLengthCCNamer final : public NameIntroduction {
 public:
-    VariableLengthCCNamer(unsigned UTF_bits) : RE_Transformer("VariableLengthCCNamer") {
+    VariableLengthCCNamer(unsigned UTF_bits) : NameIntroduction("VariableLengthCCNamer") {
         mEncoder.setCodeUnitBits(UTF_bits);
     }
     RE * transformCC (CC * cc) override {
         bool variable_length = false;
         variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
         if (variable_length) {
-            return makeName(cc->canonicalName(), cc);
+            return createName(cc->canonicalName(), cc);
         }
         return cc;
     }
@@ -42,37 +58,50 @@ RE * name_variable_length_CCs(RE * r, unsigned UTF_bits) {
     return VariableLengthCCNamer(UTF_bits).transformRE(r);
 }
 
+class FixedLengthAltNamer final : public NameIntroduction {
+public:
+    FixedLengthAltNamer(const cc::Alphabet * a, std::string lengthPrefix) : NameIntroduction("FixedLengthAltNamer"), mAlphabet(a), mLgthPrefix(lengthPrefix) {}
+    RE * transformAlt (Alt * a) override;
+private:
+    const cc::Alphabet * mAlphabet;
+    std::string mLgthPrefix;
+};
+
+RE * FixedLengthAltNamer::transformAlt(Alt * alt) {
+    if (mInitialRE != alt) return alt;
+    std::vector<RE *> newAlts;
+    std::map<int, std::vector<RE *>> fixedLengthAlts;
+    for (auto e : *alt) {
+        auto rg = getLengthRange(e, mAlphabet);
+        if (rg.first == 0) return alt;  //  zero-length REs cause problems
+        if (rg.first == rg.second) {
+            auto f = fixedLengthAlts.find(rg.first);
+            if (f == fixedLengthAlts.end()) {
+                fixedLengthAlts.emplace(rg.first, std::vector<RE *>{e});
+            } else {
+                f->second.push_back(e);
+            }
+        } else {
+            newAlts.push_back(e);
+        }
+    }
+    if (fixedLengthAlts.empty()) return alt;
+    for (auto grp : fixedLengthAlts) {
+        RE * defn;
+        if (grp.second.size() == 1) {
+            defn = grp.second[0];
+        } else {
+            defn = makeAlt(grp.second.begin(), grp.second.end());
+        }
+        Name * n = createName(mLgthPrefix + std::to_string(grp.first), defn);
+        newAlts.push_back(n);
+    }
+    if (newAlts.size() == 1) return newAlts[0];
+    return makeAlt(newAlts.begin(), newAlts.end());
+}
+
 RE * name_fixed_length_alts(RE * r, const cc::Alphabet * a, std::string lengthPrefix) {
-    if (Alt * alt = dyn_cast<Alt>(r)) {
-        std::vector<RE *> newAlts;
-        std::map<int, std::vector<RE *>> fixedLengthAlts;
-        for (auto e : *alt) {
-            auto rg = getLengthRange(e, a);
-            if (rg.first == 0) return r;  //  zero-length REs cause problems
-            if (rg.first == rg.second) {
-                auto f = fixedLengthAlts.find(rg.first);
-                if (f == fixedLengthAlts.end()) {
-                    fixedLengthAlts.emplace(rg.first, std::vector<RE *>{e});
-                } else {
-                    f->second.push_back(e);
-                }
-            } else {
-                newAlts.push_back(e);
-            }
-        }
-        if (fixedLengthAlts.empty()) return r;
-        for (auto grp : fixedLengthAlts) {
-            Name * n = makeName(lengthPrefix + std::to_string(grp.first));
-            if (grp.second.size() == 1) {
-                n->setDefinition(grp.second[0]);
-            } else {
-                n->setDefinition(makeAlt(grp.second.begin(), grp.second.end()));
-            }
-            newAlts.push_back(n);
-        }
-        if (newAlts.size() == 1) return newAlts[0];
-        return makeAlt(newAlts.begin(), newAlts.end());
-    } else return r;
+    return FixedLengthAltNamer(a, lengthPrefix).transformRE(r);
 }
 
 RE * name_start_anchored_alts(RE * r) {

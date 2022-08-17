@@ -152,7 +152,7 @@ public:
         return false;
     }
     Reference_External(re::ReferenceInfo & refInfo, re::Reference * ref) :
-        ExternalStreamObject(Kind::Reference_External, ref->getName(), {"u8_basis"}),
+        ExternalStreamObject(Kind::Reference_External, ref->getName(), {"u21_basis"}),
         mRefInfo(refInfo), mRef(ref) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:

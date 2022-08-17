@@ -62,9 +62,7 @@ const std::string Printer_RE::PrintRE(const RE * re) {
         retVal += "=(" + PrintRE(c->getCapturedRE()) + ")";
     } else if (const Reference * r = dyn_cast<const Reference>(re)) {
         retVal = "Ref \"";
-        retVal += r->getName();
-        retVal += ".";
-        retVal += std::to_string(r->getInstance());
+        retVal += r->getInstanceName();
         UCD::property_t p = r->getReferencedProperty();
         if (p != UCD::identity) {
             retVal += ":" + UCD::getPropertyFullName(p);

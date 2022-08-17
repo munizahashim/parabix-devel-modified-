@@ -17,16 +17,21 @@ using namespace llvm;
 namespace re {
 
 RE * RE_Transformer::transformRE(RE * re) {
-    RE * initialRE = re;
+    mInitialRE = re;
     RE * finalRE = transform(re);
     bool ShowRE = PrintOptionIsSet(ShowAllREs) && !mTransformationName.empty();
-    if (PrintOptionIsSet(ShowREs) && (initialRE != finalRE)) {
+    if (PrintOptionIsSet(ShowREs) && (mInitialRE != finalRE)) {
         ShowRE |= !mTransformationName.empty() && (mTransformationName[0] != '.');
     }
     if (ShowRE)  {
-        errs() << mTransformationName << ":\n" << Printer_RE::PrintRE(finalRE) << '\n';
+        errs() << mTransformationName << ":\n";
+        showProcessing();
+        errs() << Printer_RE::PrintRE(finalRE) << '\n';
     }
     return finalRE;
+}
+
+void RE_Transformer::showProcessing() {
 }
 
 RE * RE_Transformer::transform(RE * const from) { assert (from);

@@ -4,6 +4,7 @@
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
+#include <re/transforms/name_intro.h>
 #include <unicode/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -12,15 +13,15 @@ using namespace llvm;
 namespace re {
 
 
-struct FixedReferenceTransformer : public RE_Transformer {
+struct FixedReferenceTransformer : public NameIntroduction {
 public:
     FixedReferenceTransformer(const ReferenceInfo & info) :
-        RE_Transformer("FixedReferenceTransformer"),
+    NameIntroduction("FixedReferenceTransformer"),
         mRefInfo(info) {}
     RE * transformReference(Reference * r) override {
         auto rg1 = getLengthRange(r->getCapture(), &cc::Unicode);
         if (rg1.first != rg1.second) return r;
-        std::string instanceName = r->getName() + std::to_string(r->getInstance());
+        std::string instanceName = r->getInstanceName();
         auto mapping = mRefInfo.twixtREs.find(instanceName);
         if (mapping == mRefInfo.twixtREs.end()) return r;
         auto rg2 = getLengthRange(mapping->second, &cc::Unicode);
@@ -29,7 +30,7 @@ public:
         std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
         int fixed_dist = rg1.first + rg2.first;
         std::string externalName = pname + "@-" + std::to_string(fixed_dist);
-        return re::makeName(externalName, r);
+        return createName(externalName, r);
     };
 private:
     const ReferenceInfo & mRefInfo;

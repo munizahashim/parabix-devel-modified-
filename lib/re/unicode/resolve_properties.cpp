@@ -13,6 +13,7 @@
 #include <re/analysis/re_inspector.h>
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
+#include <re/transforms/name_intro.h>
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/boundaries.h>
 #include <unicode/data/PropertyAliases.h>
@@ -344,27 +345,22 @@ RE * enumeratedPropertiesToCCs(PropertySet propertyCodes, RE * r) {
     return EnumeratedPropertyMultiplexer(propertyMap).transformRE(r);
 }
 
-struct PropertyExternalizer : public RE_Transformer {
-    PropertyExternalizer() : RE_Transformer("PropertyExternalizer") {}
+struct PropertyExternalizer : public NameIntroduction {
+    PropertyExternalizer() : NameIntroduction("PropertyExternalizer") {}
     RE * transformPropertyExpression (PropertyExpression * exp) override {
         PropertyExpression::Operator op = exp->getOperator();
         std::string id = exp->getPropertyIdentifier();
         std::string val_str = exp->getValueString();
-        std::string op_str = "";
-        if (op == PropertyExpression::Operator::NEq) op_str = "!=";
-        val_str = op_str + val_str;
-        Name * externName;
+        std::string op_str = val_str == "" ? "" : ":";
+        if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
+        RE * defn = exp->getResolvedRE();
+        std::string theName = id + op_str + val_str;
         if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
-            if (val_str == "")
-                externName = makeName(id);
-            else externName = makeName(id, val_str);
+            return createName(theName, defn);
         } else {
-            id = "\\b{" + id + "}";
-            if (val_str == "" ) externName = makeName(id);
-            else externName = makeName(id, val_str);
+            theName = "\\b{" + theName + "}";
+            return createName(theName, defn);
         }
-        externName->setDefinition(exp->getResolvedRE());
-        return externName;
     }
 };
 
