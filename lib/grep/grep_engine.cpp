@@ -29,6 +29,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/unicode/boundary_kernels.h>
+#include <re/unicode/resolve_properties.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/streamutils/streams_merge.h>
@@ -291,7 +292,16 @@ void GrepEngine::initRE(re::RE * re) {
     if (!mColoring) mRE = remove_nullable_ends(mRE);
     mRE = resolveAnchors(mRE, anchorRE);
     mRE = regular_expression_passes(mRE);
-    mRE = name_variable_length_CCs(mRE);
+    UCD::PropertyExternalizer PE;
+    mRE = PE.transformRE(mRE);
+    for (auto m : PE.mNameMap) {
+        mExternalMap.emplace(m.first, new PropertyExternal(re::makeName(m.first, m.second)));
+    }
+    re::VariableLengthCCNamer CCnamer;
+    mRE = CCnamer.transformRE(mRE);
+    for (auto m : CCnamer.mNameMap) {
+        mExternalMap.emplace(m.first, new CC_External(m.first, cast<re::CC>(m.second)));
+    }
     if (hasGraphemeClusterBoundary(mRE)) {
         UnicodeIndexing = true;
         mExternalMap.emplace("\\b{g}", new GraphemeClusterBreak(&mUTF8_Transformer));
@@ -337,7 +347,18 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    mRE = name_fixed_length_alts(mRE, mIndexAlphabet);
+    re::FixedLengthAltNamer FLnamer(mIndexAlphabet);
+    mRE = FLnamer.transformRE(mRE);
+    for (auto m : FLnamer.mNameMap) {
+        mExternalMap.emplace(m.first, new RE_External(m.first, this, m.second, mIndexAlphabet));
+    }
+/*
+    re::StartAnchoredAltNamer SAnamer;
+    mRE = SAnamer.transformRE(mRE);
+    for (auto m : SAnamer.mNameMap) {
+        mExternalMap.emplace(m.first, new StartAnchoredExternal(m.first, this, m.second, mIndexAlphabet));
+    }
+*/
     re::gatherNames(mRE, mExternalNames);
 
     // For simple regular expressions with a small number of characters, we
@@ -593,7 +614,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
     options->setResults(Results);
     Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
     if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
-    return cast<ICGrepKernel>(k)->getOffset();
+    return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
 StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {

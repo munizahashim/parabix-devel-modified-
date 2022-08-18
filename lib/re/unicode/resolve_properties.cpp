@@ -13,8 +13,6 @@
 #include <re/analysis/re_inspector.h>
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
-#include <re/transforms/name_intro.h>
-#include <re/transforms/re_transformer.h>
 #include <re/unicode/boundaries.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjects.h>
@@ -345,24 +343,24 @@ RE * enumeratedPropertiesToCCs(PropertySet propertyCodes, RE * r) {
     return EnumeratedPropertyMultiplexer(propertyMap).transformRE(r);
 }
 
-struct PropertyExternalizer : public NameIntroduction {
-    PropertyExternalizer() : NameIntroduction("PropertyExternalizer") {}
-    RE * transformPropertyExpression (PropertyExpression * exp) override {
-        PropertyExpression::Operator op = exp->getOperator();
-        std::string id = exp->getPropertyIdentifier();
-        std::string val_str = exp->getValueString();
-        std::string op_str = val_str == "" ? "" : ":";
-        if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
-        RE * defn = exp->getResolvedRE();
-        std::string theName = id + op_str + val_str;
-        if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
-            return createName(theName, defn);
-        } else {
-            theName = "\\b{" + theName + "}";
-            return createName(theName, defn);
-        }
+PropertyExternalizer::PropertyExternalizer() :
+    NameIntroduction("PropertyExternalizer") {}
+
+RE * PropertyExternalizer::transformPropertyExpression (PropertyExpression * exp) {
+    PropertyExpression::Operator op = exp->getOperator();
+    std::string id = exp->getPropertyIdentifier();
+    std::string val_str = exp->getValueString();
+    std::string op_str = val_str == "" ? "" : ":";
+    if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
+    RE * defn = exp->getResolvedRE();
+    std::string theName = id + op_str + val_str;
+    if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
+        return createName(theName, defn);
+    } else {
+        theName = "\\b{" + theName + "}";
+        return createName(theName, defn);
     }
-};
+}
 
 RE * externalizeProperties(RE * r) {
     return PropertyExternalizer().transformRE(r);

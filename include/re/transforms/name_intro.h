@@ -9,11 +9,12 @@
 #include <string>
 #include <map>
 #include <re/transforms/re_transformer.h>
+#include <unicode/utf/utf_encoder.h>
 
 namespace cc {class Alphabet;}
 
 namespace re {
-class RE; class Name;
+class RE; class Name; class Alt; class Seq;
 
 class NameIntroduction : public RE_Transformer {
 public:
@@ -24,10 +25,30 @@ protected:
     void showProcessing() override;
 };
 
-RE * name_variable_length_CCs(RE * r, unsigned UTF_bits = 8);
+class VariableLengthCCNamer final : public NameIntroduction {
+public:
+    VariableLengthCCNamer(unsigned UTF_bits = 8);
+protected:
+    RE * transformCC (CC * cc) override;
+private:
+    UTF_Encoder mEncoder;
+};
 
-RE * name_fixed_length_alts(RE * r, const cc::Alphabet * a, std::string pfx = "lgth");
+class FixedLengthAltNamer final : public NameIntroduction {
+public:
+    FixedLengthAltNamer(const cc::Alphabet * a, std::string lgthPfx = "lgth");
+protected:
+    RE * transformAlt (Alt * a) override;
+private:
+    const cc::Alphabet * mAlphabet;
+    std::string mLgthPrefix;
+};
 
-RE * name_start_anchored_alts(RE * r);
+class StartAnchoredAltNamer final : public NameIntroduction {
+public:
+    StartAnchoredAltNamer();
+protected:
+    RE * transformAlt (Alt * a) override;
+    RE * transformSeq (Seq * s) override;
+};
 }
-

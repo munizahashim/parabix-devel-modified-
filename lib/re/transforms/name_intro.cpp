@@ -13,7 +13,6 @@
 #include <re/alphabet/alphabet.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
-#include <unicode/utf/utf_encoder.h>
 #include <map>
 #include <memory>
 
@@ -37,35 +36,20 @@ void NameIntroduction::showProcessing() {
     }
 }
 
-class VariableLengthCCNamer final : public NameIntroduction {
-public:
-    VariableLengthCCNamer(unsigned UTF_bits) : NameIntroduction("VariableLengthCCNamer") {
+VariableLengthCCNamer::VariableLengthCCNamer(unsigned UTF_bits) : NameIntroduction("VariableLengthCCNamer") {
         mEncoder.setCodeUnitBits(UTF_bits);
     }
-    RE * transformCC (CC * cc) override {
-        bool variable_length = false;
-        variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
-        if (variable_length) {
-            return createName(cc->canonicalName(), cc);
-        }
-        return cc;
-    }
-private:
-    UTF_Encoder mEncoder;
-};
 
-RE * name_variable_length_CCs(RE * r, unsigned UTF_bits) {
-    return VariableLengthCCNamer(UTF_bits).transformRE(r);
+RE * VariableLengthCCNamer::transformCC (CC * cc) {
+    bool variable_length = false;
+    variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
+    if (variable_length) {
+        return createName(cc->canonicalName(), cc);
+    }
+    return cc;
 }
 
-class FixedLengthAltNamer final : public NameIntroduction {
-public:
-    FixedLengthAltNamer(const cc::Alphabet * a, std::string lengthPrefix) : NameIntroduction("FixedLengthAltNamer"), mAlphabet(a), mLgthPrefix(lengthPrefix) {}
-    RE * transformAlt (Alt * a) override;
-private:
-    const cc::Alphabet * mAlphabet;
-    std::string mLgthPrefix;
-};
+FixedLengthAltNamer::FixedLengthAltNamer(const cc::Alphabet * a, std::string lengthPrefix) : NameIntroduction("FixedLengthAltNamer"), mAlphabet(a), mLgthPrefix(lengthPrefix) {}
 
 RE * FixedLengthAltNamer::transformAlt(Alt * alt) {
     if (mInitialRE != alt) return alt;
@@ -100,43 +84,40 @@ RE * FixedLengthAltNamer::transformAlt(Alt * alt) {
     return makeAlt(newAlts.begin(), newAlts.end());
 }
 
-RE * name_fixed_length_alts(RE * r, const cc::Alphabet * a, std::string lengthPrefix) {
-    return FixedLengthAltNamer(a, lengthPrefix).transformRE(r);
-}
+StartAnchoredAltNamer::StartAnchoredAltNamer() :
+    NameIntroduction("StartAnchoredAltNamer") {}
 
-RE * name_start_anchored_alts(RE * r) {
-    if (Seq * s = dyn_cast<Seq>(r)) {
-        if (isa<Start>(s->front())) {
-            Name * anchored = makeName("StartAnchored");
-            anchored->setDefinition(r);
-            return anchored;
-        }
-        return r;
-    }
-    if (Alt * alt = dyn_cast<Alt>(r)) {
-        std::vector<RE *> nonAnchoredAlts;
-        std::vector<RE *> anchoredAlts;
-        for (auto & e : *alt) {
-            if (Seq * s = dyn_cast<Seq>(e)) {
-                if (isa<Start>(s->front())) {
-                    anchoredAlts.push_back(e);
-                    continue;
-                }
+RE * StartAnchoredAltNamer::transformAlt(Alt * alt) {
+    if (mInitialRE != alt) return alt;
+    std::vector<RE *> nonAnchoredAlts;
+    std::vector<RE *> anchoredAlts;
+    for (auto & e : *alt) {
+        if (Seq * s = dyn_cast<Seq>(e)) {
+            if (isa<Start>(s->front())) {
+                anchoredAlts.push_back(e);
+                continue;
             }
             nonAnchoredAlts.push_back(e);
         }
-        if (anchoredAlts.empty()) return r;
-        Name * anchored = makeName("StartAnchored");
-        if (anchoredAlts.size() == 1) {
-            anchored->setDefinition(anchoredAlts[0]);
-        } else {
-            anchored->setDefinition(makeAlt(anchoredAlts.begin(), anchoredAlts.end()));
-        }
-        if (nonAnchoredAlts.empty()) return anchored;
-        nonAnchoredAlts.push_back(anchored);
-        return makeAlt(nonAnchoredAlts.begin(), nonAnchoredAlts.end());
+        if (anchoredAlts.empty()) return alt;
     }
-    return r;
+    RE * defn;
+    if (anchoredAlts.size() == 1) {
+        defn = anchoredAlts[0];
+    } else {
+        defn = makeAlt(anchoredAlts.begin(), anchoredAlts.end());
+    }
+    Name * anchored = createName("StartAnchored", defn);
+    if (nonAnchoredAlts.empty()) return anchored;
+    nonAnchoredAlts.push_back(anchored);
+    return makeAlt(nonAnchoredAlts.begin(), nonAnchoredAlts.end());
+}
+
+RE * StartAnchoredAltNamer::transformSeq(Seq * seq) {
+    if (isa<Start>(seq->front())) {
+        return createName("StartAnchored", seq);
+    }
+    return seq;
 }
 
 }
