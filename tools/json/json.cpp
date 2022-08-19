@@ -21,7 +21,7 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/parse/pablo_source_kernel.h>
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>

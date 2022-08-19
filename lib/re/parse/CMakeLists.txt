@@ -18,4 +18,5 @@ DEPS
     re.adt
     re.analysis
     ${Boost_LIBRARIES}
+    unicode.data
 )

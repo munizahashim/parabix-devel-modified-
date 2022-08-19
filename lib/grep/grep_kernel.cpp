@@ -13,7 +13,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/codegenstate.h>
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>          // for Ones
 #include <pablo/pe_var.h>           // for Var

@@ -98,7 +98,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>

@@ -18,6 +18,7 @@ using namespace llvm;
 
 namespace re {
 
+
 bool matchesEmptyString(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         for (const RE * re : *alt) {
@@ -59,7 +60,7 @@ bool matchesEmptyString(const RE * re) {
     return false; // otherwise
 }
 
-const CC* matchableCodepoints(const RE * re) {
+const CC * matchableCodepoints(const RE * re) {
     if (const CC * cc = dyn_cast<CC>(re)) {
         return cc;
     } else if (const Alt * alt = dyn_cast<Alt>(re)) {
@@ -73,10 +74,12 @@ const CC* matchableCodepoints(const RE * re) {
         bool pastCC = false;
         for (const RE * re : *seq) {
             if (pastCC) {
-                if (!(isa<End>(re) || matchesEmptyString(re))) return makeCC();
-            }
-            else if (isa<End>(re)) return makeCC();
-            else {
+                if (!(isa<End>(re) || matchesEmptyString(re))) {
+                    return makeCC();
+                }
+            } else if (isa<End>(re)) {
+                return makeCC();
+            } else {
                 matchable = makeCC(matchable, matchableCodepoints(re));
                 pastCC = !matchesEmptyString(re);
             }
@@ -85,8 +88,9 @@ const CC* matchableCodepoints(const RE * re) {
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
         if ((rep->getLB() <= 1) || matchesEmptyString(rep->getRE())) {
             return matchableCodepoints(rep->getRE());
+        } else {
+            return makeCC();
         }
-        else return makeCC();
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return subtractCC(matchableCodepoints(diff->getLH()), matchableCodepoints(diff->getRH()));
     } else if (const Intersect * e = dyn_cast<Intersect>(re)) {

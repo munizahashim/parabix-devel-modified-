@@ -27,4 +27,5 @@ SRC
 DEPS
     re.analysis
     unicode.utf
+    unicode.data
 )

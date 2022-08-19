@@ -11,4 +11,5 @@ SRC
     s2p_kernel.cpp
 DEPS
     pablo
+    kernel.pipeline
 )

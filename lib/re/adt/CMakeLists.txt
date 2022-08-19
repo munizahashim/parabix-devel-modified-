@@ -22,4 +22,5 @@ SRC
     alphabet/multiplex_CCs.cpp
 DEPS
     re.toolchain
+    unicode.core
 )

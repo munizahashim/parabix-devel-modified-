@@ -30,7 +30,7 @@
 #include <pablo/ps_terminate.h>
 #include <pablo/carry_manager.h>
 #include <pablo/compressed_carry_manager.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamset.h>
 #include <llvm/IR/Module.h>

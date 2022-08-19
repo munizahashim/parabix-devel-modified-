@@ -15,7 +15,7 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <pablo/pablo_kernel.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 
 using namespace llvm;

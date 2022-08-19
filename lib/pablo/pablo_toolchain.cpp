@@ -4,7 +4,7 @@
  *  icgrep is a trademark of International Characters.
  */
 
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 
 #include <toolchain/toolchain.h>
 #include <llvm/Support/CommandLine.h>

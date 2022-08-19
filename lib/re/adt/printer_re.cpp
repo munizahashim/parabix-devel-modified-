@@ -28,6 +28,7 @@ using namespace re;
 using namespace llvm;
 
 const std::string Printer_RE::PrintRE(const RE * re) {
+
     std::string retVal = "";
 
     if (re == nullptr) {
@@ -65,10 +66,13 @@ const std::string Printer_RE::PrintRE(const RE * re) {
         retVal += r->getName();
         retVal += ".";
         retVal += std::to_string(r->getInstance());
-        UCD::property_t p = r->getReferencedProperty();
-        if (p != UCD::identity) {
-            retVal += ":" + UCD::getPropertyFullName(p);
-        }
+
+#warning uncommenting these will generate a circular linking dependency
+
+//        UCD::property_t p = r->getReferencedProperty();
+//        if (p != UCD::identity) {
+//            retVal += ":" + UCD::getPropertyFullName(p);
+//        }
         retVal += "\" ";
     } else if (const Range* rg = dyn_cast<const Range>(re)) {
         retVal = "Range (";

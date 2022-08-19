@@ -17,4 +17,5 @@ DEPS
     kernel.pipeline
     re.unicode
     pablo
+    pablo.bixnum
 )

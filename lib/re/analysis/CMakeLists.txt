@@ -18,4 +18,5 @@ SRC
     validation.cpp
 DEPS
     re.adt
+    unicode.utf
 )
