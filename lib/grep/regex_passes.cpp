@@ -25,6 +25,7 @@
 #include <re/unicode/decomposition.h>
 #include <re/unicode/equivalence.h>
 #include <re/unicode/re_name_resolve.h>
+#include <re/unicode/resolve_properties.h>
 #include <re/toolchain/toolchain.h>
 #include <toolchain/toolchain.h>
 
