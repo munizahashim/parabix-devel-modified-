@@ -12,7 +12,7 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/alphabet/alphabet.h>
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/decomposition.h>

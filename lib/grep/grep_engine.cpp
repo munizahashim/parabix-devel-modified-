@@ -45,7 +45,7 @@
 #include <pablo/pablo_kernel.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_utility.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/alphabet/alphabet.h>
 #include <re/analysis/re_analysis.h>
 #include <re/analysis/re_name_gather.h>

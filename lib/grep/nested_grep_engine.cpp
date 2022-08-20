@@ -13,7 +13,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <grep/grep_toolchain.h>
 
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 
 using namespace kernel;
 using namespace llvm;

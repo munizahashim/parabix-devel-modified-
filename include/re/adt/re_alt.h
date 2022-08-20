@@ -13,7 +13,7 @@
 #include <re/adt/re_cc.h>
 #include <re/adt/re_seq.h>
 #include <re/adt/re_rep.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <util/slab_allocator.h>
 
 namespace re {

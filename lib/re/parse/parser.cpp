@@ -22,7 +22,7 @@
 #include <re/parse/fixed_string_parser.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_utility.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/data/RadicalSets.h>
 

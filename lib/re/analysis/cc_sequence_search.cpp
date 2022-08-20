@@ -1,5 +1,5 @@
 #include <re/adt/adt.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 
 using namespace llvm;
 namespace re {

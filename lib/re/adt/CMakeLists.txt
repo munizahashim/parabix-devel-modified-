@@ -7,7 +7,6 @@ parabix_add_module(
 NAME
     re.adt
 SRC
-    printer_re.cpp
     re_assertion.cpp
     re_cc.cpp
     re_diff.cpp

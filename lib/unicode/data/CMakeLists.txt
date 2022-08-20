@@ -50,5 +50,4 @@ SRC
 DEPS
     unicode.core
     re.adt
-    re.analysis
 )
