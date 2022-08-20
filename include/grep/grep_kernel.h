@@ -201,9 +201,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    PropertyBasisExternal(ProgBuilderRef b, StreamSet * input, UCD::property_t p) :
-    ExternalStreamObject(Kind::PropertyBasis, basisName(p), {"u8_basis"}), mProperty(p) {}
-    static std::string basisName(UCD::property_t p);
+    PropertyBasisExternal(UCD::property_t p) :
+    ExternalStreamObject(Kind::PropertyBasis,
+                         "UCD:" + getPropertyFullName(p) + "_basis",
+                         {"u8_basis"}), mProperty(p) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     UCD::property_t mProperty;

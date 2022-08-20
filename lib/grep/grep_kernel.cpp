@@ -131,11 +131,6 @@ void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSe
     installStreamSet(b, distStrm);
 }
 
-std::string PropertyBasisExternal::basisName(UCD::property_t p) {
-    std::string pname = p == UCD::identity ? "Unicode" : UCD::getPropertyFullName(p);
-    return pname + "_basis";
-}
-
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     if (mProperty == UCD::identity) {
         StreamSet * u21 = b->CreateStreamSet(21);
@@ -162,9 +157,9 @@ void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamS
 }
 
 void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * GCB = b->CreateStreamSet(1);
-    GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCB);
-    installStreamSet(b, GCB);
+    StreamSet * GCBstream = b->CreateStreamSet(1);
+    GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCBstream);
+    installStreamSet(b, GCBstream);
 }
 
 void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
