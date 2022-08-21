@@ -11,8 +11,8 @@ namespace re {
 // to other RE transformers and is not intended to be used on its own.
 class RE_MemoizingTransformer : public RE_Transformer {
 protected:
-    RE_MemoizingTransformer(std::string transformationName, NameTransformationMode m = NameTransformationMode::None)
-    : RE_Transformer(std::move(transformationName), m) {
+    RE_MemoizingTransformer(std::string transformationName)
+    : RE_Transformer(std::move(transformationName)) {
 
     }
 

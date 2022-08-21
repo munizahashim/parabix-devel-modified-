@@ -18,10 +18,11 @@ enum class NameTransformationMode {None, TransformDefinition};
 
 class RE_Transformer {
 public:
-    RE * transformRE(RE * r);
+    RE * transformRE(RE * r, NameTransformationMode m = NameTransformationMode::None);
 protected:
-    RE_Transformer(std::string transformationName, NameTransformationMode m = NameTransformationMode::None)
-    : mTransformationName(std::move(transformationName)), mNameTransform(m) {}
+    RE_Transformer(std::string transformationName)
+    : mTransformationName(std::move(transformationName)),
+      mNameTransform(NameTransformationMode::None) {}
 
     virtual ~RE_Transformer() {}
     virtual RE * transform(RE * r);
@@ -44,7 +45,7 @@ protected:
     virtual void showProcessing();
 private:
     const std::string mTransformationName;
-    const NameTransformationMode mNameTransform;
+    NameTransformationMode mNameTransform;
 protected:
     RE * mInitialRE;
 };

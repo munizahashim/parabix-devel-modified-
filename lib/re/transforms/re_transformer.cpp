@@ -16,8 +16,9 @@ using namespace llvm;
 
 namespace re {
 
-RE * RE_Transformer::transformRE(RE * re) {
+RE * RE_Transformer::transformRE(RE * re, NameTransformationMode m) {
     mInitialRE = re;
+    mNameTransform = m;
     RE * finalRE = transform(re);
     bool ShowRE = PrintOptionIsSet(ShowAllREs) && !mTransformationName.empty();
     if (PrintOptionIsSet(ShowREs) && (mInitialRE != finalRE)) {
@@ -34,7 +35,8 @@ RE * RE_Transformer::transformRE(RE * re) {
 void RE_Transformer::showProcessing() {
 }
 
-RE * RE_Transformer::transform(RE * const from) { assert (from);
+RE * RE_Transformer::transform(RE * const from) {
+    assert (from);
     using T = RE::ClassTypeId;
     RE * to = from;
     #define TRANSFORM(Type) \

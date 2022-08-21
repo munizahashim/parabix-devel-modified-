@@ -64,14 +64,14 @@ RE * UTF8_Transformer::transformAny(Any * e) {
     return rangeToUTF8(0, UCD::UNICODE_MAX);
 }
 
-UTF8_Transformer::UTF8_Transformer(NameTransformationMode m) :
-EncodingTransformer("ToUTF8", &cc::Unicode, &cc::UTF8, m) {
+UTF8_Transformer::UTF8_Transformer() :
+EncodingTransformer("ToUTF8", &cc::Unicode, &cc::UTF8) {
     mEncoder.setCodeUnitBits(8);
 }
 
 RE * toUTF8(RE * r, bool convertName) {
     const auto mode = convertName ? NameTransformationMode::TransformDefinition : NameTransformationMode::None;
-    return UTF8_Transformer(mode).transformRE(r);
+    return UTF8_Transformer().transformRE(r, mode);
 }
 
 }

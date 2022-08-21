@@ -54,6 +54,7 @@
 #include <re/analysis/collect_ccs.h>
 #include <re/cc/cc_kernel.h>
 #include <re/alphabet/multiplex_CCs.h>
+#include <re/transforms/re_transformer.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/replaceCC.h>
@@ -141,7 +142,6 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mLineBreakStream(nullptr),
     mLineStarts(nullptr),
     mU8index(nullptr),
-    mUTF8_Transformer(re::NameTransformationMode::None),
     mEngineThread(pthread_self()),
     mIllustrator(nullptr) {
         if (codegen::IllustratorDisplay > 0) {
@@ -290,8 +290,10 @@ void GrepEngine::initRE(re::RE * re) {
     }
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
-    mRE = resolveAnchors(mRE, anchorRE);
+    mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::TransformDefinition);
     mRE = regular_expression_passes(mRE);
+    //auto GCB_external = new PropertyBasisExternal(UCD::GCB);
+    //mExternalMap.emplace(GCB_external->getName(), GCB_external);
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
     for (auto m : PE.mNameMap) {
@@ -324,7 +326,7 @@ void GrepEngine::initRE(re::RE * re) {
         if (!UnicodeSets.empty()) {
             auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
             mRE = transformCCs(mpx, mRE);
-            mExternalMap.emplace(mpx->getName(), new MultiplexedExternal(mpx));
+            mExternalMap.emplace(mpx->getName() + "_basis", new MultiplexedExternal(mpx));
         }
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
@@ -502,24 +504,23 @@ void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStre
 void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto alphabets = re::collectAlphabets(regexp);
     for (auto & a : alphabets) {
-        std::string alphabetName = a->getName();
-        //llvm::errs() << "found alphabet: " << alphabetName << "\n";
+        std::string basisName = a->getName() + "_basis";
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            auto f = mExternalMap.find(alphabetName);
+            auto f = mExternalMap.find(basisName);
             if (f == mExternalMap.end()) {
-                llvm::report_fatal_error("Cannot find alphabet");
+                llvm::report_fatal_error("Cannot find " + basisName);
             }
             ExternalStreamObject * ext = f->second;
-            if (MultiplexedExternal * m = dyn_cast<MultiplexedExternal>(ext)) {
-                if (!m->isResolved()) {
-                    m->setIndexing(P, mU8index);
-                    resolveExternal(P, alphabetName);
-                }
-                StreamSet * alphabetBasis = m->getStreamSet();
-                if (mIllustrator) mIllustrator->captureBixNum(P, alphabetName, alphabetBasis);
+            if (!ext->isResolved()) {
+                ext->setIndexing(P, mU8index);
+                resolveExternal(P, basisName);
+            }
+            if (isa<PropertyBasisExternal>(ext) || isa<MultiplexedExternal>(ext)) {
+                StreamSet * alphabetBasis = ext->getStreamSet();
+                if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
                 options->addAlphabet(mpx, alphabetBasis);
             } else {
-                llvm::report_fatal_error("Expecting multiplexed alphabet: " + alphabetName);
+                llvm::report_fatal_error("Expecting multiplexed alphabet: " + basisName);
             }
         }
     }
@@ -555,6 +556,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
         std::vector<StreamSet *> allSpans;
         int i = 0;
+        if (alt->empty()) return MatchResults;
         for (auto & e : *alt) {
             auto a = getMatchSpan(P, e, MatchResults);
             std::string ct = std::to_string(i);

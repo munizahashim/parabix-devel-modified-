@@ -95,12 +95,12 @@ RE * StartAnchoredAltNamer::transformAlt(Alt * alt) {
         if (Seq * s = dyn_cast<Seq>(e)) {
             if (isa<Start>(s->front())) {
                 anchoredAlts.push_back(e);
-                continue;
-            }
+            } else {
             nonAnchoredAlts.push_back(e);
+            }
         }
-        if (anchoredAlts.empty()) return alt;
     }
+    if (anchoredAlts.empty()) return alt;
     RE * defn;
     if (anchoredAlts.size() == 1) {
         defn = anchoredAlts[0];
@@ -114,6 +114,7 @@ RE * StartAnchoredAltNamer::transformAlt(Alt * alt) {
 }
 
 RE * StartAnchoredAltNamer::transformSeq(Seq * seq) {
+    if (seq->empty()) return seq;
     if (isa<Start>(seq->front())) {
         return createName("StartAnchored", seq);
     }

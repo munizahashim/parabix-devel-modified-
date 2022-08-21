@@ -283,8 +283,7 @@ struct EnumBasisRequiredCollector : public RE_Inspector {
             }
         }
     }
-
-    PropertySet mEnumSet;
+    PropertySet & mEnumSet;
 };
 
 PropertySet propertiesRequiringBasisSet(RE * r) {
@@ -382,8 +381,6 @@ RE * externalizeAnyNodes(RE * r) {
 RE * linkAndResolve(RE * r, GrepLinesFunctionType grep) {
     RE * linked = linkProperties(r);
     linked = promotePropertyReferences(r);
-    PropertySet ps = propertiesRequiringBasisSet(linked);
-    linked = enumeratedPropertiesToCCs(ps, linked);
     RE * std = standardizeProperties(linked);
     return resolveProperties(std, grep);
 }

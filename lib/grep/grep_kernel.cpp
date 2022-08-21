@@ -143,7 +143,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
             std::vector<re::CC *> ccs;
             for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
             StreamSet * basis = b->CreateStreamSet(ccs.size());
-            b->CreateKernelCall<CharacterClassKernelBuilder>(ccs, inputs[0], basis);
+            b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], basis);
             installStreamSet(b, basis);
         }
     }

@@ -15,8 +15,8 @@ namespace re {
 
 struct CC_multiplexer final : public RE_Transformer {
 public:
-    CC_multiplexer(const cc::MultiplexedAlphabet * mpx, NameTransformationMode mode) :
-        RE_Transformer("Multiplex_" + mpx->getName(), mode),
+    CC_multiplexer(const cc::MultiplexedAlphabet * mpx) :
+        RE_Transformer("Multiplex_" + mpx->getName()),
         mMultiplexedAlphabet(mpx) {}
     RE * transformCC(CC * cc) override {
         if (cc->getAlphabet() == mMultiplexedAlphabet->getSourceAlphabet()) {
@@ -36,7 +36,7 @@ private:
 };
 
 RE * transformCCs(const cc::MultiplexedAlphabet * const mpx, RE * re, NameTransformationMode mode) {
-    return CC_multiplexer(mpx, mode).transformRE(re);
+    return CC_multiplexer(mpx).transformRE(re, mode);
 }
 
 }

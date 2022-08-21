@@ -434,10 +434,10 @@ ContextMatchCursor ctxt_match(RE * re, Assertion::Kind kind, ContextMatchCursor 
 class ContextualAssertionSimplifier final : public RE_Transformer {
 public:
     ContextualAssertionSimplifier() :
-        RE_Transformer("ContextualAssertionSimplifier", NameTransformationMode::TransformDefinition),
+        RE_Transformer("ContextualAssertionSimplifier"),
         mContext(RE_Context(nullptr, nullptr, 0)) {}
     ContextualAssertionSimplifier(RE_Context ctxt) :
-        RE_Transformer("", NameTransformationMode::TransformDefinition),
+        RE_Transformer(""),
         mContext(ctxt) {}
     RE * transformSeq(Seq * s) override {
         std::vector<RE *> t;
@@ -515,7 +515,7 @@ RE * simplifyAssertions(RE * r) {
     // to be of much use to eliminate assertions and possibly very
     // costly to inline multiple partially optimized assertions.
     if (has_GCB_Any(r)) return r;
-    return ContextualAssertionSimplifier().transformRE(r);
+    return ContextualAssertionSimplifier().transformRE(r, NameTransformationMode::TransformDefinition);
 }
 
 } // namespace re
