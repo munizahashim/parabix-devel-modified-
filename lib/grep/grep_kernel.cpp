@@ -158,7 +158,12 @@ void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamS
 
 void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * GCBstream = b->CreateStreamSet(1);
-    GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCBstream);
+    re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
+    GCB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::GCB}, GCB_RE);
+    GCB_RE = UCD::externalizeProperties(GCB_RE);
+    setIndexing(b, nullptr);
+    mGrepEngine->RunGrep(b, GCB_RE, nullptr, GCBstream);
+    //GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCBstream);
     installStreamSet(b, GCBstream);
 }
 

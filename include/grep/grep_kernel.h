@@ -168,14 +168,14 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    GraphemeClusterBreak(re::UTF8_Transformer * t) :
+    GraphemeClusterBreak(grep::GrepEngine * engine) :
         ExternalStreamObject(Kind::GraphemeClusterBreak, "\\b{g}",
-                             {"u8_basis", "u8index"}), mUTF8_transformer(t) {}
+                             {}), mGrepEngine(engine)  {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
     int getOffset() override {return 1;}
 private:
-    re::UTF8_Transformer * mUTF8_transformer;
+    grep::GrepEngine *  mGrepEngine;
 };
 
 class WordBoundaryExternal : public ExternalStreamObject {

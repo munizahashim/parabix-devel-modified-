@@ -290,7 +290,17 @@ void GrepEngine::initRE(re::RE * re) {
     }
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
-    mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::TransformDefinition);
+    mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::None);
+    if (hasGraphemeClusterBoundary(mRE)) {
+        UnicodeIndexing = true;
+        auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
+        mExternalMap.emplace(GCB_basis->getName(), GCB_basis);
+        re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
+        re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
+        mExternalNames.insert(epict);
+        mExternalMap.emplace(epict->getFullName(), new PropertyExternal(epict));
+        mExternalMap.emplace("\\b{g}", new GraphemeClusterBreak(this));
+    }
     mRE = regular_expression_passes(mRE);
     //auto GCB_external = new PropertyBasisExternal(UCD::GCB);
     //mExternalMap.emplace(GCB_external->getName(), GCB_external);
@@ -303,10 +313,6 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = CCnamer.transformRE(mRE);
     for (auto m : CCnamer.mNameMap) {
         mExternalMap.emplace(m.first, new CC_External(m.first, cast<re::CC>(m.second)));
-    }
-    if (hasGraphemeClusterBoundary(mRE)) {
-        UnicodeIndexing = true;
-        mExternalMap.emplace("\\b{g}", new GraphemeClusterBreak(&mUTF8_Transformer));
     }
     if (hasWordBoundary(mRE)) {
         UnicodeIndexing = true;
@@ -536,12 +542,11 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
             auto f = mExternalMap.find(name);
             if (f == mExternalMap.end()) {
                 prepareExternalObject(e);
-                resolveExternal(P, name);
                 f = mExternalMap.find(name);
             }
             ExternalStreamObject * ext = f->second;
             if (!ext->isResolved()) {
-                llvm::report_fatal_error("Unresolved external");
+                resolveExternal(P, name);
             }
             StreamSet * extStream = ext->getStreamSet();
             unsigned offset = ext->getOffset();
