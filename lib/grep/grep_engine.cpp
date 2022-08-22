@@ -446,29 +446,6 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     }
 }
 
-void GrepEngine::prepareExternalObject(re::Name * extName) {
-    auto nameStr = extName->getFullName();
-
-    const auto f = mExternalMap.find(nameStr);
-    if (f == mExternalMap.end()) {
-        // The name has not been prepared in the external map.
-        // Inspect and process the RE definition.
-        re::RE * def = extName->getDefinition();
-        if (def == nullptr) {
-            llvm::report_fatal_error("Undefined external: " + nameStr);
-        }
-        if (isa<re::PropertyExpression>(def)) {
-            mExternalMap.emplace(nameStr, new PropertyExternal(extName));
-        } else if (re::CC * cc = dyn_cast<re::CC>(def)) {
-            mExternalMap.emplace(nameStr, new CC_External(nameStr, cc));
-        } else if (re::Reference * ref = dyn_cast<re::Reference>(def)) {
-            mExternalMap.emplace(nameStr, new Reference_External(mRefInfo, ref));
-        } else {
-            mExternalMap.emplace(nameStr, new RE_External(nameStr, this, def, mIndexAlphabet));
-        }
-    }
-}
-
 StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
     auto f = mExternalMap.find(nameStr);
     if (f == mExternalMap.end()) {
@@ -487,9 +464,6 @@ StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
 }
 
 void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
-    for (auto e : mExternalNames) {
-        prepareExternalObject(e);
-    }
     if (UnicodeIndexing) {
         std::set<std::string> extNames;
         for (auto e : mExternalNames) {
@@ -541,8 +515,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
             extNames.insert(name);
             auto f = mExternalMap.find(name);
             if (f == mExternalMap.end()) {
-                prepareExternalObject(e);
-                f = mExternalMap.find(name);
+                llvm::report_fatal_error("Cannot find external name: " + name);
             }
             ExternalStreamObject * ext = f->second;
             if (!ext->isResolved()) {
