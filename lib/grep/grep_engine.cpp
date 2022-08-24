@@ -585,9 +585,8 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
     if (mIndexAlphabet == &cc::UTF8) {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
             options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
-        } else {
-            re = toUTF8(re);
         }
+        re = toUTF8(re);
     }
     options->setRE(re);
     addExternalStreams(P, options, re, indexStream);

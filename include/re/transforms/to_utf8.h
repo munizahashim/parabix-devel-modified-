@@ -43,7 +43,7 @@ private:
     UTF_Encoder mEncoder;
 };
 
-RE * toUTF8(RE * r, bool convertName = false);
+RE * toUTF8(RE * r, bool convertNameAndAny = false);
 }
 
 #endif // TO_UTF8_H

@@ -43,10 +43,9 @@ protected:
     virtual RE * transformAssertion(Assertion * a);
     virtual RE * transformPropertyExpression(PropertyExpression * pe);
     virtual void showProcessing();
-private:
+protected:
     const std::string mTransformationName;
     NameTransformationMode mNameTransform;
-protected:
     RE * mInitialRE;
 };
 
