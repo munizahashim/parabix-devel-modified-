@@ -16,20 +16,27 @@ using namespace llvm;
 
 namespace re {
 
-RE * RE_Transformer::transformRE(RE * re) {
-    RE * initialRE = re;
+RE * RE_Transformer::transformRE(RE * re, NameTransformationMode m) {
+    mInitialRE = re;
+    mNameTransform = m;
     RE * finalRE = transform(re);
     bool ShowRE = PrintOptionIsSet(ShowAllREs) && !mTransformationName.empty();
-    if (PrintOptionIsSet(ShowREs) && (initialRE != finalRE)) {
+    if (PrintOptionIsSet(ShowREs) && (mInitialRE != finalRE)) {
         ShowRE |= !mTransformationName.empty() && (mTransformationName[0] != '.');
     }
     if (ShowRE)  {
-        errs() << mTransformationName << ":\n" << Printer_RE::PrintRE(finalRE) << '\n';
+        errs() << mTransformationName << ":\n";
+        showProcessing();
+        errs() << Printer_RE::PrintRE(finalRE) << '\n';
     }
     return finalRE;
 }
 
-RE * RE_Transformer::transform(RE * const from) { assert (from);
+void RE_Transformer::showProcessing() {
+}
+
+RE * RE_Transformer::transform(RE * const from) {
+    assert (from);
     using T = RE::ClassTypeId;
     RE * to = from;
     #define TRANSFORM(Type) \
@@ -68,7 +75,7 @@ RE * RE_Transformer::transformName(Name * nm) {
     }
     RE * t = transform(defn);
     if (t == defn) return nm;
-    return t;
+    return t; //makeName(nm->getFullName(), t);
 }
 
 RE * RE_Transformer::transformCapture(Capture * c) {

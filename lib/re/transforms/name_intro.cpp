@@ -13,7 +13,6 @@
 #include <re/alphabet/alphabet.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
-#include <unicode/utf/utf_encoder.h>
 #include <map>
 #include <memory>
 
@@ -21,52 +20,105 @@ using namespace llvm;
 
 namespace re {
 
-class VariableLengthCCNamer final : public RE_Transformer {
-public:
-    VariableLengthCCNamer(unsigned UTF_bits) : RE_Transformer("VariableLengthCCNamer") {
-        mEncoder.setCodeUnitBits(UTF_bits);
+Name * NameIntroduction::createName(std::string name, RE * defn) {
+    auto f = mNameMap.find(name);
+    if (f == mNameMap.end()) {
+        mNameMap.emplace(name, defn);
+        return makeName(name, defn);
+    } else {
+        return makeName(name, f->second);
     }
-    RE * transformCC (CC * cc) override {
-        bool variable_length = false;
-        variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
-        if (variable_length) {
-            return makeName(cc->canonicalName(), cc);
-        }
-        return cc;
-    }
-private:
-    UTF_Encoder mEncoder;
-};
-
-RE * name_variable_length_CCs(RE * r, unsigned UTF_bits) {
-    return VariableLengthCCNamer(UTF_bits).transformRE(r);
 }
 
-RE * name_min_length_alts(RE * r, const cc::Alphabet * a, std::string minLengthPrefix) {
-    if (Alt * alt = dyn_cast<Alt>(r)) {
-        std::vector<RE *> namedAlts;
-        std::map<int, std::vector<RE *>> minLengthAlts;
-        for (auto & e : *alt) {
-            auto rg = getLengthRange(e, a);
-            if (rg.first == 0) return r;  //  zero-length REs cause problems
-            auto f = minLengthAlts.find(rg.first);
-            if (f == minLengthAlts.end()) {
-                minLengthAlts.emplace(rg.first, std::vector<RE *>{e});
+void NameIntroduction::showProcessing() {
+    for (auto m: mNameMap) {
+        llvm::errs() << "Name " << m.first << " ==> " << Printer_RE::PrintRE(m.second) << "\n";
+    }
+}
+
+VariableLengthCCNamer::VariableLengthCCNamer(unsigned UTF_bits) : NameIntroduction("VariableLengthCCNamer") {
+        mEncoder.setCodeUnitBits(UTF_bits);
+    }
+
+RE * VariableLengthCCNamer::transformCC (CC * cc) {
+    bool variable_length = false;
+    variable_length = mEncoder.encoded_length(lo_codepoint(cc->front())) < mEncoder.encoded_length(hi_codepoint(cc->back()));
+    if (variable_length) {
+        return createName(cc->canonicalName(), cc);
+    }
+    return cc;
+}
+
+FixedLengthAltNamer::FixedLengthAltNamer(const cc::Alphabet * a, std::string lengthPrefix) : NameIntroduction("FixedLengthAltNamer"), mAlphabet(a), mLgthPrefix(lengthPrefix) {}
+
+RE * FixedLengthAltNamer::transformAlt(Alt * alt) {
+    if (mInitialRE != alt) return alt;
+    std::vector<RE *> newAlts;
+    std::map<int, std::vector<RE *>> fixedLengthAlts;
+    for (auto e : *alt) {
+        auto rg = getLengthRange(e, mAlphabet);
+        if (rg.first == 0) return alt;  //  zero-length REs cause problems
+        if (rg.first == rg.second) {
+            auto f = fixedLengthAlts.find(rg.first);
+            if (f == fixedLengthAlts.end()) {
+                fixedLengthAlts.emplace(rg.first, std::vector<RE *>{e});
             } else {
                 f->second.push_back(e);
             }
+        } else {
+            newAlts.push_back(e);
         }
-        for (auto & grp : minLengthAlts) {
-            Name * n = makeName(minLengthPrefix + std::to_string(grp.first));
-            if (grp.second.size() == 1) {
-                n->setDefinition(grp.second[0]);
+    }
+    if (fixedLengthAlts.empty()) return alt;
+    for (auto grp : fixedLengthAlts) {
+        RE * defn;
+        if (grp.second.size() == 1) {
+            defn = grp.second[0];
+        } else {
+            defn = makeAlt(grp.second.begin(), grp.second.end());
+        }
+        Name * n = createName(mLgthPrefix + std::to_string(grp.first), defn);
+        newAlts.push_back(n);
+    }
+    if (newAlts.size() == 1) return newAlts[0];
+    return makeAlt(newAlts.begin(), newAlts.end());
+}
+
+StartAnchoredAltNamer::StartAnchoredAltNamer() :
+    NameIntroduction("StartAnchoredAltNamer") {}
+
+RE * StartAnchoredAltNamer::transformAlt(Alt * alt) {
+    if (mInitialRE != alt) return alt;
+    std::vector<RE *> nonAnchoredAlts;
+    std::vector<RE *> anchoredAlts;
+    for (auto & e : *alt) {
+        if (Seq * s = dyn_cast<Seq>(e)) {
+            if (isa<Start>(s->front())) {
+                anchoredAlts.push_back(e);
             } else {
-                n->setDefinition(makeAlt(grp.second.begin(), grp.second.end()));
+            nonAnchoredAlts.push_back(e);
             }
-            namedAlts.push_back(n);
         }
-        return makeAlt(namedAlts.begin(), namedAlts.end());
-    } else return r;
+    }
+    if (anchoredAlts.empty()) return alt;
+    RE * defn;
+    if (anchoredAlts.size() == 1) {
+        defn = anchoredAlts[0];
+    } else {
+        defn = makeAlt(anchoredAlts.begin(), anchoredAlts.end());
+    }
+    Name * anchored = createName("StartAnchored", defn);
+    if (nonAnchoredAlts.empty()) return anchored;
+    nonAnchoredAlts.push_back(anchored);
+    return makeAlt(nonAnchoredAlts.begin(), nonAnchoredAlts.end());
+}
+
+RE * StartAnchoredAltNamer::transformSeq(Seq * seq) {
+    if (seq->empty()) return seq;
+    if (isa<Start>(seq->front())) {
+        return createName("StartAnchored", seq);
+    }
+    return seq;
 }
 
 }

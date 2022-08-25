@@ -137,7 +137,6 @@ protected:
     // line break stream and the U8 index stream (if required).
     void grepPrologue(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
-    void prepareExternalObject(re::Name * extName);
     void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
     kernel::StreamSet * resolveExternal(ProgBuilderRef P, std::string nameStr);
@@ -192,6 +191,7 @@ protected:
     const cc::Alphabet * mIndexAlphabet;
     std::map<std::string, kernel::ExternalStreamObject *> mExternalMap;
     kernel::StreamSet * mLineBreakStream;
+    kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
     re::UTF8_Transformer mUTF8_Transformer;

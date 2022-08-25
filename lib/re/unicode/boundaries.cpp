@@ -253,8 +253,6 @@ RE * generateGraphemeClusterBoundaryRule(bool extendedGraphemeClusters) {
     RE * gcb = makeAlt({GCB_1_5, makeDiff(GCB_999, GCX)});
 
     gcb = UCD::linkAndResolve(gcb);
-    gcb = UCD::inlineSimpleProperties(gcb);
-    gcb = UCD::externalizeProperties(gcb);
 
     return gcb;
 }

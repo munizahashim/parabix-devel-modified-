@@ -189,6 +189,9 @@ public:
     }
     Capture * getCapture() const {return mCapture;}
     unsigned getInstance() const {return mInstance;}
+    std::string getInstanceName() const  {
+        return std::string(mName, mNameLength) + "." + std::to_string(mInstance);
+    }
     UCD::property_t getReferencedProperty() const {return mReferencedProperty;}
     void setReferencedProperty(UCD::property_t p) {mReferencedProperty = p;}
     static Reference * Create(std::string name, Capture * capture, unsigned instance, UCD::property_t p = UCD::identity) {

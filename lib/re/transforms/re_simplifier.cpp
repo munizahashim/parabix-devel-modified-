@@ -55,7 +55,7 @@ struct RE_Simplifier final : public RE_MemoizingTransformer {
         return nm;
     }
 
-    RE_Simplifier() : RE_MemoizingTransformer("Simplifier", NameTransformationMode::TransformDefinition) { }
+    RE_Simplifier() : RE_MemoizingTransformer("Simplifier") { }
 
 };
 
