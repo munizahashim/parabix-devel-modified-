@@ -52,7 +52,7 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
     }
     r = resolveCaseInsensitiveMode(r, globallyCaseInsensitive);
     //r = expandBoundaryAssertions(r);
-    r = simplifyAssertions(r);
+    //r = simplifyAssertions(r);
     //r = lookaheadPromotion(r);
     return r;
 }

@@ -410,7 +410,7 @@ void ICGrepKernel::generatePabloMethod() {
     }
     if (mOptions->mEncodingTransformer) {
         PabloAST * idxStrm = pb.createExtract(getInputStreamVar("mIndexing"), pb.getInteger(0));
-        re_compiler.addIndexingAlphabet(mOptions->mEncodingTransformer, idxStrm);
+        re_compiler.setIndexing(mOptions->mEncodingTransformer->getIndexingAlphabet(), idxStrm);
     }
     for (unsigned i = 0; i < mOptions->mExternalBindings.size(); i++) {
         auto extName = mOptions->mExternalBindings[i].getName();
@@ -424,7 +424,7 @@ void ICGrepKernel::generatePabloMethod() {
     PabloAST * matchResult = matches.stream();
     if (matches.offset() != mOffset) {
         llvm::errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
-        llvm::report_fatal_error("matches.offset() != mOffset");
+        //llvm::report_fatal_error("matches.offset() != mOffset");
     }
     pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
