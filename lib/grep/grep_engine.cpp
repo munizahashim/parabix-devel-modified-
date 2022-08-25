@@ -55,6 +55,7 @@
 #include <re/cc/cc_kernel.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/transforms/re_transformer.h>
+#include <re/transforms/re_contextual_simplification.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/replaceCC.h>
@@ -584,7 +585,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
     StreamSet * indexStream = nullptr;
     if (mIndexAlphabet == &cc::UTF8) {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
-            options->setIndexingTransformer(&mUTF8_Transformer, mU8index);
+            options->setIndexing(mU8index);
         }
         re = toUTF8(re);
     }

@@ -274,8 +274,7 @@ UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index)
 
 }
 
-void GrepKernelOptions::setIndexingTransformer(EncodingTransformer * encodingTransformer, StreamSet * idx) {
-    mEncodingTransformer = encodingTransformer;
+void GrepKernelOptions::setIndexing(StreamSet * idx) {
     mIndexStream = idx;
 }
 
@@ -327,7 +326,7 @@ Bindings GrepKernelOptions::streamSetInputBindings() {
     for (const auto & a : mExternalBindings) {
         inputs.emplace_back(a);
     }
-    if (mEncodingTransformer) {
+    if (mIndexStream) {
         inputs.emplace_back("mIndexing", mIndexStream);
     }
     if (mCombiningType != GrepCombiningType::None) {
@@ -348,9 +347,8 @@ Bindings GrepKernelOptions::scalarOutputBindings() {
     return {};
 }
 
-GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet, re::EncodingTransformer * encodingTransformer)
-: mCodeUnitAlphabet(codeUnitAlphabet)
-, mEncodingTransformer(encodingTransformer) {
+GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
+: mCodeUnitAlphabet(codeUnitAlphabet) {
 
 }
 
@@ -360,9 +358,6 @@ std::string GrepKernelOptions::makeSignature() {
     if (mSource) {
         sig << mSource->getNumElements() << 'x' << mSource->getFieldWidth();
         sig << '/' << mCodeUnitAlphabet->getName();
-    }
-    if (mEncodingTransformer) {
-        sig << ':' << mEncodingTransformer->getIndexingAlphabet()->getName();
     }
     for (const auto & e : mExternalBindings) {
         sig << '_' << e.getName();
@@ -408,9 +403,9 @@ void ICGrepKernel::generatePabloMethod() {
         auto basis = getInputStreamSet(alpha->getName() + "_basis");
         re_compiler.addAlphabet(alpha, basis);
     }
-    if (mOptions->mEncodingTransformer) {
+    if (mOptions->mIndexStream) {
         PabloAST * idxStrm = pb.createExtract(getInputStreamVar("mIndexing"), pb.getInteger(0));
-        re_compiler.setIndexing(mOptions->mEncodingTransformer->getIndexingAlphabet(), idxStrm);
+        re_compiler.setIndexing(&cc::Unicode, idxStrm);
     }
     for (unsigned i = 0; i < mOptions->mExternalBindings.size(); i++) {
         auto extName = mOptions->mExternalBindings[i].getName();
@@ -732,7 +727,7 @@ void ContextSpan::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("contextStream"), pb.getInteger(0)), pb.createInFile(consecutive));
 }
 
-void kernel::GraphemeClusterLogic(ProgBuilderRef P, UTF8_Transformer * t,
+void kernel::GraphemeClusterLogic(ProgBuilderRef P,
                                   StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
     
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
@@ -743,7 +738,7 @@ void kernel::GraphemeClusterLogic(ProgBuilderRef P, UTF8_Transformer * t,
     StreamSet * const GCB_Classes = P->CreateStreamSet(GCB_basis.size());
     P->CreateKernelCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
     std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
-    options->setIndexingTransformer(t, U8index);
+    options->setIndexing(U8index);
     options->setRE(GCB);
     options->setSource(GCB_Classes);
     options->addAlphabet(GCB_mpx, GCB_Classes);

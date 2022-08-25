@@ -237,8 +237,8 @@ class GrepKernelOptions {
     friend class ICGrepKernel;
 public:
     using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
-    GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8, re::EncodingTransformer * encodingTransformer = nullptr);
-    void setIndexingTransformer(re::EncodingTransformer *, StreamSet * indexStream);
+    GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
+    void setIndexing(StreamSet * indexStream);
     void setSource(StreamSet * s);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
@@ -259,7 +259,6 @@ protected:
 private:
 
     const cc::Alphabet *        mCodeUnitAlphabet;
-    re::EncodingTransformer *   mEncodingTransformer;
     StreamSet *                 mSource = nullptr;
     StreamSet *                 mIndexStream = nullptr;
     GrepCombiningType           mCombiningType = GrepCombiningType::None;
@@ -378,7 +377,6 @@ private:
 };
 
 void GraphemeClusterLogic(ProgBuilderRef P,
-                          re::UTF8_Transformer * t,
                           StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream);
 
 void WordBoundaryLogic(ProgBuilderRef P,

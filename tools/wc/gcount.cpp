@@ -78,7 +78,7 @@ GCountFunctionType pipelineGen(CPUDriver & pxDriver) {
     
     StreamSet * GCB = P->CreateStreamSet(1, 1);
     re::UTF8_Transformer U8xfrmer;
-    GraphemeClusterLogic(P, &U8xfrmer, BasisBits, u8index, GCB);
+    GraphemeClusterLogic(P, BasisBits, u8index, GCB);
 
     P->CreateKernelCall<PopcountKernel>(GCB, P->getOutputScalar("countResult"));
 
