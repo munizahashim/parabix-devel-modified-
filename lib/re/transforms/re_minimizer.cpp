@@ -98,7 +98,7 @@ struct RE_Minimizer final : public RE_MemoizingTransformer {
         }
     }
 
-    RE_Minimizer() : RE_MemoizingTransformer("Minimizer", NameTransformationMode::TransformDefinition) { }
+    RE_Minimizer() : RE_MemoizingTransformer("Minimizer") { }
 
 protected:
 
@@ -304,7 +304,7 @@ protected:
 };
 
 RE * minimizeRE(RE * re) {
-    return RE_Minimizer().transformRE(re);
+    return RE_Minimizer().transformRE(re, NameTransformationMode::TransformDefinition);
 }
 
 }

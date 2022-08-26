@@ -18,7 +18,6 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/cc/cc_compiler.h>
-#include <re/transforms/to_utf8.h>
 #include <re/analysis/re_analysis.h>
 #include <re/analysis/re_local.h>
 #include <re/analysis/cc_sequence_search.h>
@@ -61,7 +60,7 @@ private:
     Marker compileIntersect(Intersect * x, Marker marker);
     pablo::PabloAST * consecutive_matches(pablo::PabloAST * repeated_j, int j, int repeat_count, const int match_length, pablo::PabloAST * indexStream);
     pablo::PabloAST * reachable(pablo::PabloAST * repeated, int length, int repeat_count, pablo::PabloAST * indexStream);
-    static bool isFixedLength(RE * regexp);
+    std::pair<int, int> lengthRange(RE * regexp);
     Marker expandLowerBound(RE * repeated,  int lb, Marker marker, int ifGroupSize);
     Marker processUnboundedRep(RE * repeated, Marker marker);
     Marker expandUpperBound(RE * repeated, int ub, Marker marker, int ifGroupSize);
@@ -90,6 +89,19 @@ inline Marker RE_Block_Compiler::compile(RE * const re) {
 PabloAST * ScanToIndex(PabloAST * cursor, PabloAST * indexStrm, PabloBuilder & pb) {
     return pb.createOr(pb.createAnd(cursor, indexStrm),
                        pb.createScanTo(pb.createAnd(pb.createNot(indexStrm), cursor), indexStrm));
+}
+
+std::pair<int, int> RE_Block_Compiler::lengthRange(RE * regexp) {
+    if (Name * n = dyn_cast<Name>(regexp)) {
+        const auto & nameString = n->getFullName();
+        auto f = mMain.mExternalNameMap.find(nameString);
+        if (f == mMain.mExternalNameMap.end()) {
+            llvm::report_fatal_error("RE compiler cannot find name: " + nameString);
+        }
+        return f->second.lengthRange();
+    }
+    auto alphabet = mMain.mIndexingAlphabet ? mMain.mIndexingAlphabet : mMain.mCodeUnitAlphabet;
+    return getLengthRange(regexp, alphabet);
 }
 
 Marker RE_Block_Compiler::process(RE * const re, Marker marker) {
@@ -158,22 +170,6 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
         PabloAST * ccStrm = mMain.mAlphabetCompilers[i]->compileCC(cc);
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
-    }
-    if (mMain.mIndexingTransformer && (a == mMain.mIndexingTransformer->getIndexingAlphabet())) {
-        //llvm::errs() << "Found indexing alphabet: " << i << ", " << mMain.mIndexingTransformer->getIndexingAlphabet()->getName() << "\n";
-        const cc::Alphabet * encodingAlphabet = mMain.mIndexingTransformer->getEncodingAlphabet();
-        unsigned i = 0;
-        while (i < mMain.mAlphabets.size() && (encodingAlphabet != mMain.mAlphabets[i])) i++;
-        if (i < mMain.mAlphabets.size()) {
-            RE_Compiler code_unit_compiler(mPB.getPabloBlock(), mMain.mIndexingTransformer->getEncodingAlphabet());
-            code_unit_compiler.addAlphabet(encodingAlphabet, mMain.mBasisSets[i]);
-            //llvm::errs() << "EncodingAlphabet " + encodingAlphabet->getName() + "\n";
-            PabloAST * ccStrm = code_unit_compiler.compileRE(mMain.mIndexingTransformer->transformRE(cc)).stream();
-            mLocallyCompiledCCs.emplace(cc, ccStrm);
-            return Marker(mPB.createAnd(nextPos, ccStrm, cc->canonicalName()));
-        } else {
-            llvm::report_fatal_error("EncodingAlphabet " + encodingAlphabet->getName() + " not registered!\n");
-        }
     }
     if (a == &cc::Byte) {
         //llvm::errs() << "Using alphabet 0: for Byte\n";
@@ -289,8 +285,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         else RE_Compiler::UnsupportedRE("Unsupported boundary assertion");
     }
     // Lookahead assertions.
-    auto alphabet = mMain.mIndexingTransformer ? mMain.mIndexingTransformer->getIndexingAlphabet() : mMain.mCodeUnitAlphabet;
-    auto lengths = getLengthRange(asserted, alphabet);
+    auto lengths = lengthRange(asserted);
     if (lengths.second == 0) {
         Marker lookahead = compile(asserted);
         AlignMarkers(marker, lookahead);
@@ -306,9 +301,12 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         PabloAST * la = lookahead.stream();
         if (a->getSense() == Assertion::Sense::Negative) {
             la = mPB.createNot(la);
+            if (mMain.mIndexStream) {
+                la = mPB.createAnd(la, mMain.mIndexStream);
+            }
         }
-        Marker fbyte = AdvanceMarker(marker, 1);
-        return Marker(mPB.createAnd(fbyte.stream(), la, "lookahead"), 1);
+        Marker following = AdvanceMarker(marker, 1);
+        return Marker(mPB.createAnd(following.stream(), la, "lookahead"), 1);
     }
     llvm::errs() << "lengths.second = " << lengths.second << "\n";
     RE_Compiler::UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
@@ -436,8 +434,8 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
             }
             return marker;
         }
-        if (mMain.mIndexingTransformer) {
-            auto lengths = getLengthRange(repeated, mMain.mIndexingTransformer->getIndexingAlphabet());
+        if (mMain.mIndexingAlphabet) {
+            auto lengths = getLengthRange(repeated, mMain.mIndexingAlphabet);
             //llvm::errs() << "getLengthRange(repeated, getIndexingAlphabet) = " << lengths.first << ", " << lengths.second << "\n";
             if ((lengths.first == 1) && (lengths.second == 1)) {
                 PabloAST * cc = compile(repeated).stream();
@@ -620,8 +618,8 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
             PabloAST * unbounded = mPB.createMatchStar(base, mask, "unbounded");
             return Marker(mPB.createAnd(unbounded, mMain.mIndexStream, "unbounded"), 1);
         }
-        if (mMain.mIndexingTransformer) {
-            auto lengths = getLengthRange(repeated, mMain.mIndexingTransformer->getIndexingAlphabet());
+        if (mMain.mIndexingAlphabet) {
+            auto lengths = getLengthRange(repeated, mMain.mIndexingAlphabet);
             //llvm::errs() << "getLengthRange(repeated, getIndexingAlphabet) = " << lengths.first << ", " << lengths.second << "\n";
             if ((lengths.first == 1) && (lengths.second == 1)) {
                 PabloAST * mask = compile(repeated).stream();
@@ -737,8 +735,8 @@ void RE_Compiler::addAlphabet(const cc::Alphabet * a, std::vector<pablo::PabloAS
     mAlphabetCompilers.push_back(std::move(ccc));
 }
 
-void RE_Compiler::addIndexingAlphabet(EncodingTransformer * indexingTransformer, PabloAST * indexStream) {
-    mIndexingTransformer = indexingTransformer;
+void RE_Compiler::setIndexing(const cc::Alphabet * indexingAlphabet, PabloAST * indexStream) {
+    mIndexingAlphabet = indexingAlphabet;
     mIndexStream = indexStream;
 }
     
@@ -779,7 +777,8 @@ RE_Compiler::RE_Compiler(PabloBlock * scope,
                          const cc::Alphabet * codeUnitAlphabet)
 : mEntryScope(scope)
 , mCodeUnitAlphabet(codeUnitAlphabet)
-, mIndexingTransformer(nullptr)
+, mIndexingAlphabet(nullptr)
+, mIndexStream(nullptr)
 , mWhileTest(nullptr)
 , mStarDepth(0) {
     PabloBuilder pb(mEntryScope);

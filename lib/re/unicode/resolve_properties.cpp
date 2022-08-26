@@ -13,7 +13,6 @@
 #include <re/analysis/re_inspector.h>
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
-#include <re/transforms/re_transformer.h>
 #include <re/unicode/boundaries.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjects.h>
@@ -240,13 +239,13 @@ RE * standardizeProperties(RE * r) {
 }
 
 struct SimplePropertyInliner : public RE_Transformer {
-    const unsigned MAX_CC_SIZE_TO_INLINE = 1;
+    const unsigned MAX_CC_COUNT_TO_INLINE = 1;
     const unsigned MAX_BOUNDARY_ALTS_TO_INLINE = 2;
     SimplePropertyInliner() : RE_Transformer("SimplePropertyInliner") {}
     RE * transformPropertyExpression (PropertyExpression * exp) override {
         if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
             if (CC * cc = dyn_cast<CC>(exp->getResolvedRE())) {
-                if (cc->size() <= MAX_CC_SIZE_TO_INLINE) {
+                if (cc->count() <= MAX_CC_COUNT_TO_INLINE) {
                     return cc;
                 }
             }
@@ -284,8 +283,7 @@ struct EnumBasisRequiredCollector : public RE_Inspector {
             }
         }
     }
-
-    PropertySet mEnumSet;
+    PropertySet & mEnumSet;
 };
 
 PropertySet propertiesRequiringBasisSet(RE * r) {
@@ -344,29 +342,24 @@ RE * enumeratedPropertiesToCCs(PropertySet propertyCodes, RE * r) {
     return EnumeratedPropertyMultiplexer(propertyMap).transformRE(r);
 }
 
-struct PropertyExternalizer : public RE_Transformer {
-    PropertyExternalizer() : RE_Transformer("PropertyExternalizer") {}
-    RE * transformPropertyExpression (PropertyExpression * exp) override {
-        PropertyExpression::Operator op = exp->getOperator();
-        std::string id = exp->getPropertyIdentifier();
-        std::string val_str = exp->getValueString();
-        std::string op_str = "";
-        if (op == PropertyExpression::Operator::NEq) op_str = "!=";
-        val_str = op_str + val_str;
-        Name * externName;
-        if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
-            if (val_str == "")
-                externName = makeName(id);
-            else externName = makeName(id, val_str);
-        } else {
-            id = "\\b{" + id + "}";
-            if (val_str == "" ) externName = makeName(id);
-            else externName = makeName(id, val_str);
-        }
-        externName->setDefinition(exp->getResolvedRE());
-        return externName;
+PropertyExternalizer::PropertyExternalizer() :
+    NameIntroduction("PropertyExternalizer") {}
+
+RE * PropertyExternalizer::transformPropertyExpression (PropertyExpression * exp) {
+    PropertyExpression::Operator op = exp->getOperator();
+    std::string id = exp->getPropertyIdentifier();
+    std::string val_str = exp->getValueString();
+    std::string op_str = val_str == "" ? "" : ":";
+    if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
+    RE * defn = exp->getResolvedRE();
+    std::string theName = id + op_str + val_str;
+    if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
+        return createName(theName, defn);
+    } else {
+        theName = "\\b{" + theName + "}";
+        return createName(theName, defn);
     }
-};
+}
 
 RE * externalizeProperties(RE * r) {
     return PropertyExternalizer().transformRE(r);
@@ -375,7 +368,7 @@ RE * externalizeProperties(RE * r) {
 struct AnyExternalizer : public RE_Transformer {
     AnyExternalizer() : RE_Transformer("AnyExternalizer") {}
     RE * transformAny(Any * a) override {
-        Name * externName = makeName("Any");
+        Name * externName = makeName("u8index");
         externName->setDefinition(a);
         return externName;
     }
@@ -388,8 +381,6 @@ RE * externalizeAnyNodes(RE * r) {
 RE * linkAndResolve(RE * r, GrepLinesFunctionType grep) {
     RE * linked = linkProperties(r);
     linked = promotePropertyReferences(r);
-    PropertySet ps = propertiesRequiringBasisSet(linked);
-    linked = enumeratedPropertiesToCCs(ps, linked);
     RE * std = standardizeProperties(linked);
     return resolveProperties(std, grep);
 }

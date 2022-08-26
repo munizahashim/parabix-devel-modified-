@@ -21,9 +21,8 @@ public:
 protected:
     EncodingTransformer(std::string transformationName,
                         const cc::Alphabet * indexingAlphabet,
-                        const cc::Alphabet * encodingAlphabet,
-                        NameTransformationMode m = NameTransformationMode::None) :
-    RE_Transformer(transformationName, m),
+                        const cc::Alphabet * encodingAlphabet) :
+    RE_Transformer(transformationName),
     mIndexingAlphabet(indexingAlphabet),
     mEncodingAlphabet(encodingAlphabet) {}
 protected:
@@ -33,7 +32,7 @@ protected:
 
 class UTF8_Transformer : public EncodingTransformer {
 public:
-    UTF8_Transformer(NameTransformationMode m = NameTransformationMode::None);
+    UTF8_Transformer();
 protected:
     RE * transformAny(Any * a) override;
     RE * transformCC(CC * cc) override;
@@ -44,7 +43,7 @@ private:
     UTF_Encoder mEncoder;
 };
 
-RE * toUTF8(RE * r, bool convertName = false);
+RE * toUTF8(RE * r, bool convertNameAndAny = false);
 }
 
 #endif // TO_UTF8_H

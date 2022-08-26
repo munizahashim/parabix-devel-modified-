@@ -56,9 +56,9 @@ public:
 private:
     RE * mAnchorRE;
 };
- 
-RE * resolveAnchors(RE * r, RE * breakRE) {
-    return AnchorResolution(breakRE).transformRE(r);
+
+RE * resolveAnchors(RE * r, RE * breakRE, NameTransformationMode m) {
+    return AnchorResolution(breakRE).transformRE(r, m);
 }
-                                                        
+
 }

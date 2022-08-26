@@ -6,6 +6,8 @@
 #include <llvm/Support/Compiler.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjects.h>
+#include <re/transforms/name_intro.h>
+#include <re/transforms/re_transformer.h>
 
 namespace re {
     class RE;
@@ -45,6 +47,13 @@ PropertySet propertiesRequiringBasisSet(re::RE * r);
 re::RE * enumeratedPropertiesToCCs(PropertySet propertyCodes, re::RE * r);
 
 /*  Create named externals for all property expressions.  */
+class PropertyExternalizer : public re::NameIntroduction {
+public:
+    PropertyExternalizer();
+protected:
+    re::RE * transformPropertyExpression (re::PropertyExpression * exp) override;
+};
+
 re::RE * externalizeProperties(re::RE * r);
 
 /*  Create named external for Any nodes.  */

@@ -44,8 +44,6 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
     r = removeUnneededCaptures(r);
     r = UCD::inlineSimpleProperties(r);
     //r = resolveBoundaryProperties(r);
-    r = UCD::externalizeProperties(r);
-    //r = grep::resolveUnicodeNames(r); // use full name resolution
     validateNamesDefined(r);
     if (UnicodeLevel2IsSet() && validateAlphabet(&cc::Unicode, r)) {
         r = UCD::toNFD(r);
@@ -54,7 +52,7 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
     }
     r = resolveCaseInsensitiveMode(r, globallyCaseInsensitive);
     //r = expandBoundaryAssertions(r);
-    r = simplifyAssertions(r);
+    //r = simplifyAssertions(r);
     //r = lookaheadPromotion(r);
     return r;
 }

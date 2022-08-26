@@ -12,7 +12,6 @@
 #include <pablo/builder.hpp>
 #include <re/adt/adt.h>              // for Seq
 #include <re/alphabet/alphabet.h>
-#include <re/transforms/to_utf8.h>
 
 namespace cc { class CC_Compiler; class Alphabet;}
 namespace pablo { class PabloAST; }
@@ -95,9 +94,10 @@ class RE_Compiler {
     //
     class ExternalStream {
     public:
-        ExternalStream(Marker m, std::pair<int, int> lengthRange) :
-            mMarker(m), mLengthRange(lengthRange) {}
+        ExternalStream(Marker m, std::pair<int, int> lgthRange) :
+            mMarker(m), mLengthRange(lgthRange) {}
         ExternalStream & operator = (const ExternalStream &) = default;
+        std::pair<int, int> lengthRange() {return mLengthRange;}
         unsigned minLength() {return mLengthRange.first;}
         unsigned maxLength() {return mLengthRange.second;}
         Marker & marker() {return mMarker;}
@@ -111,7 +111,7 @@ class RE_Compiler {
     RE_Compiler(pablo::PabloBlock * scope,
                 const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
 
-    void addIndexingAlphabet(EncodingTransformer * indexingTransformer, pablo::PabloAST * idxStream);
+    void setIndexing(const cc::Alphabet * indexingAlphabet, pablo::PabloAST * idxStream);
     
     //
     // The CCs (character classes) within a regular expression are generally
@@ -143,7 +143,7 @@ private:
     using ExternalNameMap = std::map<std::string, ExternalStream>;
     pablo::PabloBlock * const                       mEntryScope;
     const cc::Alphabet *                            mCodeUnitAlphabet;
-    EncodingTransformer *                           mIndexingTransformer;
+    const cc::Alphabet *                            mIndexingAlphabet;
     pablo::PabloAST *                               mIndexStream;
     std::vector<const cc::Alphabet *>               mAlphabets;
     std::vector<std::vector<pablo::PabloAST *>>     mBasisSets;

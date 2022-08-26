@@ -28,8 +28,8 @@ void updateCaptures(RE * re, CapturePostfixMap & cm) {
 
 void update1reference(Reference * ref, CapturePostfixMap & cm, ReferenceInfo & info) {
     std::string refName = ref->getName();
+    std::string instanceName = ref->getInstanceName();
     auto f = cm.find(refName);
-    std::string instanceName = refName + std::to_string(ref->getInstance());
     if (f != cm.end()) {
         RE * twixt = makeSeq(f->second.begin(), f->second.end());
         info.twixtREs.emplace(instanceName, twixt);

@@ -26,7 +26,8 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        PreDefined, PropertyExternal, CC_External, RE_External, Reference_External,
+        PreDefined, PropertyExternal, CC_External, RE_External, StartAnchored,
+        Reference_External,
         WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed
     };
     inline Kind getKind() const {
@@ -110,16 +111,35 @@ public:
         return false;
     }
     RE_External(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mOffset(1), mIndexAlphabet(a) {}
+        ExternalStreamObject(Kind::RE_External, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
-    // RE_Externals are compiled using the ICgrep kernel, which returns offset 1.
     int getOffset() override {return mOffset;}
 private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;
-    unsigned mOffset;
     const cc::Alphabet * mIndexAlphabet;
+    unsigned mOffset;
+};
+
+class StartAnchoredExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::StartAnchored;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    StartAnchoredExternal(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::StartAnchored, name, {"u8_basis"}), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    std::pair<int, int> getLengthRange() override;
+    int getOffset() override {return mOffset;}
+private:
+    grep::GrepEngine *  mGrepEngine;
+    re::RE * mRE;
+    const cc::Alphabet * mIndexAlphabet;
+    unsigned mOffset;
 };
 
 class Reference_External : public ExternalStreamObject {
@@ -131,7 +151,7 @@ public:
         return false;
     }
     Reference_External(re::ReferenceInfo & refInfo, re::Reference * ref) :
-        ExternalStreamObject(Kind::Reference_External, ref->getName(), {"u8_basis"}),
+        ExternalStreamObject(Kind::Reference_External, ref->getName(), {"u21_basis"}),
         mRefInfo(refInfo), mRef(ref) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
@@ -147,14 +167,14 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    GraphemeClusterBreak(re::UTF8_Transformer * t) :
+    GraphemeClusterBreak(grep::GrepEngine * engine) :
         ExternalStreamObject(Kind::GraphemeClusterBreak, "\\b{g}",
-                             {"u8_basis", "u8index"}), mUTF8_transformer(t) {}
+                             {}), mGrepEngine(engine)  {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
     int getOffset() override {return 1;}
 private:
-    re::UTF8_Transformer * mUTF8_transformer;
+    grep::GrepEngine *  mGrepEngine;
 };
 
 class WordBoundaryExternal : public ExternalStreamObject {
@@ -180,9 +200,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    PropertyBasisExternal(ProgBuilderRef b, StreamSet * input, UCD::property_t p) :
-    ExternalStreamObject(Kind::PropertyBasis, basisName(p), {"u8_basis"}), mProperty(p) {}
-    static std::string basisName(UCD::property_t p);
+    PropertyBasisExternal(UCD::property_t p) :
+    ExternalStreamObject(Kind::PropertyBasis,
+                         "UCD:" + getPropertyFullName(p) + "_basis",
+                         {"u8_basis"}), mProperty(p) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     UCD::property_t mProperty;
@@ -215,8 +236,8 @@ class GrepKernelOptions {
     friend class ICGrepKernel;
 public:
     using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
-    GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8, re::EncodingTransformer * encodingTransformer = nullptr);
-    void setIndexingTransformer(re::EncodingTransformer *, StreamSet * indexStream);
+    GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
+    void setIndexing(StreamSet * indexStream);
     void setSource(StreamSet * s);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
@@ -237,7 +258,6 @@ protected:
 private:
 
     const cc::Alphabet *        mCodeUnitAlphabet;
-    re::EncodingTransformer *   mEncodingTransformer;
     StreamSet *                 mSource = nullptr;
     StreamSet *                 mIndexStream = nullptr;
     GrepCombiningType           mCombiningType = GrepCombiningType::None;
@@ -356,11 +376,50 @@ private:
 };
 
 void GraphemeClusterLogic(ProgBuilderRef P,
-                          re::UTF8_Transformer * t,
                           StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream);
 
 void WordBoundaryLogic(ProgBuilderRef P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream);
+
+//  Find longest-match spans in start-end space.   Each 0 bit in start-end space
+//  marks the occurrence of a necessary prefix of the RE, while each 1 bit marks
+//  an actual match end for the full RE.  The results produced are (a) the start
+//  position immediately preceding a full match, and (b) the longest full match
+//  corresponding to that start position.
+//  For example:
+//  start-end stream:  00111110001100101000100
+//  (a) starts:        .1.......1...1.1...1...
+//  (b) longest end:   ......1....1..1.1...1..
+//  The input in a singleton streamset for the start-end marks.
+//  The output is a set of two streams for the start and longest end marks, respectively.
+
+class LongestMatchMarks final : public pablo::PabloKernel {
+public:
+    LongestMatchMarks(BuilderRef b, StreamSet * start_ends, StreamSet * marks);
+protected:
+    void generatePabloMethod() override;
+};
+
+//  Compute match spans given a pair of streams marking a fixed prefix position
+//  of the match, as well as the final position of the match.   The prefix
+//  may be at an offset from the actual start position of the match.
+//  For example, the pair of input streams:
+//  prefix:  ...1......1.......1.....
+//  final:   .....1.....1......1.....
+//  the spans computed with a start offset of 2 are:
+//  spans    .11111..1111....111.....
+//
+class InclusiveSpans final : public pablo::PabloKernel {
+public:
+    InclusiveSpans(BuilderRef b, StreamSet * marks, StreamSet * spans, unsigned start_offset);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mOffset;
+};
+
+void PrefixSuffixSpan(ProgBuilderRef P,
+                      StreamSet * Prefix, StreamSet * Suffix, StreamSet * Spans, unsigned offset = 0);
 
 }
 #endif
