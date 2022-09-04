@@ -454,12 +454,7 @@ StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
     }
     ExternalStreamObject * ext = f->second;
     if (!ext->isResolved()) {
-        std::vector<std::string> paramNames = ext->getInputNames();
-        std::vector<StreamSet *> paramStreams;
-        for (auto & n : paramNames) {
-            paramStreams.push_back(resolveExternal(P, n));
-        }
-        ext->resolveStreamSet(P, paramStreams);
+        ext->resolveStreamSet(P, mExternalMap);
     }
     return ext->getStreamSet();
 }
