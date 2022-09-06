@@ -64,14 +64,22 @@ namespace kernel {
 ExternalStreamObject::Allocator ExternalStreamObject::mAllocator;
 }
 
-StreamSet * lookupStreamSet(ProgBuilderRef b, ExternalMapRef m, std::string ssname) {
-    auto f = m.find(ssname);
-    if (f == m.end()) {
-        report_fatal_error("Cannot get StreamSet " + ssname);
+void ExternalStreamTable::emplace(std::string externalName, ExternalStreamObject * ext) {
+    mExternalMap.emplace(externalName, ext);
+}
+
+ExternalStreamObject * ExternalStreamTable::lookup(std::string ssname) {
+    auto f = mExternalMap.find(ssname);
+    if (f == mExternalMap.end()) {
+        report_fatal_error("Cannot get external stream object " + ssname);
     }
-    ExternalStreamObject * ext = f->second;
+    return f->second;
+}
+
+StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, std::string ssname) {
+    ExternalStreamObject * ext = lookup(ssname);
     if (!ext->isResolved()) {
-        ext->resolveStreamSet(b, m);
+        ext->resolveStreamSet(b, this);
     }
     return ext->getStreamSet();
 }
@@ -102,14 +110,14 @@ void ExternalStreamObject::installStreamSet(ProgBuilderRef b, StreamSet * s) {
 
 void PropertyExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     StreamSet * pStrm  = b->CreateStreamSet(1);
-    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, lookupStreamSet(b, m, "u8_basis"), pStrm);
+    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, m->getStreamSet(b, "u8_basis"), pStrm);
     installStreamSet(b, pStrm);
 }
 
 void CC_External::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     StreamSet * ccStrm = b->CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
-    b->CreateKernelCall<CharClassesKernel>(ccs, lookupStreamSet(b, m, "u8_basis"), ccStrm);
+    b->CreateKernelCall<CharClassesKernel>(ccs, m->getStreamSet(b, "u8_basis"), ccStrm);
     installStreamSet(b, ccStrm);
 }
 std::pair<int, int> RE_External::getLengthRange() {
@@ -120,7 +128,7 @@ void RE_External::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
     // Inputs to RE compiler are already adjusted to the correct index stream.
     setIndexing(b, nullptr);
-    mOffset = mGrepEngine->RunGrep(b, mRE, lookupStreamSet(b, m, "u8_basis"), reStrm);
+    mOffset = mGrepEngine->RunGrep(b, mRE, m->getStreamSet(b, "u8_basis"), reStrm);
     installStreamSet(b, reStrm);
 }
 
@@ -132,7 +140,7 @@ void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m)
     StreamSet * reStrm  = b->CreateStreamSet(1);
     // Inputs to RE compiler are already adjusted to the correct index stream.
     setIndexing(b, nullptr);
-    mOffset = mGrepEngine->RunGrep(b, mRE, lookupStreamSet(b, m, "u8_basis"), reStrm);
+    mOffset = mGrepEngine->RunGrep(b, mRE, m->getStreamSet(b, "u8_basis"), reStrm);
     installStreamSet(b, reStrm);
 }
 
@@ -147,14 +155,14 @@ void Reference_External::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     auto rg2 = re::getLengthRange(mapping->second, &cc::Unicode);
     int dist = rg1.first + rg2.first;
     StreamSet * distStrm = b->CreateStreamSet(1);
-    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, lookupStreamSet(b, m, "u21_basis"), distStrm);
+    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, m->getStreamSet(b, "u21_basis"), distStrm);
     installStreamSet(b, distStrm);
 }
 
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     if (mProperty == UCD::identity) {
         StreamSet * u21 = b->CreateStreamSet(21);
-        b->CreateKernelCall<UTF8_Decoder>(lookupStreamSet(b, m, "u8_basis"), u21);
+        b->CreateKernelCall<UTF8_Decoder>(m->getStreamSet(b, "u8_basis"), u21);
         installStreamSet(b, u21);
     } else {
         UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
@@ -163,7 +171,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m)
             std::vector<re::CC *> ccs;
             for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
             StreamSet * basis = b->CreateStreamSet(ccs.size());
-            b->CreateKernelCall<CharClassesKernel>(ccs, lookupStreamSet(b, m, "u8_basis"), basis);
+            b->CreateKernelCall<CharClassesKernel>(ccs, m->getStreamSet(b, "u8_basis"), basis);
             installStreamSet(b, basis);
         }
     }
@@ -172,7 +180,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m)
 void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     auto mpx_basis = mAlphabet->getMultiplexedCCs();
     StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
-    b->CreateKernelCall<CharClassesKernel>(mpx_basis, lookupStreamSet(b, m, "u8_basis"), u8CharClasses);
+    b->CreateKernelCall<CharClassesKernel>(mpx_basis, m->getStreamSet(b, "u8_basis"), u8CharClasses);
     installStreamSet(b, u8CharClasses);
 }
 
@@ -183,13 +191,13 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) 
     GCB_RE = UCD::externalizeProperties(GCB_RE);
     setIndexing(b, nullptr);
     mGrepEngine->RunGrep(b, GCB_RE, nullptr, GCBstream);
-    //GraphemeClusterLogic(b, mUTF8_transformer, lookupStreamSet(b, m, "u8_basis"), inputs[1], GCBstream);
+    //GraphemeClusterLogic(b, mUTF8_transformer, m->getStreamSet(b, "u8_basis"), inputs[1], GCBstream);
     installStreamSet(b, GCBstream);
 }
 
 void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) {
     StreamSet * wb = b->CreateStreamSet(1);
-    WordBoundaryLogic(b, lookupStreamSet(b, m, "u8_basis"), lookupStreamSet(b, m, "u8index"), wb);
+    WordBoundaryLogic(b, m->getStreamSet(b, "u8_basis"), m->getStreamSet(b, "u8index"), wb);
     installStreamSet(b, wb);
 }
 

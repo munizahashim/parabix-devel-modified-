@@ -23,7 +23,17 @@ namespace kernel {
 using ProgBuilderRef = const std::unique_ptr<ProgramBuilder> &;
 
 class ExternalStreamObject;
-using ExternalMapRef = std::map<std::string, ExternalStreamObject *> &;
+class ExternalStreamTable {
+public:
+    ExternalStreamTable() {}
+    void emplace(std::string externalName, ExternalStreamObject * ext);
+    ExternalStreamObject * lookup(std::string externalName);
+    StreamSet * getStreamSet(ProgBuilderRef b, std::string externalName);
+private:
+    std::map<std::string, ExternalStreamObject *> mExternalMap;
+};
+
+using ExternalMapRef = ExternalStreamTable *;
 
 class ExternalStreamObject {
 public:
