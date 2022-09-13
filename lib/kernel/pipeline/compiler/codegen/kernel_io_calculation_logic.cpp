@@ -860,7 +860,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     Value * priorBufferPtr = nullptr;
-    if (isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+    if (buffer->isDynamic() && (mNumOfThreads != 1 || mIsNestedPipeline)) {
         // delete any old buffer if one exists
         priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
         Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
@@ -914,7 +914,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // which could result in free'ing the "old" buffer twice.
 
     Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
-    if (isa<DynamicBuffer>(buffer)) {
+    if (buffer->isDynamic()) {
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, outputPort, buffer);
         }

@@ -1038,7 +1038,7 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                 const auto prefix = makeBufferName(p, rd.Port);
                 const StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
 
-                if (isa<DynamicBuffer>(buffer)) {
+                if (buffer->isDynamic()) {
                     Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     Type * const traceTy = traceData->getType()->getPointerElementType();
                     Type * const entryTy =  traceTy->getStructElementType(0)->getPointerElementType();
@@ -1066,7 +1066,7 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
 void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSetPort outputPort,
                                                     const StreamSetBuffer * const buffer) const {
 
-    assert (mTraceDynamicBuffers && isa<DynamicBuffer>(buffer));
+    assert (mTraceDynamicBuffers && buffer->isDynamic());
 
     const auto prefix = makeBufferName(mKernelId, outputPort);
 
@@ -1233,7 +1233,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
                 const BufferPort & br = mBufferGraph[output];
                 const auto buffer = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[buffer];
-                if (isa<DynamicBuffer>(bn.Buffer)) {
+                if (bn.Buffer->isDynamic()) {
 
                     //  # KERNEL                      PORT                      BUFFER         SEG #      ITEM CAPACITY
 

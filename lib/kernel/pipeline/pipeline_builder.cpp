@@ -361,6 +361,9 @@ Kernel * PipelineBuilder::makeKernel() {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
             out << "-TL";
         }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
+            out << "+AML";
+        }
     }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {

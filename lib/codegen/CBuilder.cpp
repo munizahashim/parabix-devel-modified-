@@ -572,16 +572,16 @@ void CBuilder::CreateFree(Value * const ptr) {
     }
 }
 
-Value * CBuilder::CreateAnonymousMMap(Value * size) {
+Value * CBuilder::CreateAnonymousMMap(Value * size, const unsigned flags) {
     PointerType * const voidPtrTy = getVoidPtrTy();
     IntegerType * const intTy = getInt32Ty();
     IntegerType * const sizeTy = getSizeTy();
     size = CreateZExtOrTrunc(size, sizeTy);
     ConstantInt * const prot =  ConstantInt::get(intTy, PROT_READ | PROT_WRITE);
-    ConstantInt * const flags =  ConstantInt::get(intTy, MAP_PRIVATE | MAP_ANON);
-    ConstantInt * const fd =  ConstantInt::get(intTy, -1);
+    ConstantInt * const intflags =  ConstantInt::get(intTy, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | flags);
+    ConstantInt * const fd =  ConstantInt::get(intTy, -1ULL);
     Constant * const offset = ConstantInt::get(sizeTy, 0);
-    return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, flags, fd, offset);
+    return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, intflags, fd, offset);
 }
 
 Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
@@ -598,23 +598,68 @@ Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
 
 Value * CBuilder::CreateMMap(Value * const addr, Value * size, Value * const prot, Value * const flags, Value * const fd, Value * const offset) {
     Module * const m = getModule();
-    PointerType * const voidPtrTy = getVoidPtrTy();
-    IntegerType * const intTy = getInt32Ty();
-    IntegerType * const sizeTy = getSizeTy();
-    FunctionType * fty = FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy, intTy, intTy, intTy, sizeTy}, false);
     Function * fMMap = m->getFunction("mmap");
     if (LLVM_UNLIKELY(fMMap == nullptr)) {
+        PointerType * const voidPtrTy = getVoidPtrTy();
+        IntegerType * const intTy = getInt32Ty();
+        IntegerType * const sizeTy = getSizeTy();
+        FunctionType * fty = FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy, intTy, intTy, intTy, sizeTy}, false);
         fMMap = Function::Create(fty, Function::ExternalLinkage, "mmap", m);
     }
-    Value * ptr = CreateCall(fty, fMMap, {addr, size, prot, flags, fd, offset});
+    FixedArray<Value *, 6> args;
+    args[0] = addr;
+    args[1] = size;
+    args[2] = prot;
+    args[3] = flags;
+    args[4] = fd;
+    args[5] = offset;
+
+    Value * ptr = CreateCall(fMMap->getFunctionType(), fMMap, args);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(m);
         IntegerType * const intTy = getIntPtrTy(DL);
-        Value * success = CreateICmpNE(CreatePtrToInt(addr, intTy), ConstantInt::getAllOnesValue(intTy)); // MAP_FAILED = -1
+        Value * success = CreateICmpNE(CreatePtrToInt(addr, intTy), ConstantInt::get(intTy, (uint64_t)MAP_FAILED));
         CreateAssert(success, "CreateMMap: mmap failed to allocate memory");
     }
     return ptr;
 }
+
+Value * CBuilder::CreateMemFdCreate(Value * const name, Value * const flags) {
+    Module * const m = getModule();
+    Function * fShmOpen = m->getFunction("memfd_create");
+    if (LLVM_UNLIKELY(fShmOpen == nullptr)) {
+        IntegerType * const intTy = getInt32Ty();
+        FunctionType * fty = FunctionType::get(intTy, {getInt8PtrTy(), intTy}, false);
+        fShmOpen = Function::Create(fty, Function::ExternalLinkage, "memfd_create", m);
+    }
+    Value * retVal = CreateCall(fShmOpen->getFunctionType(), fShmOpen, {name, flags});
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        DataLayout DL(m);
+        Value * success = CreateICmpNE(retVal, ConstantInt::get(getInt32Ty(), -1ULL));
+        CreateAssert(success, "CreateMemFdCreate: failed to create anonymous memory file");
+    }
+    return retVal;
+}
+
+
+Value * CBuilder::CreateFTruncate(Value * const fd, Value * size) {
+    Module * const m = getModule();
+    Function * fTruncate = m->getFunction("ftruncate");
+    if (LLVM_UNLIKELY(fTruncate == nullptr)) {
+        IntegerType * const intTy = getInt32Ty();
+        IntegerType * const offTy = getIntNTy(sizeof(off_t) * 8);
+        FunctionType * fty = FunctionType::get(intTy, {intTy, offTy}, false);
+        fTruncate = Function::Create(fty, Function::ExternalLinkage, "ftruncate", m);
+    }
+    Value * retVal = CreateCall(fTruncate->getFunctionType(), fTruncate, {fd, size});
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        DataLayout DL(m);
+        Value * success = CreateICmpNE(retVal, ConstantInt::get(getInt32Ty(), -1ULL));
+        CreateAssert(success, "CreateFTruncate: failed to truncate fd");
+    }
+    return retVal;
+}
+
 
 /**
  * @brief CBuilder::CreateMAdvise

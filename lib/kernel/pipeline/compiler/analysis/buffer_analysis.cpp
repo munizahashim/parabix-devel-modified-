@@ -824,6 +824,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
     const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+    const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
@@ -844,6 +845,9 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
             // analyze any consumption rates.
 
+
+
+
             if (bn.Locality == BufferLocality::GloballyShared) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
@@ -854,7 +858,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                 bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
                 #endif
-                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                if (useMMap) {
+                    buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                } else {
+                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                }
+
+
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal) {

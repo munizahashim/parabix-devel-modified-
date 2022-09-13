@@ -241,7 +241,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto bufferVertex = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[bufferVertex];
-            if (isa<DynamicBuffer>(bn.Buffer)) {
+            if (bn.Buffer->isDynamic()) {
                 const BufferPort & rd = mBufferGraph[e];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b->getContext();
