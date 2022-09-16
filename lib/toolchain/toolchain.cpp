@@ -42,21 +42,17 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
                         clEnumVal(TraceProducedItemCounts, "Trace produced item count deltas over segments."),
                         clEnumVal(TraceUnconsumedItemCounts, "Trace unconsumed item counts over segments."),
-
                         clEnumVal(GenerateTransferredItemCountHistogram, "Generate a histogram CSV of each non-Fixed port detailing "
                                                                          "the transfered item count per executed stride."),
-
                         clEnumVal(GenerateDeferredItemCountHistogram, "Generate a histogram CSV of each deferred port detailing "
                                                                       "the difference between the deferred and total item count "
                                                                       "per executed stride."),
                         #ifdef ENABLE_CERN_ROOT
-
                         clEnumVal(AnalyzeTransferredItemCounts, "Generate a histogram CSV of each non-Fixed port detailing "
-                                                                        "the transfered item count per executed stride."),
-
+                                                                "the transfered item count per executed stride."),
                         clEnumVal(AnalyzeDeferredItemCounts, "Generate a histogram CSV of each deferred port detailing "
-                                                                     "the difference between the deferred and total item count "
-                                                                     "per executed stride."),
+                                                             "the difference between the deferred and total item count "
+                                                             "per executed stride."),
                         #endif
 
                         clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
@@ -70,6 +66,9 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
 
+                        clEnumVal(AllowUnsafeFileIO, "Force the MMap and Memory source kernel to always provide raw file data "
+                                                     "to the system instead of allocating a safe buffer for the final stride. "
+                                                     "Can improve performance at the cost of potential segfaults."),
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
                         #endif
@@ -271,7 +270,7 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;
     if (IllustratorDisplay > 0) return true;
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (ShowASMOption != OmittedOption) return true;
     #endif
     if (pablo::ShowPabloOption != OmittedOption) return true;
