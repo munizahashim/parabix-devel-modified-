@@ -9,7 +9,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/re_cc.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <unicode/core/unicode_set.h>
 
@@ -141,7 +141,8 @@ unsigned long MultiplexedAlphabet::findTargetCCIndex(const re::CC * sourceCC) co
             return i;
         }
     }
-    llvm::report_fatal_error(Printer_RE::PrintRE(sourceCC) + " not found");
+    // llvm::report_fatal_error(Printer_RE::PrintRE(sourceCC) + " not found");
+    llvm_unreachable("sourceCC not found");
 }
 
 re::CC * MultiplexedAlphabet::transformCC(const re::CC * sourceCC) const {

@@ -9,7 +9,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <re/adt/adt.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/toolchain/toolchain.h>
 
 namespace re {

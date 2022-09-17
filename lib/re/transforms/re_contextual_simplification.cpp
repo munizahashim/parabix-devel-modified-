@@ -11,7 +11,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/analysis/validation.h>
 #include <re/analysis/re_analysis.h>
 

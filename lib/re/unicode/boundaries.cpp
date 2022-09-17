@@ -2,7 +2,7 @@
 
 #include <re/adt/adt.h>
 #include <re/adt/re_name.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/analysis/validation.h>
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/re_name_resolve.h>

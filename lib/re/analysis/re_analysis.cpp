@@ -4,7 +4,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
-#include <re/adt/printer_re.h>
+#include <re/printer/re_printer.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
@@ -17,87 +17,6 @@
 using namespace llvm;
 
 namespace re {
-
-bool matchesEmptyString(const RE * re) {
-    if (const Alt * alt = dyn_cast<Alt>(re)) {
-        for (const RE * re : *alt) {
-            if (matchesEmptyString(re)) {
-                return true;
-            }
-        }
-        return false;
-    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
-        for (const RE * re : *seq) {
-            if (!matchesEmptyString(re)) {
-                return false;
-            }
-        }
-        return true;
-    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
-        return (rep->getLB() == 0) || matchesEmptyString(rep->getRE());
-    } else if (isa<Start>(re)) {
-        return true;
-    } else if (isa<End>(re)) {
-        return true;
-    } else if (isa<Assertion>(re)) {
-        return false;
-    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
-        return matchesEmptyString(diff->getLH()) && !matchesEmptyString(diff->getRH());
-    } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
-        return matchesEmptyString(e->getLH()) && matchesEmptyString(e->getRH());
-    } else if (isa<Any>(re)) {
-        return false;
-    } else if (isa<CC>(re)) {
-        return false;
-    } else if (const Group * g = dyn_cast<Group>(re)) {
-        return matchesEmptyString(g->getRE());
-    } else if (const Name * n = dyn_cast<Name>(re)) {
-        return matchesEmptyString(n->getDefinition());
-    } else if (const Capture * c = dyn_cast<Capture>(re)) {
-        return matchesEmptyString(c->getCapturedRE());
-    }
-    return false; // otherwise
-}
-
-const CC* matchableCodepoints(const RE * re) {
-    if (const CC * cc = dyn_cast<CC>(re)) {
-        return cc;
-    } else if (const Alt * alt = dyn_cast<Alt>(re)) {
-        CC * matchable = makeCC();
-        for (const RE * re : *alt) {
-            matchable = makeCC(matchable, matchableCodepoints(re));
-        }
-        return matchable;
-    } else if (const Seq * seq = dyn_cast<Seq>(re)) {
-        CC * matchable = makeCC();
-        bool pastCC = false;
-        for (const RE * re : *seq) {
-            if (pastCC) {
-                if (!(isa<End>(re) || matchesEmptyString(re))) return makeCC();
-            }
-            else if (isa<End>(re)) return makeCC();
-            else {
-                matchable = makeCC(matchable, matchableCodepoints(re));
-                pastCC = !matchesEmptyString(re);
-            }
-        }
-        return matchable;
-    } else if (const Rep * rep = dyn_cast<Rep>(re)) {
-        if ((rep->getLB() <= 1) || matchesEmptyString(rep->getRE())) {
-            return matchableCodepoints(rep->getRE());
-        }
-        else return makeCC();
-    } else if (const Diff * diff = dyn_cast<Diff>(re)) {
-        return subtractCC(matchableCodepoints(diff->getLH()), matchableCodepoints(diff->getRH()));
-    } else if (const Intersect * e = dyn_cast<Intersect>(re)) {
-        return intersectCC(matchableCodepoints(e->getLH()), matchableCodepoints(e->getRH()));
-    } else if (isa<Any>(re)) {
-        return makeCC(0, 0x10FFFF);
-    } else if (const Name * n = dyn_cast<Name>(re)) {
-        return matchableCodepoints(n->getDefinition());
-    }
-    return makeCC(); // otherwise = Start, End, Assertion
-}
 
 bool isUnicodeUnitLength(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {

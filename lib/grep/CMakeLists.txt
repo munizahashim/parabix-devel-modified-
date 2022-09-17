@@ -23,5 +23,6 @@ DEPS
     re.parse
     re.unicode
     re.transforms
+    re.printer
     unicode.data
 )

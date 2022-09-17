@@ -16,5 +16,6 @@ SRC
 DEPS
     re.compile
     re.parse
+    re.printer
     unicode.data
 )

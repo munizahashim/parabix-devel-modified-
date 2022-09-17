@@ -49,4 +49,5 @@ SRC
     emoji-data.cpp
 DEPS
     unicode.core
+    re.adt
 )

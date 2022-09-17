@@ -161,6 +161,11 @@ inline CC * makeByte(const codepoint_t codepoint) {
 inline CC * makeByte(const codepoint_t lo, const codepoint_t hi) {
     return new CC(lo, hi, &cc::Byte);
 }
+
+//  Determine the set of all codepoints cp such that the given RE
+//  matches a string consisting of a single Unicode character whose
+//  codepoint value is cp.
+const CC * matchableCodepoints(const RE * re);
     
 }
 

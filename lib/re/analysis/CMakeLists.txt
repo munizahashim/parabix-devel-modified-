@@ -18,4 +18,6 @@ SRC
     validation.cpp
 DEPS
     re.adt
+    re.printer
+    unicode.utf
 )

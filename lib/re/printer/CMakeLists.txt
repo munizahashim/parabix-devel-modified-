@@ -1,15 +1,14 @@
 # Copyright (c) 2019 International Characters.
 # This software is licensed to the public under the Open Software License 3.0.
 
-# module: kernel.basis
+# module: re.printer
 
 parabix_add_module(
 NAME
-    kernel.basis
+    re.printer
 SRC
-    p2s_kernel.cpp
-    s2p_kernel.cpp
+    re_printer.cpp
 DEPS
-    kernel.pipeline
-    pablo
+    re.adt
+    unicode.data
 )

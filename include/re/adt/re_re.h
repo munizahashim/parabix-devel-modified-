@@ -72,6 +72,10 @@ protected:
     }
 };
 
+// Does the RE match the empty string, considering that ^ and $ each
+// do match an empty string.
+bool matchesEmptyString(const RE * re);
+
 }
 
 #endif // RE_H
