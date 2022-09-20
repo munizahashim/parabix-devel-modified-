@@ -432,7 +432,6 @@ int main(int argc, char *argv[]) {
         for(unsigned i=0; i< pattGroups.size(); i++){
             auto editd = editdPipeline(pxDriver, pattGroups[i]);
             editd(chStream);
-            break;
         }
     }
 

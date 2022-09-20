@@ -349,6 +349,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     const auto enableAsserts = codegen::DebugOptionIsSet(codegen::EnableAsserts);
 
+    clearInternalStateAfterCodeGen();
+
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
         assert (mSharedHandle->getType()->getPointerElementType() == mTarget->getSharedStateType());
@@ -403,14 +405,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     // to access a stream set from a LLVM function call. We could create a stream-set aware function creation
     // and call system here but that is not an ideal way of handling this.
 
-    const auto numOfInputs = getNumOfStreamInputs();
-
-    reset(mInputIsClosed, numOfInputs);
-    reset(mProcessedInputItemPtr, numOfInputs);
-    reset(mAccessibleInputItems, numOfInputs);
-    reset(mAvailableInputItems, numOfInputs);
-  //  reset(mUpdatableProcessedInputItemPtr, numOfInputs);
-
     #ifdef CHECK_IO_ADDRESS_RANGE
     auto checkStreamRange = [&](const StreamSetBuffer * const buffer, const Binding & binding, Value * const startItemCount) {
 
@@ -445,6 +439,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     };
     #endif
 
+    const auto numOfInputs = getNumOfStreamInputs();
+
     IntegerType * const sizeTy = b->getSizeTy();
     for (unsigned i = 0; i < numOfInputs; i++) {
 
@@ -470,10 +466,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         /// processed item count
         /// ----------------------------------------------------
 
-        // NOTE: we create a redundant alloca to store the input param so that
-        // Mem2Reg can convert it into a PHINode if the item count is updated in
-        // a loop; otherwise, it will be discarded in favor of the param itself.
-
         const ProcessingRate & rate = input.getRate();
         Value * processed = nullptr;
         if (isMainPipeline || isAddressable(input)) {
@@ -489,6 +481,9 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
                 Value * const ref = b->CreateLoad(mProcessedInputItemPtr[port.Number]);
                 processed = b->CreateMulRational(ref, rate.getRate());
             }
+            // NOTE: we create a redundant alloca to store the input param so that
+            // Mem2Reg can convert it into a PHINode if the item count is updated in
+            // a loop; otherwise, it will be discarded in favor of the param itself.
             AllocaInst * const processedItems = b->CreateAllocaAtEntryPoint(sizeTy);
             b->CreateStore(processed, processedItems);
             mProcessedInputItemPtr[i] = processedItems;
@@ -521,11 +516,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     // set all of the output buffers
     const auto numOfOutputs = getNumOfStreamOutputs();
-    reset(mProducedOutputItemPtr, numOfOutputs);
-    reset(mInitiallyProducedOutputItems, numOfOutputs);    
-    reset(mWritableOutputItems, numOfOutputs);
-    reset(mConsumedOutputItems, numOfOutputs);
-    reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
 
     const auto canTerminate = canSetTerminateSignal();
 
@@ -779,15 +769,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
         b->CreateMProtect(mSharedHandle, CBuilder::Protect::READ);
     }
 
-//    const auto numOfInputs = getNumOfStreamInputs();
-
-//    for (unsigned i = 0; i < numOfInputs; i++) {
-//        if (mUpdatableProcessedInputItemPtr[i]) {
-//            Value * const items = b->CreateLoad(mProcessedInputItemPtr[i]);
-//            b->CreateStore(items, mUpdatableProcessedInputItemPtr[i]);
-//        }
-//    }
-
     const auto numOfOutputs = getNumOfStreamOutputs();
 
     for (unsigned i = 0; i < numOfOutputs; i++) {
@@ -897,6 +878,8 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
 void KernelCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
 
     assert (!mTarget->hasAttribute(AttrId::InternallySynchronized));
+
+    clearInternalStateAfterCodeGen();
 
     auto o = S.begin();
 
@@ -1500,12 +1483,8 @@ bool KernelCompiler::requiresOverflow(const Binding & binding) const {
  * @brief clearInternalStateAfterCodeGen
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::clearInternalStateAfterCodeGen() {
-    for (const auto & buffer : mStreamSetInputBuffers) {
-        buffer->setHandle(nullptr);
-    }
-    for (const auto & buffer : mStreamSetOutputBuffers) {
-        buffer->setHandle(nullptr);
-    }
+    // TODO: this function is more of a sanity check to ensure we don't have a pointer
+    // to an out-of-scope LLVM-value. It should be possible to remove it.
     mScalarFieldMap.clear();
     mSharedHandle = nullptr;
     mThreadLocalHandle = nullptr;
@@ -1516,6 +1495,23 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     mIsFinal = nullptr;
     mNumOfStrides = nullptr;
     mTerminationSignalPtr = nullptr;
+    const auto numOfInputs = getNumOfStreamInputs();
+    reset(mInputIsClosed, numOfInputs);
+    reset(mProcessedInputItemPtr, numOfInputs);
+    reset(mAccessibleInputItems, numOfInputs);
+    reset(mAvailableInputItems, numOfInputs);
+    const auto numOfOutputs = getNumOfStreamOutputs();
+    reset(mProducedOutputItemPtr, numOfOutputs);
+    reset(mInitiallyProducedOutputItems, numOfOutputs);
+    reset(mWritableOutputItems, numOfOutputs);
+    reset(mConsumedOutputItems, numOfOutputs);
+    reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+    for (const auto & buffer : mStreamSetInputBuffers) {
+        buffer->setHandle(nullptr);
+    }
+    for (const auto & buffer : mStreamSetOutputBuffers) {
+        buffer->setHandle(nullptr);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

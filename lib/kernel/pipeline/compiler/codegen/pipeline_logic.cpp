@@ -407,7 +407,7 @@ void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     initializeKernelAssertions(b);
     // verifyBufferRelationships();
     mScalarValue.reset(FirstKernel, LastScalar);
-    readPipelineIOItemCounts(b);
+   // readPipelineIOItemCounts(b);
     if (LLVM_UNLIKELY(mNumOfThreads == 0)) {
         report_fatal_error("Fatal error: cannot construct a 0-thread pipeline.");
     }

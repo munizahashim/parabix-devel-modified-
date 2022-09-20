@@ -13,6 +13,8 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 
+#if 0
+
     // TODO: this needs to be considered more: if we have multiple consumers of a pipeline input and
     // they process the input data at differing rates, how do we ensure that we always resume processing
     // at the correct position? We can store the actual item counts / delta of the consumed count
@@ -23,17 +25,17 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 
     mKernelId = PipelineInput;
 
-    // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
-    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const StreamSetPort inputPort = mBufferGraph[e].Port;
-        assert (inputPort.Type == PortType::Output);
-        Value * const available = getAvailableInputItems(inputPort.Number);
-        const auto streamSet = target(e, mBufferGraph);
-        mLocallyAvailableItems[streamSet] = available;
-        writeTransitoryConsumedItemCount(b, streamSet, available);
-    }
+//    // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
+//    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+//        const StreamSetPort inputPort = mBufferGraph[e].Port;
+//        assert (inputPort.Type == PortType::Output);
+//        Value * const available = getAvailableInputItems(inputPort.Number);
+//        const auto streamSet = target(e, mBufferGraph);
+//        mLocallyAvailableItems[streamSet] = available;
+//        writeTransitoryConsumedItemCount(b, streamSet, available);
+//    }
 
-#if 0
+
 
     // TODO: this code was originally added in to support an optimization branch
     // concept but will cause issues a general nested pipeline as there may be many

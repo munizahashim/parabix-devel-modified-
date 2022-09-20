@@ -313,18 +313,25 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
             const auto producer = source(f, mBufferGraph);
             const BufferPort & outputPort = mBufferGraph[f];
             assert (outputPort.Port.Type == PortType::Output);
-            const auto prefix = makeBufferName(producer, outputPort.Port);
-
             Value * produced = nullptr;
-            if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
-                produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            if (LLVM_UNLIKELY(producer == PipelineInput)) {
+                // the output port of the pipeline input is an input streamset of the pipeline kernel.
+                produced = getAvailableInputItems(outputPort.Port.Number);
+                writeTransitoryConsumedItemCount(b, streamSet, produced);
             } else {
-                produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                const auto prefix = makeBufferName(producer, outputPort.Port);
+                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                    produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                } else {
+                    produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                }
             }
             mLocallyAvailableItems[streamSet] = produced;
         }
     }
 }
+
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readProcessedItemCounts
