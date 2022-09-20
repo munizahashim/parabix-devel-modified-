@@ -103,6 +103,12 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
 
+        // A returned buffer never releases data.
+        const auto & bn = mBufferGraph[streamSet];
+        if (bn.isReturned()) {
+            return b->getSize(0);
+        }
+
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate.
         Value * produced = mInitiallyProducedItemCount[streamSet];

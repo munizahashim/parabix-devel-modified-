@@ -715,7 +715,7 @@ Value * StaticBuffer::expandBuffer(BuilderPtr b, Value * produced, Value * consu
                         writable, required);
     }
 
-    return b->getFalse();
+    return nullptr;
 }
 
 // Dynamic Buffer
@@ -1451,6 +1451,8 @@ Value * MMapedBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value *
     Value * const fdField = b->CreateInBoundsGEP(handle, indices);
     Value * const fd = b->CreateLoad(fdField);
     b->CreateFTruncate(fd, b->CreateMul(newCapacity, typeSize));
+
+    return nullptr;
 }
 
 

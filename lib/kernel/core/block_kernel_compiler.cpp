@@ -166,22 +166,9 @@ void BlockKernelCompiler::incrementCountableItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPopCountRateItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * BlockKernelCompiler::getPopCountRateItemCount(BuilderRef b,
-                                                      const ProcessingRate & rate) {
-    assert (rate.isPopCount() || rate.isNegatedPopCount());
-    const auto refPort = getStreamPort(rate.getReference());
-    assert (refPort.Type == PortType::Input);
-    Value * array = nullptr;
-    if (rate.isNegatedPopCount()) {
-        array = mNegatedPopCountRateArray[refPort.Number];
-    } else {
-        array = mPopCountRateArray[refPort.Number];
-    }
-    assert (array && "missing pop count array attribute");
-    Value * const currentSum = b->CreateLoad(b->CreateInBoundsGEP(array, mStrideBlockIndex));
-    Value * const priorIndex = b->CreateSub(mStrideBlockIndex, b->getSize(1));
-    Value * const priorSum = b->CreateLoad(b->CreateInBoundsGEP(array, priorIndex));
-    return b->CreateSub(currentSum, priorSum);
+Value * BlockKernelCompiler::getPopCountRateItemCount(BuilderRef /* b */,
+                                                      const ProcessingRate & /* rate */) {
+    report_fatal_error("PopCount rates are not currently supported");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

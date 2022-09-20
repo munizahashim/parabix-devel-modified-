@@ -430,7 +430,7 @@ protected:
 
 public:
 
-    llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const;
+    virtual llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const;
 
 protected:
 

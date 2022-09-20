@@ -310,7 +310,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) {
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration, Kernel::getDoSegmentFields,
-    // Kernel::setDoSegmentProperties and Kernel::getDoSegmentProperties.
+    // Kernel::setDoSegmentProperties, Kernel::getDoSegmentProperties and PipelineKernel::addOrDeclareMainFunction
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);

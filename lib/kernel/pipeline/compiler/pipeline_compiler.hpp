@@ -147,6 +147,7 @@ public:
     std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
     void runOptimizationPasses(BuilderRef b);
 
+
     static void linkPThreadLibrary(BuilderRef b);
     #ifdef ENABLE_PAPI
     static void linkPAPILibrary(BuilderRef b);
@@ -197,6 +198,7 @@ public:
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void clearInternalState(BuilderRef b);
+    void updateExternalPipelineIO(BuilderRef b);
 
 // partitioning codegen functions
 
@@ -988,10 +990,6 @@ inline LLVM_READNONE unsigned getItemWidth(const Type * ty ) {
     }
     return cast<IntegerType>(cast<FixedVectorType>(ty)->getElementType())->getBitWidth();
 }
-
-#ifndef NDEBUG
-bool isFromCurrentFunction(BuilderRef b, const Value * const value, const bool allowNull = true);
-#endif
 
 } // end of namespace
 

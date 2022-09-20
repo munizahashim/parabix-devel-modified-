@@ -77,7 +77,7 @@ public:
         return mSignature;
     }
 
-    const unsigned getNumOfThreads() const {
+    unsigned getNumOfThreads() const {
         return mNumOfThreads;
     }
 
@@ -100,6 +100,8 @@ public:
     ~PipelineKernel() override;
 
     virtual void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> &) {}
+
+    llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const final;
 
 protected:
 

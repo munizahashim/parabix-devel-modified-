@@ -21,6 +21,7 @@
 #include <util/not_null.h>
 
 namespace kernel { class KernelBuilder; }
+namespace kernel { class PipelineKernel; }
 namespace llvm { class Function; }
 namespace llvm { class IntegerType; }
 namespace llvm { class Module; }
@@ -35,6 +36,9 @@ inline bool is_power_2(const uint64_t n) {
 extern "C" void free_debug_wrapper(void * ptr);
 
 class CBuilder : public llvm::IRBuilder<> {
+
+    friend class kernel::PipelineKernel;
+
 public:
 
     CBuilder(llvm::LLVMContext & C);

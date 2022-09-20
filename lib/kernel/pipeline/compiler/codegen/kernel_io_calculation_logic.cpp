@@ -823,7 +823,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.isExternal() || bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
+    if (bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
         return;
     }
 
@@ -914,7 +914,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // which could result in free'ing the "old" buffer twice.
 
     Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
-    if (buffer->isDynamic()) {
+    if (priorBuffer) {
+        assert (buffer->isDynamic());
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, outputPort, buffer);
         }

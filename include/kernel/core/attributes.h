@@ -141,6 +141,13 @@ struct Attribute {
         // the buffers, both must be coordinated to ensure that every possible writer
         // sees the same view.
 
+        ReturnedBuffer,
+
+        // Indicates that the pipeline should not automatically deallocate the buffer upon
+        // program completion. Note this will cause a memory leak if the resulting buffers
+        // are not free'd by the user.
+
+
         Delayed,
 
         // Similar to Deferred, a consumer of a stream of N items with a Delayed attribute
@@ -410,6 +417,10 @@ inline Attribute ManagedBuffer() {
 
 inline Attribute SharedManagedBuffer() {
     return Attribute(Attribute::KindId::SharedManagedBuffer, 0);
+}
+
+inline Attribute ReturnedBuffer() {
+    return Attribute(Attribute::KindId::ReturnedBuffer, 0);
 }
 
 inline Attribute Principal() {
