@@ -35,6 +35,8 @@ To build Parabix, you need a development environment that meets a few requiremen
 - `make`
 - If you wish to run the test suite, while you are still in the build directory, run the following command:
 `make check`
+- If you run into problems with the cache directory, make sure that your home directory has a `.cache` subdirectory and that is is readable and writable.
+
 
 In the configuration above, all compiled tools will then be found on `/path/to/parabix-devel/build/bin`
 

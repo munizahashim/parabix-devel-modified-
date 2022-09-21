@@ -82,8 +82,10 @@ void REStringBuilder::buildString(const RE * re) {
         out << ')';
     } else if (const Reference * r = dyn_cast<const Reference>(re)) {
         out << "Ref \"";
-        out << r->getInstanceName();
-        const auto p = r->getReferencedProperty();
+        out << r->getName();
+        out << ".";
+        out << r->getInstance();
+        UCD::property_t p = r->getReferencedProperty();
         if (p != UCD::identity) {
             out << ":" << UCD::getPropertyFullName(p);
         }

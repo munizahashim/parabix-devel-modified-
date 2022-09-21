@@ -189,7 +189,7 @@ protected:
     Component mExternalComponents;
     Component mInternalComponents;
     const cc::Alphabet * mIndexAlphabet;
-    std::map<std::string, kernel::ExternalStreamObject *> mExternalMap;
+    kernel::ExternalStreamTable mExternalTable;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
