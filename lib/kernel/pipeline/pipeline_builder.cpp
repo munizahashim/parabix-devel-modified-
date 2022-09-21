@@ -73,7 +73,7 @@ PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) 
     // this gives me a safe workaround for the problem.
     PipelineBuilder nested(Internal{}, mDriver, pk->mInputStreamSets, pk->mOutputStreamSets, pk->mInputScalars, pk->mOutputScalars);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
-    pk->instantiateNestedPipeline(tmp);
+    pk->instantiateInternalKernels(tmp);
     tmp.release();
     initializeKernel(pk);
     pk->mKernels.swap(nested.mKernels);

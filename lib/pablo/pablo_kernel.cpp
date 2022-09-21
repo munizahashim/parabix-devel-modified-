@@ -257,7 +257,7 @@ llvm::IntegerType * PabloKernel::getInt1Ty() const {
     return IntegerType::getInt1Ty(getModule()->getContext());
 }
 
-static inline std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
+std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     if (DebugOptionIsSet(DumpTrace)) {
         name += "+Dump";
     }

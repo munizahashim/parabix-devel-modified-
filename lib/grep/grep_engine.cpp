@@ -727,7 +727,9 @@ public:
                               Scalar * const callbackObject)
         : PipelineKernel(b
                          // signature
-                         , "GrepColourization"
+                         , [&]() -> std::string {
+                             return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
+                         }()
                          // num of threads
                          , 1
                          // kernel list
@@ -757,7 +759,9 @@ public:
         // as a dataflow rate but current modelling system isn't very good for that.
     }
 
-    void instantiateNestedPipeline(const std::unique_ptr<PipelineBuilder> & E) final {
+protected:
+
+    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
         const std::string ESC = "\x1B";
         const std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         const  unsigned insertLengthBits = 4;
