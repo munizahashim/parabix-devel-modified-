@@ -1,5 +1,6 @@
 #include "../pipeline_compiler.hpp"
 #include <boost/format.hpp>
+#include <llvm/Support/Format.h>
 
 // TODO: Print Total CPU Cycles
 
