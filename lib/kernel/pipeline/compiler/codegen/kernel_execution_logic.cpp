@@ -515,11 +515,6 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         const auto inputPort = StreamSetPort{PortType::Input, i};
         const auto inputEdge = getInput(mKernelId, inputPort);
 
-        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized && mReturnedProcessedItemCountPtr[inputPort])) {
-            const auto streamSet = source(inputEdge, mBufferGraph);
-            mTestConsumedItemCountForZero.test(streamSet - FirstStreamSet);
-        }
-
         const Binding & input = mBufferGraph[inputEdge].Binding;
         const ProcessingRate & rate = input.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {

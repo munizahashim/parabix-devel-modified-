@@ -30,6 +30,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME_AMOUNT(Delayed);
         NAME(ManagedBuffer);
         NAME(SharedManagedBuffer);
+        NAME(ReturnedBuffer);
         NAME(Misaligned);
         NAME_AMOUNT(BlockSize);
         NAME(ReverseAdapter);

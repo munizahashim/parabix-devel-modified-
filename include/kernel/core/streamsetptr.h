@@ -28,8 +28,6 @@ struct StreamSetPtr {
 
     StreamSetPtr(void * base, uint64_t length) : __base(base), __length(length) {}
 
-    ~StreamSetPtr() { free(__base); }
-
 private:
     void * __base;
     uint64_t __length;

@@ -53,7 +53,7 @@ static cl::opt<int> editDistance("edit-dist", cl::desc("Edit Distance Value"), c
 static cl::opt<int> optPosition("opt-pos", cl::desc("Optimize position"), cl::init(0));
 static cl::opt<int> stepSize("step-size", cl::desc("Step Size"), cl::init(3));
 static cl::opt<int> prefixLen("prefix", cl::desc("Prefix length"), cl::init(3));
-static cl::opt<int> groupSize("groupPatterns", cl::desc("Number of pattern segments per group."), cl::init(1));
+static cl::opt<unsigned> groupSize("groupPatterns", cl::desc("Number of pattern segments per group."), cl::init(1));
 static cl::opt<bool> ShowPositions("display", cl::desc("Display the match positions."), cl::init(false));
 
 static cl::opt<int> Threads("threads", cl::desc("Total number of threads."), cl::init(1));
@@ -420,12 +420,14 @@ int main(int argc, char *argv[]) {
         std::cout << "total matches is " << matchList.size() << std::endl;
     } else if (EditdIndexPatternKernels) {
         auto editd_ptr = editdIndexPatternPipeline(pxDriver, pattVector[0].length());
-        for(unsigned i=0; i< pattVector.size(); i+=groupSize){
-            std::string pattern = "";
-            for (int j=0; j<groupSize; j++){
-                pattern += pattVector[i+j];
+        const unsigned gs = groupSize;
+        for(unsigned i=0; i< pattVector.size(); i += gs){
+            SmallVector<char, 1024> pattern;
+            for (unsigned j=0; j < gs; j++){
+                const auto & str = pattVector[i + j];
+                pattern.append(str.begin(), str.end());
             }
-            editd_ptr(chStream, pattern.c_str());
+            editd_ptr(chStream, pattern.data());
         }
     }
     else {
@@ -434,6 +436,8 @@ int main(int argc, char *argv[]) {
             editd(chStream);
         }
     }
+
+    free(chStream.data<8>());
 
     run_second_filter(pattern_segs, total_len, 0.15);
 

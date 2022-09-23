@@ -406,6 +406,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         args.push_back(ConstantPointerNull::get(getThreadLocalStateType()->getPointerTo()));
         threadLocalHandle = initializeThreadLocalInstance(b, args);
         segmentArgs[argCount++] = threadLocalHandle;
+        toFree.push_back(threadLocalHandle);
     }
     assert (argCount == suppliedArgs);
 
@@ -479,7 +480,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         args.push_back(threadLocalHandle);
         args.push_back(threadLocalHandle);
         finalizeThreadLocalInstance(b, args);
-        b->CreateFree(threadLocalHandle);
         args.pop_back();
     }
     Value * const result = finalizeInstance(b, args);

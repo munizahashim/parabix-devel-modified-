@@ -1063,11 +1063,12 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordBufferExpansionHistory
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSetPort outputPort,
+void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const BufferNode & bn,
+                                                    const BufferPort & port,
                                                     const StreamSetBuffer * const buffer) const {
 
     assert (mTraceDynamicBuffers && buffer->isDynamic());
-
+    const StreamSetPort outputPort = port.Port;
     const auto prefix = makeBufferName(mKernelId, outputPort);
 
     Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
@@ -1098,16 +1099,18 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const StreamSe
     b->CreateStore(produced, b->CreateGEP(entryArray, {traceIndex, TWO}));
 
     // consumer processed item count [3,n)
-    Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+    if (LLVM_LIKELY(!bn.isReturned())) {
+        Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+        const auto n = entryTy->getArrayNumElements(); assert (n > 3);
+        assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
+        Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });
+        Value * const logPtr = b->CreateGEP(entryArray, {traceIndex, THREE});
+        unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
+        Constant * const length = b->getSize(sizeTyWidth * (n - 3));
+        b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+    }
 
-    const auto n = entryTy->getArrayNumElements(); assert (n > 3);
-    assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
 
-    Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });
-    Value * const logPtr = b->CreateGEP(entryArray, {traceIndex, THREE});
-    unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
-    Constant * const length = b->getSize(sizeTyWidth * (n - 3));
-    b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
 
 }
 
@@ -1250,6 +1253,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
 
                     Value * const traceArrayField = b->CreateGEP(traceData, {ZERO, ZERO});
                     Value * const entryArray = b->CreateLoad(traceArrayField);
+
                     Value * const traceCountField = b->CreateGEP(traceData, {ZERO, ONE});
                     Value * const traceCount = b->CreateLoad(traceCountField);
 
@@ -1333,6 +1337,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
                     b->CreateCondBr(isLast, outputExit, outputLoop);
 
                     b->SetInsertPoint(outputExit);
+                    b->CreateFree(entryArray);
                 }
             }
         }

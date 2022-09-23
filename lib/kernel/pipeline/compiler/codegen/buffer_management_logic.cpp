@@ -182,38 +182,37 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief releaseOwnedBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::releaseOwnedBuffers(BuilderRef b, const bool nonLocal) {
-    loadInternalStreamSetHandles(b, nonLocal);
+void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
+    loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.Locality == BufferLocality::ThreadLocal) {
-            continue;
-        }
-        if (bn.isUnowned() || bn.isNonThreadLocal() != nonLocal) {
+        if (bn.Locality == BufferLocality::ThreadLocal || bn.isUnowned() || bn.isReturned()) {
             continue;
         }
         StreamSetBuffer * const buffer = bn.Buffer;
         assert (isFromCurrentFunction(b, buffer->getHandle(), false));
+        buffer->releaseBuffer(b);
+    }
+}
 
-        if (LLVM_LIKELY(!bn.isReturned())) {
-            buffer->releaseBuffer(b);
-        }
-
-        if (buffer->isDynamic()) {
-
-            const auto pe = in_edge(streamSet, mBufferGraph);
-            const auto p = source(pe, mBufferGraph);
-            const BufferPort & rd = mBufferGraph[pe];
-            assert (rd.Port.Type == PortType::Output);
-            const auto prefix = makeBufferName(p, rd.Port);
-            if (LLVM_LIKELY(!nonLocal && (mNumOfThreads != 1 || mIsNestedPipeline))) {
-                Value * const ptr = b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
-                b->CreateFree(ptr);
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief freePendingFreeableDynamicBuffers
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
+    if (LLVM_LIKELY(mNumOfThreads != 1 || mIsNestedPipeline)) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (bn.Locality == BufferLocality::ThreadLocal || bn.isUnowned()) {
+                continue;
             }
-            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-                Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
-                Constant * const ZERO = b->getInt32(0);
-                b->CreateFree(b->CreateLoad(b->CreateInBoundsGEP(traceData, {ZERO, ZERO})));
+            StreamSetBuffer * const buffer = bn.Buffer;
+            if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
+                const auto pe = in_edge(streamSet, mBufferGraph);
+                const auto p = source(pe, mBufferGraph);
+                const BufferPort & rd = mBufferGraph[pe];
+                assert (rd.Port.Type == PortType::Output);
+                const auto prefix = makeBufferName(p, rd.Port);
+                b->CreateFree(b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS));
             }
         }
     }

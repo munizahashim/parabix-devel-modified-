@@ -245,7 +245,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
                 const BufferPort & rd = mBufferGraph[e];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b->getContext();
-                const auto numOfConsumers = out_degree(bufferVertex, mConsumerGraph);
+                const auto numOfConsumers = std::max(out_degree(bufferVertex, mConsumerGraph), 1UL);
 
                 // segment num  0
                 // new capacity 1
@@ -451,11 +451,8 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     end(b);
     updateExternalPipelineIO(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        // TODO: this isn't fully correct for when this is a nested pipeline
+        // TODO: this isn't fully correct when this is a nested pipeline
         concludeStridesPerSegmentRecording(b);
-//        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-//        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
-//        b->CreateStore(mSegNo, ptr);
     }
 }
 
@@ -799,7 +796,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (getThreadLocalHandle() == initialThreadLocal);
     assert (b->getCompiler() == this);
 
-    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+    initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     updateExternalPipelineIO(b);
 
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
@@ -809,8 +806,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->CreateStore(mSegNo, ptr);
         concludeStridesPerSegmentRecording(b);
     }
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -859,7 +854,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         freeHistogramProperties(b);
     }
-    releaseOwnedBuffers(b, true);
+    releaseOwnedBuffers(b);
     resetInternalBufferHandles();
     #ifdef ENABLE_PAPI
     if (!mIsNestedPipeline) {
@@ -995,7 +990,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
     #ifdef ENABLE_PAPI
     accumulateFinalPAPICounters(b);
     #endif
-    releaseOwnedBuffers(b, false);
     // Since all of the nested kernels thread local state is contained within
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
@@ -1005,6 +999,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
     }
+    freePendingFreeableDynamicBuffers(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

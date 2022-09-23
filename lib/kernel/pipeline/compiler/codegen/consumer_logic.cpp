@@ -244,20 +244,20 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
     const auto prefix = makeBufferName(producer, outputPort.Port);
 
+
+
     Value * ptr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
         ptr = b->CreateInBoundsGEP(ptr, { b->getInt32(0), b->getInt32(slot) });
     }
 
-    if (mTestConsumedItemCountForZero.test(streamSet - FirstStreamSet)) {
-        // if we skipped over a partition, we don't want to update the
-        // current consumed value; rather than load the old consumed
-        // value at the point of production and incur a potential cache
-        // miss penalty, just load it here.
-        Value * const current = b->CreateLoad(ptr);
-        Value * const skipped = b->CreateIsNull(consumed);
-        consumed = b->CreateSelect(skipped, current, consumed);
-    }
+    // if we skipped over a partition, we don't want to update the
+    // current consumed value; rather than load the old consumed
+    // value at the point of production and incur a potential cache
+    // miss penalty, just load it here.
+    Value * const current = b->CreateLoad(ptr);
+    Value * const skipped = b->CreateIsNull(consumed);
+    consumed = b->CreateSelect(skipped, current, consumed);
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         Value * const prior = b->CreateLoad(ptr);
@@ -301,7 +301,6 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
         }
         if (maxConsumerInJumpRange > 0) { // && (consumerFlags & ConsumerEdge::WriteConsumedCount) == 0
             Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-            mTestConsumedItemCountForZero.set(streamSet - FirstStreamSet);
             b->CreateStore(sz_ZERO, transConsumedPtr);
         }
     }
