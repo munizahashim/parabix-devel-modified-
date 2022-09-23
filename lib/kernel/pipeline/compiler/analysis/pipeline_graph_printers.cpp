@@ -3,6 +3,7 @@
 
 #include "pipeline_analysis.hpp"
 #include <boost/graph/strong_components.hpp>
+#include <llvm/Support/Format.h>
 
 #define USE_SIMPLE_BUFFER_GRAPH
 
