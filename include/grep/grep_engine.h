@@ -194,6 +194,7 @@ protected:
     kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
+    std::vector<std::string> mSpanNames;
     re::UTF8_Transformer mUTF8_Transformer;
     pthread_t mEngineThread;
     kernel::ParabixIllustrator * mIllustrator;
