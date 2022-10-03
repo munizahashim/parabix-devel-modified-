@@ -1,13 +1,21 @@
 #include "root_histogram_analysis.h"
 
+#include <TROOT.h>
+#include <TRint.h>
 #include <TH1.h>
+#include <TF1.h>
 #include <TFitResult.h>
+#include <TCanvas.h>
+#include <TSpectrum.h>
+#include <TPDF.h>
+#include <TMinuit.h>
 #include <boost/multiprecision/cpp_bin_float.hpp>
+#include <llvm/Support/Compiler.h>
 #include <ostream>
 
 using namespace boost::multiprecision;
 
-using cpp_bin_float_7 = number<cpp_bin_float<7>>;
+using binfloat_t = number<cpp_bin_float<14>>;
 
 using namespace ROOT;
 
@@ -19,6 +27,18 @@ extern "C" {
  * @brief cern_root_analyze_histogram_data
  ** ------------------------------------------------------------------------------------------------------------- */
 void cern_root_analyze_histogram_data(const HistogramKernelData * const data, const uint64_t numOfKernels, uint32_t reportType) {
+
+    if (LLVM_UNLIKELY(numOfKernels == 0)) return;
+
+ //   GetROOT()->GetStyle()->SetHistMinimumZero();
+
+    TCanvas canvas("histograms");
+
+
+
+   // gROOT->SetStyle(style_name);
+
+   // SetHistMinimumZero
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
         const auto & K = data[i];
@@ -32,53 +52,58 @@ void cern_root_analyze_histogram_data(const HistogramKernelData * const data, co
 
             uint64_t numOfBins = 0;
             uint64_t totalSum = 0;
-
-            if (pd.Size == 0) {
+            // uint64_t maxValue = 0;
+            if (LLVM_UNLIKELY(pd.Size == 0)) {
                 auto e = static_cast<const HistogramPortListEntry *>(pd.Data);
                 while (e) {
-                    assert (numOfBins == 0 || numOfBins < e->ItemCount);
-                    numOfBins = e->ItemCount; // std::max(numOfBins, e->ItemCount);
-                    totalSum += e->Frequency;
+                    const auto k = e->ItemCount;
+                    assert (numOfBins == 0 || numOfBins < k);
+                    numOfBins = k; // std::max(numOfBins, e->ItemCount);
+                    const auto f = e->Frequency;
+                    totalSum += f;
+                    // maxValue = std::max(maxValue, f);
                     e = e->Next;
                 }
             } else {
                 numOfBins = pd.Size;
                 const auto L = static_cast<const uint64_t *>(pd.Data);
                 for (unsigned k = 0; k < numOfBins; ++k) {
-                    totalSum += L[k];
+                    const auto f = L[k];
+                    totalSum += f;
+                    // maxValue = std::max(maxValue, f);
                 }
             }
 
-            std::cerr << "numOfBins=" << numOfBins << ", totalSum=" << totalSum << std::endl;
-
-            if (numOfBins == 0) {
+            if (LLVM_UNLIKELY(totalSum == 0)) {
                 continue;
             }
 
-            assert (totalSum > 0);
+            assert (numOfBins > 0);
 
-            cpp_bin_float_7 fTotalSum(totalSum);
+            binfloat_t fTotalSum(totalSum);
 
-            TH1F * const hist = new TH1F("", "", numOfBins, 0.0, 1.0);
+            TH1D hist("", "", numOfBins, 0.0, 1.0);
+
+            hist.Smooth(0);
 
             auto addBinValue = [&](const uint64_t x, const uint64_t y0) {
-                const auto y = cpp_bin_float_7{y0} / fTotalSum;
-                hist->AddBinContent(x, y.convert_to<double>());
+                const auto y = binfloat_t{y0} / fTotalSum;
+                const auto d = y.convert_to<double>();
+                assert (0.0 <= d && d <= 1.0);
+                hist.SetBinContent(x, d);
             };
 
-            if (pd.Size == 0) {
+            if (LLVM_UNLIKELY(pd.Size == 0)) {
                 auto e = static_cast<const HistogramPortListEntry *>(pd.Data);
-                // only the root node might have a frequency of 0
-                uint64_t prior = 0;
+                unsigned prior = 0;
                 while (e) {
-                    const auto x = e->ItemCount;
-                    assert (x == 0 || prior < x);
-                    for (auto i = prior; i < x; ++i) {
-                        addBinValue(i, 0);
+                    const auto k = e->ItemCount;
+                    while (prior < k) {
+                        addBinValue(prior++, 0);
                     }
-                    addBinValue(x, e->Frequency);
+                    addBinValue(k, e->Frequency);
                     e = e->Next;
-                    prior = x + 1;
+                    prior = k + 1;
                 }
             } else {
                 numOfBins = pd.Size;
@@ -88,45 +113,91 @@ void cern_root_analyze_histogram_data(const HistogramKernelData * const data, co
                 }
             }
 
-            std::cerr << "poly1Fit" << std::endl;
-            const auto poly1Fit = hist->Fit("pol 1");
+            // look at how many peaks we have in the data
+            TSpectrum S;
+            const auto peaks = S.Search(&hist);
 
-            std::cerr << "expoFit" << std::endl;
-            const auto expoFit = hist->Fit("expo");
 
-            std::cerr << "gausFit" << std::endl;
-            const auto gausFit = hist->Fit("gaus");
 
-            std::cerr << "chi2" << std::endl;
 
-            const auto poly1Chi2 = poly1Fit->Chi2();
-            const auto expoChi2 = expoFit->Chi2();
-            const auto gausChi2 = gausFit->Chi2();
 
-            auto chi2 = poly1Chi2;
-            auto fit = poly1Fit;
+            std::array<TF1 *, 4> fits;
+            fits[0] = new TF1("a", "pol 1", 0, numOfBins);
+            fits[1] = new TF1("b", "pol 2", 0, numOfBins);
+            fits[2] = new TF1("c", "expo", 0, numOfBins);
+            fits[3] = new TF1("d", "gaus", 0, numOfBins);
 
-            if (expoChi2 < chi2) {
-                chi2 = expoChi2;
-                fit = expoFit;
+            TFitResultPtr fit;
+            double prob = 0.0;
+            unsigned chosenModel = -1U;
+
+            for (unsigned i = 0; i < fits.size(); ++i) {
+                auto nextFit = hist.Fit(fits[i], "SL");
+                if (LLVM_LIKELY(nextFit->IsValid())) {
+                    auto nextProb = nextFit->Prob();
+                    if (nextProb > prob) {
+                        prob = nextProb;
+                        fit = nextFit;
+                        chosenModel = i;
+                    }
+                }
             }
-            if (gausChi2 < chi2) {
-                chi2 = gausChi2;
-                fit = gausFit;
+
+
+            std::stringstream title;
+            title << K.Id << "." << K.KernelName << ":" << pd.BindingName;
+
+            const auto titleStr = title.str();
+
+
+            hist.SetTitle(titleStr.c_str());
+            if (chosenModel != -1U) {
+                auto & fit = fits[chosenModel];
+                assert (fit->IsValid());
+                hist.Add(fit);
             }
+            hist.Draw();
+
+            const std::string suffix = ((i == 0) ? "(" : ((i == (numOfKernels - 1)) ? ")" : ""));
+
+            const char * pdfName = "port-histogram.pdf";
+            if (numOfKernels > 1) {
+                if (i == 0 && j == 0) {
+                    pdfName = "port-histogram.pdf(";
+                } else if (i == (numOfKernels - 1) && (j == (numOfPorts - 1))) {
+                    pdfName = "port-histogram.pdf)";
+                }
+            }
+            canvas.Print(pdfName, ("Title:" + titleStr).c_str());
+
+            std::cerr << titleStr << '\n' << '\n';
+
+            std::cerr << " PEAKS: " << peaks << "\n";
+
+            if (chosenModel != -1U) {
+
+                const char * modelName = nullptr;
+
+                switch (chosenModel) {
+                    case 0: modelName = "Linear"; break;
+                    case 1: modelName = "Quadratic"; break;
+                    case 2: modelName = "Exponential"; break;
+                    case 3: modelName = "Gaussian"; break;
+                }
 
 
-            std::cerr << K.Id << "." << K.KernelName << ":" << pd.BindingName << "\n\n";
+                std::cerr << modelName << '\n' << '\n';
 
-            std::cerr << fit->ClassName() << "\n\n";
+                const auto & params = fit->Parameters();
+                const auto numOfParams = params.size();
 
-            std::cerr << "CHI2" << ": " << std::setprecision(3) << chi2 << '\n';
+                for (unsigned i = 0; i < numOfParams; ++i) {
+                    std::cerr << "  " << fit->GetParameterName(i) << ": " << std::setprecision(3) << params[i] << '\n';
+                }
 
-            const auto & params = fit->Parameters();
-            const auto numOfParams = params.size();
+                std::cerr  << '\n' << "CHI2" << ": " << std::setprecision(3) << fit->Chi2() << '\n';
+                std::cerr  << '\n' << "NDF" << ": " << std::setprecision(3) << fit->Ndf() << '\n';
 
-            for (unsigned i = 0; i < numOfParams; ++i) {
-                std::cerr << fit->GetParameterName(i) << ": " << std::setprecision(3) << params[i] << '\n';
             }
 
             std::cerr << std::endl;

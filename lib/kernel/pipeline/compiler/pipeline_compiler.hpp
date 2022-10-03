@@ -147,6 +147,7 @@ public:
     std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
     void runOptimizationPasses(BuilderRef b);
 
+
     static void linkPThreadLibrary(BuilderRef b);
     #ifdef ENABLE_PAPI
     static void linkPAPILibrary(BuilderRef b);
@@ -197,6 +198,7 @@ public:
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void clearInternalState(BuilderRef b);
+    void updateExternalPipelineIO(BuilderRef b);
 
 // partitioning codegen functions
 
@@ -364,7 +366,8 @@ public:
     void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index, const unsigned groupId);
     void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
     void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
-    void releaseOwnedBuffers(BuilderRef b, const bool nonLocal);
+    void releaseOwnedBuffers(BuilderRef b);
+    void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
 
@@ -396,7 +399,7 @@ public:
 
 
     void initializeBufferExpansionHistory(BuilderRef b) const;
-    void recordBufferExpansionHistory(BuilderRef b, const StreamSetPort outputPort, const StreamSetBuffer * const buffer) const;
+    void recordBufferExpansionHistory(BuilderRef b, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
     void printOptionalBufferExpansionHistory(BuilderRef b);
 
     void initializeStridesPerSegment(BuilderRef b) const;
@@ -646,7 +649,6 @@ protected:
     FixedVector<Value *>                        mScalarValue;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
-    BitVector                                   mTestConsumedItemCountForZero;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -905,7 +907,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
-, mTestConsumedItemCountForZero(LastStreamSet - FirstStreamSet + 1)
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 
@@ -988,10 +989,6 @@ inline LLVM_READNONE unsigned getItemWidth(const Type * ty ) {
     }
     return cast<IntegerType>(cast<FixedVectorType>(ty)->getElementType())->getBitWidth();
 }
-
-#ifndef NDEBUG
-bool isFromCurrentFunction(BuilderRef b, const Value * const value, const bool allowNull = true);
-#endif
 
 } // end of namespace
 

@@ -207,6 +207,8 @@ private:
     Vec<Var *, 16>                   mScalarOutputVars;
 };
 
+std::string && annotateKernelNameWithPabloDebugFlags(std::string && name);
+
 }
 
 #endif // PABLO_KERNEL_H

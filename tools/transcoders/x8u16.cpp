@@ -23,7 +23,7 @@
 #include <pablo/builder.hpp>
 #include <pablo/pablo_kernel.h>
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/pe_zeroes.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <toolchain/toolchain.h>

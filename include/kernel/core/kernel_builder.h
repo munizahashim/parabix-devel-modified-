@@ -269,6 +269,14 @@ public:
     }
 };
 
+#ifndef NDEBUG
+bool isFromCurrentFunction(const KernelBuilder * const b, const llvm::Value * const value, const bool allowNull = true);
+
+inline bool isFromCurrentFunction(const std::unique_ptr<KernelBuilder> & b, const llvm::Value * const value, const bool allowNull = true) {
+    return isFromCurrentFunction(b.get(), value, allowNull);
+}
+#endif
+
 }
 
 #endif // KERNEL_BUILDER_H

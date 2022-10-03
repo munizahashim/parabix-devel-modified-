@@ -82,7 +82,7 @@ link_directories(${LLVM_LIBRARY_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 math(EXPR LLVM_VERSION_INTEGER "${LLVM_VERSION_MAJOR} * 10000 + ${LLVM_VERSION_MINOR} * 100 + ${LLVM_VERSION_PATCH}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLLVM_VERSION_INTEGER=${LLVM_VERSION_INTEGER}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLLVM_VERSION_major=${LLVM_VERSION_MAJOR} -DLLVM_VERSION_MINOR=${LLVM_VERSION_MINOR}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLLVM_VERSION_MAJOR=${LLVM_VERSION_MAJOR} -DLLVM_VERSION_MINOR=${LLVM_VERSION_MINOR}")
 message(STATUS "LLVM Version Integer: ${LLVM_VERSION_INTEGER}")
 
 
@@ -126,7 +126,7 @@ endif()
 
 ### Import dependenct: CERN ROOT   ###
 
-find_package(ROOT)
+find_package(ROOT COMPONENTS Spectrum)
 if (ROOT_FOUND)
 message(STATUS "Found CERN ROOT in: ${ROOT_INCLUDE_DIRS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT")
@@ -158,7 +158,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_OBJECT_CACHE='\"${PARABIX_OBJE
 set(CMAKE_MACOSX_RPATH ON)
 
 # Enable all warnings
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic") # -Werror=global-constructors
 if (${LLVM_PACKAGE_VERSION} VERSION_LESS "6.0")
 # LLVM 5 and earlier generate many warnings about deprecated declarations; suppress these.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
@@ -324,6 +324,8 @@ function(parabix_add_executable)
     if(ARTIFACT_MODE STREQUAL "Single")
         target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
     endif()
+    target_link_libraries(${ARG_NAME} toolchain)
+    target_link_libraries(${ARG_NAME} kernel.pipeline)
 endfunction(parabix_add_executable)
 
 # Creates a pablo source target which copies pablo source files to the parabix

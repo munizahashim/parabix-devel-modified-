@@ -310,7 +310,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) {
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration, Kernel::getDoSegmentFields,
-    // Kernel::setDoSegmentProperties and Kernel::getDoSegmentProperties.
+    // Kernel::setDoSegmentProperties, Kernel::getDoSegmentProperties and PipelineKernel::addOrDeclareMainFunction
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -514,11 +514,6 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         Value * processed = nullptr;
         const auto inputPort = StreamSetPort{PortType::Input, i};
         const auto inputEdge = getInput(mKernelId, inputPort);
-
-        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized && mReturnedProcessedItemCountPtr[inputPort])) {
-            const auto streamSet = source(inputEdge, mBufferGraph);
-            mTestConsumedItemCountForZero.test(streamSet - FirstStreamSet);
-        }
 
         const Binding & input = mBufferGraph[inputEdge].Binding;
         const ProcessingRate & rate = input.getRate();

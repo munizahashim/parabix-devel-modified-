@@ -19,7 +19,7 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/pablo_source_kernel.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <pablo/parser/error.h>
 #include <pablo/parser/rd_parser.h>
 #include <pablo/parser/simple_lexer.h>

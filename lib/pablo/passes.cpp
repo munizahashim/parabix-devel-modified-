@@ -16,7 +16,7 @@
 #include <pablo/printer_pablos.h>
 #include <llvm/Support/raw_ostream.h>
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
 #define OF_Append F_Append

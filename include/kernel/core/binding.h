@@ -136,9 +136,15 @@ LLVM_READNONE inline bool isNonFixedCountable(const Binding & binding) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isAddressable
  ** ------------------------------------------------------------------------------------------------------------- */
-LLVM_READNONE inline bool isAddressable(const Binding & binding) {
-    if (LLVM_UNLIKELY(binding.isDeferred())) {
-        return true;
+LLVM_READNONE inline bool isAddressable(const Binding & binding) {    
+    for (const auto & attr : binding.getAttributes()) {
+        switch (attr.getKind()) {
+            case Binding::AttributeId::Deferred:
+            case Binding::AttributeId::ReturnedBuffer:
+            return true;
+        default:
+            break;
+        }
     }
     const ProcessingRate & rate = binding.getRate();
     switch (rate.getKind()) {

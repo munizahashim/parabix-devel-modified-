@@ -27,6 +27,7 @@ public:
         ExternalBuffer
         , StaticBuffer
         , DynamicBuffer
+        , MMapedBuffer
     };
 
     using BuilderPtr = PtrWrapper<kernel::KernelBuilder>;
@@ -82,6 +83,10 @@ public:
     size_t getOverflowCapacity(BuilderPtr b) const;
 
     bool isEmptySet() const;
+
+    bool isDynamic() const {
+        return (mBufferKind == BufferKind::DynamicBuffer) || (mBufferKind == BufferKind::MMapedBuffer);
+    }
 
     virtual ~StreamSetBuffer() = 0;
 
@@ -306,6 +311,58 @@ public:
     }
 
     DynamicBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
+                  const size_t overflowSize, const size_t underflowSize,
+                  const bool linear, const unsigned AddressSpace);
+
+    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+
+    void releaseBuffer(BuilderPtr b) const override;
+
+    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+
+    llvm::Value * getCapacity(BuilderPtr b) const override;
+
+    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+
+    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+
+    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const final;
+
+    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    size_t getInitialCapacity() const {
+        return mInitialCapacity;
+    }
+
+    llvm::Type * getHandleType(BuilderPtr b) const override;
+
+    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+
+    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+
+    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
+
+private:
+
+    const size_t    mInitialCapacity;
+
+};
+
+class MMapedBuffer final : public InternalBuffer {
+
+    enum Field { BaseAddress, Capacity, Released, Fd };
+
+public:
+
+    static inline bool classof(const StreamSetBuffer * b) {
+        return b->getBufferKind() == BufferKind::MMapedBuffer;
+    }
+
+    MMapedBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
                   const size_t overflowSize, const size_t underflowSize,
                   const bool linear, const unsigned AddressSpace);
 

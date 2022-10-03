@@ -10,7 +10,7 @@
 #include <testing/runtime.h>
 #include <testing/stream_gen.hpp>
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 
 #define TEST_CASE(NAME, ...)                                                                                    \
 template<typename... Ps>                                                                                        \

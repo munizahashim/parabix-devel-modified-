@@ -12,4 +12,5 @@ SRC
 DEPS
     kernel.pipeline
     pablo
+    kernel.pipeline
 )

@@ -7,7 +7,7 @@
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <string>                // for string
 #include <kernel/core/kernel_builder.h>
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 
 namespace kernel {
 

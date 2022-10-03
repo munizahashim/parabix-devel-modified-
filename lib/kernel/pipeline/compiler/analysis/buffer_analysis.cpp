@@ -112,15 +112,19 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bp.IsPrincipal = true;
                         break;
                     case AttrId::Deferred:
-                        cannotBePlacedIntoThreadLocalMemory = true;
+                        bn.Locality = BufferLocality::PartitionLocal;
                         bp.IsDeferred = true;
                         break;
                     case AttrId::SharedManagedBuffer:
-                        cannotBePlacedIntoThreadLocalMemory = true;
+                        bn.Locality = BufferLocality::PartitionLocal;
                         bp.IsShared = true;
                         break;                        
                     case AttrId::ManagedBuffer:
                         bp.IsManaged = true;
+                        break;
+                    case AttrId::ReturnedBuffer:
+                        bn.Type |= BufferType::Returned;
+                        bn.Locality = BufferLocality::PartitionLocal;
                         break;
                     case AttrId::EmptyWriteOverflow:
                         bn.OverflowCapacity = std::max(bn.OverflowCapacity, 1U);
@@ -296,22 +300,12 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
     }
 
-//    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
-
-//        const RelationshipNode & node = mStreamGraph[kernel];
-//        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
-//        if (isa<PopCountKernel>(kernelObj)) {
-//            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//                const auto streamSet = target(output, mBufferGraph);
-//                BufferNode & bn = mBufferGraph[streamSet];
-//                if (bn.Locality == BufferLocality::ThreadLocal) {
-//                    bn.Locality = BufferLocality::GloballyShared;
-//                }
-//            }
-//        }
-
-
-//    }
+    if (LLVM_LIKELY(!IsNestedPipeline)) {
+        for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+            const auto streamSet = source(e, mBufferGraph);
+            mBufferGraph[streamSet].Type |= BufferType::Returned;
+        }
+    }
 
 }
 
@@ -436,8 +430,16 @@ void PipelineAnalysis::identifyOutputNodeIds() {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyOwnedBuffers() {
 
+    // fill in any unmanaged pipeline input buffers
+    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        BufferNode & bn = mBufferGraph[streamSet];
+        bn.Type |= BufferType::External;
+        bn.Type |= BufferType::Unowned;
+    }
+
     // fill in any known managed buffers
-    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+    for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
             if (LLVM_UNLIKELY(rate.IsManaged)) {
@@ -452,27 +454,12 @@ void PipelineAnalysis::identifyOwnedBuffers() {
         }
     }
 
-    // fill in any unmanaged pipeline input buffers
-    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        BufferNode & bn = mBufferGraph[streamSet];
-        bn.Type |= BufferType::External;
-        bn.Type |= BufferType::Unowned;
-    }
-
     // and pipeline output buffers ...
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         BufferNode & bn = mBufferGraph[streamSet];
         bn.Type |= BufferType::External;
-        const BufferPort & rate = mBufferGraph[e];
-        if (LLVM_UNLIKELY(rate.IsShared)) {
-            bn.Type |= BufferType::Shared;
-        } else if (!rate.IsManaged) {
-            bn.Type |= BufferType::Unowned;
-        }
     }
-
 
 }
 
@@ -824,6 +811,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
     const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+    const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
@@ -844,6 +832,9 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
             // analyze any consumption rates.
 
+
+
+
             if (bn.Locality == BufferLocality::GloballyShared) {
                 // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                 // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
@@ -854,7 +845,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                 bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
                 #endif
-                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                if (useMMap) {
+                    buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                } else {
+                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                }
+
+
             } else {
                 auto bufferSize = bn.RequiredCapacity;
                 if (bn.Locality == BufferLocality::PartitionLocal) {

@@ -19,9 +19,27 @@ Bindings RunIndexOutputBindings(StreamSet * runIndex, StreamSet * overflow) {
     return {Binding{"runIndex", runIndex}, Binding{"overflow", overflow}};
 }
     
+
+
+
 RunIndex::RunIndex(BuilderRef b,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, Kind kind, Numbering n)
-    : PabloKernel(b, "RunIndex-" + std::to_string(runIndex->getNumElements()) + (overflow == nullptr ? "" : "overflow") + (kind == Kind::RunOf0 ? "" : "_invert") + (n == Numbering::RunOnly ? "" : "_add1"),
+    : PabloKernel(b, [&]() -> std::string {
+                        std::string tmp;
+                        llvm::raw_string_ostream out(tmp);
+                        out << "RunIndex-" << runIndex->getNumElements();
+                        if (overflow) {
+                            out << 'O';
+                        }
+                        if (kind == Kind::RunOf1) {
+                            out << 'I';
+                        }
+                        if (n == Numbering::RunPlus1) {
+                            out << 'A';
+                        }
+                        out.flush();
+                        return tmp;
+                    }(),
            // input
 {Binding{"runMarks", runMarks}},
            // output

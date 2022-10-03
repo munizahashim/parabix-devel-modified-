@@ -249,6 +249,7 @@ enum BufferType : unsigned {
     External = 1
     , Unowned = 2
     , Shared = 4
+    , Returned = 8
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -300,6 +301,10 @@ struct BufferNode {
 
     bool isShared() const {
         return (Type & BufferType::Shared) != 0;
+    }
+
+    bool isReturned() const {
+        return (Type & BufferType::Returned) != 0;
     }
 
     bool isNonThreadLocal() const {

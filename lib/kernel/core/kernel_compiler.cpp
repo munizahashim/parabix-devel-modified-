@@ -15,6 +15,8 @@
 #endif
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_set.hpp>
+#include <kernel/core/streamsetptr.h>
+#include <codegen/TypeBuilder.h>
 
 using namespace llvm;
 using namespace boost;
@@ -314,32 +316,8 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Bu
 /* static */ Rational KernelCompiler::getLCMOfFixedRateInputs(const Kernel * const target) {
     Rational rateLCM(1);
     bool first = true;
-    const auto n = target->getNumOfStreamInputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & input = target->getInputStreamSetBinding(i);
+    for (const Binding & input : target->getInputStreamSetBindings()) {
         const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
-            if (first) {
-                rateLCM = rate.getRate();
-                first = false;
-            } else {
-                rateLCM = lcm(rateLCM, rate.getRate());
-            }
-        }
-    }
-    return rateLCM;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getLCMOfFixedRateOutputs
- ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ Rational KernelCompiler::getLCMOfFixedRateOutputs(const Kernel * const target) {
-    Rational rateLCM(1);
-    bool first = true;
-    const auto n = target->getNumOfStreamOutputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & output = target->getOutputStreamSetBinding(i);
-        const ProcessingRate & rate = output.getRate();
         if (LLVM_LIKELY(rate.isFixed())) {
             if (first) {
                 rateLCM = rate.getRate();
@@ -359,7 +337,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration,
     // Kernel::getDoSegmentFields, KernelCompiler::getDoSegmentProperties,
-    // and PipelineCompiler::writeKernelCall
+    // PipelineCompiler::buildKernelCallArgumentList and PipelineKernel::addOrDeclareMainFunction
 
     auto arg = args.begin();
     auto nextArg = [&]() {
@@ -370,6 +348,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     };
 
     const auto enableAsserts = codegen::DebugOptionIsSet(codegen::EnableAsserts);
+
+    clearInternalStateAfterCodeGen();
 
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
@@ -386,23 +366,37 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         }
     }    
     const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
-    if (LLVM_UNLIKELY(internallySynchronized)) {
-        mExternalSegNo = nextArg();
-    }
-    mRawNumOfStrides = nextArg();
-    if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-        mIsFinal = nullptr;
-        mNumOfStrides = mRawNumOfStrides;
-    } else {
-        mIsFinal = b->CreateIsNull(mRawNumOfStrides);
-        mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
-    }
+    // TODO: the simplest way of ensuring we can allow external I/O to be passed though the main pipeline
+    // even if there are multiple consumers of the input with differing processing rates is to special
+    // case the outermost pipeline such that all I/O is always addressible. This creates a problem,
+    // however, in that we will not be able to optimize a single kernel program by having the main
+    // function call it directly instead of a pipeline. Given that this is not a realistic use-case,
+    // we're ignoring that limitation for now.
+    const auto isMainPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline) && !internallySynchronized;
 
     Rational fixedRateLCM{0};
     mFixedRateFactor = nullptr;
-    if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
-        fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
-        mFixedRateFactor = nextArg();
+
+    if (LLVM_UNLIKELY(isMainPipeline)) {
+        mIsFinal = b->getTrue();
+        mRawNumOfStrides = nullptr;
+        mNumOfStrides = nullptr;
+    } else {
+        if (LLVM_UNLIKELY(internallySynchronized)) {
+            mExternalSegNo = nextArg();
+        }
+        mRawNumOfStrides = nextArg();
+        if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
+            mIsFinal = nullptr;
+            mNumOfStrides = mRawNumOfStrides;
+        } else {
+            mIsFinal = b->CreateIsNull(mRawNumOfStrides);
+            mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
+        }
+        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+            fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
+            mFixedRateFactor = nextArg();
+        }
     }
 
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
@@ -410,14 +404,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     // NOTE: the disadvantage of passing the stream pointers as a parameter is that it becomes more difficult
     // to access a stream set from a LLVM function call. We could create a stream-set aware function creation
     // and call system here but that is not an ideal way of handling this.
-
-    const auto numOfInputs = getNumOfStreamInputs();
-
-    reset(mInputIsClosed, numOfInputs);
-    reset(mProcessedInputItemPtr, numOfInputs);
-    reset(mAccessibleInputItems, numOfInputs);
-    reset(mAvailableInputItems, numOfInputs);
-    reset(mUpdatableProcessedInputItemPtr, numOfInputs);
 
     #ifdef CHECK_IO_ADDRESS_RANGE
     auto checkStreamRange = [&](const StreamSetBuffer * const buffer, const Binding & binding, Value * const startItemCount) {
@@ -453,6 +439,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     };
     #endif
 
+    const auto numOfInputs = getNumOfStreamInputs();
+
     IntegerType * const sizeTy = b->getSizeTy();
     for (unsigned i = 0; i < numOfInputs; i++) {
 
@@ -465,18 +453,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         Value * const virtualBaseAddress = b->CreatePointerCast(nextArg(), buffer->getPointerType());
         Value * const localHandle = b->CreateAllocaAtEntryPoint(buffer->getHandleType(b));
         buffer->setHandle(localHandle);
-
-//        if (LLVM_UNLIKELY(enableAsserts)) {
-//            b->CreateAssert(localHandle, "%s.%s: virtual %s base address handle cannot be null",
-//                            b->GetString(getName()), b->GetString(input.getName()), b->GetString("input"));
-//        }
-
         buffer->setBaseAddress(b, virtualBaseAddress);
-
-//        if (LLVM_UNLIKELY(enableAsserts)) {
-//            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual %s base address cannot be null",
-//                            b->GetString(getName()), b->GetString(input.getName()), b->GetString("input"));
-//        }
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
             mInputIsClosed[i] = nextArg();
@@ -489,34 +466,33 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         /// processed item count
         /// ----------------------------------------------------
 
-        // NOTE: we create a redundant alloca to store the input param so that
-        // Mem2Reg can convert it into a PHINode if the item count is updated in
-        // a loop; otherwise, it will be discarded in favor of the param itself.
-
         const ProcessingRate & rate = input.getRate();
         Value * processed = nullptr;
-        if (isAddressable(input)) {
-            mUpdatableProcessedInputItemPtr[i] = nextArg();
-            processed = b->CreateLoad(mUpdatableProcessedInputItemPtr[i]);
-        } else if (LLVM_LIKELY(isCountable(input))) {
-            processed = nextArg();
-        } else { // isRelative
-            const auto port = getStreamPort(rate.getReference());
-            assert (port.Type == PortType::Input && port.Number < i);
-            assert (mProcessedInputItemPtr[port.Number]);
-            Value * const ref = b->CreateLoad(mProcessedInputItemPtr[port.Number]);
-            processed = b->CreateMulRational(ref, rate.getRate());
+        if (isMainPipeline || isAddressable(input)) {
+            mProcessedInputItemPtr[i] = nextArg();
+            processed = b->CreateLoad(mProcessedInputItemPtr[i]);
+        } else {
+            if (LLVM_LIKELY(isCountable(input))) {
+                processed = nextArg();
+            } else { // isRelative
+                const auto port = getStreamPort(rate.getReference());
+                assert (port.Type == PortType::Input && port.Number < i);
+                assert (mProcessedInputItemPtr[port.Number]);
+                Value * const ref = b->CreateLoad(mProcessedInputItemPtr[port.Number]);
+                processed = b->CreateMulRational(ref, rate.getRate());
+            }
+            // NOTE: we create a redundant alloca to store the input param so that
+            // Mem2Reg can convert it into a PHINode if the item count is updated in
+            // a loop; otherwise, it will be discarded in favor of the param itself.
+            AllocaInst * const processedItems = b->CreateAllocaAtEntryPoint(sizeTy);
+            b->CreateStore(processed, processedItems);
+            mProcessedInputItemPtr[i] = processedItems;
         }
-        assert (processed);
-        assert (processed->getType() == sizeTy);
-        AllocaInst * const processedItems = b->CreateAllocaAtEntryPoint(sizeTy);
-        b->CreateStore(processed, processedItems);
-        mProcessedInputItemPtr[i] = processedItems;
         /// ----------------------------------------------------
         /// accessible item count
         /// ----------------------------------------------------
         Value * accessible = nullptr;
-        if (LLVM_UNLIKELY(requiresItemCount(input))) {
+        if (LLVM_UNLIKELY(isMainPipeline || requiresItemCount(input))) {
             accessible = nextArg();
         } else {
             accessible = b->CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
@@ -524,6 +500,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         assert (accessible);
         assert (accessible->getType() == sizeTy);
         mAccessibleInputItems[i] = accessible;
+
         Value * avail = b->CreateAdd(processed, accessible);
         mAvailableInputItems[i] = avail;
         if (input.hasLookahead()) {
@@ -539,11 +516,6 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     // set all of the output buffers
     const auto numOfOutputs = getNumOfStreamOutputs();
-    reset(mProducedOutputItemPtr, numOfOutputs);
-    reset(mInitiallyProducedOutputItems, numOfOutputs);    
-    reset(mWritableOutputItems, numOfOutputs);
-    reset(mConsumedOutputItems, numOfOutputs);
-    reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
 
     const auto canTerminate = canSetTerminateSignal();
 
@@ -562,7 +534,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             Value * const handle = nextArg();
             assert (isa<DynamicBuffer>(buffer));
             buffer->setHandle(b->CreatePointerCast(handle, buffer->getHandlePointerType(b)));
-        } else if (LLVM_UNLIKELY(isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             mUpdatableOutputBaseVirtualAddressPtr[i] = nextArg();
@@ -575,17 +547,13 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             buffer->setBaseAddress(b, virtualBaseAddress);
             assert (isa<ExternalBuffer>(buffer));
         }
-        assert (buffer->getHandle());
-//        if (LLVM_UNLIKELY(enableAsserts)) {
-//            b->CreateAssert(buffer->getBaseAddress(b), "%s.%s: virtual %s base address cannot be null",
-//                            b->GetString(getName()), b->GetString(output.getName()), b->GetString("output"));
-//        }
+
         /// ----------------------------------------------------
         /// produced item count
         /// ----------------------------------------------------
         const ProcessingRate & rate = output.getRate();
         Value * produced = nullptr;
-        if (LLVM_LIKELY(canTerminate || isAddressable(output))) {
+        if (LLVM_LIKELY(canTerminate || isMainPipeline || isAddressable(output))) {
             mProducedOutputItemPtr[i] = nextArg();
             produced = b->CreateLoad(mProducedOutputItemPtr[i]);
         } else {
@@ -620,7 +588,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             writable = buffer->getLinearlyWritableItems(b, produced, consumed);
             assert (writable && writable->getType() == sizeTy);
         } else {
-            if (requiresItemCount(output)) {
+            if (isMainPipeline || requiresItemCount(output)) {
                 writable = nextArg();
                 assert (writable && writable->getType() == sizeTy);
             } else if (mFixedRateFactor) {
@@ -676,12 +644,17 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         props.push_back(mThreadLocalHandle); assert (mThreadLocalHandle);
     }
     const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
+    const auto isMainPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline) && !internallySynchronized;
+
     if (LLVM_UNLIKELY(internallySynchronized)) {
         props.push_back(mExternalSegNo);
     }
-    props.push_back(mNumOfStrides); assert (mNumOfStrides);
-    if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
-        props.push_back(mFixedRateFactor);
+
+    if (LLVM_LIKELY(!isMainPipeline)) {
+        props.push_back(mNumOfStrides); assert (mNumOfStrides);
+        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+            props.push_back(mFixedRateFactor);
+        }
     }
 
     PointerType * const voidPtrTy = b->getVoidPtrTy();
@@ -703,7 +676,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         /// processed item count
         /// ----------------------------------------------------
         const Binding & input = mInputStreamSets[i];
-        if (isAddressable(input)) {
+        if (isMainPipeline || isAddressable(input)) {
             props.push_back(mProcessedInputItemPtr[i]);
         } else if (LLVM_LIKELY(isCountable(input))) {
             props.push_back(b->CreateLoad(mProcessedInputItemPtr[i]));
@@ -711,7 +684,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         /// ----------------------------------------------------
         /// accessible item count
         /// ----------------------------------------------------
-        if (requiresItemCount(input)) {
+        if (isMainPipeline || requiresItemCount(input)) {
             props.push_back(mAccessibleInputItems[i]);
         }
     }
@@ -733,22 +706,20 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         Value * handle = nullptr;
         if (LLVM_UNLIKELY(isShared)) {            
             handle = b->CreatePointerCast(buffer->getHandle(), voidPtrTy);
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+            // If an output is a managed buffer, the address is stored within the state instead
+            // of being passed in through the function call.
+            PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
+            handle = b->CreatePointerCast(mUpdatableOutputBaseVirtualAddressPtr[i], voidPtrPtrTy);
         } else {
-            if (LLVM_UNLIKELY(isLocal)) {
-                // If an output is a managed buffer, the address is stored within the state instead
-                // of being passed in through the function call.
-                PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
-                handle = b->CreatePointerCast(mUpdatableOutputBaseVirtualAddressPtr[i], voidPtrPtrTy);
-            } else {
-                handle = b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy);
-            }
+            handle = b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy);
         }
         props.push_back(handle);
 
         /// ----------------------------------------------------
         /// produced item count
         /// ----------------------------------------------------
-        if (LLVM_LIKELY(canTerminate || isAddressable(output))) {
+        if (LLVM_LIKELY(canTerminate || isMainPipeline ||isAddressable(output))) {
             props.push_back(mProducedOutputItemPtr[i]);
         } else if (LLVM_LIKELY(isCountable(output))) {
             props.push_back(b->CreateLoad(mProducedOutputItemPtr[i]));
@@ -758,13 +729,13 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isShared || isLocal)) {
             props.push_back(mConsumedOutputItems[i]);
-        } else if (requiresItemCount(output)) {
+        } else if (isMainPipeline || requiresItemCount(output)) {
             props.push_back(mWritableOutputItems[i]);
         }
+
     }
     return props;
 }
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateDoSegmentMethod
@@ -798,15 +769,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
         b->CreateMProtect(mSharedHandle, CBuilder::Protect::READ);
     }
 
-    const auto numOfInputs = getNumOfStreamInputs();
-
-    for (unsigned i = 0; i < numOfInputs; i++) {
-        if (mUpdatableProcessedInputItemPtr[i]) {
-            Value * const items = b->CreateLoad(mProcessedInputItemPtr[i]);
-            b->CreateStore(items, mUpdatableProcessedInputItemPtr[i]);
-        }
-    }
-
     const auto numOfOutputs = getNumOfStreamOutputs();
 
     for (unsigned i = 0; i < numOfOutputs; i++) {
@@ -825,14 +787,21 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
             Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
             Constant * const ZERO = b->getSize(0);
             Value * produced = mInitiallyProducedOutputItems[i];
+            assert (isFromCurrentFunction(b, produced, false));
             // TODO: will LLVM optimizations replace the following with the already loaded value?
             // If not, re-loading it here may reduce register pressure / compilation time.
             if (mProducedOutputItemPtr[i]) {
+                assert (isFromCurrentFunction(b, mProducedOutputItemPtr[i], false));
                 produced = b->CreateLoad(mProducedOutputItemPtr[i]);
             }
+            assert (isFromCurrentFunction(b, produced, true));
             Value * const blockIndex = b->CreateLShr(produced, LOG_2_BLOCK_WIDTH);
             Value * vba = buffer->getStreamLogicalBasePtr(b.get(), baseAddress, ZERO, blockIndex);
+
+            assert (isFromCurrentFunction(b, vba, true));
             vba = b->CreatePointerCast(vba, b->getVoidPtrTy());
+
+            assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));
 
             b->CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
         }
@@ -840,6 +809,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
 
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {
+        assert (isFromCurrentFunction(b, mTerminationSignalPtr, true));
         b->CreateRet(b->CreateLoad(mTerminationSignalPtr));
         mTerminationSignalPtr = nullptr;
     } else {
@@ -859,7 +829,7 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
     assert (!mTarget->hasAttribute(AttrId::InternallySynchronized));
 
     std::vector<Value *> S;
-    S.resize(8 + numOfInputs * 4 + numOfOutputs * 5);
+    S.resize(8 + numOfInputs * 5 + numOfOutputs * 6);
 
     auto o = S.begin();
 
@@ -880,17 +850,22 @@ std::vector<Value *> KernelCompiler::storeDoSegmentState() const {
         o = std::copy_n(V.begin(), n, o);
     };
 
+    copy(mInputIsClosed, numOfInputs);
     copy(mProcessedInputItemPtr, numOfInputs);
     copy(mAccessibleInputItems, numOfInputs);
     copy(mAvailableInputItems, numOfInputs);
-    copy(mUpdatableProcessedInputItemPtr, numOfInputs);
-
+    for (unsigned i = 0; i < numOfInputs; ++i) {
+        append(getInputStreamSetBuffer(i)->getHandle());
+    }
 
     copy(mProducedOutputItemPtr, numOfOutputs);
+    copy(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
     copy(mInitiallyProducedOutputItems, numOfOutputs);
     copy(mWritableOutputItems, numOfOutputs);
     copy(mConsumedOutputItems, numOfOutputs);
-    copy(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+    for (unsigned i = 0; i < numOfOutputs; ++i) {
+        append(getOutputStreamSetBuffer(i)->getHandle());
+    }
 
     assert (o == S.end());
 
@@ -904,21 +879,23 @@ void KernelCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
 
     assert (!mTarget->hasAttribute(AttrId::InternallySynchronized));
 
+    clearInternalStateAfterCodeGen();
+
     auto o = S.begin();
 
-    auto extract = [&](Value *& v) {
+    auto revertOne = [&](Value *& v) {
         assert (o != S.end());
         v = *o++;
     };
 
-    extract(mSharedHandle);
-    extract(mThreadLocalHandle);
-    extract(mTerminationSignalPtr);
-    extract(mIsFinal);
-    extract(mNumOfStrides);
-    extract(mFixedRateFactor);
-    extract(mExternalSegNo);
-    extract(mNumOfStrides);
+    revertOne(mSharedHandle);
+    revertOne(mThreadLocalHandle);
+    revertOne(mTerminationSignalPtr);
+    revertOne(mIsFinal);
+    revertOne(mNumOfStrides);
+    revertOne(mFixedRateFactor);
+    revertOne(mExternalSegNo);
+    revertOne(mNumOfStrides);
 
     auto revert = [&](Vec<llvm::Value *> & V, const size_t n) {
         assert (static_cast<size_t>(std::distance(o, S.end())) >= n);
@@ -928,17 +905,28 @@ void KernelCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
     };
 
     const auto numOfInputs = getNumOfStreamInputs();
+    revert(mInputIsClosed, numOfInputs);
     revert(mProcessedInputItemPtr, numOfInputs);
     revert(mAccessibleInputItems, numOfInputs);
     revert(mAvailableInputItems, numOfInputs);
-    revert(mUpdatableProcessedInputItemPtr, numOfInputs);
+    for (unsigned i = 0; i < numOfInputs; ++i) {
+        Value * handle;
+        revertOne(handle);
+        getInputStreamSetBuffer(i)->setHandle(handle);
+    }
 
     const auto numOfOutputs = getNumOfStreamOutputs();
     revert(mProducedOutputItemPtr, numOfOutputs);
+    revert(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
     revert(mInitiallyProducedOutputItems, numOfOutputs);
     revert(mWritableOutputItems, numOfOutputs);
     revert(mConsumedOutputItems, numOfOutputs);
-    revert(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+
+    for (unsigned i = 0; i < numOfOutputs; ++i) {
+        Value * handle;
+        revertOne(handle);
+        getOutputStreamSetBuffer(i)->setHandle(handle);
+    }
 
     assert (o == S.end());
 
@@ -1410,7 +1398,7 @@ StreamSetPort KernelCompiler::getStreamPort(const StringRef name) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * /* b */, const StringRef name) const {
+Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * const b, const StringRef name) const {
     assert (this);
     if (LLVM_UNLIKELY(mScalarFieldMap.empty())) {
         SmallVector<char, 256> tmp;
@@ -1439,9 +1427,10 @@ Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * /* b */, const StringR
             out << "\n";
             assert (false);
             #endif
-
         }
-        return f->second;
+        Value * const result = f->second;
+        assert (isFromCurrentFunction(b, result, false));
+        return result;
     }
 }
 
@@ -1494,12 +1483,8 @@ bool KernelCompiler::requiresOverflow(const Binding & binding) const {
  * @brief clearInternalStateAfterCodeGen
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::clearInternalStateAfterCodeGen() {
-    for (const auto & buffer : mStreamSetInputBuffers) {
-        buffer->setHandle(nullptr);
-    }
-    for (const auto & buffer : mStreamSetOutputBuffers) {
-        buffer->setHandle(nullptr);
-    }
+    // TODO: this function is more of a sanity check to ensure we don't have a pointer
+    // to an out-of-scope LLVM-value. It should be possible to remove it.
     mScalarFieldMap.clear();
     mSharedHandle = nullptr;
     mThreadLocalHandle = nullptr;
@@ -1510,6 +1495,23 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     mIsFinal = nullptr;
     mNumOfStrides = nullptr;
     mTerminationSignalPtr = nullptr;
+    const auto numOfInputs = getNumOfStreamInputs();
+    reset(mInputIsClosed, numOfInputs);
+    reset(mProcessedInputItemPtr, numOfInputs);
+    reset(mAccessibleInputItems, numOfInputs);
+    reset(mAvailableInputItems, numOfInputs);
+    const auto numOfOutputs = getNumOfStreamOutputs();
+    reset(mProducedOutputItemPtr, numOfOutputs);
+    reset(mInitiallyProducedOutputItems, numOfOutputs);
+    reset(mWritableOutputItems, numOfOutputs);
+    reset(mConsumedOutputItems, numOfOutputs);
+    reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+    for (const auto & buffer : mStreamSetInputBuffers) {
+        buffer->setHandle(nullptr);
+    }
+    for (const auto & buffer : mStreamSetOutputBuffers) {
+        buffer->setHandle(nullptr);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

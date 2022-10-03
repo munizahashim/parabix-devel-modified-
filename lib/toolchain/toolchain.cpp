@@ -5,7 +5,6 @@
  */
 
 #include <toolchain/toolchain.h>
-#include <toolchain/pablo_toolchain.h>
 #include <unicode/core/UCD_Config.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Host.h>
@@ -65,6 +64,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
+                        clEnumVal(EnableAnonymousMMapedDynamicLinearBuffers, "Use anonymous mmap for dynamic linear buffers instead of copyback mechanism."),
 
                         clEnumVal(AllowUnsafeFileIO, "Force the MMap and Memory source kernel to always provide raw file data "
                                                      "to the system instead of allocating a safe buffer for the final stride. "
@@ -84,6 +84,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
 
 
 std::string ShowIROption = OmittedOption;
+
 static cl::opt<std::string, true> IROutputOption("ShowIR", cl::location(ShowIROption), cl::ValueOptional,
                                                          cl::desc("Print optimized LLVM IR to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
 
@@ -157,22 +158,6 @@ static cl::opt<bool, true> OptPabloTransposition("enable-pablo-s2p", cl::locatio
 bool SplitTransposition;
 static cl::opt<bool, true> OptSplitTransposition("enable-split-s2p", cl::location(SplitTransposition),
                                                  cl::desc("Enable experimental split transposition."), cl::init(false), cl::cat(CodeGenOptions));
-
-
-
-//unsigned NumOfKernels = 0;
-//unsigned NumOfStreamSets = 0;
-//unsigned NumOfPartitions = 0;
-
-//static cl::opt<unsigned, true> NumOfKernelsOption("num-kernels", cl::location(NumOfKernels), cl::init(1),
-//                                               cl::desc("NumOfKernels"), cl::value_desc("positive integer"));
-
-//static cl::opt<unsigned, true> NumOfStreamSetsOption("num-streamsets", cl::location(NumOfStreamSets), cl::init(1),
-//                                               cl::desc("NumOfStreamSets"), cl::value_desc("positive integer"));
-
-//static cl::opt<unsigned, true> NumOfPartitionsOption("num-partitions", cl::location(NumOfPartitions), cl::init(1),
-//                                               cl::desc("NumOfPartitions"), cl::value_desc("positive integer"));
-
 
 static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
@@ -273,8 +258,8 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (ShowASMOption != OmittedOption) return true;
     #endif
-    if (pablo::ShowPabloOption != OmittedOption) return true;
-    if (pablo::ShowOptimizedPabloOption != OmittedOption) return true;
+//    if (pablo::ShowPabloOption != OmittedOption) return true;
+//    if (pablo::ShowOptimizedPabloOption != OmittedOption) return true;
     return false;
 }
 

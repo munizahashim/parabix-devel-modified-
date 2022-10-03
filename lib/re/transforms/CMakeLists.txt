@@ -28,4 +28,5 @@ DEPS
     re.analysis
     re.printer
     unicode.utf
+    unicode.data
 )

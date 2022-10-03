@@ -26,6 +26,8 @@ SRC
     printer_pablos.cpp
     schedulingprepass.cpp
     symbol_generator.cpp
+    pablo_toolchain.cpp
 DEPS
     kernel.core
+    toolchain
 )

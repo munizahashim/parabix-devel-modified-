@@ -557,4 +557,34 @@ std::string KernelBuilder::getKernelName() const noexcept {
     return mCompiler->getName();
 }
 
+
+#ifndef NDEBUG
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isFromCurrentFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool isFromCurrentFunction(const KernelBuilder * const b, const Value * const value, const bool allowNull) {
+    if (value == nullptr) {
+        return allowNull;
+    }
+    BasicBlock * const ip = b->GetInsertBlock();
+    assert (ip);
+    if (isa<Constant>(value)) {
+        return true;
+    }
+    const Function * const builderFunction = ip->getParent();
+    assert (builderFunction);
+    const Function * function = builderFunction;
+    if (isa<Argument>(value)) {
+        function = cast<Argument>(value)->getParent();
+    } else if (isa<Instruction>(value)) {
+        function = cast<Instruction>(value)->getParent()->getParent();
+    }
+    assert (function);
+    if (LLVM_UNLIKELY(&b->getContext() != &value->getContext())) {
+        return false;
+    }
+    return (builderFunction == function);
+}
+#endif
+
 }

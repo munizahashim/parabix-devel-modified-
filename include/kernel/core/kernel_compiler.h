@@ -324,7 +324,7 @@ public:
 
     bool hasScalarField(const llvm::StringRef name) const;
 
-    llvm::Value * getScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
+    llvm::Value * getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
 
     LLVM_READNONE const BindingMapEntry & getBinding(const BindingType type, const llvm::StringRef name) const;
 
@@ -382,6 +382,8 @@ public:
 
     void callGenerateFinalizeMethod(BuilderRef b);
 
+    static Rational getLCMOfFixedRateInputs(const Kernel * const target);
+
 protected:
 
     virtual std::vector<llvm::Value *> getFinalOutputScalars(BuilderRef b);
@@ -389,10 +391,6 @@ protected:
 private:
 
     void clearInternalStateAfterCodeGen();
-
-    static Rational getLCMOfFixedRateInputs(const Kernel * const target);
-
-    static Rational getLCMOfFixedRateOutputs(const Kernel * const target);
 
     void runInternalOptimizationPasses(llvm::Module * const m);
 
@@ -427,14 +425,10 @@ protected:
 
     Vec<llvm::Value *>              mInputIsClosed;
 
-    Vec<llvm::Value *>              mUpdatableProcessedInputItemPtr;
     Vec<llvm::Value *>              mProcessedInputItemPtr;
 
     Vec<llvm::Value *>              mAccessibleInputItems;
     Vec<llvm::Value *>              mAvailableInputItems;
-    Vec<llvm::Value *>              mPopCountRateArray;
-    Vec<llvm::Value *>              mNegatedPopCountRateArray;
-
     Vec<llvm::Value *>              mProducedOutputItemPtr;
     Vec<llvm::Value *>              mUpdatableOutputBaseVirtualAddressPtr;
     Vec<llvm::Value *>              mInitiallyProducedOutputItems;

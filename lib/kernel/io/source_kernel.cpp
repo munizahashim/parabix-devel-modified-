@@ -544,8 +544,8 @@ MMapSourceKernel::MMapSourceKernel(BuilderRef b, Scalar * const fd, StreamSet * 
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
     addAttribute(MustExplicitlyTerminate());
-    setStride(codegen::SegmentSize);
     addAttribute(SideEffecting());
+    setStride(codegen::SegmentSize);
 }
 
 ReadSourceKernel::ReadSourceKernel(BuilderRef b, Scalar * const fd, StreamSet * const outputStream)
@@ -567,8 +567,8 @@ ReadSourceKernel::ReadSourceKernel(BuilderRef b, Scalar * const fd, StreamSet * 
     IntegerType * const sizeTy = b->getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addAttribute(MustExplicitlyTerminate());
-    setStride(codegen::SegmentSize);
     addAttribute(SideEffecting());
+    setStride(codegen::SegmentSize);
 }
 
 
@@ -593,8 +593,8 @@ FDSourceKernel::FDSourceKernel(BuilderRef b, Scalar * const useMMap, Scalar * co
     IntegerType * const sizeTy = b->getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addAttribute(MustExplicitlyTerminate());
-    setStride(codegen::SegmentSize);
     addAttribute(SideEffecting());
+    setStride(codegen::SegmentSize);
 }
 
 MemorySourceKernel::MemorySourceKernel(BuilderRef b, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
@@ -609,8 +609,8 @@ MemorySourceKernel::MemorySourceKernel(BuilderRef b, Scalar * fileSource, Scalar
 // internal scalar
 {}) {
     addAttribute(MustExplicitlyTerminate());
-    setStride(codegen::SegmentSize);
     addInternalScalar(fileSource->getType(), "ancillaryBuffer");
+    setStride(codegen::SegmentSize);
 }
 
 }

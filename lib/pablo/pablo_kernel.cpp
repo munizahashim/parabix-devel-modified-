@@ -11,7 +11,7 @@
 #include <pablo/pe_ones.h>
 #include <pablo/passes.h>
 
-#include <toolchain/pablo_toolchain.h>
+#include <pablo/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamset.h>
 #include <toolchain/toolchain.h>
@@ -257,7 +257,7 @@ llvm::IntegerType * PabloKernel::getInt1Ty() const {
     return IntegerType::getInt1Ty(getModule()->getContext());
 }
 
-static inline std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
+std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     if (DebugOptionIsSet(DumpTrace)) {
         name += "+Dump";
     }

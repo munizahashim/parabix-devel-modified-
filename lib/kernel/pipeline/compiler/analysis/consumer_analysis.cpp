@@ -15,16 +15,20 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         // If we have no consumers, we do not want to update the consumer count on exit
-        // as we would then have to retain a scalar for it.
-
-        const BufferNode & streamSetNode = mBufferGraph[streamSet];
-        if (streamSetNode.Locality != BufferLocality::GloballyShared) {
-            continue;
-        }
+        // as we would then have to retain a scalar for it. If this streamset is
+        // returned to the outside environment, we cannot ever release data from it
+        // even if it has an internal consumer.
 
         if (LLVM_UNLIKELY(out_degree(streamSet, mBufferGraph) == 0)) {
             continue;
         }
+
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.Locality != BufferLocality::GloballyShared || bn.isReturned()) {
+            continue;
+        }
+
+
 
         // copy the producing edge
         const auto pe = in_edge(streamSet, mBufferGraph);
