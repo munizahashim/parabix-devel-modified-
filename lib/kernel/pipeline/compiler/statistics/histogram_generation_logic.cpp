@@ -1,5 +1,6 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include "cern-root/root_histogram_analysis.h"
+#include <llvm/Support/Format.h>
 
 namespace kernel {
 

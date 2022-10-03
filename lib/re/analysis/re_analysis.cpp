@@ -527,6 +527,11 @@ unsigned grepOffset(const RE * re) {
         return 0;
     } else if (isa<CC>(re)) {
         return 0;
+    } else if (const PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+            return 1;
+        }
+        return 0;
     } else if (const Group * g = dyn_cast<Group>(re)) {
         return grepOffset(g->getRE());
     } else if (const Name * n = dyn_cast<Name>(re)) {

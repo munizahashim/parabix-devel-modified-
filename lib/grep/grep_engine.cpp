@@ -291,33 +291,37 @@ void GrepEngine::initRE(re::RE * re) {
     }
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
+
+    StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
+    StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
+
     mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::None);
     if (hasGraphemeClusterBoundary(mRE)) {
         UnicodeIndexing = true;
         auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
-        mExternalTable.emplace(GCB_basis->getName(), GCB_basis);
+        mExternalTable.declareExternal(Unicode, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
         re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
         re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
         mExternalNames.insert(epict);
-        mExternalTable.emplace(epict->getFullName(), new PropertyExternal(epict));
-        mExternalTable.emplace("\\b{g}", new GraphemeClusterBreak(this));
+        mExternalTable.declareExternal(Unicode, epict->getFullName(), new PropertyExternal(epict));
+        mExternalTable.declareExternal(Unicode, "\\b{g}", new GraphemeClusterBreak(this));
     }
     mRE = regular_expression_passes(mRE);
     //auto GCB_external = new PropertyBasisExternal(UCD::GCB);
-    //mExternalTable.emplace(GCB_external->getName(), GCB_external);
+    //mExternalTable.declareExternal(Unicode, GCB_external->getName(), GCB_external);
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
     for (auto m : PE.mNameMap) {
-        mExternalTable.emplace(m.first, new PropertyExternal(re::makeName(m.first, m.second)));
+        mExternalTable.declareExternal(Unicode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
     }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);
     for (auto m : CCnamer.mNameMap) {
-        mExternalTable.emplace(m.first, new CC_External(m.first, cast<re::CC>(m.second)));
+        mExternalTable.declareExternal(Unicode, m.first, new CC_External(cast<re::CC>(m.second)));
     }
     if (hasWordBoundary(mRE)) {
         UnicodeIndexing = true;
-        mExternalTable.emplace("\\b", new WordBoundaryExternal());
+        mExternalTable.declareExternal(Unicode, "\\b", new WordBoundaryExternal());
     }
     if (!validateFixedUTF8(mRE)) {
         setComponent(mExternalComponents, Component::UTF8index);
@@ -333,7 +337,7 @@ void GrepEngine::initRE(re::RE * re) {
         if (!UnicodeSets.empty()) {
             auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
             mRE = transformCCs(mpx, mRE);
-            mExternalTable.emplace(mpx->getName() + "_basis", new MultiplexedExternal(mpx));
+            mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
         }
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
@@ -356,16 +360,25 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
+    auto indexing = UnicodeIndexing ? Unicode : u8;
     re::FixedLengthAltNamer FLnamer(mIndexAlphabet);
     mRE = FLnamer.transformRE(mRE);
     for (auto m : FLnamer.mNameMap) {
-        mExternalTable.emplace(m.first, new RE_External(m.first, this, m.second, mIndexAlphabet));
+        auto r = new RE_External(this, m.second, mIndexAlphabet);
+        auto lgth = r->getLengthRange().first;
+        auto offset = r->getOffset();
+        auto spanName = m.first + "Span";
+        mExternalTable.declareExternal(indexing, m.first, r);
+        if (lgth > 0) {
+            mExternalTable.declareExternal(indexing, m.first + "Span", new FixedSpanExternal(m.first, lgth, offset));
+            mSpanNames.push_back(spanName);
+        }
     }
 /*
     re::StartAnchoredAltNamer SAnamer;
     mRE = SAnamer.transformRE(mRE);
     for (auto m : SAnamer.mNameMap) {
-        mExternalTable.emplace(m.first, new StartAnchoredExternal(m.first, this, m.second, mIndexAlphabet));
+        mExternalTable.declareExternal(Unicode, m.first, new StartAnchoredExternal(this, m.second, mIndexAlphabet));
     }
 */
     re::gatherNames(mRE, mExternalNames);
@@ -389,16 +402,20 @@ void GrepEngine::initRE(re::RE * re) {
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
     if (mIllustrator) mIllustrator->captureByteData(P, "Source", ByteStream);
+    auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
-        mExternalTable.emplace("u8_basis", new PreDefined("u8_basis", BasisBits));
+        mExternalTable.declareExternal(u8, "basis", new PreDefined(BasisBits));
+    } else {
+        mExternalTable.declareExternal(u8, "basis", new PreDefined(ByteStream));
     }
     if (hasComponent(mExternalComponents, Component::U21)) {
         mU21 = P->CreateStreamSet(21, 1);
         P->CreateKernelCall<UTF8_Decoder>(Source, mU21);
-        mExternalTable.emplace("u21_basis", new PreDefined("u21_basis", mU21));
+        auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
+        mExternalTable.declareExternal(Unicode, "basis", new PreDefined(mU21));
     }
     return Source;
 }
@@ -422,14 +439,21 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
         if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
         if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
-        mExternalTable.emplace("UTF8_LB", new PreDefined("UTF8_LB", mLineBreakStream));
-        mExternalTable.emplace("u8index", new PreDefined("u8index", mU8index));
+        auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
+        mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
+        if (UnicodeIndexing) {
+            auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
+            mExternalTable.declareExternal(Unicode, "UTF8_LB", new PreDefined(mLineBreakStream));
+        } else {
+            mExternalTable.declareExternal(u8, "UTF8_LB", new PreDefined(mLineBreakStream));
+        }
     }
     else {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
             P->CreateKernelCall<UTF8_index>(SourceStream, mU8index);
             if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
-            mExternalTable.emplace("u8index", new PreDefined("u8index", mU8index));
+            auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
+            mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
         }
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
             Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
@@ -448,38 +472,25 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
 }
 
 StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
-    return mExternalTable.getStreamSet(P, nameStr);
+    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+    return mExternalTable.getStreamSet(P, indexing, nameStr);
 }
 
 void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
-    if (UnicodeIndexing) {
-        std::set<std::string> extNames;
-        for (auto e : mExternalNames) {
-            std::string name = e->getFullName();
-            if (extNames.count(name) == 0) {
-                extNames.insert(name);
-                ExternalStreamObject * ext = mExternalTable.lookup(name);
-                ext->setIndexing(P, mU8index);
-                //llvm::errs() << "Setting indexing for: " << name << "\n";
-            }
-        }
-    }
-    for (auto e : mExternalNames) {
-        resolveExternal(P, e->getFullName());
-    }
+    mExternalTable.resolveExternals(P);
 }
 
 void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto alphabets = re::collectAlphabets(regexp);
+    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     for (auto & a : alphabets) {
         std::string basisName = a->getName() + "_basis";
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            ExternalStreamObject * ext = mExternalTable.lookup(basisName);
+            ExternalStreamObject * ext = mExternalTable.lookup(indexing, basisName);
             if (!ext->isResolved()) {
-                ext->setIndexing(P, mU8index);
                 resolveExternal(P, basisName);
             }
-            if (isa<PropertyBasisExternal>(ext) || isa<MultiplexedExternal>(ext)) {
+            if (isa<PropertyBasisExternal>(ext) || isa<MultiplexedExternal>(ext) || isa<FilterByMaskExternal>(ext)) {
                 StreamSet * alphabetBasis = ext->getStreamSet();
                 if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
                 options->addAlphabet(mpx, alphabetBasis);
@@ -497,8 +508,8 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
         auto name = e->getFullName();
         if (extNames.count(name) == 0) {
             extNames.insert(name);
-            ExternalStreamObject * ext = mExternalTable.lookup(name);
-            StreamSet * extStream = mExternalTable.getStreamSet(P, name);
+            ExternalStreamObject * ext = mExternalTable.lookup(indexing, name);
+            StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, name);
             unsigned offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
@@ -508,6 +519,16 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
 }
 
 StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * MatchResults) {
+    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+    if (mSpanNames.empty() == false) {
+        std::vector<StreamSet *> allSpans;
+        for (unsigned i = 0; i < mSpanNames.size(); i++) {
+            allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
+        }
+        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        return mergedSpans;
+    }
     if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
         std::vector<StreamSet *> allSpans;
         int i = 0;
@@ -524,10 +545,11 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         return mergedSpans;
     } else if (re::Name * externalName = dyn_cast<re::Name>(r)) {
         std::string nameStr = externalName->getFullName();
-        StreamSet * match_marks = mExternalTable.getStreamSet(P, nameStr);
-        ExternalStreamObject * ext = mExternalTable.lookup(nameStr);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "match_marks", match_marks);
-        if (StartAnchoredExternal * s = dyn_cast<StartAnchoredExternal>(ext)) {
+        auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+        StreamSet * match_marks = mExternalTable.getStreamSet(P, indexing, nameStr);
+        ExternalStreamObject * ext = mExternalTable.lookup(indexing, nameStr);
+        if (mIllustrator) mIllustrator->captureBitstream(P, nameStr + " marks", match_marks);
+        if (isa<StartAnchoredExternal>(ext)) {
             StreamSet * spans = P->CreateStreamSet(1, 1);
             PrefixSuffixSpan(P, mLineStarts, match_marks, spans);
             if (mIllustrator) mIllustrator->captureBitstream(P, "spans", spans);
@@ -536,6 +558,8 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         // else Other special cases
         // default by min match length
         int spanLgth = ext->getLengthRange().first;
+        //llvm::errs() << "ext->getLengthRange().first = " << ext->getLengthRange().first << "\n";
+        //llvm::errs() << "ext->getOffset() = " << ext->getOffset() << "\n";
         if (spanLgth <= 1) return match_marks;
         StreamSet * spans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, ext->getOffset(), match_marks, spans);
