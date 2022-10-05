@@ -174,7 +174,8 @@ std::pair<int, int> RE_External::getLengthRange() {
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    auto offset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    assert(offset == mOffset);
     installStreamSet(b, reStrm);
 }
 

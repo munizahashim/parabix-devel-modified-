@@ -9,6 +9,7 @@
 #include <re/alphabet/alphabet.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>
+#include <re/analysis/re_analysis.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/util/debug_display.h>
@@ -139,7 +140,7 @@ public:
         return false;
     }
     RE_External(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
+        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mOffset(grepOffset(mRE)) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     int getOffset() override {return mOffset;}
@@ -261,12 +262,14 @@ public:
     }
     std::vector<std::string> getParameters() override;
     StreamIndexCode getBaseIndex() {return mBase;}
-    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames) :
-        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames) {}
+    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, unsigned offset = 0) :
+        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames), mOffset(offset) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    int getOffset() override {return mOffset;}
 private:
     StreamIndexCode mBase;
     std::vector<std::string> mParamNames;
+    unsigned mOffset;
 };
 
 class FixedSpanExternal : public ExternalStreamObject {
