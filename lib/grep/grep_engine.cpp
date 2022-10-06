@@ -360,18 +360,20 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    auto indexing = UnicodeIndexing ? Unicode : u8;
+    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     re::FixedLengthAltNamer FLnamer(mIndexAlphabet);
-    mRE = FLnamer.transformRE(mRE);
-    for (auto m : FLnamer.mNameMap) {
-        auto r = new RE_External(this, m.second, mIndexAlphabet);
-        auto lgth = r->getLengthRange().first;
-        auto offset = r->getOffset();
-        auto spanName = m.first + "Span";
-        mExternalTable.declareExternal(indexing, m.first, r);
-        if (lgth > 0) {
-            mExternalTable.declareExternal(indexing, m.first + "Span", new FixedSpanExternal(m.first, lgth, offset));
-            mSpanNames.push_back(spanName);
+    if (mColoring) {
+        mRE = FLnamer.transformRE(mRE);
+        for (auto m : FLnamer.mNameMap) {
+            auto r = new RE_External(this, m.second, mIndexAlphabet);
+            auto lgth = r->getLengthRange().first;
+            auto offset = r->getOffset();
+            auto spanName = m.first + "Span";
+            mExternalTable.declareExternal(indexing, m.first, r);
+            if (lgth > 0) {
+                mExternalTable.declareExternal(indexing, m.first + "Span", new FixedSpanExternal(m.first, lgth, offset));
+                mSpanNames.push_back(spanName);
+            }
         }
     }
 /*
