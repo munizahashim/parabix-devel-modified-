@@ -269,6 +269,8 @@ public:
 
     void calculateFinalItemCounts(BuilderRef b, Vec<Value *> & accessibleItems, Vec<Value *> & writableItems, Value *& minFixedRateFactor, Value *& finalStrideRemainder);
 
+    Value * revertTransitiveAddCalculation(BuilderRef b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
+
     void zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses);
 
     Value * allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlock * const insertBefore) const;

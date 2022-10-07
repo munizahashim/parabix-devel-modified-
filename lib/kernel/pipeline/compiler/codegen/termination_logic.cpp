@@ -62,7 +62,6 @@ Value * PipelineCompiler::hasPipelineTerminated(BuilderRef b) {
         if (const auto type = mTerminationCheck[partitionId]) {
             Value * signal = mPartitionTerminationSignal[partitionId];
             assert (isFromCurrentFunction(b, signal, false));
-
             if (type & TerminationCheckFlag::Hard) {
                 Value * const final = b->CreateICmpEQ(signal, fatal);
                 if (hard) {

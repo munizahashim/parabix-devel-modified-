@@ -245,6 +245,13 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif
 
+    if (mKernelCanTerminateEarly) {
+        mTerminatedExplicitly = doSegmentRetVal;
+        assert (doSegmentRetVal->getType()->isIntegerTy());
+    } else {
+        mTerminatedExplicitly = nullptr;
+    }
+
     if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
         updateProcessedAndProducedItemCounts(b);
         readReturnedOutputVirtualBaseAddresses(b);
@@ -285,13 +292,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->CreateCondBr(done, individualStrideLoopExit, individualStrideLoop);
 
         b->SetInsertPoint(individualStrideLoopExit);
-    }
-
-    if (mKernelCanTerminateEarly) {
-        mTerminatedExplicitly = doSegmentRetVal;
-        assert (doSegmentRetVal->getType()->isIntegerTy());
-    } else {
-        mTerminatedExplicitly = nullptr;
     }
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
@@ -509,16 +509,30 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
 
+    const auto mustExplicitlyTerminate = mKernel->hasAttribute(AttrId::MustExplicitlyTerminate);
+
+    Value * rejectedTermSignal = nullptr;
+    if (mustExplicitlyTerminate) {
+        assert (mTerminatedExplicitly);
+        rejectedTermSignal = b->CreateAnd(b->CreateIsNull(mCurrentNumOfLinearStrides), b->CreateIsNull(mTerminatedExplicitly));
+    }
+
     // calculate or read the item counts (assuming this kernel did not terminate)
     for (unsigned i = 0; i < numOfInputs; ++i) {
         Value * processed = nullptr;
         const auto inputPort = StreamSetPort{PortType::Input, i};
         const auto inputEdge = getInput(mKernelId, inputPort);
-
-        const Binding & input = mBufferGraph[inputEdge].Binding;
+        const auto & port = mBufferGraph[inputEdge];
+        const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
-            processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mCurrentLinearInputItems[inputPort]);
+
+            Value * inputItems = mCurrentLinearInputItems[inputPort];
+            if (LLVM_UNLIKELY(mustExplicitlyTerminate && port.TransitiveAdd > 0 && rate.isFixed())) {
+                inputItems = revertTransitiveAddCalculation(b, rate, inputItems, rejectedTermSignal);
+            }
+            processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], inputItems);
+
             assert (input.isDeferred() ^ (mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr));
             if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                 assert (mReturnedProcessedItemCountPtr[inputPort]);
