@@ -139,9 +139,15 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
     if options.verbose:
         print("Doing: " + grep_cmd)
     try:
-        grep_out = codecs.decode(subprocess.check_output(grep_cmd.encode('utf-8'), cwd=options.exec_dir, shell=True), 'utf-8')
+        raw_output = subprocess.check_output(grep_cmd.encode('utf-8'), cwd=options.exec_dir, shell=True)
+        grep_out = codecs.decode(raw_output, 'utf-8')
     except subprocess.CalledProcessError as e:
         grep_out = codecs.decode(e.output, 'utf-8')
+    except UnicodeDecodeError:
+        msg = u"Test failure: {%s} expecting {%s} got malformed UTF-8" % (grep_cmd, expected_result)
+        print(msg.encode('utf-8'))
+        failure_count += 1
+        return
     if len(grep_out) > 0 and grep_out[-1] == '\n': grep_out = grep_out[:-1]
     filtered_out = filter_colorization(grep_out)
     if filtered_out != expected_result:
