@@ -29,4 +29,35 @@ void gatherNames(RE * const re, std::set<Name *> & nameSet) {
     NameCollector collector(nameSet);
     collector.inspectRE(re);
 }
+
+struct ExternalCollector final : public RE_Inspector {
+
+    ExternalCollector()
+    : RE_Inspector() {}
+
+    void inspectName(Name * n) final {
+        ExternalSet.insert(n->getFullName());
+    }
+
+    void inspectCC(CC * cc) final {
+        auto alpha = cc->getAlphabet();
+        if ((alpha == &cc::Unicode) || (alpha == &cc::UTF8)) {
+            ExternalSet.insert("basis");
+        } else {
+            ExternalSet.insert(alpha->getName() + "_basis");
+        }
+    }
+
+    std::set<std::string> ExternalSet;
+};
+
+std::vector<std::string> gatherExternals(RE * const re) {
+    ExternalCollector collector;
+    collector.inspectRE(re);
+    std::vector<std::string> externals;
+    for (auto & e : collector.ExternalSet) {
+        externals.push_back(e);
+    }
+    return externals;
+}
 }

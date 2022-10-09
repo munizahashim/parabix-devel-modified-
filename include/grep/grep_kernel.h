@@ -10,6 +10,7 @@
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/re_analysis.h>
+#include <re/analysis/re_name_gather.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/util/debug_display.h>
@@ -56,6 +57,7 @@ private:
 using ExternalMapRef = ExternalStreamTable *;
 
 class ExternalStreamObject {
+    friend class ExternalStreamTable;
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
@@ -78,7 +80,7 @@ protected:
     static Allocator mAllocator;
     ExternalStreamObject(Kind k) :
         mKind(k), mStreamSet(nullptr)  {}
-    void installStreamSet(ProgBuilderRef b, StreamSet * s);
+    void installStreamSet(StreamSet * s);
 public:
     void* operator new (std::size_t size) noexcept {
         return mAllocator.allocate<uint8_t>(size);
@@ -139,8 +141,9 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    std::vector<std::string> getParameters() override {return mParams;}
     RE_External(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mOffset(grepOffset(mRE)) {}
+        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mOffset(grepOffset(mRE)), mParams(re::gatherExternals(re)) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     int getOffset() override {return mOffset;}
@@ -149,6 +152,7 @@ private:
     re::RE * mRE;
     const cc::Alphabet * mIndexAlphabet;
     unsigned mOffset;
+    std::vector<std::string> mParams;
 };
 
 class StartAnchoredExternal : public ExternalStreamObject {
