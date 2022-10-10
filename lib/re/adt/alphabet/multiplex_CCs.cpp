@@ -114,8 +114,8 @@ void doMultiplexCCs(const CC_Set & CCs,
 
 
 
-MultiplexedAlphabet::MultiplexedAlphabet(const std::string alphabetName, const CC_Set CCs)
-: Alphabet(std::move(alphabetName), ClassTypeId::MultiplexedAlphabet)
+MultiplexedAlphabet::MultiplexedAlphabet(const std::string name, const CC_Set CCs)
+: Alphabet(name, name, ClassTypeId::MultiplexedAlphabet)
 , mUnicodeSets(std::move(CCs)) {
     if (!mUnicodeSets.empty()) {
         mSourceAlphabet = mUnicodeSets[0]->getAlphabet();

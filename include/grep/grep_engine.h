@@ -182,18 +182,19 @@ protected:
     GrepRecordBreakKind mGrepRecordBreak;
 
     re:: RE * mRE;
-    std::set<re::Name *> mExternalNames;
     re::CC * mBreakCC;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;
     Component mInternalComponents;
     const cc::Alphabet * mIndexAlphabet;
+    const cc::Alphabet * mLengthAlphabet;
     kernel::ExternalStreamTable mExternalTable;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
+    std::vector<std::string> mSpanNames;
     re::UTF8_Transformer mUTF8_Transformer;
     pthread_t mEngineThread;
     kernel::ParabixIllustrator * mIllustrator;

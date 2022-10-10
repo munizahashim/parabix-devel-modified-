@@ -118,7 +118,7 @@ namespace iso_8859_5 {
         0x2116, 0x0451, 0x0452, 0x0453, 0x0454, 0x0455, 0x0456, 0x0457,
         0x0458, 0x0459, 0x045a, 0x045b, 0x045c, 0x00a7, 0x045e, 0x045f};
 
-    cc::UnicodeMappableAlphabet alphabet("iso-8859-5", 128, codepoints);
+    cc::UnicodeMappableAlphabet alphabet("iso-8859-5", "l5", 128, codepoints);
 
 }
 

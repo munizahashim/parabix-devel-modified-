@@ -30,6 +30,7 @@ class Alphabet {
 public:
     using Allocator = SlabAllocator<Alphabet *>;
     const std::string & getName() const { return mAlphabetName;}
+    const std::string & getCode() const { return mCode;}
     virtual const unsigned getSize() const = 0;
     enum class ClassTypeId : unsigned {UnicodeMappableAlphabet, CodeUnitAlphabet, MultiplexedAlphabet};
     inline ClassTypeId getClassTypeId() const {
@@ -37,13 +38,14 @@ public:
     }
     virtual ~Alphabet() {}
 protected:
-    Alphabet(const std::string && name, ClassTypeId k) : mAlphabetName(std::move(name)), mClassTypeId(k) {}
+    Alphabet(const std::string name, const std::string code, ClassTypeId k) : mAlphabetName(name), mCode(code), mClassTypeId(k) {}
     void* operator new (std::size_t size) noexcept {
         return mAllocator.allocate<uint8_t>(size);
     }
     static Allocator mAllocator;
 private:
     const std::string mAlphabetName;
+    const std::string mCode;
     const ClassTypeId mClassTypeId;
 };
 
@@ -57,9 +59,10 @@ public:
     //  character codes (if any) above unicodeCommon - 1.
     
     UnicodeMappableAlphabet(const std::string alphabetName,
+                            const std::string code,
                             unsigned unicodeCommon,
                             std::vector <UCD::codepoint_t> aboveCommon);
-    
+
     static inline bool classof(const Alphabet * a) {
         return a->getClassTypeId() == ClassTypeId::UnicodeMappableAlphabet;
     }
@@ -80,7 +83,7 @@ protected:
 
 class CodeUnitAlphabet final : public Alphabet {
 public:
-    CodeUnitAlphabet(const std::string alphabetName, uint8_t codeUnitBits);
+    CodeUnitAlphabet(const std::string name, const std::string code, uint8_t codeUnitBits);
     static inline bool classof(const Alphabet * a) {
         return a->getClassTypeId() == ClassTypeId::CodeUnitAlphabet;
     }
@@ -94,17 +97,17 @@ private:
 
 //  Some important alphabets are predefined.
 
-const extern UnicodeMappableAlphabet Unicode; // Unicode("Unicode", UCD::UNICODE_MAX, {})
+const extern UnicodeMappableAlphabet Unicode; // Unicode("Unicode", "U", UCD::UNICODE_MAX, {})
 
-const extern UnicodeMappableAlphabet ASCII;  // ASCII("ASCII", 0x7F, {});
+const extern UnicodeMappableAlphabet ASCII;  // ASCII("ASCII", "A", 0x7F, {});
 
-const extern UnicodeMappableAlphabet ISO_Latin1; // ISO_Latin1("ISO_Latin1", 0xFF, {});
+const extern UnicodeMappableAlphabet ISO_Latin1; // ISO_Latin1("ISO_Latin1", "l1", 0xFF, {});
 
-const extern CodeUnitAlphabet Byte; // Byte("Byte", 8);
+const extern CodeUnitAlphabet Byte; // Byte("Byte", "x8", 8);
     
-const extern CodeUnitAlphabet UTF8; // UTF8("UTF8", 8);
+const extern CodeUnitAlphabet UTF8; // UTF8("UTF8", "u8", 8);
 
-const extern CodeUnitAlphabet UTF16; // UTF16("UTF16", 16);
+const extern CodeUnitAlphabet UTF16; // UTF16("UTF16", "u16", 16);
     
 }
 

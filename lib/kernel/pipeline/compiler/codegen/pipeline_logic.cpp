@@ -788,7 +788,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     if (PipelineHasTerminationSignal) {
         assert (initialTerminationSignalPtr);
-        assert (mCurrentThreadTerminationSignalPtr);
         b->CreateStore(finalTerminationSignal, initialTerminationSignalPtr);
     }
 

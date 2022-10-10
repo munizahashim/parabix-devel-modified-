@@ -9,8 +9,11 @@
 #include <re/alphabet/alphabet.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>
+#include <re/analysis/re_analysis.h>
+#include <re/analysis/re_name_gather.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/util/debug_display.h>
 #include <util/slab_allocator.h>
 
 
@@ -23,50 +26,67 @@ namespace kernel {
 using ProgBuilderRef = const std::unique_ptr<ProgramBuilder> &;
 
 class ExternalStreamObject;
+
+//  StreamIndexCode is used to identify the indexing base of
+//  streamsets.   UTF-8 and Unicode indexed streams are two
+//  common indexing bases.
+using StreamIndexCode = unsigned;
+
+struct StreamIndexInfo {
+    std::string name;
+    StreamIndexCode base;
+    std::string indexStreamName;
+};
+
 class ExternalStreamTable {
 public:
-    ExternalStreamTable() {}
-    void emplace(std::string externalName, ExternalStreamObject * ext);
-    ExternalStreamObject * lookup(std::string externalName);
-    StreamSet * getStreamSet(ProgBuilderRef b, std::string externalName);
+    ExternalStreamTable() : mIllustrator(nullptr) {}
+    StreamIndexCode declareStreamIndex(std::string indexName, StreamIndexCode base = 0, std::string indexStreamName = "");
+    StreamIndexCode getStreamIndex(std::string indexName);
+    void declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext);
+    ExternalStreamObject * lookup(StreamIndexCode c, std::string externalName);
+    StreamSet * getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string externalName);
+    void resolveExternals(ProgBuilderRef b);
+    void setIllustrator(kernel::ParabixIllustrator * illustrator) {mIllustrator = illustrator;}
 private:
-    std::map<std::string, ExternalStreamObject *> mExternalMap;
+    std::vector<StreamIndexInfo> mStreamIndices;
+    std::vector<std::map<std::string, ExternalStreamObject *>> mExternalMap;
+    kernel::ParabixIllustrator * mIllustrator;
 };
 
 using ExternalMapRef = ExternalStreamTable *;
 
 class ExternalStreamObject {
+    friend class ExternalStreamTable;
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
         PreDefined, PropertyExternal, CC_External, RE_External, StartAnchored,
         Reference_External,
-        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed
+        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed,
+        FilterByMask, FixedSpan
     };
     inline Kind getKind() const {
         return mKind;
     }
-    std::string getName() {return mStreamSetName;}
     StreamSet * getStreamSet() {return mStreamSet;}
-    virtual void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) = 0;
+    // Most externals are computed from the basis bit stremas.
+    virtual std::vector<std::string> getParameters() {return std::vector<std::string>{"basis"};}
+    virtual void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) = 0;
     virtual std::pair<int, int> getLengthRange() {return std::make_pair(1,1);}
     virtual int getOffset() {return 0;}  //default offset unless overridden.
     bool isResolved() {return mStreamSet != nullptr;}
-    void setIndexing(ProgBuilderRef b, StreamSet * indexStrm);
 protected:
     static Allocator mAllocator;
-    ExternalStreamObject(Kind k, std::string name) :
-        mKind(k), mStreamSetName(name), mIndexStream(nullptr), mStreamSet(nullptr)  {}
-    void installStreamSet(ProgBuilderRef b, StreamSet * s);
+    ExternalStreamObject(Kind k) :
+        mKind(k), mStreamSet(nullptr)  {}
+    void installStreamSet(StreamSet * s);
 public:
     void* operator new (std::size_t size) noexcept {
         return mAllocator.allocate<uint8_t>(size);
     }
-private:
-    Kind mKind;
-    std::string mStreamSetName;
-    StreamSet * mIndexStream;
 protected:
+    Kind mKind;
     StreamSet * mStreamSet;
 };
 
@@ -78,9 +98,9 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    PreDefined(std::string ssName, StreamSet * predefined) :
-        ExternalStreamObject(Kind::PreDefined, ssName) {mStreamSet = predefined;}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override {}
+    PreDefined(StreamSet * predefined) :
+        ExternalStreamObject(Kind::PreDefined) {mStreamSet = predefined;}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override {}
 };
 
 class PropertyExternal : public ExternalStreamObject {
@@ -92,8 +112,8 @@ public:
         return false;
     }
     PropertyExternal(re::Name * n) :
-        ExternalStreamObject(Kind::PropertyExternal, n->getFullName()), mName(n) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+        ExternalStreamObject(Kind::PropertyExternal), mName(n) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     re::Name * mName;
 };
@@ -106,9 +126,9 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    CC_External(std::string name, re::CC * cc) :
-        ExternalStreamObject(Kind::CC_External, name), mCharClass(cc) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+    CC_External(re::CC * cc) :
+        ExternalStreamObject(Kind::CC_External), mCharClass(cc) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     re::CC * mCharClass;
 };
@@ -121,9 +141,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    RE_External(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::RE_External, name), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+    std::vector<std::string> getParameters() override {return mParams;}
+    RE_External(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mOffset(grepOffset(mRE)), mParams(re::gatherExternals(re)) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     int getOffset() override {return mOffset;}
 private:
@@ -131,6 +152,7 @@ private:
     re::RE * mRE;
     const cc::Alphabet * mIndexAlphabet;
     unsigned mOffset;
+    std::vector<std::string> mParams;
 };
 
 class StartAnchoredExternal : public ExternalStreamObject {
@@ -141,9 +163,9 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    StartAnchoredExternal(std::string name, grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::StartAnchored, name), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+    StartAnchoredExternal(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::StartAnchored), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override;
     int getOffset() override {return mOffset;}
 private:
@@ -162,9 +184,9 @@ public:
         return false;
     }
     Reference_External(re::ReferenceInfo & refInfo, re::Reference * ref) :
-        ExternalStreamObject(Kind::Reference_External, ref->getName()),
+        ExternalStreamObject(Kind::Reference_External),
         mRefInfo(refInfo), mRef(ref) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     re::ReferenceInfo & mRefInfo;
     re::Reference * mRef;
@@ -178,9 +200,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    std::vector<std::string> getParameters() override;
     GraphemeClusterBreak(grep::GrepEngine * engine) :
-        ExternalStreamObject(Kind::GraphemeClusterBreak, "\\b{g}"), mGrepEngine(engine)  {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+        ExternalStreamObject(Kind::GraphemeClusterBreak), mGrepEngine(engine)  {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
     int getOffset() override {return 1;}
 private:
@@ -195,9 +218,10 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    std::vector<std::string> getParameters() override;
     WordBoundaryExternal() :
-        ExternalStreamObject(Kind::WordBoundaryExternal, "\\b") {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+        ExternalStreamObject(Kind::WordBoundaryExternal) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
     int getOffset() override {return 1;}
 };
@@ -211,9 +235,8 @@ public:
         return false;
     }
     PropertyBasisExternal(UCD::property_t p) :
-    ExternalStreamObject(Kind::PropertyBasis,
-                         "UCD:" + getPropertyFullName(p) + "_basis"), mProperty(p) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+    ExternalStreamObject(Kind::PropertyBasis), mProperty(p) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     UCD::property_t mProperty;
 };
@@ -227,10 +250,48 @@ public:
         return false;
     }
     MultiplexedExternal(cc::MultiplexedAlphabet * mpx) :
-    ExternalStreamObject(Kind::Multiplexed, mpx->getName()), mAlphabet(mpx) {}
-    void resolveStreamSet(ProgBuilderRef b, ExternalMapRef m) override;
+        ExternalStreamObject(Kind::Multiplexed), mAlphabet(mpx) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     cc::MultiplexedAlphabet * mAlphabet;
+};
+
+class FilterByMaskExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::FilterByMask;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    std::vector<std::string> getParameters() override;
+    StreamIndexCode getBaseIndex() {return mBase;}
+    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, unsigned offset = 0) :
+        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames), mOffset(offset) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+    int getOffset() override {return mOffset;}
+private:
+    StreamIndexCode mBase;
+    std::vector<std::string> mParamNames;
+    unsigned mOffset;
+};
+
+class FixedSpanExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::FixedSpan;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    std::vector<std::string> getParameters() override;
+    FixedSpanExternal(std::string matchMarks, unsigned lgth, unsigned offset) :
+        ExternalStreamObject(Kind::FixedSpan), mMatchMarks(matchMarks), mLength(lgth), mOffset(offset) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    std::string mMatchMarks;
+    unsigned mLength;
+    unsigned mOffset;
 };
 
 class UTF8_index : public pablo::PabloKernel {
