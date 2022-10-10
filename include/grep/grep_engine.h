@@ -182,7 +182,6 @@ protected:
     GrepRecordBreakKind mGrepRecordBreak;
 
     re:: RE * mRE;
-    std::set<re::Name *> mExternalNames;
     re::CC * mBreakCC;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;

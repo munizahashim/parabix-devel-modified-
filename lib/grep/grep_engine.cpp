@@ -279,7 +279,6 @@ void GrepEngine::initRE(re::RE * re) {
         anchorName->setDefinition(re::makeUnicodeBreak());
         anchorRE = anchorName;
         setComponent(mExternalComponents, Component::UTF8index);
-        mExternalNames.insert(anchorName);
     }
 
     mRefInfo = re::buildReferenceInfo(mRE);
@@ -326,7 +325,6 @@ void GrepEngine::initRE(re::RE * re) {
         mExternalTable.declareExternal(indexCode, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
         re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
         re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
-        mExternalNames.insert(epict);
         mExternalTable.declareExternal(indexCode, epict->getFullName(), new PropertyExternal(epict));
         mExternalTable.declareExternal(indexCode, "\\b{g}", new GraphemeClusterBreak(this));
     }
@@ -389,22 +387,13 @@ void GrepEngine::initRE(re::RE * re) {
         mExternalTable.declareExternal(Unicode, m.first, new StartAnchoredExternal(this, m.second, mIndexAlphabet));
     }
 */
-    re::gatherNames(mRE, mExternalNames);
-
-    // For simple regular expressions with a small number of characters, we
-    // can bypass transposition and use the Direct CC compiler.
-    if ((mGrepRecordBreak != GrepRecordBreakKind::Unicode) && mExternalNames.empty() && !UnicodeIndexing) {
-        if (byteTestsWithinLimit(mRE, ByteCClimit)) {
-            return;  // skip transposition
-        } else {
-            setComponent(mExternalComponents, Component::S2P);
-        }
-    } else {
+    if (mLengthAlphabet == &cc::Unicode) {
+        setComponent(mExternalComponents, Component::S2P);
+        setComponent(mExternalComponents, Component::UTF8index);
+    } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-    if (mLengthAlphabet == &cc::Unicode) {
-        setComponent(mExternalComponents, Component::UTF8index);
-    }
+
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
