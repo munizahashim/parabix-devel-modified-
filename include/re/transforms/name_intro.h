@@ -34,11 +34,11 @@ private:
     UTF_Encoder mEncoder;
 };
 
-class FixedLengthAltNamer final : public NameIntroduction {
+class FixedSpanNamer final : public NameIntroduction {
 public:
-    FixedLengthAltNamer(const cc::Alphabet * a, std::string lgthPfx = "lgth");
+    FixedSpanNamer(const cc::Alphabet * a);
 protected:
-    RE * transformAlt (Alt * a) override;
+    RE * transform (RE * r) override;
 private:
     const cc::Alphabet * mAlphabet;
     std::string mLgthPrefix;

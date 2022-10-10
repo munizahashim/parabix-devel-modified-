@@ -83,34 +83,14 @@ void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externa
     if (mExternalMap[c].find(externalName) != mExternalMap[c].end()) {
         return;
     }
-    auto paramNames = ext->getParameters();
-    bool all_found = true;
-    for (auto & p : paramNames) {
-        auto f = mExternalMap[c].find(p);
-        if (f == mExternalMap[c].end()) {
-            all_found = false;
-            break;
-        }
-    }
-    if (all_found) {
-        mExternalMap[c].emplace(externalName, ext);
-        //llvm::errs() << "declared external: " << mStreamIndices[c].name << "_" << externalName << "\n";
-    } else {
-        auto base = mStreamIndices[c].base;
-        mExternalMap[base].emplace(externalName, ext);
-        std::vector<std::string> filterParms;
-        filterParms.push_back(mStreamIndices[c].indexStreamName);
-        filterParms.push_back(externalName);
-        //llvm::errs() << "declared external: " << mStreamIndices[base].name << "_" << externalName << "\n";
-        mExternalMap[c].emplace(externalName, new FilterByMaskExternal(base, filterParms));
-        //llvm::errs() << "declared fbm external: " << mStreamIndices[c].name << "_" << externalName << "\n";
-    }
+    mExternalMap[c].emplace(externalName, ext);
 }
 
 ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::string ssname) {
     auto f = mExternalMap[c].find(ssname);
     if (f == mExternalMap[c].end()) {
-        report_fatal_error("Cannot get external stream object " + ssname);
+        report_fatal_error("Cannot get external stream object " +
+                           mStreamIndices[c].name + "_" + ssname);
     }
     return f->second;
 }
@@ -118,21 +98,31 @@ ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::strin
 StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string ssname) {
     ExternalStreamObject * ext = lookup(c, ssname);
     if (!ext->isResolved()) {
-        if (FilterByMaskExternal * f = dyn_cast<FilterByMaskExternal>(ext)) {
-            auto base = f->getBaseIndex();
-            std::vector<std::string> paramNames = ext->getParameters();
-            std::vector<StreamSet *> paramStreams;
-            for (auto pName : paramNames) {
-                paramStreams.push_back(getStreamSet(b, base, pName));
+        std::vector<std::string> paramNames = ext->getParameters();
+        bool all_found = true;
+        for (auto & p : paramNames) {
+            auto f = mExternalMap[c].find(p);
+            if (f == mExternalMap[c].end()) {
+                all_found = false;
             }
-            ext->resolveStreamSet(b, paramStreams);
-        } else {
-            std::vector<std::string> paramNames = ext->getParameters();
+        }
+        if (all_found) {
             std::vector<StreamSet *> paramStreams;
             for (auto pName : paramNames) {
                 paramStreams.push_back(getStreamSet(b, c, pName));
             }
             ext->resolveStreamSet(b, paramStreams);
+        } else {
+            auto base = mStreamIndices[c].base;
+            if (base == c) {
+                llvm::report_fatal_error("Cannot resolve " + mStreamIndices[c].name + "_" + ssname);
+            }
+            mExternalMap[base].emplace(ssname, ext);
+            StreamSet * baseSet = getStreamSet(b, base, ssname);
+            StreamSet * mask = getStreamSet(b, base, mStreamIndices[c].indexStreamName);
+            StreamSet * filtered = b->CreateStreamSet(baseSet->getNumElements());
+            FilterByMask(b, mask, baseSet, filtered);
+            ext->installStreamSet(filtered);
         }
         StreamSet * s = ext->getStreamSet();
         if (mIllustrator && (s->getNumElements() == 1)) {
@@ -152,21 +142,21 @@ void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
     }
 }
 
-void ExternalStreamObject::installStreamSet(ProgBuilderRef b, StreamSet * s) {
+void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;
 }
 
 void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * pStrm  = b->CreateStreamSet(1);
     b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
-    installStreamSet(b, pStrm);
+    installStreamSet(pStrm);
 }
 
 void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * ccStrm = b->CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
     b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
-    installStreamSet(b, ccStrm);
+    installStreamSet(ccStrm);
 }
 std::pair<int, int> RE_External::getLengthRange() {
     return re::getLengthRange(mRE, mIndexAlphabet);
@@ -174,8 +164,9 @@ std::pair<int, int> RE_External::getLengthRange() {
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
-    installStreamSet(b, reStrm);
+    auto offset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    assert(offset == mOffset);
+    installStreamSet(reStrm);
 }
 
 std::pair<int, int> StartAnchoredExternal::getLengthRange() {
@@ -185,13 +176,13 @@ std::pair<int, int> StartAnchoredExternal::getLengthRange() {
 void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
     mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
-    installStreamSet(b, reStrm);
+    installStreamSet(reStrm);
 }
 
 void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     std::string instanceName = mRef->getInstanceName();
     auto mapping = mRefInfo.twixtREs.find(instanceName);
-    llvm::errs() << instanceName  << "\n";
+    //llvm::errs() << instanceName  << "\n";
     if (mapping == mRefInfo.twixtREs.end()) {
         llvm::report_fatal_error("grep engine: undefined reference!");
     }
@@ -200,14 +191,14 @@ void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSe
     int dist = rg1.first + rg2.first;
     StreamSet * distStrm = b->CreateStreamSet(1);
     b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, inputs[0], distStrm);
-    installStreamSet(b, distStrm);
+    installStreamSet(distStrm);
 }
 
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     if (mProperty == UCD::identity) {
         StreamSet * u21 = b->CreateStreamSet(21);
         b->CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
-        installStreamSet(b, u21);
+        installStreamSet(u21);
     } else {
         UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
         if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
@@ -216,7 +207,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
             for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
             StreamSet * basis = b->CreateStreamSet(ccs.size());
             b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], basis);
-            installStreamSet(b, basis);
+            installStreamSet(basis);
         }
     }
 }
@@ -225,7 +216,7 @@ void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamS
     auto mpx_basis = mAlphabet->getMultiplexedCCs();
     StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
     b->CreateKernelCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
-    installStreamSet(b, u8CharClasses);
+    installStreamSet(u8CharClasses);
 }
 
 std::vector<std::string> GraphemeClusterBreak::getParameters() {
@@ -239,7 +230,7 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     GCB_RE = UCD::externalizeProperties(GCB_RE);
     mGrepEngine->RunGrep(b, GCB_RE, nullptr, GCBstream);
     //GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCBstream);
-    installStreamSet(b, GCBstream);
+    installStreamSet(GCBstream);
 }
 
 std::vector<std::string> WordBoundaryExternal::getParameters() {
@@ -249,7 +240,7 @@ std::vector<std::string> WordBoundaryExternal::getParameters() {
 void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * wb = b->CreateStreamSet(1);
     WordBoundaryLogic(b, inputs[0], inputs[1], wb);
-    installStreamSet(b, wb);
+    installStreamSet(wb);
 }
 
 std::vector<std::string> FilterByMaskExternal::getParameters() {
@@ -261,7 +252,7 @@ void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     StreamSet * toFilter = inputs[1];
     StreamSet * filtered = b->CreateStreamSet(toFilter->getNumElements());
     FilterByMask(b, mask, toFilter, filtered);
-    installStreamSet(b, filtered);
+    installStreamSet(filtered);
 }
 
 std::vector<std::string> FixedSpanExternal::getParameters() {
@@ -272,7 +263,7 @@ void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet
     StreamSet * matchMarks = inputs[0];
     StreamSet * spans = b->CreateStreamSet(1, 1);
     b->CreateKernelCall<FixedMatchSpansKernel>(mLength, mOffset, matchMarks, spans);
-    installStreamSet(b, spans);
+    installStreamSet(spans);
 }
 
 void UTF8_index::generatePabloMethod() {
@@ -520,7 +511,7 @@ void ICGrepKernel::generatePabloMethod() {
     RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
     PabloAST * matchResult = matches.stream();
     if (matches.offset() != mOffset) {
-        llvm::errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
+        //llvm::errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
         //llvm::report_fatal_error("matches.offset() != mOffset");
     }
     pb.createAssign(final_matches, matchResult);

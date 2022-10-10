@@ -258,7 +258,11 @@ bool GrepEngine::matchesToEOLrequired () {
 }
 
 void GrepEngine::initRE(re::RE * re) {
+    mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
+
+    mLengthAlphabet = &cc::UTF8;
     if (mEngineKind != EngineKind::EmitMatches) mColoring = false;
+
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
         if (hasEndAnchor(re)) {
@@ -275,12 +279,7 @@ void GrepEngine::initRE(re::RE * re) {
         anchorName->setDefinition(re::makeUnicodeBreak());
         anchorRE = anchorName;
         setComponent(mExternalComponents, Component::UTF8index);
-        mExternalNames.insert(anchorName);
     }
-
-    mRE = re;
-
-    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
 
     mRefInfo = re::buildReferenceInfo(mRE);
     mRE = fixedReferenceTransform(mRefInfo, mRE);
@@ -292,39 +291,19 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
+    if (mIllustrator) mExternalTable.setIllustrator(mIllustrator);
+
     StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
     StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
     mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::None);
     if (hasGraphemeClusterBoundary(mRE)) {
         UnicodeIndexing = true;
-        auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
-        mExternalTable.declareExternal(Unicode, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
-        re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
-        re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
-        mExternalNames.insert(epict);
-        mExternalTable.declareExternal(Unicode, epict->getFullName(), new PropertyExternal(epict));
-        mExternalTable.declareExternal(Unicode, "\\b{g}", new GraphemeClusterBreak(this));
     }
     mRE = regular_expression_passes(mRE);
-    //auto GCB_external = new PropertyBasisExternal(UCD::GCB);
-    //mExternalTable.declareExternal(Unicode, GCB_external->getName(), GCB_external);
-    UCD::PropertyExternalizer PE;
-    mRE = PE.transformRE(mRE);
-    for (auto m : PE.mNameMap) {
-        mExternalTable.declareExternal(Unicode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
-    }
-    re::VariableLengthCCNamer CCnamer;
-    mRE = CCnamer.transformRE(mRE);
-    for (auto m : CCnamer.mNameMap) {
-        mExternalTable.declareExternal(Unicode, m.first, new CC_External(cast<re::CC>(m.second)));
-    }
-    if (hasWordBoundary(mRE)) {
-        UnicodeIndexing = true;
-        mExternalTable.declareExternal(Unicode, "\\b", new WordBoundaryExternal());
-    }
-    if (!validateFixedUTF8(mRE)) {
+    if (!validateFixedUTF8(mRE) || (mGrepRecordBreak == GrepRecordBreakKind::Unicode)) {
         setComponent(mExternalComponents, Component::UTF8index);
+        mLengthAlphabet = &cc::Unicode;
         if (mColoring) {
             UnicodeIndexing = true;
         }
@@ -339,6 +318,31 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = transformCCs(mpx, mRE);
             mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
         }
+    }
+    auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+    if (hasGraphemeClusterBoundary(mRE)) {
+        auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
+        mExternalTable.declareExternal(indexCode, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
+        re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
+        re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
+        mExternalTable.declareExternal(indexCode, epict->getFullName(), new PropertyExternal(epict));
+        mExternalTable.declareExternal(indexCode, "\\b{g}", new GraphemeClusterBreak(this));
+    }
+    UCD::PropertyExternalizer PE;
+    mRE = PE.transformRE(mRE);
+    for (auto m : PE.mNameMap) {
+        mLengthAlphabet = &cc::Unicode;
+        mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
+    }
+    re::VariableLengthCCNamer CCnamer;
+    mRE = CCnamer.transformRE(mRE);
+    for (auto m : CCnamer.mNameMap) {
+        mLengthAlphabet = &cc::Unicode;
+        mExternalTable.declareExternal(indexCode, m.first, new CC_External(cast<re::CC>(m.second)));
+    }
+    if (hasWordBoundary(mRE)) {
+        mLengthAlphabet = &cc::Unicode;
+        mExternalTable.declareExternal(indexCode, "\\b", new WordBoundaryExternal());
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);
@@ -360,18 +364,20 @@ void GrepEngine::initRE(re::RE * re) {
             mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
         }
     }
-    auto indexing = UnicodeIndexing ? Unicode : u8;
-    re::FixedLengthAltNamer FLnamer(mIndexAlphabet);
-    mRE = FLnamer.transformRE(mRE);
-    for (auto m : FLnamer.mNameMap) {
-        auto r = new RE_External(this, m.second, mIndexAlphabet);
-        auto lgth = r->getLengthRange().first;
-        auto offset = r->getOffset();
-        auto spanName = m.first + "Span";
-        mExternalTable.declareExternal(indexing, m.first, r);
-        if (lgth > 0) {
-            mExternalTable.declareExternal(indexing, m.first + "Span", new FixedSpanExternal(m.first, lgth, offset));
-            mSpanNames.push_back(spanName);
+    if (mColoring) {
+        re::FixedSpanNamer FLnamer(mIndexAlphabet);
+        mRE = FLnamer.transformRE(mRE);
+        auto indexing = mExternalTable.getStreamIndex(mLengthAlphabet->getCode());
+        for (auto m : FLnamer.mNameMap) {
+            auto r = new RE_External(this, m.second, mIndexAlphabet);
+            auto lgth = r->getLengthRange().first;
+            auto offset = r->getOffset();
+            mExternalTable.declareExternal(indexing, m.first, r);
+            if (lgth > 0) {
+                auto spanName = m.first + "Span";
+                mExternalTable.declareExternal(indexing, spanName, new FixedSpanExternal(m.first, lgth, offset));
+                mSpanNames.push_back(spanName);
+            }
         }
     }
 /*
@@ -381,22 +387,13 @@ void GrepEngine::initRE(re::RE * re) {
         mExternalTable.declareExternal(Unicode, m.first, new StartAnchoredExternal(this, m.second, mIndexAlphabet));
     }
 */
-    re::gatherNames(mRE, mExternalNames);
-
-    // For simple regular expressions with a small number of characters, we
-    // can bypass transposition and use the Direct CC compiler.
-    if ((mGrepRecordBreak != GrepRecordBreakKind::Unicode) && mExternalNames.empty() && !UnicodeIndexing) {
-        if (byteTestsWithinLimit(mRE, ByteCClimit)) {
-            return;  // skip transposition
-        } else {
-            setComponent(mExternalComponents, Component::S2P);
-        }
-    } else {
+    if (mLengthAlphabet == &cc::Unicode) {
+        setComponent(mExternalComponents, Component::S2P);
+        setComponent(mExternalComponents, Component::UTF8index);
+    } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-    if (!mExternalNames.empty()) {
-        setComponent(mExternalComponents, Component::UTF8index);
-    }
+
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
@@ -441,11 +438,10 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
         auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
         mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
+        mExternalTable.declareExternal(u8, "UTF8_LB", new PreDefined(mLineBreakStream));
         if (UnicodeIndexing) {
             auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
-            mExternalTable.declareExternal(Unicode, "UTF8_LB", new PreDefined(mLineBreakStream));
-        } else {
-            mExternalTable.declareExternal(u8, "UTF8_LB", new PreDefined(mLineBreakStream));
+            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index1", "UTF8_LB"}));
         }
     }
     else {
@@ -575,10 +571,13 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
 unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
     options->setSource(Source);
+    //llvm::errs() << "mIndexAlphabet: " << mIndexAlphabet->getCode() << "\n";
+    //llvm::errs() << "mLengthAlphabet: " << mLengthAlphabet->getCode() << "\n";
     StreamSet * indexStream = nullptr;
     if (mIndexAlphabet == &cc::UTF8) {
-        if (hasComponent(mExternalComponents, Component::UTF8index)) {
-            options->setIndexing(mU8index);
+        if (mLengthAlphabet == &cc::Unicode) {
+            indexStream = mU8index;
+            options->setIndexing(indexStream);
         }
         re = toUTF8(re);
     }
