@@ -57,14 +57,23 @@ void addConsumerRelationships(const PortType portType, const unsigned consumer, 
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    if (isa<StreamSet>(array[0].getRelationship())) {
+    if (isa<StreamSet>(array[0].getRelationship()) || isa<RepeatingStreamSet>(array[0].getRelationship())) {
         for (unsigned i = 0; i < n; ++i) {
             const Binding & item = array[i];
             assert (isa<StreamSet>(item.getRelationship()));
             const auto binding = G.add(&item);
             add_edge(binding, consumer, RelationshipType{portType, i}, G);
             const auto rel = item.getRelationship();
-            const auto relationship = G.addOrFind(rel, addRelationship);
+            RelationshipGraph::vertex_descriptor relationship;
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(array[0].getRelationship()))) {
+                // Every repeating streamset is independent even if they have multiple consumers.
+                // TODO: If we can determine that two or more consumers are synchronous and within
+                // the same partition, we may be able to share the computation with the subseqent ones
+                // safely. We would not be able to reason that out until after scheduling.
+                relationship = add_vertex(RelationshipNode{rel}, G);
+            } else {
+                relationship = G.addOrFind(rel, addRelationship);
+            }
             add_edge(relationship, binding, RelationshipType{portType, i}, G);
         }
     } else if (isa<Scalar>(array[0].getRelationship())) {
@@ -217,7 +226,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
                 assert (rn.Relationship);
                 if (isa<StreamSet>(rn.Relationship)) {
                     streamSets.push_back(i);
-                } else { assert (isa<Scalar>(rn.Relationship));
+                } else if (isa<Scalar>(rn.Relationship)) {
                     scalars.push_back(i);
                 }
                 break;

@@ -39,6 +39,7 @@ public:
 
     enum class ClassTypeId {
         StreamSet
+        , RepeatingStreamSet
         , Scalar
         , ScalarConstant
     };
@@ -86,6 +87,27 @@ public:
     std::string shapeString();
 
     StreamSet(llvm::LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth) noexcept;
+
+};
+
+class RepeatingStreamSet : public StreamSet {
+public:
+    static bool classof(const Relationship * e) {
+        return e->getClassTypeId() == ClassTypeId::RepeatingStreamSet;
+    }
+    static bool classof(const void *) {
+        return false;
+    }
+    LLVM_READNONE unsigned getNumElements() const;
+
+    LLVM_READNONE unsigned getFieldWidth() const;
+
+    std::string shapeString();
+
+    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth, const uint8_t * string, const unsigned length) noexcept;
+
+private:
+
 
 };
 

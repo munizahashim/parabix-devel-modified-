@@ -279,6 +279,7 @@ Kernel * PipelineBuilder::makeKernel() {
             Relationship * const rel = array.getRelationship(i);
             assert ("relationship cannot be null!" && rel);
             if (LLVM_UNLIKELY(isa<ScalarConstant>(rel))) continue;
+#error here?
             const auto f = M.find(rel);
             if (LLVM_UNLIKELY(f == M.end())) {
                 SmallVector<char, 256> tmp;

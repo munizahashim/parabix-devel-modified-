@@ -337,6 +337,8 @@ struct BufferPort {
     bool IsShared = false;
     bool IsManaged = false;
 
+    bool IsGeneratedSequence = false;
+
     int TransitiveAdd = 0;
 
     bool operator < (const BufferPort & rn) const {

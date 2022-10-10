@@ -99,7 +99,13 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         mUncachedKernel.emplace_back(kernel.get());
     }
 
+}
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief __CreateRepeatingStreamSet8
+ ** ------------------------------------------------------------------------------------------------------------- */
+kernel::RepeatingStreamSet * BaseDriver::__CreateRepeatingStreamSet8(const uint8_t * string, size_t length) {
+    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -7,6 +7,7 @@
 #include <kernel/core/kernel.h>
 #include <kernel/core/relationship.h>
 #include <util/slab_allocator.h>
+#include <boost/integer.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -40,6 +41,25 @@ public:
     }
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1);
+
+    template<unsigned FieldWidth, typename storage_t = typename boost::uint_t<FieldWidth>::fast>
+    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const storage_t * string) {
+        static_assert(FieldWidth == 8, "non-8 bit types are not currently supported");
+        // TODO: although we could represent 1-bit values with a 0/1 string, and 8-bit with ASCII,
+        // supporting other types will require a varadic argument. Should every type be automatically
+        // converted to a byte array? What should the interface be for multi-element types?
+        return __CreateRepeatingStreamSet8(string, sizeof(string));
+    }
+
+    template<unsigned NumElements, unsigned FieldWidth, typename storage_t = typename boost::uint_t<FieldWidth>::fast>
+    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(std::array<const storage_t *, NumElements> string) {
+        static_assert(FieldWidth == 8, "non-8 bit types are not currently supported");
+        // TODO: although we could represent 1-bit values with a 0/1 string, and 8-bit with ASCII,
+        // supporting other types will require a varadic argument. Should every type be automatically
+        // converted to a byte array? What should the interface be for multi-element types?
+        return __CreateRepeatingStreamSet8(string, sizeof(string));
+    }
+
 
     kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType);
 
@@ -80,6 +100,10 @@ protected:
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
 
+private:
+
+    kernel::RepeatingStreamSet * __CreateRepeatingStreamSet8(const uint8_t * string, size_t length);
+
 protected:
 
     std::unique_ptr<llvm::LLVMContext>                      mContext;
@@ -91,7 +115,7 @@ protected:
     KernelSet                                               mUncachedKernel;
     KernelSet                                               mCachedKernel;
     KernelSet                                               mCompiledKernel;
-    KernelSet                                               mPreservedKernel;    
+    KernelSet                                               mPreservedKernel;
     SlabAllocator<>                                         mAllocator;
 };
 

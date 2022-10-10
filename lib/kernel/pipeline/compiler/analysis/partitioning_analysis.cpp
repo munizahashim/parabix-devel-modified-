@@ -72,6 +72,9 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
             case RelationshipNode::IsRelationship:
                 BEGIN_SCOPED_REGION
                 const Relationship * const ss = Relationships[u].Relationship;
+                // NOTE: We explicitly ignore RepeatingStreamSets here; trying to reason
+                // about them will only complicate the analysis. They'll almost certainly
+                // be kept in shared memory and shuffled accordingly at kernel invocation.
                 if (LLVM_LIKELY(isa<StreamSet>(ss))) {
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
