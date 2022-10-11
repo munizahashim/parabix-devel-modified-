@@ -4,6 +4,7 @@
  */
 
 #include <toolchain/toolchain.h>
+#include <kernel/streamutils/stream_select.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -145,14 +146,29 @@ void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string strea
 }
 
 void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLabel, StreamSet * bixnum, char hexBase) {
-    unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
-    scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+    llvm::errs() << streamLabel << "\n";
+    auto bixBits = bixnum->getNumElements();
+    llvm::errs() << "bixBits: " << bixBits << "\n";
+    if (bixBits <= 4) {
+        unsigned illustratedStreamNo = addStream(streamLabel);
+        StreamSet * printableBasis = P->CreateStreamSet(8);
+        P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
+        StreamSet * printableData = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
+        Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
+        Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+        scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+    } else {
+        auto hexDigits = (bixBits + 3)/4;
+        for (auto i = hexDigits; i >= 1; i--) {
+            auto low = (i - 1) * 4;
+            auto hi = bixBits - 1;
+            std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi) + "]";
+            StreamSet * hexBasis = streamutils::Select(P, bixnum, streamutils::Range(low, hi));
+            captureBixNum(P, lbl, hexBasis, hexBase);
+            bixBits = low;
+        }
+    }
 }
 
 void ParabixIllustrator::displayAllCapturedData() {
