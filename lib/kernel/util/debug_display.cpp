@@ -146,9 +146,7 @@ void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string strea
 }
 
 void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLabel, StreamSet * bixnum, char hexBase) {
-    llvm::errs() << streamLabel << "\n";
     auto bixBits = bixnum->getNumElements();
-    llvm::errs() << "bixBits: " << bixBits << "\n";
     if (bixBits <= 4) {
         unsigned illustratedStreamNo = addStream(streamLabel);
         StreamSet * printableBasis = P->CreateStreamSet(8);
@@ -162,8 +160,8 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
         auto hexDigits = (bixBits + 3)/4;
         for (auto i = hexDigits; i >= 1; i--) {
             auto low = (i - 1) * 4;
-            auto hi = bixBits - 1;
-            std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi) + "]";
+            auto hi = bixBits;
+            std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi - 1) + "]";
             StreamSet * hexBasis = streamutils::Select(P, bixnum, streamutils::Range(low, hi));
             captureBixNum(P, lbl, hexBasis, hexBase);
             bixBits = low;
