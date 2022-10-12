@@ -82,10 +82,10 @@ void UTF8_Decoder::generatePabloMethod() {
             suffix2_bit[i] = level1.createAnd(suffix2, level1.createLookahead(suffix2_bit[i], 1));
         }
         level1.createAssign(Unicode_bit[i],
-                            level1.createOrAnd(Unicode_bit[i], scope22, suffix2_bit[i]));
+                            level1.createOr(Unicode_bit[i], level1.createAnd(scope22, suffix2_bit[i])));
     }
     // Three and four-byte sequences are further nested.
-    PabloAST * u8pfx34 = ccc.compileCC("u8pfx2", re::makeByte(0xE0, 0xFF), level1);
+    PabloAST * u8pfx34 = ccc.compileCC("u8pfx34", re::makeByte(0xE0, 0xFF), level1);
     auto level2 = level1.createScope();
     level1.createIf(u8pfx34, level2);
     //
@@ -126,13 +126,13 @@ void UTF8_Decoder::generatePabloMethod() {
         if (mBitMovement == BitMovementMode::LookAhead) {
             suffix3_bit[i] = level2.createLookahead(suffix3_bit[i], 2);
         }
-        PabloAST * sfx32bit = level2.createOrAnd(Unicode_bit[i+6], scope32, suffix2_bit[i]);
-        PabloAST * sfx33bit = level2.createOrAnd(Unicode_bit[i], scope33, suffix3_bit[i]);
+        PabloAST * sfx32bit = level2.createAnd(scope32, suffix2_bit[i]);
+        PabloAST * sfx33bit = level2.createAnd(scope33, suffix3_bit[i]);
         if (mBitMovement == BitMovementMode::Advance) {
             sfx32bit = level2.createAdvance(sfx32bit, 1);
         }
-        level2.createAssign(Unicode_bit[i+6], sfx32bit);
-        level2.createAssign(Unicode_bit[i], sfx33bit);
+        level2.createAssign(Unicode_bit[i+6], level2.createOr(Unicode_bit[i+6], sfx32bit));
+        level2.createAssign(Unicode_bit[i], level2.createOr(Unicode_bit[i], sfx33bit));
     }
     //
     PabloAST * u8pfx4 = ccc.compileCC("u8pfx4", re::makeByte(0xF0, 0xFF), level2);
@@ -178,16 +178,16 @@ void UTF8_Decoder::generatePabloMethod() {
         if (mBitMovement == BitMovementMode::LookAhead) {
             suffix4_bit[i] = level3.createLookahead(suffix4_bit[i], 3);
         }
-        PabloAST * sfx42bit = level3.createOrAnd(Unicode_bit[i+12], scope42, suffix2_bit[i]);
-        PabloAST * sfx43bit = level3.createOrAnd(Unicode_bit[i+6], scope43, suffix3_bit[i]);
-        PabloAST * sfx44bit = level3.createOrAnd(Unicode_bit[i], scope44, suffix4_bit[i]);
+        PabloAST * sfx42bit = level3.createAnd(scope42, suffix2_bit[i]);
+        PabloAST * sfx43bit = level3.createAnd(scope43, suffix3_bit[i]);
+        PabloAST * sfx44bit = level3.createAnd(scope44, suffix4_bit[i]);
         if (mBitMovement == BitMovementMode::Advance) {
             sfx42bit = level3.createAdvance(sfx42bit, 2);
             sfx43bit = level3.createAdvance(sfx43bit, 1);
         }
-        level3.createAssign(Unicode_bit[i+12], sfx42bit);
-        level3.createAssign(Unicode_bit[i+6], sfx43bit);
-        level3.createAssign(Unicode_bit[i], sfx44bit);
+        level3.createAssign(Unicode_bit[i+12], level3.createOr(Unicode_bit[i+12], sfx42bit));
+        level3.createAssign(Unicode_bit[i+6], level3.createOr(Unicode_bit[i+6], sfx43bit));
+        level3.createAssign(Unicode_bit[i], level3.createOr(Unicode_bit[i], sfx44bit));
     }
     Var * output = getOutputStreamVar("unicode_bit");
     for (unsigned i = 0; i < 21; i++) {
