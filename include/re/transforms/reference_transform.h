@@ -6,10 +6,21 @@
 
 #pragma once
 
+#include <re/transforms/re_transformer.h>
+#include <re/transforms/name_intro.h>
+
+
 namespace re {
 
 struct ReferenceInfo; class RE;
 
-RE * fixedReferenceTransform(const ReferenceInfo & info, RE * r);
+struct FixedReferenceTransformer : public NameIntroduction {
+public:
+    FixedReferenceTransformer(const ReferenceInfo & info) :
+        NameIntroduction("FixedReferenceTransformer"), mRefInfo(info) {}
+    RE * transformReference(Reference * r) override;
+private:
+    const ReferenceInfo & mRefInfo;
+};
 
 }

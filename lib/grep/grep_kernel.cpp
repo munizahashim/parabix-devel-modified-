@@ -76,12 +76,12 @@ StreamIndexCode ExternalStreamTable::getStreamIndex(std::string indexName) {
     for (unsigned i = 0; i < mStreamIndices.size(); i++) {
         if (mStreamIndices[i].name == indexName) return i;
     }
-    llvm::report_fatal_error("Undeclared stream index");
+    llvm::report_fatal_error("Undeclared stream index" + indexName);
 }
 
 void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext) {
     if (mExternalMap[c].find(externalName) != mExternalMap[c].end()) {
-        return;
+        llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << " redeclared!\n";
     }
     mExternalMap[c].emplace(externalName, ext);
 }
@@ -99,17 +99,18 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
     ExternalStreamObject * ext = lookup(c, ssname);
     if (!ext->isResolved()) {
         std::vector<std::string> paramNames = ext->getParameters();
+        StreamIndexCode code = isa<FilterByMaskExternal>(ext) ? mStreamIndices[c].base : c;
         bool all_found = true;
         for (auto & p : paramNames) {
-            auto f = mExternalMap[c].find(p);
-            if (f == mExternalMap[c].end()) {
+            auto f = mExternalMap[code].find(p);
+            if (f == mExternalMap[code].end()) {
                 all_found = false;
             }
         }
         if (all_found) {
             std::vector<StreamSet *> paramStreams;
             for (auto pName : paramNames) {
-                paramStreams.push_back(getStreamSet(b, c, pName));
+                paramStreams.push_back(getStreamSet(b, code, pName));
             }
             ext->resolveStreamSet(b, paramStreams);
         } else {
@@ -125,8 +126,12 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
             ext->installStreamSet(filtered);
         }
         StreamSet * s = ext->getStreamSet();
-        if (mIllustrator && (s->getNumElements() == 1)) {
-            mIllustrator->captureBitstream(b, mStreamIndices[c].name + "_" + ssname, s);
+        if (mIllustrator) {
+            if (s->getNumElements() == 1) {
+                mIllustrator->captureBitstream(b, mStreamIndices[c].name + "_" + ssname, s);
+            } else {
+                mIllustrator->captureBixNum(b, mStreamIndices[c].name + "_" + ssname, s);
+            }
         }
     }
     return ext->getStreamSet();

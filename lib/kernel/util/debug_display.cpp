@@ -219,7 +219,7 @@ void BitstreamIllustrator::generatePabloMethod() {
 PrintableASCII::PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
     : pablo::PabloKernel(kb, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
                   {Binding{"basisBits", basisBits}},
-                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}),
+                  {Binding{"printableBasis", printableBasis}}),
                   mNonASCIIsubstitute(nonASCIIsubstitute) {}
 
 void PrintableASCII::generatePabloMethod() {
@@ -244,7 +244,7 @@ void PrintableASCII::generatePabloMethod() {
 PrintableBixNum::PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
     : pablo::PabloKernel(kb, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
                   {Binding{"bixnum", bixnum}},
-                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}), mHexBase(hexBase) {}
+                  {Binding{"printableBasis", printableBasis}}), mHexBase(hexBase) {}
 
 void PrintableBixNum::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
