@@ -92,8 +92,6 @@ private:
     , mPipelineKernel(pipelineKernel)
     , mNumOfThreads(pipelineKernel->getNumOfThreads())
     , mKernels(pipelineKernel->mKernels)
-    , mCallBindings(pipelineKernel->mCallBindings)
-    , mLengthAssertions(pipelineKernel->mLengthAssertions)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
@@ -232,8 +230,6 @@ private:
     PipelineKernel * const          mPipelineKernel;
     const unsigned					mNumOfThreads;
     Kernels                         mKernels;
-    CallBindings                    mCallBindings;
-    LengthAssertions                mLengthAssertions;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
 
