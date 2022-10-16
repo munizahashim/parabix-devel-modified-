@@ -185,7 +185,7 @@ protected:
         void advance(unsigned n);
 
         inline quad_iterator_return_t dereference() const {
-            return std::make_pair(std::make_pair(type(), length()), quad());
+            return std::make_pair(run_t{type(), length()}, quad());
         }
 
         inline void increment() {
@@ -223,7 +223,7 @@ protected:
     };
 
     inline quad_iterator quad_begin() const {
-        return quad_iterator(mRuns, mRuns + mRunLength, mQuads, mQuads + mQuadLength, std::get<0>(*mRuns), std::get<1>(*mRuns));
+        return quad_iterator(mRuns, mRuns + mRunLength, mQuads, mQuads + mQuadLength, mRuns->first, mRuns->second);
     }
 
     inline quad_iterator quad_end() const {       
