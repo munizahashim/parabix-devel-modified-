@@ -36,6 +36,7 @@
 #include <re/analysis/collect_ccs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/re_multiplex.h>
+#include <kernel/basis/s2p_kernel.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/streams_merge.h>
@@ -80,8 +81,10 @@ StreamIndexCode ExternalStreamTable::getStreamIndex(std::string indexName) {
 }
 
 void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext) {
-    if (mExternalMap[c].find(externalName) != mExternalMap[c].end()) {
-        llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << " redeclared!\n";
+    auto f = mExternalMap[c].find(externalName);
+    if (f != mExternalMap[c].end()) {
+        //llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << " redeclared!\n";
+        f->second = ext;
     }
     mExternalMap[c].emplace(externalName, ext);
 }
@@ -95,6 +98,20 @@ ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::strin
     return f->second;
 }
 
+bool ExternalStreamTable::isDeclared(StreamIndexCode c, std::string ssname) {
+    return mExternalMap[c].find(ssname) != mExternalMap[c].end();
+}
+
+bool ExternalStreamTable::hasReferenceTo(StreamIndexCode c, std::string ssname) {
+    for (auto & entry : mExternalMap[c]) {
+        auto params = entry.second->getParameters();
+        for (auto p : params) {
+            if (p == ssname) return true;
+        }
+    }
+    return false;
+}
+
 StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string ssname) {
     ExternalStreamObject * ext = lookup(c, ssname);
     if (!ext->isResolved()) {
@@ -102,6 +119,9 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
         StreamIndexCode code = isa<FilterByMaskExternal>(ext) ? mStreamIndices[c].base : c;
         bool all_found = true;
         for (auto & p : paramNames) {
+            if ((code == c) && (p == ssname)) {
+                llvm::report_fatal_error("Recursion in external resolution: " + ssname);
+            }
             auto f = mExternalMap[code].find(p);
             if (f == mExternalMap[code].end()) {
                 all_found = false;
@@ -137,6 +157,14 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
     return ext->getStreamSet();
 }
 
+void ExternalStreamTable::resetExternals() {
+    for (unsigned i = 0; i < mExternalMap.size(); i++) {
+        for (auto & entry : mExternalMap[i]) {
+            entry.second->mStreamSet = nullptr;
+        }
+    }
+}
+
 void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
     for (unsigned i = 0; i < mExternalMap.size(); i++) {
         for (auto & entry : mExternalMap[i]) {
@@ -149,6 +177,12 @@ void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
 
 void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;
+}
+
+void U21_External::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+    StreamSet * U21 = P->CreateStreamSet(21, 1);
+    P->CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
+    installStreamSet(U21);
 }
 
 void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
