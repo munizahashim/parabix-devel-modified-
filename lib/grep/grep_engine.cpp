@@ -1197,7 +1197,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
     } else {
         //llvm::errs() << "filenames.size() = " << fileNames.size() << "\n";
         //for (auto & name : fileNames) { llvm::errs() << name << "\n";}
-        typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, size_t maxCount);
+        typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, kernel::ParabixIllustrator *,size_t maxCount);
         auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
         EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
         accum.setStringStream(&strm);
@@ -1259,7 +1259,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
                 accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
             }
-            f(accum.mBatchBuffer, current_start_position, &accum, mMaxCount);
+            f(accum.mBatchBuffer, current_start_position, &accum, mIllustrator, mMaxCount);
         }
         alloc.deallocate(accum.mBatchBuffer, 0);
         if (accum.mLineCount > 0) grepMatchFound = true;
