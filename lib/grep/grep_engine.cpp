@@ -70,6 +70,7 @@
 #include <grep/grep_toolchain.h>
 #include <toolchain/toolchain.h>
 #include <kernel/util/debug_display.h>
+#include <sys/mman.h>
 #include <util/aligned_allocator.h>
 
 using namespace llvm;
@@ -225,13 +226,6 @@ std::vector<std::vector<std::string>> formFileGroups(std::vector<fs::path> paths
         }
     }
     return groups;
-}
-
-bool GrepEngine::haveFileBatch() {
-    for (auto & b : mFileGroups) {
-        if (b.size() > 1) return true;
-    }
-    return false;
 }
 
 void GrepEngine::initFileResult(const std::vector<boost::filesystem::path> & paths) {
@@ -1061,28 +1055,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
 void EmitMatchesEngine::grepCodeGen() {
     auto & idb = mGrepDriver.getBuilder();
 
-    auto E1 = mGrepDriver.makePipeline(
-                // inputs
-                {Binding{idb->getSizeTy(), "useMMap"},
-                Binding{idb->getInt32Ty(), "fileDescriptor"},
-                Binding{idb->getIntAddrTy(), "callbackObject"},
-                Binding{idb->getIntAddrTy(), "illustratorAddr"},
-                Binding{idb->getSizeTy(), "maxCount"}}
-                ,// output
-                {Binding{idb->getInt64Ty(), "countResult"}});
-
-    Scalar * const useMMap = E1->getInputScalar("useMMap");
-    Scalar * const fileDescriptor = E1->getInputScalar("fileDescriptor");
-    if (mIllustrator) mIllustrator->registerIllustrator(E1->getInputScalar("illustratorAddr"));
-    StreamSet * const ByteStream = E1->CreateStreamSet(1, ENCODING_BITS);
-    
-    E1->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
-    grepPipeline(E1, ByteStream);
-    E1->setOutputScalar("countResult", E1->CreateConstant(idb->getInt64(0)));
-    mMainMethod = E1->compile();
-
-    if (haveFileBatch()) {
-        auto E2 = mGrepDriver.makePipeline(
+    auto E2 = mGrepDriver.makePipeline(
                     // inputs
                     {Binding{idb->getInt8PtrTy(), "buffer"},
                     Binding{idb->getSizeTy(), "length"},
@@ -1092,20 +1065,15 @@ void EmitMatchesEngine::grepCodeGen() {
                     ,// output
                     {Binding{idb->getInt64Ty(), "countResult"}});
 
-        Scalar * const buffer = E2->getInputScalar("buffer");
-        Scalar * const length = E2->getInputScalar("length");
-        if (mIllustrator) mIllustrator->registerIllustrator(E2->getInputScalar("illustratorAddr"));
-        StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
-        E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-        grepPipeline(E2, InternalBytes, /* BatchMode = */ true);
-        E2->setOutputScalar("countResult", E2->CreateConstant(idb->getInt64(0)));
-        mBatchMethod = E2->compile();
-    }
+    Scalar * const buffer = E2->getInputScalar("buffer");
+    Scalar * const length = E2->getInputScalar("length");
+    if (mIllustrator) mIllustrator->registerIllustrator(E2->getInputScalar("illustratorAddr"));
+    StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
+    E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
+    grepPipeline(E2, InternalBytes, /* BatchMode = */ true);
+    E2->setOutputScalar("countResult", E2->CreateConstant(idb->getInt64(0)));
+    mBatchMethod = E2->compile();
 }
-
-//
-//  The doGrep methods apply a GrepEngine to a single file, processing the results
-//  differently based on the engine type.
 
 bool canMMap(const std::string & fileName) {
     if (fileName == "-") return false;
@@ -1167,65 +1135,45 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
 }
 
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    if (fileNames.size() == 1) {
-        typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, EmitMatch *, kernel::ParabixIllustrator *, size_t maxCount);
-        auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
-        EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
-        accum.setStringStream(&strm);
-        bool useMMap;
-        int32_t fileDescriptor;
-        if (fileNames[0] == "-") {
-            fileDescriptor = STDIN_FILENO;
-            accum.setFileLabel(mStdinLabel);
-            useMMap = false;
-        } else {
-            fileDescriptor= openFile(fileNames[0], strm);
-            if (fileDescriptor == -1) return 0;
-            accum.setFileLabel(fileNames[0]);
-            useMMap = mPreferMMap && canMMap(fileNames[0]);
-        }
-        assert (f);
-        f(useMMap, fileDescriptor, &accum, mIllustrator, mMaxCount);
-        close(fileDescriptor);
-        if (accum.binaryFileSignalled()) {
-            accum.mResultStr->clear();
-            accum.mResultStr->str("");
-        }
-        if (accum.mLineCount > 0) grepMatchFound = true;
-        if (mIllustrator) mIllustrator->displayAllCapturedData();
-        return accum.mLineCount;
+    typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, kernel::ParabixIllustrator *, size_t maxCount);
+    auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
+    EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
+    accum.setStringStream(&strm);
+    std::vector<int32_t> fileDescriptor(fileNames.size());
+    std::vector<size_t> fileSize(fileNames.size(), 0);
+    size_t cumulativeSize = 0;
+    unsigned filesOpened = 0;
+    unsigned lastOpened = 0;
+    for (unsigned i = 0; i < fileNames.size(); i++) {
+        fileDescriptor[i] = openFile(fileNames[i], strm);
+        if (fileDescriptor[i] == -1) continue;  // File error; skip.
+        struct stat st;
+        if (fstat(fileDescriptor[i], &st) != 0) continue;
+        fileSize[i] = st.st_size;
+        cumulativeSize += st.st_size;
+        filesOpened++;
+        lastOpened = i;
+    }
+    if (filesOpened == 0) return 0;
+    accum.mFileNames.reserve(filesOpened);
+    accum.mFileStartPositions.reserve(filesOpened);
+    AlignedAllocator<char, batch_alignment> alloc;
+    size_t current_start_position = 0;
+    bool singleFileMMapMode = (filesOpened == 1) && canMMap(fileNames[lastOpened]);
+    if (singleFileMMapMode) {
+        auto mmap_ptr = mmap(NULL, fileSize[lastOpened], PROT_READ, MAP_PRIVATE, fileDescriptor[lastOpened], 0);
+        accum.mBatchBuffer = reinterpret_cast<char *>(mmap_ptr);
+        accum.mFileNames.push_back(fileNames[lastOpened]);
+        accum.mFileStartPositions.push_back(static_cast<size_t>(0));
     } else {
-        //llvm::errs() << "filenames.size() = " << fileNames.size() << "\n";
-        //for (auto & name : fileNames) { llvm::errs() << name << "\n";}
-        typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, kernel::ParabixIllustrator *,size_t maxCount);
-        auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
-        EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
-        accum.setStringStream(&strm);
-        std::vector<int32_t> fileDescriptor(fileNames.size());
-        std::vector<size_t> fileSize(fileNames.size(), 0);
-        size_t cumulativeSize = 0;
-        unsigned filesOpened = 0;
-        for (unsigned i = 0; i < fileNames.size(); i++) {
-            fileDescriptor[i] = openFile(fileNames[i], strm);
-            if (fileDescriptor[i] == -1) continue;  // File error; skip.
-            struct stat st;
-            if (fstat(fileDescriptor[i], &st) != 0) continue;
-            fileSize[i] = st.st_size;
-            cumulativeSize += st.st_size;
-            filesOpened++;
-        }
         cumulativeSize += filesOpened;  // Add an extra byte per file for possible '\n'.
         size_t aligned_size = (cumulativeSize + batch_alignment - 1) & -batch_alignment;
 
-        AlignedAllocator<char, batch_alignment> alloc;
         accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
         if (accum.mBatchBuffer == nullptr) {
             llvm::report_fatal_error("Unable to allocate batch buffer of size: " + std::to_string(aligned_size));
         }
         char * current_base = accum.mBatchBuffer;
-        size_t current_start_position = 0;
-        accum.mFileNames.reserve(filesOpened);
-        accum.mFileStartPositions.reserve(filesOpened);
 
         for (unsigned i = 0; i < fileNames.size(); i++) {
             if (fileDescriptor[i] == -1) continue;  // Error opening file; skip.
@@ -1250,22 +1198,27 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
                 current_start_position++;
             }
         }
-        if (accum.mFileNames.size() > 0) {
-            accum.setFileLabel(accum.mFileNames[0]);
-            accum.mFileStartLineNumbers.resize(accum.mFileNames.size());
-            // Initialize to the maximum integer value so that tests
-            // will not rule that we are past a given file until the
-            // actual limit is computed.
-            for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
-                accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
-            }
-            f(accum.mBatchBuffer, current_start_position, &accum, mIllustrator, mMaxCount);
-        }
-        alloc.deallocate(accum.mBatchBuffer, 0);
-        if (accum.mLineCount > 0) grepMatchFound = true;
-        if (mIllustrator) mIllustrator->displayAllCapturedData();
-        return accum.mLineCount;
+        cumulativeSize = current_start_position;
     }
+    if (accum.mFileNames.size() > 0) {
+        accum.setFileLabel(accum.mFileNames[0]);
+        accum.mFileStartLineNumbers.resize(accum.mFileNames.size());
+        // Initialize to the maximum integer value so that tests
+        // will not rule that we are past a given file until the
+        // actual limit is computed.
+        for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
+            accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
+        }
+        f(accum.mBatchBuffer, cumulativeSize, &accum, mIllustrator, mMaxCount);
+    }
+    if (singleFileMMapMode) {
+        munmap(reinterpret_cast<void *>(accum.mBatchBuffer), fileSize[lastOpened]);
+    } else {
+        alloc.deallocate(accum.mBatchBuffer, 0);
+    }
+    if (accum.mLineCount > 0) grepMatchFound = true;
+    if (mIllustrator) mIllustrator->displayAllCapturedData();
+    return accum.mLineCount;
 }
 
 // Open a file and return its file desciptor.
