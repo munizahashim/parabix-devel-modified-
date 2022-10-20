@@ -1094,4 +1094,18 @@ Unterminated</datafile>
 蝰蛇科和眼睛蛇科
 </datafile>
 <grepcase regexp="虫虫" datafile="Chinese" greplines="1 4 8"/>
+
+<datafile id="palindromes">Turkish small: küçük
+Russian income: доход
+German name:  nennen
+English: rotator cuff
+#aaaaaa
+#BBBBBBB
+[Classical Chinese]:  中山王族王山中 - Zhōngshān wángzú wàng shānzhōng -
+   The House of Zhongshan ruled as kings in the mountain
+</datafile>
+<grepcase regexp="\b(\p{Letter})(\p{Letter})\p{Letter}\2\1\b" datafile="palindromes" greplines="1 2"/>
+<grepcase regexp="\b(\p{Letter})(\p{Letter})(\p{Letter})\3\2\1\b" datafile="palindromes" greplines="3 5"/>
+<grepcase regexp="\b(\p{Letter})(\p{Letter})(\p{Letter})\p{Letter}\3\2\1\b" datafile="palindromes" greplines="4 6 7"/>
+<grepcase regexp="(\p{Letter})\p{Letter}\p{Letter}\1" datafile="palindromes" greplines="3 5 6"/>
 </greptest>

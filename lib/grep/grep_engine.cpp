@@ -147,6 +147,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mIllustrator(nullptr) {
         if (codegen::IllustratorDisplay > 0) {
             mIllustrator = new kernel::ParabixIllustrator(codegen::IllustratorDisplay);
+            mExternalTable.setIllustrator(mIllustrator);
         }
     }
 
@@ -155,6 +156,7 @@ GrepEngine::~GrepEngine() { }
 QuietModeEngine::QuietModeEngine(BaseDriver &driver) : GrepEngine(driver) {
     mEngineKind = EngineKind::QuietMode;
     mMaxCount = 1;
+    mColoring = false;
 }
 
 MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, bool useNullSeparators) :
@@ -163,11 +165,13 @@ MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, b
     mFileSuffix = useNullSeparators ? std::string("\0", 1) : "\n";
     mMaxCount = 1;
     mShowFileNames = true;
+    mColoring = false;
 }
 
 CountOnlyEngine::CountOnlyEngine(BaseDriver &driver) : GrepEngine(driver) {
     mEngineKind = EngineKind::CountOnly;
     mFileSuffix = ":";
+    mColoring = false;
 }
 
 EmitMatchesEngine::EmitMatchesEngine(BaseDriver &driver)
@@ -261,7 +265,8 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
 
     mLengthAlphabet = &cc::UTF8;
-    if (mEngineKind != EngineKind::EmitMatches) mColoring = false;
+    StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
+    StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
@@ -282,19 +287,21 @@ void GrepEngine::initRE(re::RE * re) {
     }
 
     mRefInfo = re::buildReferenceInfo(mRE);
-    mRE = fixedReferenceTransform(mRefInfo, mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
+        auto indexCode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
         setComponent(mExternalComponents, Component::S2P);
-        setComponent(mExternalComponents, Component::U21);
+        mExternalTable.declareExternal(u8, "u21", new U21_External());
+        mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}));
+        re::FixedReferenceTransformer FRT(mRefInfo);
+        mRE = FRT.transformRE(mRE);
+        for (auto m : FRT.mNameMap) {
+            re::Reference * ref = cast<re::Reference>(m.second);
+            mExternalTable.declareExternal(indexCode, m.first, new Reference_External(mRefInfo, ref));
+        }
     }
     mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
-
-    if (mIllustrator) mExternalTable.setIllustrator(mIllustrator);
-
-    StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
-    StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
     mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::None);
     if (hasGraphemeClusterBoundary(mRE)) {
@@ -312,11 +319,13 @@ void GrepEngine::initRE(re::RE * re) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::UTF8index);
-        const auto UnicodeSets = re::collectCCs(mRE, *mIndexAlphabet);
-        if (!UnicodeSets.empty()) {
-            auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
-            mRE = transformCCs(mpx, mRE);
-            mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
+        if (!mExternalTable.isDeclared(Unicode, "basis")) {
+            const auto UnicodeSets = re::collectCCs(mRE, *mIndexAlphabet);
+            if (!UnicodeSets.empty()) {
+                auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
+                mRE = transformCCs(mpx, mRE);
+                mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
+            }
         }
     }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
@@ -393,7 +402,9 @@ void GrepEngine::initRE(re::RE * re) {
     } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-
+    //if (mExternalTable.hasReferenceTo(u8, "u8index")) {
+    //    mExternalTable.declareExternal(u8, "u8index", new U8Index_External());
+    //}
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
@@ -407,12 +418,6 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
         mExternalTable.declareExternal(u8, "basis", new PreDefined(BasisBits));
     } else {
         mExternalTable.declareExternal(u8, "basis", new PreDefined(ByteStream));
-    }
-    if (hasComponent(mExternalComponents, Component::U21)) {
-        mU21 = P->CreateStreamSet(21, 1);
-        P->CreateKernelCall<UTF8_Decoder>(Source, mU21);
-        auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
-        mExternalTable.declareExternal(Unicode, "basis", new PreDefined(mU21));
     }
     return Source;
 }
@@ -441,7 +446,7 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         mExternalTable.declareExternal(u8, "UTF8_LB", new PreDefined(mLineBreakStream));
         if (UnicodeIndexing) {
             auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
-            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index1", "UTF8_LB"}));
+            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}));
         }
     }
     else {
@@ -509,7 +514,6 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
             unsigned offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
-            if (mIllustrator) mIllustrator->captureBitstream(P, name + "_ext", extStream);
         }
     }
 }
@@ -590,6 +594,9 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
 }
 
 StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
+
+    mExternalTable.resetExternals();
+
     StreamSet * SourceStream = getBasis(P, InputStream);
 
     grepPrologue(P, SourceStream);
@@ -906,6 +913,8 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 }
 
 void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, bool BatchMode) {
+    mExternalTable.resetExternals();
+
     StreamSet * SourceStream = getBasis(E, ByteStream);
 
     grepPrologue(E, SourceStream);
@@ -1188,7 +1197,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
     } else {
         //llvm::errs() << "filenames.size() = " << fileNames.size() << "\n";
         //for (auto & name : fileNames) { llvm::errs() << name << "\n";}
-        typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, size_t maxCount);
+        typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, kernel::ParabixIllustrator *,size_t maxCount);
         auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
         EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
         accum.setStringStream(&strm);
@@ -1250,7 +1259,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
                 accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
             }
-            f(accum.mBatchBuffer, current_start_position, &accum, mMaxCount);
+            f(accum.mBatchBuffer, current_start_position, &accum, mIllustrator, mMaxCount);
         }
         alloc.deallocate(accum.mBatchBuffer, 0);
         if (accum.mLineCount > 0) grepMatchFound = true;
