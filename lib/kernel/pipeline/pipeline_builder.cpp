@@ -82,6 +82,7 @@ PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) 
     return pk;
 }
 
+
 using Kernels = PipelineBuilder::Kernels;
 
 enum class VertexType { Kernel, StreamSet, Scalar };
@@ -278,8 +279,7 @@ Kernel * PipelineBuilder::makeKernel() {
         for (unsigned i = 0; i < n; ++i) {
             Relationship * const rel = array.getRelationship(i);
             assert ("relationship cannot be null!" && rel);
-            if (LLVM_UNLIKELY(isa<ScalarConstant>(rel))) continue;
-#error here?
+            if (LLVM_UNLIKELY(isa<ScalarConstant>(rel) || isa<RepeatingStreamSet>(rel))) continue;
             const auto f = M.find(rel);
             if (LLVM_UNLIKELY(f == M.end())) {
                 SmallVector<char, 256> tmp;

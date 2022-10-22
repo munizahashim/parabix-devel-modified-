@@ -29,7 +29,7 @@ parabix_add_kernel_test(test_bit_movement kernel.streamutils)
 parabix_add_kernel_test(index_test kernel.streamutils)
 parabix_add_kernel_test(nesting_tests kernel.util)
 parabix_add_kernel_test(everynth_tests pablo)
-
+parabix_add_kernel_test(test_repeatingstreamset kernel.io)
 
 # `make kernel-tests` to run all kernel tests
 add_custom_target(kernel-tests

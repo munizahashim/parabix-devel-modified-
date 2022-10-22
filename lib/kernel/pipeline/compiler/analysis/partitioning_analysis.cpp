@@ -607,7 +607,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     for (unsigned i = 0; i < m; ++i) {
         BitSet & V = G[i];
-        V.resize(n);
+        V.resize((n * 2) + 1);
         assert (V.none());
     }
 
@@ -624,6 +624,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             G[j].set(P.LinkedGroupId);
         }
     }
+
 
     auto nextRateId = l;
 

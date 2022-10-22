@@ -104,10 +104,15 @@ public:
 
     std::string shapeString();
 
-    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth, const uint8_t * string, const unsigned length) noexcept;
+    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet) noexcept
+    : StreamSet(C, FieldWidth, stringSet.size())
+    , _StringSet(std::move(stringSet)) {
+
+    }
 
 private:
 
+    std::vector<std::vector<uint64_t>> _StringSet;
 
 };
 

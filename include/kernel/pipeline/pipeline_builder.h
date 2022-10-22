@@ -2,6 +2,7 @@
 #define PIPELINE_BUILDER_H
 
 #include <kernel/pipeline/pipeline_kernel.h>
+#include <boost/integer.hpp>
 
 class BaseDriver;
 
@@ -47,6 +48,23 @@ public:
 
     Scalar * CreateConstant(llvm::Constant * value) {
         return mDriver.CreateConstant(value);
+    }
+
+    using pattern_t = std::vector<uint64_t>;
+
+    template<unsigned FieldWidth>
+    RepeatingStreamSet * CreateRepeatingStreamSet(pattern_t string) {
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)});
+    }
+
+    template<unsigned FieldWidth>
+    RepeatingStreamSet * CreateRepeatingStreamSet(std::vector<pattern_t> string) {
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string));
+    }
+
+    template<unsigned FieldWidth, unsigned NumOfElements>
+    RepeatingStreamSet * CreateRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()});
     }
 
     template <typename ExternalFunctionType>

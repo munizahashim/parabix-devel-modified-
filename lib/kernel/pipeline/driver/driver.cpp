@@ -28,15 +28,24 @@ std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-StreamSet * BaseDriver::CreateStreamSet(const unsigned NumElements, const unsigned FieldWidth) {
+StreamSet * BaseDriver::CreateStreamSet(const unsigned NumElements, const unsigned FieldWidth) noexcept {
     RelationshipAllocator A(mAllocator);
     return new (A) StreamSet(getContext(), NumElements, FieldWidth);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateStreamSet
+ ** ------------------------------------------------------------------------------------------------------------- */
+RepeatingStreamSet * BaseDriver::CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t>> && stringSet) noexcept {
+    RelationshipAllocator A(mAllocator);
+    // TODO: the stringSet will probably cause a memleak
+    return new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet));
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateConstant
  ** ------------------------------------------------------------------------------------------------------------- */
-Scalar * BaseDriver::CreateScalar(not_null<llvm::Type *> scalarType) {
+Scalar * BaseDriver::CreateScalar(not_null<llvm::Type *> scalarType) noexcept {
     RelationshipAllocator A(mAllocator);
     return new (A) Scalar(scalarType);
 }
@@ -44,7 +53,7 @@ Scalar * BaseDriver::CreateScalar(not_null<llvm::Type *> scalarType) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateConstant
  ** ------------------------------------------------------------------------------------------------------------- */
-Scalar * BaseDriver::CreateConstant(not_null<llvm::Constant *> value) {
+Scalar * BaseDriver::CreateConstant(not_null<llvm::Constant *> value) noexcept {
     RelationshipAllocator A(mAllocator);
     return new (A) ScalarConstant(value);
 }

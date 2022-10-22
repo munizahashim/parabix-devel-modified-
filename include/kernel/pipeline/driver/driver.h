@@ -40,30 +40,13 @@ public:
         return mBuilder;
     }
 
-    kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1);
+    kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 
-    template<unsigned FieldWidth, typename storage_t = typename boost::uint_t<FieldWidth>::fast>
-    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const storage_t * string) {
-        static_assert(FieldWidth == 8, "non-8 bit types are not currently supported");
-        // TODO: although we could represent 1-bit values with a 0/1 string, and 8-bit with ASCII,
-        // supporting other types will require a varadic argument. Should every type be automatically
-        // converted to a byte array? What should the interface be for multi-element types?
-        return __CreateRepeatingStreamSet8(string, sizeof(string));
-    }
+    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet) noexcept;
 
-    template<unsigned NumElements, unsigned FieldWidth, typename storage_t = typename boost::uint_t<FieldWidth>::fast>
-    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(std::array<const storage_t *, NumElements> string) {
-        static_assert(FieldWidth == 8, "non-8 bit types are not currently supported");
-        // TODO: although we could represent 1-bit values with a 0/1 string, and 8-bit with ASCII,
-        // supporting other types will require a varadic argument. Should every type be automatically
-        // converted to a byte array? What should the interface be for multi-element types?
-        return __CreateRepeatingStreamSet8(string, sizeof(string));
-    }
+    kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType) noexcept;
 
-
-    kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType);
-
-    kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value);
+    kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;
 
     void addKernel(not_null<Kernel *> kernel);
 
