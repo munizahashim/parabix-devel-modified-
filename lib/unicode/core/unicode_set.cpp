@@ -26,6 +26,7 @@
 #include <llvm/ADT/SmallVector.h>
 #ifndef NDEBUG
 #include <llvm/Support/ErrorHandling.h>
+#include <type_traits>
 #endif
 
 namespace UCD {
@@ -63,9 +64,21 @@ inline UnicodeSet::length_t lengthOf(const run_t & run) {
 }
 
 template<typename T>
+inline void copy_(T * dst, const T * src, const size_t n) {
+//    static_assert(std::is_trivially_copyable<T>::value, "cannot safely call memcpy on type");
+    std::memcpy(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+}
+
+template<typename T>
+inline void move_(T * dst, const T * src, const size_t n) {
+//    static_assert(std::is_trivially_copyable<T>::value, "cannot safely call mem on type");
+    std::memmove(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+}
+
+template<typename T>
 T * copyOf(const T * base, const uint32_t length, SlabAllocator<> & allocator) {
     T * const ptr = allocator.allocate<T>(length);
-    std::memcpy(ptr, base, length * sizeof(T));
+    copy_(ptr, base, length);
     return ptr;
 }
 
@@ -82,7 +95,7 @@ void assign(UnicodeSet * const self, const RunVector & runs, const QuadVector & 
         self->mRuns = UnicodeSet::GlobalAllocator.allocate<run_t>(n);
         self->mRunCapacity = n;
     }
-    std::memcpy(self->mRuns, runs.data(), n * sizeof(run_t));
+    copy_(self->mRuns, runs.data(), n);
     self->mRunLength = n;
     const unsigned m = quads.size();
     assert (m < UNICODE_QUAD_COUNT);
@@ -92,7 +105,7 @@ void assign(UnicodeSet * const self, const RunVector & runs, const QuadVector & 
             self->mQuads = UnicodeSet::GlobalAllocator.allocate<bitquad_t>(m);
             self->mQuadCapacity = m;
         }
-        std::memcpy(self->mQuads, quads.data(), m * sizeof(bitquad_t));
+        copy_(self->mQuads, quads.data(), m);
     }
     self->mQuadLength = m;
 }
@@ -611,13 +624,13 @@ void UnicodeSet::insert(const codepoint_t cp) {
         quadIndex += offset;
         if (LLVM_UNLIKELY(mQuadCapacity == 0)) {
             bitquad_t * const quads = GlobalAllocator.allocate<bitquad_t>(mQuadLength - 1);
-            std::memcpy(quads, mQuads, (quadIndex - 1) * sizeof(bitquad_t));
+            copy_(quads, mQuads, (quadIndex - 1));
             quads[quadIndex] = mQuads[quadIndex] | value;
             const unsigned quadOffset = (quads[quadIndex] == FULL_QUAD_MASK) ? 1 : 0;
             mQuadCapacity = mQuadLength;
             mQuadLength -= quadOffset;
             ++quadIndex;
-            std::memcpy(quads + quadIndex, mQuads + quadIndex + quadOffset, (mQuadLength - quadIndex) * sizeof(bitquad_t));
+            copy_(quads + quadIndex, mQuads + quadIndex + quadOffset, (mQuadLength - quadIndex));
             mQuads = quads;
             if (LLVM_LIKELY(quadOffset == 0)) {  // no change to runs needed
                 assert (verify(mRuns, mRunLength, mQuads, mQuadLength));
@@ -632,7 +645,7 @@ void UnicodeSet::insert(const codepoint_t cp) {
                 return;
             }
             --mQuadLength;
-            std::memmove(mQuads + quadIndex, mQuads + quadIndex + 1, (mQuadLength - quadIndex) * sizeof(bitquad_t));
+            move_(mQuads + quadIndex, mQuads + quadIndex + 1, (mQuadLength - quadIndex));
         }
 
     } else if (type == Empty) {
@@ -640,14 +653,14 @@ void UnicodeSet::insert(const codepoint_t cp) {
         const auto l = mQuadLength + 1;
         if (l > mQuadCapacity) {
             bitquad_t * const quads = GlobalAllocator.allocate<bitquad_t>(l);
-            std::memcpy(quads, mQuads, quadIndex * sizeof(bitquad_t));
+            copy_(quads, mQuads, quadIndex);
             quads[quadIndex] = value;
-            std::memcpy(quads + quadIndex + 1, mQuads + quadIndex, (mQuadLength - quadIndex) * sizeof(bitquad_t));
+            copy_(quads + quadIndex + 1, mQuads + quadIndex, (mQuadLength - quadIndex));
             GlobalAllocator.deallocate<bitquad_t>(mQuads, mQuadCapacity);
             mQuads = quads;
             mQuadCapacity = l;
         } else { // reuse the same buffer
-            std::memmove(mQuads + quadIndex + 1, mQuads + quadIndex, (mQuadLength - quadIndex) * sizeof(bitquad_t));
+            move_(mQuads + quadIndex + 1, mQuads + quadIndex, (mQuadLength - quadIndex));
             mQuads[quadIndex] = value;
         }
         mQuadLength = l;
@@ -665,13 +678,13 @@ void UnicodeSet::insert(const codepoint_t cp) {
         const auto k = runIndex + ((offset != 0) ? 1 : 0);
         if (l > mRunCapacity) {
             run_t * const newRun = GlobalAllocator.allocate<run_t>(l);
-            std::memcpy(newRun, mRuns, k * sizeof(run_t));
-            std::memcpy(newRun + k + m, mRuns + k, (mRunLength - k) * sizeof(run_t));
+            copy_(newRun, mRuns, k);
+            copy_(newRun + k + m, mRuns + k, (mRunLength - k));
             GlobalAllocator.deallocate<run_t>(mRuns, mRunCapacity);
             mRuns = newRun;
             mRunCapacity = l;
         } else { // reuse the same buffer
-            std::memmove(mRuns + k + m, mRuns + k, (mRunLength - k) * sizeof(run_t));
+            move_(mRuns + k + m, mRuns + k, (mRunLength - k));
         }
         mRuns[k] = std::make_pair(type == Empty ? Mixed : Full, 1);
         if (offset) {
@@ -1337,7 +1350,7 @@ UnicodeSet::UnicodeSet(std::initializer_list<interval_t>::iterator begin, std::i
     mRuns = GlobalAllocator.allocate<run_t>(n);
     mRunCapacity = n;
     mRunLength = n;
-    std::memcpy(mRuns, runs.data(), n * sizeof(run_t));
+    copy_(mRuns, runs.data(), n);
 
     const auto m = quads.size();
     assert (m < UNICODE_QUAD_COUNT);
@@ -1345,7 +1358,7 @@ UnicodeSet::UnicodeSet(std::initializer_list<interval_t>::iterator begin, std::i
         mQuads = GlobalAllocator.allocate<bitquad_t>(m);
         mQuadCapacity = m;
         mQuadLength = m;
-        std::memcpy(mQuads, quads.data(), m * sizeof(bitquad_t));
+        copy_(mQuads, quads.data(), m);
     }
 
     assert (verify(mRuns, mRunLength, mQuads, mQuadLength));
@@ -1371,7 +1384,7 @@ UnicodeSet::UnicodeSet(const std::vector<interval_t>::iterator begin, const std:
     mRuns = GlobalAllocator.allocate<run_t>(n);
     mRunCapacity = n;
     mRunLength = n;
-    std::memcpy(mRuns, runs.data(), n * sizeof(run_t));
+    copy_(mRuns, runs.data(), n);
 
     const auto m = quads.size();
     assert (m < UNICODE_QUAD_COUNT);
@@ -1379,7 +1392,7 @@ UnicodeSet::UnicodeSet(const std::vector<interval_t>::iterator begin, const std:
         mQuads = GlobalAllocator.allocate<bitquad_t>(m);
         mQuadCapacity = m;
         mQuadLength = m;
-        std::memcpy(mQuads, quads.data(), m * sizeof(bitquad_t));
+        copy_(mQuads, quads.data(), m);
     }
 
     assert (verify(mRuns, mRunLength, mQuads, mQuadLength));

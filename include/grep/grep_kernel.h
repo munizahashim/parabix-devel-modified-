@@ -45,7 +45,10 @@ public:
     StreamIndexCode getStreamIndex(std::string indexName);
     void declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext);
     ExternalStreamObject * lookup(StreamIndexCode c, std::string externalName);
+    bool isDeclared(StreamIndexCode c, std::string externalName);
+    bool hasReferenceTo(StreamIndexCode c, std::string externalName);
     StreamSet * getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string externalName);
+    void resetExternals();  // Reset all externals to unresolved.
     void resolveExternals(ProgBuilderRef b);
     void setIllustrator(kernel::ParabixIllustrator * illustrator) {mIllustrator = illustrator;}
 private:
@@ -61,7 +64,7 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        PreDefined, PropertyExternal, CC_External, RE_External, StartAnchored,
+        U21, PreDefined, PropertyExternal, CC_External, RE_External, StartAnchored,
         Reference_External,
         WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed,
         FilterByMask, FixedSpan
@@ -98,9 +101,22 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    std::vector<std::string> getParameters() override {return {};}
     PreDefined(StreamSet * predefined) :
         ExternalStreamObject(Kind::PreDefined) {mStreamSet = predefined;}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override {}
+};
+
+class U21_External : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::U21;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    U21_External() : ExternalStreamObject(Kind::U21) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 };
 
 class PropertyExternal : public ExternalStreamObject {

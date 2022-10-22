@@ -868,7 +868,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * mustExpand = nullptr;
 
-    if (buffer->isLinear()) {
+    if (isa<DynamicBuffer>(buffer) && buffer->isLinear()) {
 
         mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
 

@@ -21,4 +21,5 @@ DEPS
     re.cc
     kernel.pipeline
     kernel.basis
+    kernel.streamutils
 )

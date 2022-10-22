@@ -4,6 +4,7 @@
  */
 
 #include <toolchain/toolchain.h>
+#include <kernel/streamutils/stream_select.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -145,14 +146,27 @@ void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string strea
 }
 
 void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLabel, StreamSet * bixnum, char hexBase) {
-    unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
-    scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+    auto bixBits = bixnum->getNumElements();
+    if (bixBits <= 4) {
+        unsigned illustratedStreamNo = addStream(streamLabel);
+        StreamSet * printableBasis = P->CreateStreamSet(8);
+        P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
+        StreamSet * printableData = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
+        Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
+        Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+        scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
+    } else {
+        auto hexDigits = (bixBits + 3)/4;
+        for (auto i = hexDigits; i >= 1; i--) {
+            auto low = (i - 1) * 4;
+            auto hi = bixBits;
+            std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi - 1) + "]";
+            StreamSet * hexBasis = streamutils::Select(P, bixnum, streamutils::Range(low, hi));
+            captureBixNum(P, lbl, hexBasis, hexBase);
+            bixBits = low;
+        }
+    }
 }
 
 void ParabixIllustrator::displayAllCapturedData() {
@@ -205,7 +219,7 @@ void BitstreamIllustrator::generatePabloMethod() {
 PrintableASCII::PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
     : pablo::PabloKernel(kb, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
                   {Binding{"basisBits", basisBits}},
-                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}),
+                  {Binding{"printableBasis", printableBasis}}),
                   mNonASCIIsubstitute(nonASCIIsubstitute) {}
 
 void PrintableASCII::generatePabloMethod() {
@@ -230,7 +244,7 @@ void PrintableASCII::generatePabloMethod() {
 PrintableBixNum::PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
     : pablo::PabloKernel(kb, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
                   {Binding{"bixnum", bixnum}},
-                  {Binding{"printableBasis", printableBasis, FixedRate(), Add1()}}), mHexBase(hexBase) {}
+                  {Binding{"printableBasis", printableBasis}}), mHexBase(hexBase) {}
 
 void PrintableBixNum::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());

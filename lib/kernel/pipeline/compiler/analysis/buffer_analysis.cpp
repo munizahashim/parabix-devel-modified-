@@ -297,13 +297,6 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
     }
 
-    if (LLVM_LIKELY(!IsNestedPipeline)) {
-        for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);
-            mBufferGraph[streamSet].Type |= BufferType::Returned;
-        }
-    }
-
 }
 
 
@@ -352,7 +345,9 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyOutputNodeIds() {
 
-    if (mLengthAssertions.empty()) {
+    const auto & lengthAssertions = mPipelineKernel->getLengthAssertions();
+
+    if (lengthAssertions.empty()) {
 
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             BufferNode & bn = mBufferGraph[streamSet];
@@ -396,7 +391,7 @@ void PipelineAnalysis::identifyOutputNodeIds() {
 
         };
 
-        for (const auto & pair : mLengthAssertions) {
+        for (const auto & pair : lengthAssertions) {
             unsigned id[2];
             for (unsigned i = 0; i < 2; ++i) {
                 const auto f = StreamSetToNodeIdMap.find(pair[i]);
@@ -433,6 +428,7 @@ void PipelineAnalysis::identifyOwnedBuffers() {
         BufferNode & bn = mBufferGraph[streamSet];
         bn.Type |= BufferType::External;
         bn.Type |= BufferType::Unowned;
+        bn.Locality = BufferLocality::GloballyShared;
     }
 
     // fill in any known managed buffers
@@ -456,6 +452,10 @@ void PipelineAnalysis::identifyOwnedBuffers() {
         const auto streamSet = source(e, mBufferGraph);
         BufferNode & bn = mBufferGraph[streamSet];
         bn.Type |= BufferType::External;
+        if (LLVM_LIKELY(!IsNestedPipeline)) {
+            bn.Type |= BufferType::Returned;
+        }
+        bn.Locality = BufferLocality::GloballyShared;
     }
 
 }
@@ -821,6 +821,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         const Binding & output = producerRate.Binding;
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isUnowned())) {
+            assert (bn.Locality != BufferLocality::ThreadLocal);
             buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
         } else { // is internal buffer
 

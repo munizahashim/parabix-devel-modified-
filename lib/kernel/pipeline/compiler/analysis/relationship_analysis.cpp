@@ -568,7 +568,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
         addConsumerRelationships(PortType::Input, vertex[i], mKernels[i]->getInputScalarBindings(), Relationships, true);
     }
 
-    for (const CallBinding & C : mCallBindings) {
+    for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
         addConsumerRelationships(PortType::Input, C, Relationships);
     }
 
@@ -1137,8 +1137,7 @@ inline void PipelineAnalysis::removeUnusedKernels(const unsigned p_in, const uns
         pending.push(p);
         visited.insert_unique(p);
     }
-    const auto & calls = mPipelineKernel->getCallBindings();
-    for (const CallBinding & C : calls) {
+    for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
         const auto c = G.find(&C);
         pending.push(c);
         visited.insert_unique(c);
