@@ -1,4 +1,4 @@
-﻿#ifndef VARIABLE_RATE_ANALYSIS_HPP
+#ifndef VARIABLE_RATE_ANALYSIS_HPP
 #define VARIABLE_RATE_ANALYSIS_HPP
 
 #include "pipeline_analysis.hpp"
@@ -1226,7 +1226,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                             data.Distribution = &model;
                         } else if (*data.Distribution != model) {
                             // TODO: write more useful message indicating which streamset this is
-                            llvm::report_fatal_error("Inconsistent probability models given to PartialSum rate");
+                            llvm::errs() << "Inconsistent probability models given to PartialSum rate\n";
                         }
                     };
 
