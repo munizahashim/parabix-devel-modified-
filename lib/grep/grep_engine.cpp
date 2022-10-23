@@ -466,11 +466,6 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     }
 }
 
-StreamSet * GrepEngine::resolveExternal(ProgBuilderRef P, std::string nameStr) {
-    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
-    return mExternalTable.getStreamSet(P, indexing, nameStr);
-}
-
 void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
@@ -479,19 +474,11 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernel
     auto alphabets = re::collectAlphabets(regexp);
     auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     for (auto & a : alphabets) {
-        std::string basisName = a->getName() + "_basis";
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            ExternalStreamObject * ext = mExternalTable.lookup(indexing, basisName);
-            if (!ext->isResolved()) {
-                resolveExternal(P, basisName);
-            }
-            if (isa<PropertyBasisExternal>(ext) || isa<MultiplexedExternal>(ext) || isa<FilterByMaskExternal>(ext)) {
-                StreamSet * alphabetBasis = ext->getStreamSet();
-                if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
-                options->addAlphabet(mpx, alphabetBasis);
-            } else {
-                llvm::report_fatal_error("Expecting multiplexed alphabet: " + basisName);
-            }
+            std::string basisName = a->getName() + "_basis";
+            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
+            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
+            options->addAlphabet(mpx, alphabetBasis);
         }
     }
     std::set<re::Name *> externals;
@@ -537,27 +524,6 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
-    } else if (re::Name * externalName = dyn_cast<re::Name>(r)) {
-        std::string nameStr = externalName->getFullName();
-        auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
-        StreamSet * match_marks = mExternalTable.getStreamSet(P, indexing, nameStr);
-        ExternalStreamObject * ext = mExternalTable.lookup(indexing, nameStr);
-        if (mIllustrator) mIllustrator->captureBitstream(P, nameStr + " marks", match_marks);
-        if (isa<StartAnchoredExternal>(ext)) {
-            StreamSet * spans = P->CreateStreamSet(1, 1);
-            PrefixSuffixSpan(P, mLineStarts, match_marks, spans);
-            if (mIllustrator) mIllustrator->captureBitstream(P, "spans", spans);
-            return spans;
-        }
-        // else Other special cases
-        // default by min match length
-        int spanLgth = ext->getLengthRange().first;
-        //llvm::errs() << "ext->getLengthRange().first = " << ext->getLengthRange().first << "\n";
-        //llvm::errs() << "ext->getOffset() = " << ext->getOffset() << "\n";
-        if (spanLgth <= 1) return match_marks;
-        StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, ext->getOffset(), match_marks, spans);
-        return spans;
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
         StreamSet * spans = P->CreateStreamSet(1, 1);
@@ -906,7 +872,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
 }
 
-void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, bool BatchMode) {
+void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
     mExternalTable.resetExternals();
 
     StreamSet * SourceStream = getBasis(E, ByteStream);
@@ -984,20 +950,12 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
     }
 
     if (needsColoring) {
-        StreamSet * SourceCoords = nullptr;
-        if (BatchMode) {
-            //llvm::errs() << "Batch mode calling BatchCoordinatesKernel\n";
-            SourceCoords = E->CreateStreamSet(1, sizeof(size_t) * 8);
-            Scalar * const callbackObject = E->getInputScalar("callbackObject");
-            Kernel * const batchK = E->CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
-            batchK->link("get_file_count_wrapper", get_file_count_wrapper);
-            batchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
-            batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
-            //E->CreateKernelCall<DebugDisplayKernel>("SourceCoords", SourceCoords);
-        } else {
-            SourceCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-            E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, 1);
-        }
+        StreamSet * SourceCoords = E->CreateStreamSet(1, sizeof(size_t) * 8);
+        Scalar * const callbackObject = E->getInputScalar("callbackObject");
+        Kernel * const batchK = E->CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
+        batchK->link("get_file_count_wrapper", get_file_count_wrapper);
+        batchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
+        batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
 
         if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", mLineStarts);
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
@@ -1008,11 +966,9 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
 
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
-        //E->CreateKernelCall<DebugDisplayKernel>("MatchedLineSpans", MatchedLineSpans);
 
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, Matches, FilteredMatchSpans);
-        //E->CreateKernelCall<DebugDisplayKernel>("FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
@@ -1032,23 +988,15 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream, b
             matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
             matchK->link("finalize_match_wrapper", finalize_match_wrapper);
         } else {
-            if (BatchMode) {
-                Scalar * const callbackObject = E->getInputScalar("callbackObject");
-                Kernel * const scanBatchK = E->CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
-                scanBatchK->link("get_file_count_wrapper", get_file_count_wrapper);
-                scanBatchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
-                scanBatchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
-                scanBatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
-                scanBatchK->link("finalize_match_wrapper", finalize_match_wrapper);
-            } else {
-                Scalar * const callbackObject = E->getInputScalar("callbackObject");
-                Kernel * const matchK = E->CreateKernelCall<ScanMatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
-                matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
-                matchK->link("finalize_match_wrapper", finalize_match_wrapper);
-            }
+            Scalar * const callbackObject = E->getInputScalar("callbackObject");
+            Kernel * const scanBatchK = E->CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+            scanBatchK->link("get_file_count_wrapper", get_file_count_wrapper);
+            scanBatchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
+            scanBatchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
+            scanBatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
+            scanBatchK->link("finalize_match_wrapper", finalize_match_wrapper);
         }
     }
-    //E->CreateKernelCall<StdOutKernel>(ColorizedBytes);
 }
 
 
@@ -1070,7 +1018,7 @@ void EmitMatchesEngine::grepCodeGen() {
     if (mIllustrator) mIllustrator->registerIllustrator(E2->getInputScalar("illustratorAddr"));
     StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
     E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-    grepPipeline(E2, InternalBytes, /* BatchMode = */ true);
+    grepPipeline(E2, InternalBytes);
     E2->setOutputScalar("countResult", E2->CreateConstant(idb->getInt64(0)));
     mBatchMethod = E2->compile();
 }
