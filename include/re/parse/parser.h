@@ -117,11 +117,11 @@ protected:
         return false;
     }
     
-    inline void require(char c) {
-        if (!accept(c)) {
-            if (mCursor.noMore()) ParseFailure("Expecting " + std::string(1, c) + " but end of input encountered");
-            ParseFailure("Expecting " + std::string(1, c) + " but " + std::string(1, *mCursor) + " encountered");
-        }
+    inline bool require(char c) {
+        if (accept(c)) return true;
+        if (mCursor.noMore()) ParseFailure("Expecting " + std::string(1, c) + " but end of input encountered");
+        ParseFailure("Expecting " + std::string(1, c) + " but " + std::string(1, *mCursor) + " encountered");
+        return false;
     }
     
     inline bool atany(std::string s) {
@@ -151,12 +151,12 @@ protected:
         return true;
     }
     
-    inline void require(std::string s) {
-        if (!accept(s)) {
-            if (mCursor.noMore()) ParseFailure("Expecting " + s + " but end of input encountered");
-            size_t rem = mCursor.remaining();
-            ParseFailure("Expecting " + s + " but " + std::string(mCursor.pos(), mCursor.pos() + std::min(rem, s.length())) + " encountered");
-        }
+    inline bool require(std::string s) {
+        if (accept(s)) return true;
+        if (mCursor.noMore()) ParseFailure("Expecting " + s + " but end of input encountered");
+        size_t rem = mCursor.remaining();
+        ParseFailure("Expecting " + s + " but " + std::string(mCursor.pos(), mCursor.pos() + std::min(rem, s.length())) + " encountered");
+        return false;
     }
     
     inline char get1() { return *mCursor++;}

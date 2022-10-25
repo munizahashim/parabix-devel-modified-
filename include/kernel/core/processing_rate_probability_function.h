@@ -62,6 +62,11 @@ struct ProcessingRateProbabilityDistribution {
         return !operator==(other);
     }
 
+    bool operator < (const ProcessingRateProbabilityDistribution & other) const {
+        if (other.TypeId == Maximum) return true;
+        return false;
+    }
+
 protected:
 
     friend struct Binding;

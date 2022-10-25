@@ -110,6 +110,10 @@ int main(int argc, char *argv[]) {
             if (argv::WithFilenameFlag) grep->showFileNames();
             if (argv::LineNumberFlag) grep->showLineNumbers();
             if (argv::InitialTabFlag) grep->setInitialTab();
+            if ((argv::ColorFlag == argv::alwaysColor) ||
+                ((argv::ColorFlag == argv::autoColor) && isatty(STDOUT_FILENO))) {
+                grep->setColoring();
+            }
            break;
         case argv::CountOnly:
             grep = std::make_unique<grep::CountOnlyEngine>(driver);
@@ -121,7 +125,7 @@ int main(int argc, char *argv[]) {
             grep = std::make_unique<grep::MatchOnlyEngine>(driver, argv::Mode == argv::FilesWithMatch, argv::NullFlag);
             break;
         case argv::QuietMode:
-            grep = std::make_unique<grep::QuietModeEngine>(driver);
+           grep = std::make_unique<grep::QuietModeEngine>(driver);
             break;
         default: llvm_unreachable("Invalid grep mode!");
     }
@@ -141,10 +145,6 @@ int main(int argc, char *argv[]) {
     if (argv::NoMessagesFlag) grep->suppressFileMessages();
     if (argv::MmapFlag) grep->setPreferMMap();
     grep->setBinaryFilesOption(argv::BinaryFilesFlag);
-    if ((argv::ColorFlag == argv::alwaysColor) ||
-        ((argv::ColorFlag == argv::autoColor) && isatty(STDOUT_FILENO))) {
-        grep->setColoring();
-    }    
     grep->initFileResult(allFiles); // unnecessary copy!
     grep->initRE(RE);
     grep->grepCodeGen();

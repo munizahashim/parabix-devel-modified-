@@ -489,77 +489,74 @@ RE * RE_Parser::parsePropertyExpression(PropertyExpression::Kind k) {
     const auto prop_end = mCursor.pos();
     std::string prop = canonicalize(start, prop_end);
     while (accept(' ') || accept('\t')) {/* skip whitespace, do nothing */}
-    PropertyExpression::Operator op;
-    if (atany("!=:")) {
-        // We have a property-name op value expression
-        if (accept('=') || accept(':')) op = PropertyExpression::Operator::Eq;
-        else if (accept("!=")) op = PropertyExpression::Operator::NEq;
-        while (accept(' ') || accept('\t')) {/* skip whitespace, do nothing */}
-        auto val_start = mCursor.pos();
-        if (accept('/')) {
-            // property-value is another regex
-            auto previous = val_start;
-            auto current = mCursor.pos();
-            
-            while (true) {
-                if (*current == '/' && *previous != '\\') {
-                    break;
-                }
-                
-                if (!mCursor.more()) {
-                    ParseFailure("Malformed property expression");
-                }
-                
-                previous = current;
-                current = (++mCursor).pos();
-            }
-            ++mCursor;
-            return makePropertyExpression(k, prop, op, std::string(val_start, current));
-        }
-        if (*val_start == '@') {
-            // property-value is @property@ or @identity@
-            auto previous = val_start;
-            auto current = (++mCursor).pos();
-            
-            while (true) {
-                if (*current == '@' && *previous != '\\') {
-                    break;
-                }
-                
-                if (!mCursor.more()) {
-                    ParseFailure("Malformed property expression");
-                }
-                
-                previous = current;
-                current = (++mCursor).pos();
-            }
-            ++mCursor;
-            return makePropertyExpression(k, prop, op, std::string(val_start, current));
-        }
-        if (accept('\\')) {
-            // property-value is a property reference
-            Reference * ref = parse_back_reference();
-            PropertyExpression * propref = makePropertyExpression(k, prop, op, ref->getName());
-            propref->setResolvedRE(ref);
-            return propref;
-        }
-        else {
-            // property-value is normal string
-            while (mCursor.more()) {
-                bool done = false;
-                switch (*mCursor) {
-                    case '}': case ':':
-                        done = true;
-                }
-                if (done) {
-                    break;
-                }
-                ++mCursor;
-            }
-            return makePropertyExpression(k, prop, op, std::string(val_start, mCursor.pos()));
-        }
+    if (at('}') || at(":]")) {
+        return makePropertyExpression(k, prop);
     }
-    return makePropertyExpression(k, prop);
+    PropertyExpression::Operator op = PropertyExpression::Operator::Eq;
+    if (accept("!=")) {
+        op = PropertyExpression::Operator::NEq;
+    } else {
+        accept(':') || require('=');
+    }
+    while (accept(' ') || accept('\t')) {/* skip whitespace, do nothing */}
+    auto val_start = mCursor.pos();
+    if (accept('/')) {
+        // property-value is another regex
+        auto previous = val_start;
+        auto current = mCursor.pos();
+        while (true) {
+            if (*current == '/' && *previous != '\\') {
+                break;
+            }
+            if (!mCursor.more()) {
+                ParseFailure("Malformed property expression");
+            }
+            previous = current;
+            current = (++mCursor).pos();
+        }
+        ++mCursor;
+        return makePropertyExpression(k, prop, op, std::string(val_start, current));
+    }
+    if (*val_start == '@') {
+        // property-value is @property@ or @identity@
+        auto previous = val_start;
+        auto current = (++mCursor).pos();
+        while (true) {
+            if (*current == '@' && *previous != '\\') {
+                break;
+            }
+            
+            if (!mCursor.more()) {
+                ParseFailure("Malformed property expression");
+            }
+            previous = current;
+            current = (++mCursor).pos();
+        }
+        ++mCursor;
+        return makePropertyExpression(k, prop, op, std::string(val_start, current));
+    }
+    if (accept('\\')) {
+        // property-value is a property reference
+        Reference * ref = parse_back_reference();
+        PropertyExpression * propref = makePropertyExpression(k, prop, op, ref->getName());
+        propref->setResolvedRE(ref);
+        return propref;
+    }
+    else {
+        // property-value is normal string
+        while (mCursor.more()) {
+            bool done = false;
+            switch (*mCursor) {
+                case '}': case ':':
+                    done = true;
+            }
+            if (done) {
+                break;
+            }
+            ++mCursor;
+        }
+        return makePropertyExpression(k, prop, op, std::string(val_start, mCursor.pos()));
+    }
 }
 
 RE * RE_Parser::parseNamePatternExpression(){
