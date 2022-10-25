@@ -37,6 +37,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
             }
             if (LLVM_LIKELY(itemWidth < blockWidth)) {
                 Constant * const factor = b->getSize(blockWidth / itemWidth);
+                assert ((blockWidth % itemWidth) == 0);
                 requiredBytes = b->CreateRoundUp(requiredBytes, factor);
             }
             requiredBytes = b->CreateMul(requiredBytes, bn.Buffer->getStreamSetCount(b));
@@ -47,6 +48,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
             } else if (fieldWidth > 8) {
                 requiredBytes = b->CreateMul(requiredBytes, b->getSize(fieldWidth / 8));
             }
+            const auto name = makeBufferName(mKernelId, br.Port);
             requiredBytes = b->CreateSelect(mIsInputZeroExtended[br.Port], requiredBytes, ZERO, "zeroExtendRequiredBytes");
             requiredSpace = b->CreateUMax(requiredSpace, requiredBytes);
         }
