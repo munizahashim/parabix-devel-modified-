@@ -279,8 +279,7 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         b->setScalarField("LineNum", strideFinalLineNumPhi);
     }
-    Value * processed = b->CreateSelect(b->isFinal(), avail, strideFinalLineStart);
-    b->setProcessedItemCount("InputStream", processed);
+    b->setProcessedItemCount("InputStream", strideFinalLineStart);
     b->CreateCondBr(b->isFinal(), callFinalizeScan, scanReturn);
 
     b->SetInsertPoint(callFinalizeScan);
@@ -414,7 +413,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
     Value * matchBitBlock = b->loadInputStreamBlock("matchResult", sz_ZERO, strideBlockIndex);
     Value * breakBitBlock = b->loadInputStreamBlock("lineBreak", sz_ZERO, strideBlockIndex);
-
     Value * const anyMatch = b->simd_any(sw.width, matchBitBlock);
     Value * const anyBreak = b->simd_any(sw.width, breakBitBlock);
     if (mLineNumbering) {
@@ -655,8 +653,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         b->setScalarField("LineNum", strideFinalLineNumPhi);
     }
-    Value * processed = b->CreateSelect(b->isFinal(), avail, strideFinalLineStart);
-    b->setProcessedItemCount("InputStream", processed);
+    b->setProcessedItemCount("InputStream", strideFinalLineStart);
     b->CreateCondBr(b->isFinal(), callFinalizeScan, scanReturn);
 
     b->SetInsertPoint(callFinalizeScan);
@@ -680,7 +677,7 @@ ScanBatchKernel::ScanBatchKernel(BuilderRef b, StreamSet * const Matches, Stream
 // inputs
 {Binding{"matchResult", Matches}
 ,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended()}
-,Binding{"InputStream", ByteStream, FixedRate(), { Deferred() }}},
+,Binding{"InputStream", ByteStream, FixedRate(), { ZeroExtended(), Deferred() }}},
 // outputs
 {},
 // input scalars

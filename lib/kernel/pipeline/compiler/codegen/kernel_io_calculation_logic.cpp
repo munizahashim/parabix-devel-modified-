@@ -761,7 +761,9 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
         Value * const closed = isClosed(b, inputPort);
-        Value * const exhausted = b->CreateICmpUGE(processed, available);
+        Value * const deferred = mCurrentProcessedDeferredItemCountPhi[inputPort];
+        Value * const itemCount = port.IsDeferred ? deferred : processed;
+        Value * const exhausted = b->CreateICmpUGE(itemCount, available);
         Value * const useZeroExtend = b->CreateAnd(closed, exhausted);
         mIsInputZeroExtended[inputPort] = useZeroExtend;
         if (LLVM_LIKELY(mHasZeroExtendedInput == nullptr)) {
