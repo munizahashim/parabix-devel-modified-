@@ -1224,9 +1224,8 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                         const auto & model = G[e].Distribution;
                         if (data.Distribution == nullptr || data.Distribution->getTypeId() == DistId::Uniform) {
                             data.Distribution = &model;
-                        } else if (*data.Distribution != model) {
-                            // TODO: write more useful message indicating which streamset this is
-                            llvm::errs() << "Inconsistent probability models given to PartialSum rate\n";
+                        } else if (*data.Distribution < model) {
+                            data.Distribution = &model;
                         }
                     };
 
