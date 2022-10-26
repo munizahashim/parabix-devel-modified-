@@ -305,10 +305,12 @@ void GrepEngine::initRE(re::RE * re) {
     if (!validateFixedUTF8(mRE) || (mGrepRecordBreak == GrepRecordBreakKind::Unicode)) {
         setComponent(mExternalComponents, Component::UTF8index);
         mLengthAlphabet = &cc::Unicode;
-        if (mColoring) {
-            UnicodeIndexing = true;
-        }
     }
+    auto lgth_range = getLengthRange(mRE, mLengthAlphabet);
+    // For length 0 regular expressions (e.g. a zero-width assertion like $)
+    // there will be no match spans to color.
+    if (lgth_range.second == 0) mColoring = false;
+    if ((mLengthAlphabet == &cc::Unicode) && mColoring) UnicodeIndexing = true;
     if (UnicodeIndexing) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);

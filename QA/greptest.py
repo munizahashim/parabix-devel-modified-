@@ -172,7 +172,7 @@ flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             '-EnableTernaryOpt' : []}
 
 def add_random_flags(flags, fileLength):
-    selected = fixed_flags.keys()
+    selected = list(fixed_flags.keys())
     for f in selected:
         flag_val = fixed_flags[f]
         if flag_val == []:
@@ -185,15 +185,17 @@ def add_random_flags(flags, fileLength):
         # Avoid duplicate flags and expensive test cases
         while rand_flag in selected or (rand_flag == "-v" and fileLength > 4000):
             rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
-        selected[rand_flag] = True
+        selected.append(rand_flag)
         values = flag_map[rand_flag]
         if values == []:
             flags[rand_flag] = True
         else:
             choice = values[random.randint(0, len(values) - 1)]
             if rand_flag[0] == "-":
-                if not choice in selected: flags[rand_flag] = choice
-            else: flags[choice] = True
+                flags[rand_flag] = choice
+            else:
+                flags[choice] = True
+            
 
 def parse_flag_string(flag_string):
     flags = {}
