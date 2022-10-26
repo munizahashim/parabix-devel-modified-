@@ -56,7 +56,8 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
     for (const auto & vec : pattern) {
         char joiner = '{';
         for (const auto c : vec) {
-            out << joiner << c;
+            out << joiner;
+            out.write_hex(c);
             joiner = ',';
         }
         out << '}';
@@ -147,7 +148,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
                            + " to ensure proper streamset construction");
     }
 
-    const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
+   // const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
@@ -155,48 +156,58 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();    
     Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
 
+    const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
+
     ConstantInt * const sz_ZERO = b->getSize(0);
 
    // Constant * const sz_outputTypeSize = ConstantExpr::getSizeOf(outputBuffer->getType());
 
-    const auto stripLength = (fieldWidth * bw) / 8;
-
     std::vector<Constant *> vectors(numElements);
 
     if (fieldWidth < 8) {
-        // if our fieldwidth size is less than a byte, we treat it as a bit vector,
+        // if our fieldwidth size is less than a byte, we treat it as a bit vector
 
         constexpr auto LANE_SIZE = 64ULL;
         assert ((LANE_SIZE % fieldWidth) == 0);
         const auto lanes = bw / LANE_SIZE;
-        const auto N = patternLength * fieldWidth / bw;
 
-        std::vector<uint64_t> tmp(lanes);
-        std::vector<Constant *> tmp2(N);
+        IntegerType * const int64Ty = b->getInt64Ty();
+
+        VectorType * const vecTy = VectorType::get(int64Ty, lanes, false);
+
+        ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
+
+        ArrayType * const patternTy = ArrayType::get(elementTy, maxPatternSize);
+
+        SmallVector<Constant *, 16> tmp(lanes);
+        SmallVector<Constant *, 16> tmp2(fieldWidth);
         std::vector<Constant *> tmp3(maxPatternSize);
 
-        for (unsigned i = 0; i < numElements; ++i) {
-            const auto & vec = Pattern[i];
+        for (unsigned p = 0; p < numElements; ++p) {
+            const auto & vec = Pattern[p];
             const auto L = vec.size();
-            for (uint64_t j = 0; j < maxPatternSize; ++j) {
-                for (auto k = j, p = j; k < N; ++k) {
-                    for (uint64_t l = 0; l < lanes; ++l) {
-                        uint64_t V = 0;
-                        for (uint64_t t = 0; t < LANE_SIZE; t += fieldWidth) {
-                            const auto v = vec[p++ % L];
-                            if (LLVM_UNLIKELY(v > maxVal)) {
-                                report_fatal_error(std::to_string(v) + " exceeds a " +
-                                                   std::to_string(fieldWidth) + "-bit value");
+            for (uint64_t s = 0; s < maxPatternSize; ++s) {
+                for (uint64_t i = 0; i < fieldWidth; ++i) {
+                    for (uint64_t j = 0; j < lanes; ++j) {
+                        for (uint64_t k = 0; k < patternLength; ) {
+                            uint64_t V = 0;
+                            for (uint64_t t = 0; t < LANE_SIZE; t += fieldWidth) {
+                                const auto v = vec[(s + k++) % L];
+                                if (LLVM_UNLIKELY(v > maxVal)) {
+                                    report_fatal_error(std::to_string(v) + " exceeds a " +
+                                                       std::to_string(fieldWidth) + "-bit value");
+                                }
+                                V |= (v << t);
                             }
-                            V |= (v << t);
+                            tmp[j] = ConstantInt::get(int64Ty, V, false);
                         }
-                        tmp[l] = V;
                     }
-                    tmp2[k] = ConstantDataVector::get(b->getContext(), tmp);
+                    tmp2[i] = ConstantVector::get(tmp);
+                    assert (tmp2[i]->getType() == vecTy);
                 }
-                tmp3[j] = ConstantArray::get(ArrayType::get(tmp2[0]->getType(), N), tmp2);
+                tmp3[s] = ConstantArray::get(elementTy, tmp2);
             }
-            vectors[i] = ConstantArray::get(ArrayType::get(tmp3[0]->getType(), maxPatternSize), tmp3);
+            vectors[p] = ConstantArray::get(patternTy, tmp3);
         }
     } else {
         // convert these to vec types too?
@@ -275,13 +286,15 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const capacity = b->getCapacity("output");
     // Have we consumed enough data that we can safely copy back the unconsumed data and still
     // leave enough space for one segment without needing a temporary buffer?
+
+    const Rational bytesPerItem{fieldWidth * numElements, 8};
+   // Value * const remainingStrides = b->CreateExactUDiv(remaining, sz_BlockWidth);
+    Value * const remainingBytes = b->CreateMulRational(remaining, bytesPerItem);
+
     b->CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
 
     // If so, just copy the data ...
     b->SetInsertPoint(copyBack);
-    const Rational bytesPerItem{fieldWidth * numElements, 8};
-   // Value * const remainingStrides = b->CreateExactUDiv(remaining, sz_BlockWidth);
-    Value * const remainingBytes = b->CreateMulRational(remaining, bytesPerItem);
     b->CreateMemCpy(baseBuffer, unreadData, remainingBytes, 1);
 
     // Since our consumed count cannot exceed the effective capacity, in order for (consumed % capacity)
@@ -346,7 +359,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
     Value * const currentIndex = b->CreateExactUDiv(pos, sz_BlockWidth);
 
-    ConstantInt * const sz_StripLength = b->getSize(stripLength);
+    ConstantInt * const copySize = b->getSize((fieldWidth * bw) / 8);
 
     // b->CreateAssert(b->CreateICmpEQ(sizeOfOutputStreamSetTy, sz_StripLength), "unexpected data size?");
 
@@ -357,7 +370,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         offset[2] = b->CreateURem(pos, b->getSize(vec.size()));
         Value * const src = b->CreateGEP(patternData, offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, elementIndex, currentIndex);
-        b->CreateMemCpy(dst, src, sz_StripLength, 1);
+        b->CreateMemCpy(dst, src, copySize, 1);
     }
 
     Value * const nextProduced = b->CreateAdd(pos, sz_BlockWidth);
@@ -421,7 +434,7 @@ TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
     CPUDriver pxDriver("test");
-    const auto f = buildRepeatingStreamSetTest(pxDriver, 8, 1, 22);
+    const auto f = buildRepeatingStreamSetTest(pxDriver, 2, 1, 73);
     f();
     return 0;
 }
