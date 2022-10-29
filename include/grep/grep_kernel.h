@@ -64,9 +64,9 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        U21, PreDefined, PropertyExternal, CC_External, RE_External, StartAnchored,
-        Reference_External,
-        WordBoundaryExternal, GraphemeClusterBreak, PropertyBasis, Multiplexed,
+        U21, PreDefined, CC_External, RE_External, StartAnchored,
+        PropertyExternal, PropertyBasis, PropertyDistance,
+        WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan
     };
     inline Kind getKind() const {
@@ -191,21 +191,22 @@ private:
     unsigned mOffset;
 };
 
-class Reference_External : public ExternalStreamObject {
+class PropertyDistanceExternal : public ExternalStreamObject {
 public:
     static inline bool classof(const ExternalStreamObject * ext) {
-        return ext->getKind() == Kind::Reference_External;
+        return ext->getKind() == Kind::PropertyDistance;
     }
     static inline bool classof(const void *) {
         return false;
     }
-    Reference_External(re::ReferenceInfo & refInfo, re::Reference * ref) :
-        ExternalStreamObject(Kind::Reference_External),
-        mRefInfo(refInfo), mRef(ref) {}
+    std::vector<std::string> getParameters() override;
+    PropertyDistanceExternal(UCD::property_t p, unsigned dist) :
+        ExternalStreamObject(Kind::PropertyDistance),
+        mProperty(p), mDistance(dist) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
-    re::ReferenceInfo & mRefInfo;
-    re::Reference * mRef;
+    UCD::property_t mProperty;
+    unsigned mDistance;
 };
 
 class GraphemeClusterBreak : public ExternalStreamObject {

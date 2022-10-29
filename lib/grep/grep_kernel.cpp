@@ -218,19 +218,16 @@ void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
     installStreamSet(reStrm);
 }
 
-void Reference_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    std::string instanceName = mRef->getInstanceName();
-    auto mapping = mRefInfo.twixtREs.find(instanceName);
-    //llvm::errs() << instanceName  << "\n";
-    if (mapping == mRefInfo.twixtREs.end()) {
-        llvm::report_fatal_error("grep engine: undefined reference!");
-    }
-    auto rg1 = re::getLengthRange(mRef->getCapture(), &cc::Unicode);
-    auto rg2 = re::getLengthRange(mapping->second, &cc::Unicode);
-    int dist = rg1.first + rg2.first;
+void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    StreamSet * propertyBasis = inputs[0];
     StreamSet * distStrm = b->CreateStreamSet(1);
-    b->CreateKernelCall<FixedDistanceMatchesKernel>(dist, inputs[0], distStrm);
+    b->CreateKernelCall<FixedDistanceMatchesKernel>(mDistance, propertyBasis, distStrm);
     installStreamSet(distStrm);
+}
+
+std::vector<std::string> PropertyDistanceExternal::getParameters() {
+    if (mProperty == UCD::identity) return {"basis"};
+    return {UCD::getPropertyFullName(mProperty) + "_basis"};
 }
 
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {

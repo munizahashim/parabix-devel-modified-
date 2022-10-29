@@ -285,13 +285,27 @@ void GrepEngine::initRE(re::RE * re) {
         UnicodeIndexing = true;
         auto indexCode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
         setComponent(mExternalComponents, Component::S2P);
-        mExternalTable.declareExternal(u8, "u21", new U21_External());
-        mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}));
         re::FixedReferenceTransformer FRT(mRefInfo);
         mRE = FRT.transformRE(mRE);
         for (auto m : FRT.mNameMap) {
             re::Reference * ref = cast<re::Reference>(m.second);
-            mExternalTable.declareExternal(indexCode, m.first, new Reference_External(mRefInfo, ref));
+            UCD::property_t p = ref->getReferencedProperty();
+            if (p == UCD::identity) {
+                mExternalTable.declareExternal(u8, "u21", new U21_External());
+                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}));
+            } else {
+                std::string extName = UCD::getPropertyFullName(p) + "_basis";
+                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
+            }
+            auto captureLen = getLengthRange(ref->getCapture(), &cc::Unicode).first;
+            if (captureLen != 1) {
+                llvm::report_fatal_error("Capture length > 1 is a future extension");
+            }
+            std::string instanceName = ref->getInstanceName();
+            auto mapping = mRefInfo.twixtREs.find(instanceName);
+            auto twixtLen = getLengthRange(mapping->second, &cc::Unicode).first;
+            auto dist = captureLen + twixtLen;
+            mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
         }
     }
     mRE = re::exclude_CC(mRE, mBreakCC);
