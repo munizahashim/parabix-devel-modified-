@@ -209,6 +209,7 @@ struct PropertyStandardization : public RE_Transformer {
         std::string canon = UCD::canonicalize_value_name(val_str);
         auto * propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
         if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+            if (canon == "") return exp;  // No value to standardize
             int val_code = obj->GetPropertyValueEnumCode(canon);
             if (val_code < 0) return exp;
             exp->setValueString(obj->GetValueFullName(val_code));
