@@ -6,6 +6,7 @@
 #include <grep/grep_kernel.h>
 
 #include <grep/grep_engine.h>
+#include <grep/grep_toolchain.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamset.h>
 #include <kernel/pipeline/pipeline_builder.h>
@@ -81,9 +82,21 @@ StreamIndexCode ExternalStreamTable::getStreamIndex(std::string indexName) {
 }
 
 void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext) {
+    if (grep::ShowExternals) {
+        llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << "(";
+        auto parms = ext->getParameters();
+        bool at_start = true;
+        for (auto & p : parms) {
+            llvm::errs() << (!at_start ? ", " : "") << p;
+            at_start = false;
+        }
+        llvm::errs() << ")\n";
+    }
     auto f = mExternalMap[c].find(externalName);
     if (f != mExternalMap[c].end()) {
-        //llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << " redeclared!\n";
+        if (grep::ShowExternals) {
+            llvm::errs() << "  redeclaration!  Discarding previous declaration.\n";
+        }
         f->second = ext;
     }
     mExternalMap[c].emplace(externalName, ext);

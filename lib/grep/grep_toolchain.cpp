@@ -37,6 +37,10 @@ static cl::opt<unsigned, true> OptByteCClimit("byte-CC-limit", cl::location(Byte
 bool TraceFiles;
 static cl::opt<bool, true> OptTraceFiles("TraceFiles", cl::location(TraceFiles),
                                          cl::desc("Report files as they are opened."), cl::init(false));
+bool ShowExternals;
+static cl::opt<bool, true> OptShowExternals("ShowExternals", cl::location(ShowExternals),
+                                         cl::desc("Show externals as they are declared."), cl::init(false));
+
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
                                          cl::desc("Use a nested pipeline for colourization."), cl::init(true));
