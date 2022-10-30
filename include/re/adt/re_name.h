@@ -268,5 +268,12 @@ inline PropertyExpression * makePropertyExpression(std::string ident, std::strin
 inline PropertyExpression * makeBoundaryExpression(std::string ident, std::string v = "", PropertyExpression::Operator op = PropertyExpression::Operator::Eq) {
     return PropertyExpression::Create(PropertyExpression::Kind::Boundary, ident, op, v);
 }
+
+inline void UnresolvedPropertyExpressionError(const PropertyExpression * pe) {
+    std::string prop = pe->getPropertyIdentifier();
+    llvm::report_fatal_error("Error: Unresolved procperty expression in RE: " + prop);
+}
+
+
 }
 #endif // RE_NAME_H

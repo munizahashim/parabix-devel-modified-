@@ -12,14 +12,24 @@
 
 namespace re {
 
-enum class NameProcessingMode {None, ProcessDefinition};
+//
+// The mode for processing Names and PropertyExpressions.
+// If a definition is required but absent, an error is reported.
+//
+enum class NameProcessingMode {
+    None,                 //  Leave unanalyzed/unmodified.
+    RequireDefinition,    //  Require a definition but do not process.
+    ProcessDefinition,    //  Process the definition, if present
+    ProcessRequired       //  Require and process a definiton.
+};
+
 enum class InspectionMode {TraverseNonUnique, IgnoreNonUnique};
 
 class RE_Inspector {
 public:
     void inspectRE(RE * r);
 protected:
-    RE_Inspector(const NameProcessingMode m = NameProcessingMode::None,
+    RE_Inspector(const NameProcessingMode m = NameProcessingMode::RequireDefinition,
                  const InspectionMode ignoreNonUnique = InspectionMode::IgnoreNonUnique) :
          mNameMode(m), mIgnoreNonUnique(ignoreNonUnique) {}
     virtual ~RE_Inspector() {}

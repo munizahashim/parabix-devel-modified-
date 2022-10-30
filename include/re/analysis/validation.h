@@ -9,6 +9,7 @@
 
 #include <string>
 #include <re/adt/adt_forward_decl.h>
+#include <re/analysis/re_inspector.h>
 
 namespace cc { class Alphabet;}
 
@@ -31,7 +32,8 @@ bool validateAssertionFree(const RE * r);
 class RE_Validator {
 public:
     bool validateRE(const RE * r);
-    RE_Validator(std::string name = "") : mValidatorName(name) {}
+    RE_Validator(std::string name = "", const NameProcessingMode m = NameProcessingMode::RequireDefinition) :
+    mValidatorName(name), mNameMode(m) {}
     virtual ~RE_Validator() {}
 protected:
     bool validate(const RE * r);
@@ -53,6 +55,7 @@ protected:
     virtual bool validatePropertyExpression(const PropertyExpression * pe);
 private:
     std::string mValidatorName;
+    const NameProcessingMode mNameMode;
 };
 
 }

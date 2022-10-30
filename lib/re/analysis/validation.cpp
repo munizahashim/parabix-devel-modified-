@@ -48,9 +48,14 @@ case T::Type: return validate##Type(llvm::cast<Type>(re)); break
 #undef VALIDATE
 }
 
-bool RE_Validator::validateName(const Name * n) {
-    RE * def = n->getDefinition();
-    return (def) && validate(def);
+bool RE_Validator::validateName(const Name * nm) {
+    if (mNameMode == NameProcessingMode::None) return true;
+    RE * const d = nm->getDefinition();
+    if (d == nullptr) {
+        if (mNameMode == NameProcessingMode::ProcessDefinition) return false;
+        UndefinedNameError(nm);
+    }
+    return validate(d);
 }
 
 bool RE_Validator::validateCapture(const Capture * c) {
@@ -116,7 +121,13 @@ bool RE_Validator::validateAssertion(const Assertion * a) {
 }
 
 bool RE_Validator::validatePropertyExpression(const PropertyExpression * pe) {
-    return true;
+    if (mNameMode == NameProcessingMode::None) return true;
+    RE * const d = pe->getResolvedRE();
+    if (d == nullptr) {
+        if (mNameMode == NameProcessingMode::ProcessDefinition) return false;
+        UnresolvedPropertyExpressionError(pe);
+    }
+    return validate(d);
 }
 
 bool validateNamesDefined(const RE * r) {

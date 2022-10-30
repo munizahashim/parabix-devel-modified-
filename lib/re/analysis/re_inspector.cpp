@@ -47,10 +47,13 @@ void RE_Inspector::inspect(RE * const re) {
 }
 
 void RE_Inspector::inspectName(Name * nm) {
-    if (mNameMode == NameProcessingMode::ProcessDefinition) {
-        RE * const d = nm->getDefinition();
-        if (d) inspect(d);
+    if (mNameMode == NameProcessingMode::None) return;
+    RE * const d = nm->getDefinition();
+    if (d == nullptr) {
+        if (mNameMode == NameProcessingMode::ProcessDefinition) return;
+        UndefinedNameError(nm);
     }
+    inspect(d);
 }
 
 void RE_Inspector::inspectCapture(Capture * c) {
@@ -112,6 +115,13 @@ void RE_Inspector::inspectAssertion(Assertion * a) {
 }
 
 void RE_Inspector::inspectPropertyExpression(PropertyExpression * pe) {
+    if (mNameMode == NameProcessingMode::None) return;
+    RE * const d = pe->getResolvedRE();
+    if (d == nullptr) {
+        if (mNameMode == NameProcessingMode::ProcessDefinition) return;
+        UnresolvedPropertyExpressionError(pe);
+    }
+    inspect(d);
 }
 
 } // namespace re
