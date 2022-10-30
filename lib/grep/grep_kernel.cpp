@@ -191,6 +191,19 @@ void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet 
     installStreamSet(pStrm);
 }
 
+std::vector<std::string> PropertyBoundaryExternal::getParameters() {
+    std::string basis_name = UCD::getPropertyFullName(mProperty) + "_basis";
+    return std::vector<std::string>{basis_name, "u8index"};
+}
+
+void PropertyBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    StreamSet * basis = inputs[0];
+    StreamSet * index = inputs[1];
+    StreamSet * bStrm  = b->CreateStreamSet(1);
+    b->CreateKernelCall<BoundaryKernel>(basis, index, bStrm);
+    installStreamSet(bStrm);
+}
+
 void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * ccStrm = b->CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};

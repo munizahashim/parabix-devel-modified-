@@ -351,7 +351,19 @@ void GrepEngine::initRE(re::RE * re) {
     mRE = PE.transformRE(mRE);
     for (auto m : PE.mNameMap) {
         mLengthAlphabet = &cc::Unicode;
-        mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
+        if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
+            if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
+                mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
+            } else { //PropertyExpression::Kind::Boundary
+                UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
+                auto prop_basis = new PropertyBasisExternal(prop);
+                mExternalTable.declareExternal(indexCode, getPropertyFullName(prop) + "_basis", prop_basis);
+                auto boundary = new PropertyBoundaryExternal(prop);
+                mExternalTable.declareExternal(indexCode, m.first, boundary);
+           }
+        } else {
+            llvm::report_fatal_error("Expected property expression");
+        }
     }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);

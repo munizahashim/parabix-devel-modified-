@@ -352,13 +352,13 @@ RE * PropertyExternalizer::transformPropertyExpression (PropertyExpression * exp
     std::string val_str = exp->getValueString();
     std::string op_str = val_str == "" ? "" : ":";
     if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
-    RE * defn = exp->getResolvedRE();
+    //RE * defn = exp->getResolvedRE();
     std::string theName = id + op_str + val_str;
     if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
-        return createName(theName, defn);
+        return createName(theName, exp);
     } else {
         theName = "\\b{" + theName + "}";
-        return createName(theName, defn);
+        return createName(theName, exp);
     }
 }
 

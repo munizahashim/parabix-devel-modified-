@@ -65,7 +65,7 @@ public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
         U21, PreDefined, CC_External, RE_External, StartAnchored,
-        PropertyExternal, PropertyBasis, PropertyDistance,
+        PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
         WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan
     };
@@ -132,6 +132,24 @@ public:
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     re::Name * mName;
+};
+
+class PropertyBoundaryExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::PropertyBoundary;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    std::vector<std::string> getParameters() override;
+    PropertyBoundaryExternal(UCD::property_t p) :
+        ExternalStreamObject(Kind::PropertyBoundary), mProperty(p) {}
+    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
+    int getOffset() override {return 1;}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    UCD::property_t mProperty;
 };
 
 class CC_External : public ExternalStreamObject {
