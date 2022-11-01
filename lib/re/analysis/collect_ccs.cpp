@@ -22,8 +22,7 @@ struct SetCollector final : public RE_Inspector {
 
     void inspectPropertyExpression(PropertyExpression * pe) final {
         RE * resolved = pe->getResolvedRE();
-        if (resolved && (nameMode == re::NameProcessingMode::ProcessDefinition))
-            inspectRE(resolved);
+        if (resolved) inspectRE(resolved);
     }
 
     void inspectCC(CC * cc) final {
@@ -34,7 +33,6 @@ struct SetCollector final : public RE_Inspector {
 
 private:
     const cc::Alphabet * const alphabet;
-    re::NameProcessingMode nameMode;
     CC_Set & ccs;
 };
 
