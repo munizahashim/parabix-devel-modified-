@@ -236,13 +236,14 @@ public:
         return false;
     }
     std::vector<std::string> getParameters() override;
-    GraphemeClusterBreak(grep::GrepEngine * engine) :
-        ExternalStreamObject(Kind::GraphemeClusterBreak), mGrepEngine(engine)  {}
+    GraphemeClusterBreak(grep::GrepEngine * engine, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::GraphemeClusterBreak), mGrepEngine(engine), mIndexAlphabet(a)  {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
     std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
     int getOffset() override {return 1;}
 private:
     grep::GrepEngine *  mGrepEngine;
+    const cc::Alphabet * mIndexAlphabet;
 };
 
 class WordBoundaryExternal : public ExternalStreamObject {

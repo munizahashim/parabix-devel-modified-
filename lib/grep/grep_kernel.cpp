@@ -229,7 +229,7 @@ std::pair<int, int> RE_External::getLengthRange() {
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    auto offset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
     assert(offset == mOffset);
     installStreamSet(reStrm);
 }
@@ -240,7 +240,7 @@ std::pair<int, int> StartAnchoredExternal::getLengthRange() {
 
 void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    mOffset = mGrepEngine->RunGrep(b, mRE, inputs[0], reStrm);
+    mOffset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
     installStreamSet(reStrm);
 }
 
@@ -290,8 +290,7 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
     GCB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::GCB}, GCB_RE);
     GCB_RE = UCD::externalizeProperties(GCB_RE);
-    mGrepEngine->RunGrep(b, GCB_RE, nullptr, GCBstream);
-    //GraphemeClusterLogic(b, mUTF8_transformer, inputs[0], inputs[1], GCBstream);
+    mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, nullptr, GCBstream);
     installStreamSet(GCBstream);
 }
 

@@ -345,7 +345,7 @@ void GrepEngine::initRE(re::RE * re) {
         re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
         re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
         mExternalTable.declareExternal(indexCode, epict->getFullName(), new PropertyExternal(epict));
-        mExternalTable.declareExternal(indexCode, "\\b{g}", new GraphemeClusterBreak(this));
+        mExternalTable.declareExternal(indexCode, "\\b{g}", new GraphemeClusterBreak(this, mIndexAlphabet));
     }
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
@@ -497,10 +497,9 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
 void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
-
-void GrepEngine::addExternalStreams(ProgBuilderRef P, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto alphabets = re::collectAlphabets(regexp);
-    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+    auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
     for (auto & a : alphabets) {
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
             std::string basisName = a->getName() + "_basis";
@@ -560,13 +559,13 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, StreamSet * Results) {
-    auto options = std::make_unique<GrepKernelOptions>(mIndexAlphabet);
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Source, StreamSet * Results) {
+    auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
     options->setSource(Source);
     //llvm::errs() << "mIndexAlphabet: " << mIndexAlphabet->getCode() << "\n";
     //llvm::errs() << "mLengthAlphabet: " << mLengthAlphabet->getCode() << "\n";
     StreamSet * indexStream = nullptr;
-    if (mIndexAlphabet == &cc::UTF8) {
+    if (indexAlphabet == &cc::UTF8) {
         if (mLengthAlphabet == &cc::Unicode) {
             indexStream = mU8index;
             options->setIndexing(indexStream);
@@ -574,7 +573,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, re::RE * re, StreamSet * Source, 
         re = toUTF8(re);
     }
     options->setRE(re);
-    addExternalStreams(P, options, re, indexStream);
+    addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
     if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
@@ -592,7 +591,7 @@ StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) 
     prepareExternalStreams(P, SourceStream);
 
     StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(P, mRE, SourceStream, Matches);
+    RunGrep(P, mIndexAlphabet, mRE, SourceStream, Matches);
 
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
@@ -910,7 +909,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
     prepareExternalStreams(E, SourceStream);
 
     StreamSet * Matches = E->CreateStreamSet();
-    RunGrep(E, mRE, SourceStream, Matches);
+    RunGrep(E, mIndexAlphabet, mRE, SourceStream, Matches);
     if (mIllustrator) mIllustrator->captureBitstream(E, "ICGrep Matches", Matches);
     if (hasComponent(mExternalComponents, Component::MatchSpans)) {
         StreamSet * MatchSpans;
