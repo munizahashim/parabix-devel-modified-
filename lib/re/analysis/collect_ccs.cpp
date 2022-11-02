@@ -20,11 +20,6 @@ struct SetCollector final : public RE_Inspector {
 
     }
 
-    void inspectPropertyExpression(PropertyExpression * pe) final {
-        RE * resolved = pe->getResolvedRE();
-        if (resolved) inspectRE(resolved);
-    }
-
     void inspectCC(CC * cc) final {
         if (LLVM_LIKELY(cc->getAlphabet() == alphabet)) {
             ccs.push_back(cc);

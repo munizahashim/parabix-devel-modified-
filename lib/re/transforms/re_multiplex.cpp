@@ -24,13 +24,6 @@ public:
         }
         return cc;
     };
-    RE * transformPropertyExpression(PropertyExpression * pe) override {
-        if (LLVM_LIKELY(pe->getResolvedRE() != nullptr)) {
-            RE * xfrm = transform(pe->getResolvedRE());
-            return xfrm;
-        }
-        return pe;
-    }
 private:
     const cc::MultiplexedAlphabet * const mMultiplexedAlphabet;
 };

@@ -356,10 +356,12 @@ void GrepEngine::initRE(re::RE * re) {
                 mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
             } else { //PropertyExpression::Kind::Boundary
                 UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
-                auto prop_basis = new PropertyBasisExternal(prop);
-                mExternalTable.declareExternal(indexCode, getPropertyFullName(prop) + "_basis", prop_basis);
-                auto boundary = new PropertyBoundaryExternal(prop);
-                mExternalTable.declareExternal(indexCode, m.first, boundary);
+                if (prop != UCD::g) {  // Boundary expressions, except GCB.
+                    auto prop_basis = new PropertyBasisExternal(prop);
+                    mExternalTable.declareExternal(indexCode, getPropertyFullName(prop) + "_basis", prop_basis);
+                    auto boundary = new PropertyBoundaryExternal(prop);
+                    mExternalTable.declareExternal(indexCode, m.first, boundary);
+                }
            }
         } else {
             llvm::report_fatal_error("Expected property expression");
