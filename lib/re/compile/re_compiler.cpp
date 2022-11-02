@@ -153,7 +153,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     PabloAST * nextPos = marker.stream();
     const cc::Alphabet * a = cc->getAlphabet();
     if (marker.offset() == 0) {
-        if (a == &cc::Byte) {
+        if ((a == &cc::Byte) || (a == mMain.mCodeUnitAlphabet)) {
             nextPos = mPB.createAdvance(nextPos, 1);
         } else {
             nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
@@ -203,6 +203,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (adv > 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, adv);
     }
+    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {nextPos});
     return Marker(mPB.createAnd(nextPos, externalMarker.stream(), nameString), externalMarker.offset());
 }
 
