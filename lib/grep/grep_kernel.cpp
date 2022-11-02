@@ -34,6 +34,7 @@
 #include <re/toolchain/toolchain.h>
 #include <re/transforms/re_reverse.h>
 #include <re/transforms/re_transformer.h>
+#include <re/transforms/to_utf8.h>
 #include <re/analysis/collect_ccs.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/re_multiplex.h>
@@ -129,6 +130,16 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
     ExternalStreamObject * ext = lookup(c, ssname);
     if (!ext->isResolved()) {
         std::vector<std::string> paramNames = ext->getParameters();
+        if (grep::ShowExternals) {
+            llvm::errs() << "resolving External: " << mStreamIndices[c].name << "_" << ssname << "(";
+            auto parms = ext->getParameters();
+            bool at_start = true;
+            for (auto & p : parms) {
+                llvm::errs() << (!at_start ? ", " : "") << p;
+                at_start = false;
+            }
+            llvm::errs() << ")\n";
+        }
         StreamIndexCode code = isa<FilterByMaskExternal>(ext) ? mStreamIndices[c].base : c;
         bool all_found = true;
         for (auto & p : paramNames) {
@@ -290,6 +301,8 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
     GCB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::GCB}, GCB_RE);
     GCB_RE = UCD::externalizeProperties(GCB_RE);
+    //GCB_RE = toUTF8(GCB_RE);
+    //StreamSet * idxStrm = (mIndexAlphabet == &cc::UTF8) ? mGrepEngine->mU8index : nullptr;
     mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, nullptr, GCBstream);
     installStreamSet(GCBstream);
 }
