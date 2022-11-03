@@ -291,8 +291,9 @@ void GrepEngine::initRE(re::RE * re) {
             re::Reference * ref = cast<re::Reference>(m.second);
             UCD::property_t p = ref->getReferencedProperty();
             if (p == UCD::identity) {
-                mExternalTable.declareExternal(u8, "u21", new U21_External());
-                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}));
+                auto u8_u21 = new U21_External();
+                mExternalTable.declareExternal(u8, "u21", u8_u21);
+                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
             } else {
                 std::string extName = UCD::getPropertyFullName(p) + "_basis";
                 mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
@@ -333,7 +334,7 @@ void GrepEngine::initRE(re::RE * re) {
             const auto UnicodeSets = re::collectCCs(mRE, *mIndexAlphabet);
             if (!UnicodeSets.empty()) {
                 auto mpx = makeMultiplexedAlphabet("mpx", UnicodeSets);
-                mRE = transformCCs(mpx, mRE);
+                mRE = transformCCs(mpx, mRE, re::NameTransformationMode::None);
                 mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
             }
         }
@@ -341,11 +342,15 @@ void GrepEngine::initRE(re::RE * re) {
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (hasGraphemeClusterBoundary(mRE)) {
         auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
-        mExternalTable.declareExternal(indexCode, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
+        mExternalTable.declareExternal(u8, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
         re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
         re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
-        mExternalTable.declareExternal(indexCode, epict->getFullName(), new PropertyExternal(epict));
-        mExternalTable.declareExternal(indexCode, "\\b{g}", new GraphemeClusterBreak(this, mIndexAlphabet));
+        mExternalTable.declareExternal(u8, epict->getFullName(), new PropertyExternal(epict));
+        auto u8_GCB = new GraphemeClusterBreak(this, &cc::UTF8);
+        mExternalTable.declareExternal(u8, "\\b{g}", u8_GCB);
+        if (indexCode == Unicode) {
+            mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
+        }
     }
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
@@ -447,7 +452,6 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
 }
 
 void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
-
     mLineBreakStream = nullptr;
     mU8index = nullptr;
 
@@ -468,10 +472,11 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
         auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
         mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
-        mExternalTable.declareExternal(u8, "UTF8_LB", new PreDefined(mLineBreakStream));
+        auto u8_LB = new PreDefined(mLineBreakStream);
+        mExternalTable.declareExternal(u8, "UTF8_LB", u8_LB);
         if (UnicodeIndexing) {
             auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
-            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}));
+            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}, u8_LB));
         }
     }
     else {
@@ -500,6 +505,7 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
 void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
+
 void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto alphabets = re::collectAlphabets(regexp);
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());

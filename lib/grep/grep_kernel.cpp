@@ -321,6 +321,14 @@ std::vector<std::string> FilterByMaskExternal::getParameters() {
     return mParamNames;
 }
 
+std::pair<int, int> FilterByMaskExternal::getLengthRange() {
+    return mBaseExternal->getLengthRange();
+}
+
+int FilterByMaskExternal::getOffset() {
+    return mBaseExternal->getOffset();
+}
+
 void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * mask = inputs[0];
     StreamSet * toFilter = inputs[1];

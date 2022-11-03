@@ -302,14 +302,15 @@ public:
     }
     std::vector<std::string> getParameters() override;
     StreamIndexCode getBaseIndex() {return mBase;}
-    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, unsigned offset = 0) :
-        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames), mOffset(offset) {}
+    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
+        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames), mBaseExternal(e) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    int getOffset() override {return mOffset;}
+    std::pair<int, int> getLengthRange() override;
+    int getOffset() override;
 private:
     StreamIndexCode mBase;
     std::vector<std::string> mParamNames;
-    unsigned mOffset;
+    ExternalStreamObject * mBaseExternal;
 };
 
 class FixedSpanExternal : public ExternalStreamObject {
