@@ -38,7 +38,7 @@ void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isNonThreadLocal()) {
+        if (bn.isNonThreadLocal() && !bn.isConstant()) {
 
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
@@ -105,9 +105,12 @@ void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
         for (auto k = firstKernel; k <= lastKernel; ++k) {
             for (const auto input : make_iterator_range(in_edges(k, mBufferGraph))) {
                 const auto streamSet = source(input, mBufferGraph);
-                const auto producer = parent(streamSet, mBufferGraph);
-                const auto prodPartId = KernelPartitionId[producer];
-                toCheck.set(prodPartId);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_LIKELY(!bn.isConstant())) {
+                    const auto producer = parent(streamSet, mBufferGraph);
+                    const auto prodPartId = KernelPartitionId[producer];
+                    toCheck.set(prodPartId);
+                }
             }
         }
 

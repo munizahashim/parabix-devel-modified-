@@ -44,6 +44,7 @@ SRC
     compiler/codegen/partition_processing_logic.cpp
     compiler/codegen/pipeline_logic.cpp
     compiler/codegen/pipeline_optimization_logic.cpp
+    compiler/codegen/repeatingstreamset_logic.cpp
     compiler/codegen/scalar_logic.cpp
     compiler/codegen/synchronization_logic.cpp
     compiler/codegen/termination_logic.cpp

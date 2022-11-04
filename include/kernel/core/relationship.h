@@ -86,7 +86,14 @@ public:
 
     std::string shapeString();
 
-    StreamSet(llvm::LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth) noexcept;
+    inline StreamSet(llvm::LLVMContext & C, const unsigned NumElements, const unsigned FieldWidth) noexcept
+    : StreamSet(C, ClassTypeId::StreamSet, NumElements, FieldWidth) {
+
+    }
+
+protected:
+
+    StreamSet(llvm::LLVMContext & C, const ClassTypeId typeId, const unsigned NumElements, const unsigned FieldWidth) noexcept;
 
 };
 
@@ -98,14 +105,13 @@ public:
     static bool classof(const void *) {
         return false;
     }
-    LLVM_READNONE unsigned getNumElements() const;
 
-    LLVM_READNONE unsigned getFieldWidth() const;
-
-    std::string shapeString();
+    const std::vector<uint64_t> & getPattern(const unsigned elementIndex = 0) const {
+        return _StringSet[elementIndex];
+    }
 
     RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet) noexcept
-    : StreamSet(C, FieldWidth, stringSet.size())
+    : StreamSet(C, ClassTypeId::RepeatingStreamSet, stringSet.size(), FieldWidth)
     , _StringSet(std::move(stringSet)) {
 
     }

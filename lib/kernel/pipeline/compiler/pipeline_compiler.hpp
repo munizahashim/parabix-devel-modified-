@@ -85,6 +85,9 @@ const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
 const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 
+const static std::string REPEATING_STREAMSET_HANDLE_PREFIX = "@RSS.";
+const static std::string REPEATING_STREAMSET_MALLOCED_DATA_PREFIX = "@RSSD.";
+
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
 const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
 const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_COUNT_SUFFIX;
@@ -378,6 +381,12 @@ public:
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
     void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
+
+// repeating streamset functions
+
+    void generateGlobalDataForRepeatingStreamSet(BuilderRef b, const unsigned streamSet, Value * const expectedNumOfStrides);
+    void addRepeatingStreamSetBufferProperties(BuilderRef b);
+    void deallocateRepeatingBuffers(BuilderRef b);
 
 // prefetch instructions
 

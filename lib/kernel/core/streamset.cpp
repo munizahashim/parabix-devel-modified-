@@ -1455,6 +1455,80 @@ Value * MMapedBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value *
     return nullptr;
 }
 
+// Repeating Buffer
+
+Type * RepeatingBuffer::getHandleType(BuilderPtr b) const {
+    auto & C = b->getContext();
+    FixedArray<Type *, 1> types;
+    types[BaseAddress] = getPointerType();
+    return StructType::get(C, types);
+}
+
+void RepeatingBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplier) {
+    unsupported("allocateBuffer", "Repeating");
+}
+
+void RepeatingBuffer::releaseBuffer(BuilderPtr b) const {
+    unsupported("releaseBuffer", "Repeating");
+}
+
+Value * RepeatingBuffer::modByCapacity(BuilderPtr b, Value * const offset) const {
+    assert (offset->getType()->isIntegerTy());
+    assert (mModulus);
+    return b->CreateURem(offset, mModulus);
+}
+
+Value * RepeatingBuffer::getCapacity(BuilderPtr b) const {
+    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+}
+
+Value * RepeatingBuffer::getInternalCapacity(BuilderPtr b) const {
+    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+}
+
+void RepeatingBuffer::setCapacity(BuilderPtr b, Value * capacity) const {
+    unsupported("setCapacity", "Repeating");
+}
+
+Value * RepeatingBuffer::getBaseAddress(BuilderPtr b) const {
+    FixedArray<Value *, 2> indices;
+    indices[0] = b->getInt32(0);
+    indices[1] = b->getInt32(BaseAddress);
+    Value * const handle = getHandle(); assert (handle);
+    Value * const base = b->CreateInBoundsGEP(handle, indices);
+    return b->CreateLoad(base, "baseAddress");
+}
+
+void RepeatingBuffer::setBaseAddress(BuilderPtr b, Value * addr) const {
+    FixedArray<Value *, 2> indices;
+    indices[0] = b->getInt32(0);
+    indices[1] = b->getInt32(BaseAddress);
+    Value * const handle = getHandle(); assert (handle);
+    b->CreateStore(addr, b->CreateInBoundsGEP(handle, indices));
+}
+
+Value * RepeatingBuffer::getMallocAddress(BuilderPtr b) const {
+    return getBaseAddress(b);
+}
+
+Value * RepeatingBuffer::getOverflowAddress(BuilderPtr b) const {
+    FixedArray<Value *, 2> indices;
+    indices[0] = b->getInt32(0);
+    indices[1] = mModulus;
+    return b->CreateGEP(getBaseAddress(b), indices);
+}
+
+Value * RepeatingBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * consumed, Value * required) const {
+    return b->getFalse();
+}
+
+void RepeatingBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consumed, Value * required) const {
+    unsupported("linearCopyBack", "Repeating");
+}
+
+Value * RepeatingBuffer::expandBuffer(BuilderPtr b, Value * produced, Value * consumed, Value * const required) const  {
+    unsupported("linearCopyBack", "Repeating");
+}
 
 // Constructors
 
@@ -1500,6 +1574,12 @@ MMapedBuffer::MMapedBuffer(const unsigned id, BuilderPtr b, Type * const type,
             && (initialCapacity >= (std::max(underflowSize, overflowSize) * 2)));
     #endif
 }
+
+RepeatingBuffer::RepeatingBuffer(const unsigned id, BuilderPtr b, Type * const type)
+: InternalBuffer(id, BufferKind::RepeatingBuffer, b, type, 0, 0, false, 0) {
+
+}
+
 
 inline InternalBuffer::InternalBuffer(const unsigned id, const BufferKind k, BuilderPtr b, Type * const baseType,
                                       const size_t overflowSize, const size_t underflowSize,

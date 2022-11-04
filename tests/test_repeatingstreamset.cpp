@@ -23,12 +23,9 @@ using namespace llvm;
 using namespace testing;
 using namespace boost::integer;
 
-// constexpr auto REPETITION_LENGTH = 999983ULL;
+constexpr auto REPETITION_LENGTH = 999983ULL;
 
-constexpr auto REPETITION_LENGTH = 200ULL;
-
-typedef void (*TestFunctionType)();
-
+// constexpr auto REPETITION_LENGTH = 200ULL;
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
@@ -156,6 +153,8 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();    
     Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
 
+
+
     const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
 
     ConstantInt * const sz_ZERO = b->getSize(0);
@@ -173,7 +172,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
         IntegerType * const int64Ty = b->getInt64Ty();
 
-        VectorType * const vecTy = VectorType::get(int64Ty, lanes, false);
+        FixedVectorType * const vecTy = FixedVectorType::get(int64Ty, lanes);
 
         ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
 
@@ -398,11 +397,136 @@ void RepeatingSourceKernel::generateFinalizeMethod(BuilderRef b) {
     b->CreateFree(b->getScalarField("buffer"));
 }
 
+class StreamEq : public MultiBlockKernel {
+    using BuilderRef = BuilderRef;
+public:
+    enum class Mode { EQ, NE };
+
+    StreamEq(BuilderRef b, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    void generateInitializeMethod(BuilderRef b) override;
+    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateFinalizeMethod(BuilderRef b) override;
+
+};
+
+StreamEq::StreamEq(
+    BuilderRef b,
+    StreamSet * lhs,
+    StreamSet * rhs,
+    Scalar * outPtr)
+    : MultiBlockKernel(b, [&]() -> std::string {
+       std::string backing;
+       raw_string_ostream str(backing);
+       str << "StreamEq::["
+           << "<i" << lhs->getFieldWidth() << ">"
+           << "[" << lhs->getNumElements() << "],"
+           << "<i" << rhs->getFieldWidth() << ">"
+           << "[" << rhs->getNumElements() << "]]";
+        str.flush();
+        return backing;
+    }(),
+    {{"lhs", lhs}, {"rhs", rhs}},
+    {},
+    {{"result_ptr", outPtr}},
+    {},
+    {InternalScalar(b->getInt1Ty(), "accum")})
+{
+    assert(lhs->getFieldWidth() == rhs->getFieldWidth());
+    assert(lhs->getNumElements() == rhs->getNumElements());
+    setStride(b->getBitBlockWidth() / lhs->getFieldWidth());
+    addAttribute(SideEffecting());
+}
+
+void StreamEq::generateInitializeMethod(BuilderRef b) {
+    b->setScalarField("accum", b->getInt1(true));
+}
+
+void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+    auto istreamset = b->getInputStreamSet("lhs");
+    const uint32_t FW = istreamset->getFieldWidth();
+    const uint32_t COUNT = istreamset->getNumElements();
+    const uint32_t ITEMS_PER_BLOCK = b->getBitBlockWidth() / FW;
+
+    BasicBlock * const entryBlock = b->GetInsertBlock();
+    BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
+    BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
+    Value * const hasMoreItems = b->CreateICmpNE(b->getAccessibleItemCount("lhs"), b->getSize(0));
+    Value * initialOffset = nullptr;
+    if (FW != 1) {
+        initialOffset = b->CreateUDiv(b->getProcessedItemCount("lhs"), b->getSize(ITEMS_PER_BLOCK));
+    }
+    b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
+
+    b->SetInsertPoint(loopBlock);
+    PHINode * strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    strideNo->addIncoming(b->getSize(0), entryBlock);
+    Value * blockOffset = nullptr;
+    if (FW != 1) {
+        blockOffset = b->CreateAdd(strideNo, initialOffset);
+    }
+
+    for (uint32_t i = 0; i < COUNT; ++i) {
+        Value * lhs;
+        Value * rhs;
+        if (FW == 1) {
+            lhs = b->loadInputStreamBlock("lhs", b->getInt32(i), strideNo);
+            rhs = b->loadInputStreamBlock("rhs", b->getInt32(i), strideNo);
+        } else {
+
+            lhs = b->getInputStreamPackPtr("lhs", b->getInt32(i), blockOffset);
+            rhs = b->getInputStreamPackPtr("rhs", b->getInt32(i), blockOffset);
+
+            b->CallPrintInt("lhs", lhs);
+            b->CallPrintInt("rhs", rhs);
+
+            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), blockOffset);
+            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), blockOffset);
+        }
+        // Perform vector comparison lhs != rhs.
+        // Result will be a vector of all zeros if lhs == rhs
+        Value * const vComp = b->CreateICmpNE(lhs, rhs);
+        Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
+        // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+        Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+        // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
+        Value * const accum = b->getScalarField("accum");
+        Value * const newAccum = b->CreateAnd(accum, comp);
+        b->setScalarField("accum", newAccum);
+    }
+    Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
+    strideNo->addIncoming(nextStrideNo, loopBlock);
+    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
+
+    b->SetInsertPoint(exitBlock);
+}
+
+void StreamEq::generateFinalizeMethod(BuilderRef b) {
+    // a `result` value of `true` means the assertion passed
+    Value * result = b->getScalarField("accum");
+
+    // A `ptrVal` value of `0` means that the test is currently passing and a
+    // value of `1` means the test is failing. If the test is already failing,
+    // then we don't need to update the test state.
+    Value * const ptrVal = b->CreateLoad(b->getScalarField("result_ptr"));
+    Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
+
+    Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
+    b->CreateStore(newVal, b->getScalarField("result_ptr"));
+}
+
+typedef void (*TestFunctionType)(uint32_t * output);
+
+
 TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
                                              const unsigned fieldWidth,
                                              const unsigned numOfElements,
                                              const unsigned patternLength) {
-    auto P = pxDriver.makePipeline();
+
+    auto & b = pxDriver.getBuilder();
+
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty()->getPointerTo(), "output"}},{});
+
+    // bindings.push_back({b->getInt32Ty()->getPointerTo(), "output"});
 
     std::random_device rd;
     std::default_random_engine rng(rd());
@@ -417,15 +541,13 @@ TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
         }
     }
 
-//    RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet<1>(pattern);
+    RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
 
     StreamSet * const Output = P->CreateStreamSet(numOfElements, fieldWidth);
 
     P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output);
 
-//    AssertEQ(P, Output, RepeatingStream);
-
-    P->CreateKernelCall<StdOutKernel>(Output);
+    P->CreateKernelCall<StreamEq>(RepeatingStream, Output, P->getInputScalar("output"));
 
     return reinterpret_cast<TestFunctionType>(P->compile());
 }
@@ -434,7 +556,8 @@ TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
     CPUDriver pxDriver("test");
-    const auto f = buildRepeatingStreamSetTest(pxDriver, 2, 1, 73);
-    f();
-    return 0;
+    const auto f = buildRepeatingStreamSetTest(pxDriver, 8, 1, 73);
+    uint32_t result = 0;
+    f(&result);
+    return result;
 }

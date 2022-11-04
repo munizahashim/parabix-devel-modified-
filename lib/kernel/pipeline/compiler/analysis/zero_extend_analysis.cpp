@@ -34,13 +34,34 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
             const Binding & binding = rn.Binding;
             const RelationshipType & port = mStreamGraph[e];
 
-            if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::ZeroExtended))) {
+            auto h =  first_in_edge(k, mStreamGraph);
+            assert (mStreamGraph[h].Reason != ReasonType::Reference);
+            const auto streamSet = source(h, mStreamGraph);
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            const auto isConstant = isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
+            const auto zeroExtend = binding.hasAttribute(AttrId::ZeroExtended);
+            if (LLVM_UNLIKELY(isConstant || zeroExtend)) {
                 add_edge(port.Number, numOfInputs, H);
+                if (LLVM_UNLIKELY(isConstant && zeroExtend)) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << kernelObj->getName() << '.' << binding.getName();
+                    msg << " cannot ZeroExtend a repeating streamset";
+                    report_fatal_error(msg.str());
+                }
                 if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::Principal))) {
-                    report_fatal_error(kernelObj->getName() + "." + binding.getName() +
-                                       " cannot have both ZeroExtend and Principal attributes");
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << kernelObj->getName() << '.' << binding.getName();
+                    if (zeroExtend) {
+                        msg << " cannot have both ZeroExtend and Principal attributes";
+                    } else {
+                        msg << " cannot have a Principal repeating streamset";
+                    }
+                    report_fatal_error(msg.str());
                 }
             }
+
             if (LLVM_UNLIKELY(in_degree(k, mStreamGraph) != 1)) {
                 graph_traits<RelationshipGraph>::in_edge_iterator ei, ei_end;
                 std::tie(ei, ei_end) = in_edges(k, mStreamGraph);
@@ -82,6 +103,8 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
         for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             BufferPort & inputData = mBufferGraph[input];
             const auto streamSet = source(input, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) continue;
             const auto producer = parent(streamSet, mBufferGraph);
             const auto prodPartitionId = KernelPartitionId[producer];
             if (partitionId != prodPartitionId) {

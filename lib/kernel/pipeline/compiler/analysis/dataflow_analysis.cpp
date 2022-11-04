@@ -73,55 +73,55 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                    if (isa<StreamSet>(Relationships[streamSet].Relationship)) {
+                        const RelationshipNode & output = Relationships[binding];
+                        assert (output.Type == RelationshipNode::IsBinding);
 
-                    const RelationshipNode & output = Relationships[binding];
-                    assert (output.Type == RelationshipNode::IsBinding);
+                        const Binding & outputBinding = output.Binding;
+                        const ProcessingRate & outputRate = outputBinding.getRate();
+                        // ignore unknown output rates; we cannot reason about them here.
+                        if (LLVM_LIKELY(outputRate.isFixed())) {
 
-                    const Binding & outputBinding = output.Binding;
-                    const ProcessingRate & outputRate = outputBinding.getRate();
-                    // ignore unknown output rates; we cannot reason about them here.
-                    if (LLVM_LIKELY(outputRate.isFixed())) {
+                            assert (VarList[producer]);
+                            Z3_ast expOutRate = nullptr;
 
-                        assert (VarList[producer]);
-                        Z3_ast expOutRate = nullptr;
+                            for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
+                                const auto binding = target(e, Relationships);
+                                const RelationshipNode & input = Relationships[binding];
+                                if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
 
-                        for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
-                            const auto binding = target(e, Relationships);
-                            const RelationshipNode & input = Relationships[binding];
-                            if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {
+                                    const Binding & inputBinding = input.Binding;
+                                    const ProcessingRate & inputRate = inputBinding.getRate();
 
-                                const Binding & inputBinding = input.Binding;
-                                const ProcessingRate & inputRate = inputBinding.getRate();
+                                    if (LLVM_LIKELY(inputRate.isFixed())) {
 
-                                if (LLVM_LIKELY(inputRate.isFixed())) {
+                                        const auto f = first_out_edge(binding, Relationships);
+                                        assert (Relationships[f].Reason != ReasonType::Reference);
+                                        const unsigned consumer = target(f, Relationships);
 
-                                    const auto f = first_out_edge(binding, Relationships);
-                                    assert (Relationships[f].Reason != ReasonType::Reference);
-                                    const unsigned consumer = target(f, Relationships);
+                                        const auto c = PartitionIds.find(consumer);
+                                        assert (c != PartitionIds.end());
+                                        const auto consumerPartitionId = c->second;
+                                        assert (producerPartitionId <= consumerPartitionId);
 
-                                    const auto c = PartitionIds.find(consumer);
-                                    assert (c != PartitionIds.end());
-                                    const auto consumerPartitionId = c->second;
-                                    assert (producerPartitionId <= consumerPartitionId);
+                                        if (producerPartitionId == consumerPartitionId) {
 
-                                    if (producerPartitionId == consumerPartitionId) {
+                                            if (expOutRate == nullptr) {
+                                                const RelationshipNode & producerNode = Relationships[producer];
+                                                assert (producerNode.Type == RelationshipNode::IsKernel);
+                                                const auto expectedOutput = outputRate.getRate() * producerNode.Kernel->getStride();
+                                                expOutRate = multiply(VarList[producer], constant_real(expectedOutput));
+                                            }
 
-                                        if (expOutRate == nullptr) {
-                                            const RelationshipNode & producerNode = Relationships[producer];
-                                            assert (producerNode.Type == RelationshipNode::IsKernel);
-                                            const auto expectedOutput = outputRate.getRate() * producerNode.Kernel->getStride();
-                                            expOutRate = multiply(VarList[producer], constant_real(expectedOutput));
+                                            const RelationshipNode & consumerNode = Relationships[consumer];
+                                            assert (consumerNode.Type == RelationshipNode::IsKernel);
+                                            const auto expectedInput = inputRate.getRate() * consumerNode.Kernel->getStride();
+                                            const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
+
+                                            hard_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                                         }
 
-                                        const RelationshipNode & consumerNode = Relationships[consumer];
-                                        assert (consumerNode.Type == RelationshipNode::IsKernel);
-                                        const auto expectedInput = inputRate.getRate() * consumerNode.Kernel->getStride();
-                                        const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
-
-                                        hard_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                                     }
-
                                 }
                             }
                         }
@@ -192,6 +192,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             assert (portNum < m);
             port.SymbolicRateId = portNum++;
             const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) return;
             if (bn.isNonThreadLocal()) {
                 const Binding & binding = port.Binding;
                 if (isNonSynchronousRate(binding)) {
@@ -230,29 +231,35 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
 
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
-            const BufferPort & port = mBufferGraph[e];
-            BitSet & bs = portRateSet[port.SymbolicRateId];
-            bs.resize(nextRateId);
-            bs.set(KernelPartitionId[kernel]);
-            const auto k = m + streamSet - FirstStreamSet;
-            assert (k < portRateSet.size());
-            const BitSet & src = portRateSet[k];
-            assert (src.size() == bs.size());
-            bs |= src;
-            accum |= bs;
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_LIKELY(!bn.isConstant())) {
+                const BufferPort & port = mBufferGraph[e];
+                BitSet & bs = portRateSet[port.SymbolicRateId];
+                bs.resize(nextRateId);
+                bs.set(KernelPartitionId[kernel]);
+                const auto k = m + streamSet - FirstStreamSet;
+                assert (k < portRateSet.size());
+                const BitSet & src = portRateSet[k];
+                assert (src.size() == bs.size());
+                bs |= src;
+                accum |= bs;
+            }
         }
 
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
-            const BufferPort & port = mBufferGraph[e];
-            BitSet & bs = portRateSet[port.SymbolicRateId];
-            bs.resize(nextRateId);
-            const auto k = m + streamSet - FirstStreamSet;
-            assert (k < portRateSet.size());
-            BitSet & dst = portRateSet[k];
-            dst.resize(nextRateId);
-            bs |= accum;
-            dst |= bs;
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_LIKELY(!bn.isConstant())) {
+                const BufferPort & port = mBufferGraph[e];
+                BitSet & bs = portRateSet[port.SymbolicRateId];
+                bs.resize(nextRateId);
+                const auto k = m + streamSet - FirstStreamSet;
+                assert (k < portRateSet.size());
+                BitSet & dst = portRateSet[k];
+                dst.resize(nextRateId);
+                bs |= accum;
+                dst |= bs;
+            }
         }
     }
 
@@ -260,28 +267,29 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
 
     for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
-        auto updateEdgeRate = [&](const BufferGraph::edge_descriptor & e) {
+        auto updateEdgeRate = [&](const BufferGraph::edge_descriptor & e, const BufferGraph::vertex_descriptor streamSet) {
             BufferPort & port = mBufferGraph[e];
-            BitSet & bs = portRateSet[port.SymbolicRateId];
-
-
-            assert (bs.size() == nextRateId);
-            const auto f = rateMap.find(bs);
-            unsigned symRateId = 0;
-            if (f == rateMap.end()) {
-                symRateId = (unsigned)rateMap.size() + 1U;
-                rateMap.emplace(std::move(bs), symRateId);
-            } else {
-                symRateId = f->second;
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_LIKELY(!bn.isConstant())) {
+                BitSet & bs = portRateSet[port.SymbolicRateId];
+                assert (bs.size() == nextRateId);
+                const auto f = rateMap.find(bs);
+                unsigned symRateId = 0;
+                if (f == rateMap.end()) {
+                    symRateId = (unsigned)rateMap.size() + 1U;
+                    rateMap.emplace(std::move(bs), symRateId);
+                } else {
+                    symRateId = f->second;
+                }
+                port.SymbolicRateId = symRateId;
             }
-            port.SymbolicRateId = symRateId;
         };
 
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            updateEdgeRate(e);
+            updateEdgeRate(e, source(e, mBufferGraph));
         }
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            updateEdgeRate(e);
+            updateEdgeRate(e, target(e, mBufferGraph));
         }
     }
 

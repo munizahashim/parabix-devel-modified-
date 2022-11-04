@@ -73,8 +73,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 BEGIN_SCOPED_REGION
                 const Relationship * const ss = Relationships[u].Relationship;
                 // NOTE: We explicitly ignore RepeatingStreamSets here; trying to reason
-                // about them will only complicate the analysis. They'll almost certainly
-                // be kept in shared memory and shuffled accordingly at kernel invocation.
+                // about them will only complicate the analysis.
                 if (LLVM_LIKELY(isa<StreamSet>(ss))) {
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
@@ -99,16 +98,18 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
         if (node.Type == RelationshipNode::IsKernel) {
             addKernelRelationshipsInReferenceOrdering(u, Relationships,
                 [&](const PortType type, const unsigned binding, const unsigned streamSet) {
-                    const auto j = mapping[streamSet];
-                    assert (j < m);
-                    assert (sequence[j] == streamSet);
-                    auto a = i, b = j;
-                    if (type == PortType::Input) {
-                        a = j; b = i;
+                    if (LLVM_LIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                        const auto j = mapping[streamSet];
+                        assert (j < m);
+                        assert (sequence[j] == streamSet);
+                        auto a = i, b = j;
+                        if (type == PortType::Input) {
+                            a = j; b = i;
+                        }
+                        assert (a < b);
+                        assert (Relationships[binding].Type == RelationshipNode::IsBinding);
+                        add_edge(a, b, binding, G);
                     }
-                    assert (a < b);
-                    assert (Relationships[binding].Type == RelationshipNode::IsBinding);
-                    add_edge(a, b, binding, G);
                 }
             );
         }
@@ -224,10 +225,6 @@ add_output_rate:    O.set(nextRateId++);
 
             }
         } else { // just propagate the bitsets
-
-            if (in_degree(i, G) != 1) {
-                errs() << " XXXX " << i << "\n";
-            }
 
             assert (in_degree(i, G) == 1);
 
@@ -581,16 +578,18 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         if (node.Type == RelationshipNode::IsKernel) {
             addKernelRelationshipsInReferenceOrdering(u, Relationships,
                 [&](const PortType type, const unsigned binding, const unsigned streamSet) {
-                    const auto j = mapping[streamSet];
-                    assert (j < m);
-                    assert (sequence[j] == streamSet);
-                    auto a = i, b = j;
-                    if (type == PortType::Input) {
-                        a = j; b = i;
+                    if (LLVM_LIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                        const auto j = mapping[streamSet];
+                        assert (j < m);
+                        assert (sequence[j] == streamSet);
+                        auto a = i, b = j;
+                        if (type == PortType::Input) {
+                            a = j; b = i;
+                        }
+                        assert (a < b);
+                        assert (Relationships[binding].Type == RelationshipNode::IsBinding);
+                        add_edge(a, b, binding, G);
                     }
-                    assert (a < b);
-                    assert (Relationships[binding].Type == RelationshipNode::IsBinding);
-                    add_edge(a, b, binding, G);
                 }
             );
         }

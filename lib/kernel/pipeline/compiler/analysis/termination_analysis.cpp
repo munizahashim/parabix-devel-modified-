@@ -22,8 +22,10 @@ void PipelineAnalysis::identifyTerminationChecks() {
     for (auto consumer = FirstKernel; consumer <= PipelineOutput; ++consumer) {
         const auto cid = KernelPartitionId[consumer];
         for (const auto e : make_iterator_range(in_edges(consumer, mBufferGraph))) {
-            const auto buffer = source(e, mBufferGraph);
-            const auto producer = parent(buffer, mBufferGraph);
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) continue;
+            const auto producer = parent(streamSet, mBufferGraph);
             const auto pid = KernelPartitionId[producer];
             assert (pid <= cid);
             if (pid != cid) {
@@ -125,6 +127,8 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
         for (auto i = start; i < end; ++i) {
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
                 const auto streamSet = source(e, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(bn.isConstant())) continue;
                 const auto producer = parent(streamSet, mBufferGraph);
                 const auto partitionId = KernelPartitionId[producer];
                 inputs.set(partitionId);

@@ -181,11 +181,11 @@ public:
     }
 
     LLVM_READNONE StreamSet * getInputStreamSet(const unsigned i) const {
-        return llvm::cast<StreamSet>(getInputStreamSetBinding(i).getRelationship());
+        return static_cast<StreamSet *>(getInputStreamSetBinding(i).getRelationship());
     }
 
     LLVM_READNONE StreamSet * getInputStreamSet(const llvm::StringRef name) const {
-        return llvm::cast<StreamSet>(getInputStreamSetBinding(name).getRelationship());
+        return static_cast<StreamSet *>(getInputStreamSetBinding(name).getRelationship());
     }
 
     void setInputStreamSet(const llvm::StringRef name, StreamSet * value) const {

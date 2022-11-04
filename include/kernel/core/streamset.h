@@ -25,6 +25,7 @@ public:
 
     enum class BufferKind : unsigned {
         ExternalBuffer
+        , RepeatingBuffer
         , StaticBuffer
         , DynamicBuffer
         , MMapedBuffer
@@ -401,6 +402,54 @@ public:
 private:
 
     const size_t    mInitialCapacity;
+
+};
+
+class RepeatingBuffer final : public InternalBuffer {
+public:
+    static inline bool classof(const StreamSetBuffer * b) {
+        return b->getBufferKind() == BufferKind::RepeatingBuffer;
+    }
+
+    enum Field { BaseAddress };
+
+    RepeatingBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type);
+
+    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const override;
+
+    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+
+    void releaseBuffer(BuilderPtr b) const override;
+
+    llvm::Type * getHandleType(BuilderPtr b) const override;
+
+    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+
+    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+
+    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+
+    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
+
+    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+
+    llvm::Value * getCapacity(BuilderPtr b) const override;
+
+    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+
+    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    void setModulus(llvm::Constant * const modulus) {
+        mModulus = modulus;
+    }
+
+private:
+
+    llvm::Constant * mModulus;
 
 };
 

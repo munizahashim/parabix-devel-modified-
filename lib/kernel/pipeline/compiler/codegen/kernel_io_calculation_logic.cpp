@@ -434,6 +434,9 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
+    const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(bn.isConstant())) return;
+
     // Only the partition root dictates how many strides this kernel will end up doing. All other kernels
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
@@ -569,12 +572,13 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
     if (mIsPartitionRoot) {
         Value * resultVal = nullptr;
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) continue;
             const BufferPort & br =  mBufferGraph[e];
             if (LLVM_UNLIKELY(br.IsZeroExtended)) {
                 continue;
             }
-            const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
             Value * const closed = isClosed(b, br.Port); assert (closed);
             Value * fullyConsumed = closed;
             if (!bn.IsLinear) {
@@ -635,6 +639,9 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
         while (ei != ei_end) {
             const auto e = *ei++;
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) continue;
             const BufferPort & port =  mBufferGraph[e];
             if (LLVM_UNLIKELY(port.IsZeroExtended)) {
                 continue;
@@ -718,6 +725,9 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     const auto streamSet = source(input, mBufferGraph);
 
     const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(bn.isConstant())) {
+        return ConstantInt::getAllOnesValue(b->getSizeTy());
+    }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const available = getLocallyAvailableItemCount(b, inputPort);

@@ -935,6 +935,9 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = source(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(Relationships[streamSet].Relationship))) {
+                        continue;
+                    }
                     assert (isa<StreamSet>(Relationships[streamSet].Relationship));
                     const auto g = first_in_edge(streamSet, Relationships);
                     assert (Relationships[g].Reason != ReasonType::Reference);

@@ -119,6 +119,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         }
         #endif
     }
+    addRepeatingStreamSetBufferProperties(b);
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         mTarget->addThreadLocalScalar(b->getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
@@ -853,6 +854,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         freeHistogramProperties(b);
     }
+    deallocateRepeatingBuffers(b);
     releaseOwnedBuffers(b);
     resetInternalBufferHandles();
     #ifdef ENABLE_PAPI

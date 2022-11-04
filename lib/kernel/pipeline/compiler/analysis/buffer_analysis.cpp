@@ -135,6 +135,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             if (cannotBePlacedIntoThreadLocalMemory) {
                 bn.Locality = BufferLocality::PartitionLocal;
             }
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
+                bn.Locality = BufferLocality::ConstantShared;
+                bn.IsLinear = true;
+            }
             return bp;
         };
 
@@ -313,6 +317,8 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isConstant())) continue;
         const auto producer = parent(streamSet, mBufferGraph);
         const auto partitionId = KernelPartitionId[producer];
         assert (partitionId < PartitionCount);
@@ -324,7 +330,6 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
             assert (consumerPartitionId < PartitionCount);
 
             if (partitionId != consumerPartitionId) {
-                BufferNode & bn = mBufferGraph[streamSet];
                 bn.Locality = BufferLocality::GloballyShared;
                 break;
             }
@@ -334,6 +339,7 @@ void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(output, mBufferGraph);
         BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isConstant())) continue;
         bn.Locality = BufferLocality::GloballyShared;
     }
 
@@ -622,6 +628,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
         #endif
 //        assert (fixedPartitionInputs.empty());
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & N = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(N.isConstant())) continue;
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.CanModifySegmentLength = true;
@@ -629,8 +638,6 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             if (isPartitionRoot) {
                 inputRate.CanModifySegmentLength = true;
             } else {
-                const auto streamSet = source(e, mBufferGraph);
-                const BufferNode & N = mBufferGraph[streamSet];
                 inputRate.CanModifySegmentLength = !N.IsLinear;
             }
             #endif
@@ -658,7 +665,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isUnowned())) {
+        if (LLVM_UNLIKELY(bn.isUnowned() || bn.Locality == BufferLocality::ConstantShared)) {
             continue;
         }
 
@@ -816,49 +823,53 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             continue;
         }
 
-        const auto producerOutput = in_edge(streamSet, mBufferGraph);
-        const BufferPort & producerRate = mBufferGraph[producerOutput];
-        const Binding & output = producerRate.Binding;
         StreamSetBuffer * buffer = nullptr;
-        if (LLVM_UNLIKELY(bn.isUnowned())) {
-            assert (bn.Locality != BufferLocality::ThreadLocal);
-            buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
-        } else { // is internal buffer
+        if (LLVM_UNLIKELY(bn.Locality == BufferLocality::ConstantShared)) {
+            const auto consumerInput = first_out_edge(streamSet, mBufferGraph);
+            const BufferPort & consumerRate = mBufferGraph[consumerInput];
+            const Binding & input = consumerRate.Binding;
+            buffer = new RepeatingBuffer(streamSet, b, input.getType());
+        } else  {
+            const auto producerOutput = in_edge(streamSet, mBufferGraph);
+            const BufferPort & producerRate = mBufferGraph[producerOutput];
+            const Binding & output = producerRate.Binding;
+            if (LLVM_UNLIKELY(bn.isUnowned())) {
+                assert (bn.Locality != BufferLocality::ThreadLocal);
+                buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
+            } else { // is internal buffer
 
-            // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
-            // E.g., if this buffer is externally used, we cannot analyze the dataflow rate of
-            // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
-            // analyze any consumption rates.
+                // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
+                // E.g., if this buffer is externally used, we cannot analyze the dataflow rate of
+                // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
+                // analyze any consumption rates.
 
-
-
-
-            if (bn.Locality == BufferLocality::GloballyShared) {
-                // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
-                // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
-                // determine this.
-                auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
-                auto bufferSize = bn.RequiredCapacity * mult;
-                assert (bufferSize > 0);
-                #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                #endif
-                if (useMMap) {
-                    buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                } else {
-                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                }
-
-
-            } else {
-                auto bufferSize = bn.RequiredCapacity;
-                if (bn.Locality == BufferLocality::PartitionLocal) {
-                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
+                if (bn.Locality == BufferLocality::GloballyShared) {
+                    // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
+                    // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
+                    // determine this.
+                    auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
+                    auto bufferSize = bn.RequiredCapacity * mult;
+                    assert (bufferSize > 0);
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                     bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
                     #endif
+                    if (useMMap) {
+                        buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                    } else {
+                        buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+                    }
+
+
+                } else {
+                    auto bufferSize = bn.RequiredCapacity;
+                    if (bn.Locality == BufferLocality::PartitionLocal) {
+                        bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
+                        #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+                        bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+                        #endif
+                    }
+                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
                 }
-                buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
             }
         }
         assert ("missing buffer?" && buffer);

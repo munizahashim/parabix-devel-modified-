@@ -257,8 +257,8 @@ ENABLE_ENUM_FLAGS(BufferType)
 enum BufferLocality {
     ThreadLocal
     , PartitionLocal
-
     , GloballyShared
+    , ConstantShared
 };
 
 struct BufferNode {
@@ -307,8 +307,16 @@ struct BufferNode {
         return (Type & BufferType::Returned) != 0;
     }
 
+    bool isThreadLocal() const {
+        return (Locality == BufferLocality::ThreadLocal);
+    }
+
     bool isNonThreadLocal() const {
         return (Locality != BufferLocality::ThreadLocal);
+    }
+
+    bool isConstant() const {
+        return (Locality == BufferLocality::ConstantShared);
     }
 
 };

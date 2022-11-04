@@ -109,8 +109,12 @@ void PipelineCompiler::signalAbnormalTermination(BuilderRef b) {
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally) const {
-    const auto buffer = getInputBufferVertex(inputPort);
-    const auto e = in_edge(buffer, mBufferGraph);
+    const auto streamSet = getInputBufferVertex(inputPort);
+    const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(bn.isConstant())) {
+        return b->getFalse();
+    }
+    const auto e = in_edge(streamSet, mBufferGraph);
     const auto producer = source(e, mBufferGraph);
     if (LLVM_UNLIKELY(producer == PipelineInput)) {
         if (mIsNestedPipeline) {

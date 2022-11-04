@@ -240,7 +240,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         out << "label=\"" << streamSet;
         out << " |{";
 
-
+        if (bn.isConstant()) {
+            out << 'C';
+        }
         if (bn.isExternal()) {
             out << 'X';
         }
@@ -254,6 +256,8 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                     out << 'D'; break;
                 case BufferId::ExternalBuffer:
                     out << 'E'; break;
+                case BufferId::RepeatingBuffer:
+                    out << 'R'; break;
                 default: llvm_unreachable("unknown streamset type");
             }
         }
@@ -285,13 +289,16 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         #endif
         out << "|{";
 
-        if (buffer && buffer->getBufferKind() != BufferId::ExternalBuffer) {
+        if (buffer) {
             switch (buffer->getBufferKind()) {
                 case BufferId::StaticBuffer:
                     out << cast<StaticBuffer>(buffer)->getCapacity();
                     break;
                 case BufferId::DynamicBuffer:
                     out << cast<DynamicBuffer>(buffer)->getInitialCapacity();
+                    break;
+                case BufferId::RepeatingBuffer:
+                case BufferId::ExternalBuffer:
                     break;
                 default: llvm_unreachable("unknown buffer type");
             }
@@ -409,13 +416,10 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         #endif
         out << "];\n";
 
-        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
-            printStreamSet(streamSet);
-        }
-
         firstKernelInPartition = false;
     };
+
+
 
     out << "digraph \"" << StringRef(mPipelineKernel->getName()) << "\" {\n"
            "rankdir=tb;"
@@ -443,7 +447,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
     }
 
     printKernel(PipelineOutput, "P_{out}", true, hidePipelineOutput);
+
     firstKernelOfPartition[PartitionCount - 1] = PipelineOutput;
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        printStreamSet(streamSet);
+    }
 
     for (auto e : make_iterator_range(edges(mBufferGraph))) {
         const auto s = source(e, mBufferGraph);
@@ -454,11 +463,14 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         bool isLocal = true;
         // is this edge from a buffer to a kernel?
         if (s >= FirstStreamSet) {
-            const auto p = parent(s, mBufferGraph);
-            const auto pId = KernelPartitionId[p];
-            const auto tId = KernelPartitionId[t];
-            // does this use of the buffer cross a partition boundary?
-            isLocal = (pId == tId);
+            const BufferNode & bn = mBufferGraph[s];
+            if (LLVM_LIKELY(!bn.isConstant())) {
+                const auto p = parent(s, mBufferGraph);
+                const auto pId = KernelPartitionId[p];
+                const auto tId = KernelPartitionId[t];
+                // does this use of the buffer cross a partition boundary?
+                isLocal = (pId == tId);
+            }
         }
 
         out << "v" << s << " -> v" << t <<

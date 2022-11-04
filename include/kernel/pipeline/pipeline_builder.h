@@ -52,13 +52,11 @@ public:
 
     using pattern_t = std::vector<uint64_t>;
 
-    template<unsigned FieldWidth>
-    RepeatingStreamSet * CreateRepeatingStreamSet(pattern_t string) {
+    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, pattern_t string) {
         return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)});
     }
 
-    template<unsigned FieldWidth>
-    RepeatingStreamSet * CreateRepeatingStreamSet(std::vector<pattern_t> string) {
+    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string) {
         return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string));
     }
 
