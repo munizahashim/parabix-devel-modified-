@@ -116,15 +116,29 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     BasicBlock * const generateData = b->CreateBasicBlock("generateData");
     BasicBlock * const exit = b->CreateBasicBlock("exit");
 
-
     // build our pattern array
     const auto output = b->getOutputStreamSet("output");
     const auto fieldWidth = output->getFieldWidth();
     const auto numElements = output->getNumElements();
+
+    const auto blockWidth = b->getBitBlockWidth();
+
+    const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
+
+    size_t patternLength = blockWidth;
     size_t maxPatternSize = 0;
     for (unsigned i = 0; i < numElements; ++i) {
         const auto & vec = Pattern[i];
+        for (auto v : vec) {
+            if (LLVM_UNLIKELY(v > maxVal)) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream msg(tmp);
+                msg << "Value " << v << " exceeds a " << fieldWidth << "-bit value";
+                report_fatal_error(msg.str());
+            }
+        }
         const auto l = vec.size();
+        patternLength = boost::lcm(patternLength, l);
         maxPatternSize = std::max(maxPatternSize, l);
     }
     const Binding & binding = b->getOutputStreamSetBinding("output");
@@ -136,108 +150,70 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         report_fatal_error("output rate should at least be as large as the pattern length");
     }
 
-    const auto bw = b->getBitBlockWidth();
-    if (fieldWidth > bw) {
-        report_fatal_error("does not support field width sizes above " + std::to_string(bw));
+
+    if (fieldWidth > blockWidth) {
+        report_fatal_error("does not support field width sizes above " + std::to_string(blockWidth));
     }
-    if ((maxFillSize % bw) != 0) {
-        report_fatal_error("output rate should be a multiple of " + std::to_string(bw)
+    if ((maxFillSize % blockWidth) != 0) {
+        report_fatal_error("output rate should be a multiple of " + std::to_string(blockWidth)
                            + " to ensure proper streamset construction");
     }
-
-   // const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
-
-    const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
     StreamSetBuffer * const outputBuffer = b->getOutputStreamSetBuffer("output");
     PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();    
     Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
 
 
-
-    const auto patternLength = ((maxPatternSize + (bw - 1ULL)) / bw) * bw;
-
     ConstantInt * const sz_ZERO = b->getSize(0);
 
-   // Constant * const sz_outputTypeSize = ConstantExpr::getSizeOf(outputBuffer->getType());
+    const auto runLength = (patternLength / blockWidth);
 
-    std::vector<Constant *> vectors(numElements);
+    std::vector<Constant *> dataVectorArray(runLength);
 
-    if (fieldWidth < 8) {
-        // if our fieldwidth size is less than a byte, we treat it as a bit vector
+    FixedVectorType * const vecTy = b->getBitBlockType();
+    IntegerType * const intTy = cast<IntegerType>(vecTy->getScalarType());
+    const auto laneWidth = intTy->getIntegerBitWidth();
+    const auto numLanes = blockWidth / laneWidth;
+    ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
+    ArrayType * const streamSetTy = ArrayType::get(elementTy, numElements);
 
-        constexpr auto LANE_SIZE = 64ULL;
-        assert ((LANE_SIZE % fieldWidth) == 0);
-        const auto lanes = bw / LANE_SIZE;
+    SmallVector<Constant *, 16> laneVal(numLanes);
+    SmallVector<Constant *, 16> packVal(fieldWidth);
+    SmallVector<Constant *, 16> elemVal(numElements);
 
-        IntegerType * const int64Ty = b->getInt64Ty();
+    SmallVector<uint64_t, 16> elementPos(numElements, 0);
 
-        FixedVectorType * const vecTy = FixedVectorType::get(int64Ty, lanes);
-
-        ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
-
-        ArrayType * const patternTy = ArrayType::get(elementTy, maxPatternSize);
-
-        SmallVector<Constant *, 16> tmp(lanes);
-        SmallVector<Constant *, 16> tmp2(fieldWidth);
-        std::vector<Constant *> tmp3(maxPatternSize);
-
+    for (unsigned r = 0; r < runLength; ++r) {
         for (unsigned p = 0; p < numElements; ++p) {
             const auto & vec = Pattern[p];
             const auto L = vec.size();
-            for (uint64_t s = 0; s < maxPatternSize; ++s) {
-                for (uint64_t i = 0; i < fieldWidth; ++i) {
-                    for (uint64_t j = 0; j < lanes; ++j) {
-                        for (uint64_t k = 0; k < patternLength; ) {
-                            uint64_t V = 0;
-                            for (uint64_t t = 0; t < LANE_SIZE; t += fieldWidth) {
-                                const auto v = vec[(s + k++) % L];
-                                if (LLVM_UNLIKELY(v > maxVal)) {
-                                    report_fatal_error(std::to_string(v) + " exceeds a " +
-                                                       std::to_string(fieldWidth) + "-bit value");
-                                }
-                                V |= (v << t);
-                            }
-                            tmp[j] = ConstantInt::get(int64Ty, V, false);
-                        }
+            for (uint64_t i = 0; i < fieldWidth; ++i) {
+                for (uint64_t j = 0; j < numLanes; ++j) {
+                    uint64_t V = 0;
+                    for (uint64_t k = 0; k != laneWidth; k += fieldWidth) {
+                        auto & pos = elementPos[p];
+                        const auto v = vec[pos % L];
+                        V |= (v << k);
+                        ++pos;
                     }
-                    tmp2[i] = ConstantVector::get(tmp);
-                    assert (tmp2[i]->getType() == vecTy);
+                    laneVal[j] = ConstantInt::get(intTy, V, false);
                 }
-                tmp3[s] = ConstantArray::get(elementTy, tmp2);
+                packVal[i] = ConstantVector::get(laneVal);
             }
-            vectors[p] = ConstantArray::get(patternTy, tmp3);
+            elemVal[p] = ConstantArray::get(elementTy, packVal);
         }
-    } else {
-        // convert these to vec types too?
-
-        IntegerType * const intTy = b->getIntNTy(fieldWidth);
-        const auto totalSize = patternLength * 2ULL - 1ULL;
-        std::vector<Constant *> array(totalSize);
-        for (unsigned i = 0; i < numElements; ++i) {
-            const auto & vec = Pattern[i];
-            const auto L = vec.size();
-            for (unsigned j = 0; j < totalSize; ++j) {
-                const auto v = vec[j % L];
-                if (LLVM_UNLIKELY(v > maxVal)) {
-                    report_fatal_error(std::to_string(v) + " exceeds a " +
-                                       std::to_string(fieldWidth) + "-bit value");
-                }
-                array[j] = ConstantInt::get(intTy, v);
-            }
-            vectors[i] = ConstantArray::get(ArrayType::get(intTy, totalSize), array);
-        }
+        dataVectorArray[r] = ConstantArray::get(streamSetTy, elemVal);
     }
 
-    ArrayType * const patTy = ArrayType::get(vectors[0]->getType(), numElements);
-    Constant * const patternVec = ConstantArray::get(patTy, vectors);
+    ArrayType * const arrTy = ArrayType::get(streamSetTy, runLength);
+
+    Constant * const patternVec = ConstantArray::get(arrTy, dataVectorArray);
 
     Module & mod = *b->getModule();
-    GlobalVariable * const patternData = new GlobalVariable(mod, patTy, true, GlobalValue::PrivateLinkage, patternVec);
-    // TODO: this isn't being aligned as I expect? using unaligned memcpy as a temporary measure
-    patternData->setAlignment(MaybeAlign{bw /8});
+    GlobalVariable * const patternData = new GlobalVariable(mod, arrTy, true, GlobalValue::PrivateLinkage, patternVec);
+    patternData->setAlignment(MaybeAlign{blockWidth /8});
 
-    ConstantInt * const sz_BlockWidth = b->getSize(bw);
+    ConstantInt * const sz_BlockWidth = b->getSize(blockWidth);
 
     ConstantInt * const sz_strideFillSize = b->getSize(maxFillSize);
 
@@ -259,7 +235,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const totalStrides = b->CreateExactUDiv(total, sz_BlockWidth);
 
     Value * const mustFill = b->CreateICmpULT(remaining, fillSize);
-
     BasicBlock * const entry = b->GetInsertBlock();
     b->CreateLikelyCondBr(mustFill, checkBuffer, exit);
 
@@ -357,19 +332,17 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     offset[0] = b->getInt32(0);
 
     Value * const currentIndex = b->CreateExactUDiv(pos, sz_BlockWidth);
+    const auto length = (fieldWidth * blockWidth) / 8;
+    ConstantInt * const elementSize = b->getSize(length);
 
-    ConstantInt * const copySize = b->getSize((fieldWidth * bw) / 8);
-
-    // b->CreateAssert(b->CreateICmpEQ(sizeOfOutputStreamSetTy, sz_StripLength), "unexpected data size?");
+    offset[2] = b->CreateURem(currentIndex, b->getSize(runLength));
 
     for (unsigned i = 0; i < numElements; ++i) {
         ConstantInt * const elementIndex = b->getInt32(i);
-        const auto & vec = Pattern[i];
         offset[1] = elementIndex;
-        offset[2] = b->CreateURem(pos, b->getSize(vec.size()));
         Value * const src = b->CreateGEP(patternData, offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, elementIndex, currentIndex);
-        b->CreateMemCpy(dst, src, copySize, 1);
+        b->CreateMemCpy(dst, src, elementSize, length);
     }
 
     Value * const nextProduced = b->CreateAdd(pos, sz_BlockWidth);
@@ -445,26 +418,24 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
     auto istreamset = b->getInputStreamSet("lhs");
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
-    const uint32_t ITEMS_PER_BLOCK = b->getBitBlockWidth() / FW;
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
-    Value * const hasMoreItems = b->CreateICmpNE(b->getAccessibleItemCount("lhs"), b->getSize(0));
-    Value * initialOffset = nullptr;
-    if (FW != 1) {
-        initialOffset = b->CreateUDiv(b->getProcessedItemCount("lhs"), b->getSize(ITEMS_PER_BLOCK));
-    }
+
+    Value * const initialAccum = b->getScalarField("accum");
+    Constant * const sz_ZERO = b->getSize(0);
+
+    Value * const hasMoreItems = b->CreateICmpNE(numOfStrides, sz_ZERO);
+
     b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
 
     b->SetInsertPoint(loopBlock);
-    PHINode * strideNo = b->CreatePHI(b->getSizeTy(), 2);
-    strideNo->addIncoming(b->getSize(0), entryBlock);
-    Value * blockOffset = nullptr;
-    if (FW != 1) {
-        blockOffset = b->CreateAdd(strideNo, initialOffset);
-    }
-
+    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
+    accumPhi->addIncoming(initialAccum, entryBlock);
+    Value * nextAccum = accumPhi;
     for (uint32_t i = 0; i < COUNT; ++i) {
         Value * lhs;
         Value * rhs;
@@ -472,32 +443,35 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
             lhs = b->loadInputStreamBlock("lhs", b->getInt32(i), strideNo);
             rhs = b->loadInputStreamBlock("rhs", b->getInt32(i), strideNo);
         } else {
-
-            lhs = b->getInputStreamPackPtr("lhs", b->getInt32(i), blockOffset);
-            rhs = b->getInputStreamPackPtr("rhs", b->getInt32(i), blockOffset);
-
-            b->CallPrintInt("lhs", lhs);
-            b->CallPrintInt("rhs", rhs);
-
-            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), blockOffset);
-            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), blockOffset);
+            // TODO: using strideNo in this fashion is technically going to refer to the
+            // correct pack in memory but will exceed the number of elements in the pack
+            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), strideNo);
+            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), strideNo);
         }
+      //  b->CallPrintRegister("lhs", lhs);
+      //  b->CallPrintRegister("rhs", rhs);
+
         // Perform vector comparison lhs != rhs.
         // Result will be a vector of all zeros if lhs == rhs
         Value * const vComp = b->CreateICmpNE(lhs, rhs);
         Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
         // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
         Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+       // b->CallPrintInt("comp", comp);
         // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        Value * const accum = b->getScalarField("accum");
-        Value * const newAccum = b->CreateAnd(accum, comp);
-        b->setScalarField("accum", newAccum);
+        nextAccum = b->CreateAnd(nextAccum, comp);
     }
+
     Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
     strideNo->addIncoming(nextStrideNo, loopBlock);
+    accumPhi->addIncoming(nextAccum, loopBlock);
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
 
     b->SetInsertPoint(exitBlock);
+    PHINode * const finalAccum = b->CreatePHI(b->getInt1Ty(), 2);
+    finalAccum->addIncoming(initialAccum, entryBlock);
+    finalAccum->addIncoming(nextAccum, loopBlock);
+    b->setScalarField("accum", finalAccum);
 }
 
 void StreamEq::generateFinalizeMethod(BuilderRef b) {
@@ -518,6 +492,7 @@ typedef void (*TestFunctionType)(uint32_t * output);
 
 
 TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
+                                             std::default_random_engine & rng,
                                              const unsigned fieldWidth,
                                              const unsigned numOfElements,
                                              const unsigned patternLength) {
@@ -526,10 +501,6 @@ TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
 
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty()->getPointerTo(), "output"}},{});
 
-    // bindings.push_back({b->getInt32Ty()->getPointerTo(), "output"});
-
-    std::random_device rd;
-    std::default_random_engine rng(rd());
     std::uniform_int_distribution<uint64_t> dist(0ULL, (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL);
 
     std::vector<std::vector<uint64_t>> pattern(numOfElements);
@@ -556,8 +527,28 @@ TestFunctionType buildRepeatingStreamSetTest(CPUDriver & pxDriver,
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
     CPUDriver pxDriver("test");
-    const auto f = buildRepeatingStreamSetTest(pxDriver, 8, 1, 73);
+    std::random_device rd;
+    std::default_random_engine rng(rd());
+
+//    for (unsigned rounds = 0; rounds < 100; ++rounds) {
+
+
+
+
+
+//        const auto f = buildRepeatingStreamSetTest(pxDriver, rng, 8, 1, 73);
+//        uint32_t result = 0;
+//        f(&result);
+
+
+//    }
+
+
+    const auto f = buildRepeatingStreamSetTest(pxDriver, rng, 1, 1, 27);
     uint32_t result = 0;
     f(&result);
+
+    llvm::errs() << "result=" << result << "\n";
+
     return result;
 }

@@ -54,26 +54,24 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
     auto istreamset = b->getInputStreamSet("lhs");
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
-    const uint32_t ITEMS_PER_BLOCK = b->getBitBlockWidth() / FW;
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
-    Value * const hasMoreItems = b->CreateICmpNE(b->getAccessibleItemCount("lhs"), b->getSize(0));
-    Value * initialOffset = nullptr;
-    if (FW != 1) {
-        initialOffset = b->CreateUDiv(b->getProcessedItemCount("lhs"), b->getSize(ITEMS_PER_BLOCK));
-    }
+
+    Value * const initialAccum = b->getScalarField("accum");
+    Constant * const sz_ZERO = b->getSize(0);
+
+    Value * const hasMoreItems = b->CreateICmpNE(numOfStrides, sz_ZERO);
+
     b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
 
     b->SetInsertPoint(loopBlock);
-    PHINode * strideNo = b->CreatePHI(b->getSizeTy(), 2);
-    strideNo->addIncoming(b->getSize(0), entryBlock);
-    Value * blockOffset = nullptr;
-    if (FW != 1) {
-        blockOffset = b->CreateAdd(strideNo, initialOffset);
-    }
-
+    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    strideNo->addIncoming(sz_ZERO, entryBlock);
+    PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
+    accumPhi->addIncoming(initialAccum, entryBlock);
+    Value * nextAccum = accumPhi;
     for (uint32_t i = 0; i < COUNT; ++i) {
         Value * lhs;
         Value * rhs;
@@ -81,8 +79,10 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
             lhs = b->loadInputStreamBlock("lhs", b->getInt32(i), strideNo);
             rhs = b->loadInputStreamBlock("rhs", b->getInt32(i), strideNo);
         } else {
-            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), blockOffset);
-            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), blockOffset);
+            // TODO: using strideNo in this fashion is technically going to refer to the
+            // correct pack in memory but will exceed the number of elements in the pack
+            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), strideNo);
+            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), strideNo);
         }
         // Perform vector comparison lhs != rhs.
         // Result will be a vector of all zeros if lhs == rhs
@@ -91,15 +91,19 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
         // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
         Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
         // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        Value * const accum = b->getScalarField("accum");
-        Value * const newAccum = b->CreateAnd(accum, comp);
-        b->setScalarField("accum", newAccum);
+        nextAccum = b->CreateAnd(nextAccum, comp);
     }
+
     Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
     strideNo->addIncoming(nextStrideNo, loopBlock);
+    accumPhi->addIncoming(nextAccum, loopBlock);
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
 
     b->SetInsertPoint(exitBlock);
+    PHINode * const finalAccum = b->CreatePHI(b->getInt1Ty(), 2);
+    finalAccum->addIncoming(initialAccum, entryBlock);
+    finalAccum->addIncoming(nextAccum, loopBlock);
+    b->setScalarField("accum", finalAccum);
 }
 
 void StreamEquivalenceKernel::generateFinalizeMethod(BuilderRef b) {

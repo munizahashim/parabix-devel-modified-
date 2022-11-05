@@ -53,17 +53,10 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
 
     auto additionalStrides = 1U;
     for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-
         const auto consumer = target(e, mBufferGraph);
         assert (consumer >= FirstKernel && consumer <= PipelineOutput);
         const auto m = MaximumNumOfStrides[consumer];
-
-        errs() << "m=" << m << "\n";
-
         const BufferPort & bp = mBufferGraph[e];
-
-        errs() << "max=" << bp.Maximum.numerator() << "/" << bp.Maximum.denominator() << "\n";
-
         const auto s = bp.Maximum * Rational{m, blockWidth};
         assert (s.denominator() == 1);
         additionalStrides = std::max<unsigned>(additionalStrides, ceiling(s));
@@ -78,9 +71,9 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
     ArrayType * const streamSetTy = ArrayType::get(elementTy, numElements);
 
-    SmallVector<Constant *, 16> tmp(numLanes);
-    SmallVector<Constant *, 16> tmp2(fieldWidth);
-    SmallVector<Constant *, 16> tmp3(numElements);
+    SmallVector<Constant *, 16> laneVal(numLanes);
+    SmallVector<Constant *, 16> packVal(fieldWidth);
+    SmallVector<Constant *, 16> elemVal(numElements);
 
     SmallVector<uint64_t, 16> elementPos(numElements, 0);
 
@@ -97,17 +90,14 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
                         V |= (v << k);
                         ++pos;
                     }
-                    tmp[j] = ConstantInt::get(intTy, V, false);
+                    laneVal[j] = ConstantInt::get(intTy, V, false);
                 }
-                tmp2[i] = ConstantVector::get(tmp);
+                packVal[i] = ConstantVector::get(laneVal);
             }
-            tmp3[p] = ConstantArray::get(elementTy, tmp2);
+            elemVal[p] = ConstantArray::get(cast<ArrayType>(elementTy), packVal);
         }
-        dataVectorArray[r] = ConstantArray::get(streamSetTy, tmp3);
+        dataVectorArray[r] = ConstantArray::get(streamSetTy, elemVal);
     }
-
-    errs() << "RUN: " << runLength << ", AS=" << additionalStrides << "\n";
-
 
     for (unsigned r = 0; r < additionalStrides; ++r) {
         assert (dataVectorArray[r] == dataVectorArray[r % runLength]);
@@ -125,17 +115,17 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     // streamset id to the global var.
     Module & mod = *b->getModule();
     GlobalVariable * const patternData =
-        new GlobalVariable(mod, arrTy, true, GlobalValue::PrivateLinkage, patternVec);
+        new GlobalVariable(mod, patternVec->getType(), true, GlobalValue::PrivateLinkage, patternVec);
     const auto align = blockWidth / 8;
     patternData->setAlignment(MaybeAlign{align});
-
-    BasicBlock * const copyAndExpandGlobal = b->CreateBasicBlock();
-    BasicBlock * const copyAndExpandGlobalLoop = b->CreateBasicBlock();
-    BasicBlock * const exit = b->CreateBasicBlock();
 
     const BufferNode & bn = mBufferGraph[streamSet];
     assert (bn.isConstant());
     RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
+
+    BasicBlock * const copyAndExpandGlobal = b->CreateBasicBlock();
+    BasicBlock * const copyAndExpandGlobalLoop = b->CreateBasicBlock();
+    BasicBlock * const exit = b->CreateBasicBlock();
 
     ConstantInt * const baseLength = b->getSize(runLength);
     buffer->setModulus(baseLength);
@@ -180,8 +170,8 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     PHINode * const addr = b->CreatePHI(arrPtrTy, 2);
     addr->addIncoming(patternData, entryBlock);
     addr->addIncoming(array, copyAndExpandGlobalLoop);
-    offset[1] = sz_ZERO;
-    buffer->setBaseAddress(b, b->CreateGEP(addr, offset));
+    Value * const ba = b->CreatePointerCast(addr, buffer->getPointerType());
+    buffer->setBaseAddress(b, ba);
 }
 
 void PipelineCompiler::addRepeatingStreamSetBufferProperties(BuilderRef b) {

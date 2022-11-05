@@ -150,24 +150,28 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
         const BufferNode & bn = mBufferGraph[streamSet];
         StreamSetBuffer * const buffer = bn.Buffer;
 
-        if (LLVM_UNLIKELY(bn.isConstant())) {
-            const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-            Value * const handle = b->getScalarFieldPtr(handleName);
-            buffer->setHandle(handle);
-            generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
-        } else if (bn.isOwned() && bn.isNonThreadLocal() == nonLocal) {
+        if (bn.isOwned() && bn.isNonThreadLocal() == nonLocal) {
 
-            assert (bn.isInternal());
-            const auto pe = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(pe, mBufferGraph);
-            const BufferPort & rd = mBufferGraph[pe];
-            const auto handleName = makeBufferName(producer, rd.Port);
-            Value * const handle = b->getScalarFieldPtr(handleName);
-            buffer->setHandle(handle);
+            if (LLVM_UNLIKELY(bn.isConstant())) {
+                const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
+                Value * const handle = b->getScalarFieldPtr(handleName);
+                buffer->setHandle(handle);
+                generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
+            } else {
+                assert (bn.isInternal());
+                const auto pe = in_edge(streamSet, mBufferGraph);
+                const auto producer = source(pe, mBufferGraph);
+                const BufferPort & rd = mBufferGraph[pe];
+                const auto handleName = makeBufferName(producer, rd.Port);
+                Value * const handle = b->getScalarFieldPtr(handleName);
+                buffer->setHandle(handle);
 
-            if (bn.isNonThreadLocal()) {
-                buffer->allocateBuffer(b, expectedNumOfStrides);
+                if (bn.isNonThreadLocal()) {
+                    buffer->allocateBuffer(b, expectedNumOfStrides);
+                }
+
             }
+
         }
     }
 
@@ -873,6 +877,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
 
     if (bufferNode.isUnowned()) {
         assert (bufferNode.Locality != BufferLocality::ThreadLocal);
+        assert (!bufferNode.isConstant());
         return baseAddress;
     }
 
