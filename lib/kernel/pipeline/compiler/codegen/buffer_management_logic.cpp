@@ -7,6 +7,8 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned kernelId, const unsigned groupId) {
 
+    bool hasAnyInternalStreamSets = false;
+
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -14,14 +16,17 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
 
+
+
         // external buffers already have a buffer handle
         if (LLVM_LIKELY(bn.isInternal())) {
             Type * const handleType = buffer->getHandleType(b);
             // We automatically assign the buffer memory according to the buffer start position
             if (bn.Locality == BufferLocality::ThreadLocal) {
-                assert (bn.isOwned());
+                hasAnyInternalStreamSets = true;
                 mTarget->addNonPersistentScalar(handleType, prefix);
             } else if (LLVM_LIKELY(bn.isOwned())) {
+                hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
@@ -33,11 +38,32 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
-        if (buffer->isDynamic() && bn.isOwned() && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+        if (bn.isOwned() && isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
             assert (bn.Locality != BufferLocality::ThreadLocal);
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
     }
+
+    if (LLVM_UNLIKELY(!mTarget->allocatesInternalStreamSets())) {
+        const Kernel * const kernelObj = getKernel(kernelId);
+        if (LLVM_UNLIKELY(hasAnyInternalStreamSets)) {
+            SmallVector<char, 1024> tmp;
+            raw_svector_ostream msg(tmp);
+            msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
+            << " but must do so to support " << kernelObj->getName() << ".";
+            report_fatal_error(msg.str());
+        }
+        if (LLVM_UNLIKELY(kernelObj->allocatesInternalStreamSets())) {
+            SmallVector<char, 1024> tmp;
+            raw_svector_ostream msg(tmp);
+            msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
+            << " but " << kernelObj->getName() << " must do so to be correctly initialized.";
+            report_fatal_error(msg.str());
+        }
+    }
+
+
+
 
 }
 
@@ -49,52 +75,52 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
         const BufferNode & bn = mBufferGraph[streamSet];
         // external buffers already have a buffer handle
         StreamSetBuffer * const buffer = bn.Buffer;
-        if (LLVM_UNLIKELY(bn.isExternal())) {
-            assert (isFromCurrentFunction(b, buffer->getHandle()));
-        } else if (LLVM_UNLIKELY(bn.isConstant())) {
-            const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-            Value * const handle = b->getScalarFieldPtr(handleName);
-            buffer->setHandle(handle);
-        } else if (bn.isNonThreadLocal() == nonLocal) {
+        if (bn.isNonThreadLocal() == nonLocal) {
+            if (LLVM_UNLIKELY(bn.isExternal())) {
+                assert (isFromCurrentFunction(b, buffer->getHandle(), true));
+            } else if (LLVM_UNLIKELY(bn.isConstant())) {
+                assert (nonLocal);
+                const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
+                Value * const handle = b->getScalarFieldPtr(handleName);
+                buffer->setHandle(handle);
+            } else {
 
-            assert (bn.isInternal());
-            const auto pe = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(pe, mBufferGraph);
-            const BufferPort & rd = mBufferGraph[pe];
-            const auto handleName = makeBufferName(producer, rd.Port);
-            Value * const handle = b->getScalarFieldPtr(handleName);
-            buffer->setHandle(handle);
+                const auto pe = in_edge(streamSet, mBufferGraph);
+                const auto producer = source(pe, mBufferGraph);
+                const BufferPort & rd = mBufferGraph[pe];
+                const auto handleName = makeBufferName(producer, rd.Port);
+                Value * const handle = b->getScalarFieldPtr(handleName);
+                buffer->setHandle(handle);
+                if (bn.isThreadLocal() && mThreadLocalStreamSetBaseAddress) {
+                    assert (RequiredThreadLocalStreamSetMemory > 0);
+                    assert (isa<StaticBuffer>(buffer));
+                    assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
+                    Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(bn.BufferStart));
+                    Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
+                    if (LLVM_UNLIKELY(CheckAssertions)) {
+                        DataLayout DL(b->getModule());
+                        Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
+                        Value * const intPtrVal = b->CreatePtrToInt(baseAddress, intPtrTy);
 
-            if (bn.Locality == BufferLocality::ThreadLocal && mThreadLocalStreamSetBaseAddress) {
+                        Constant * const bindingName = b->GetString(rd.Binding.get().getName());
+    //                    b->CreateAssert(intPtrVal, "%s.%s: thread-local base addresss cannot be null",
+    //                                    mCurrentKernelName, bindingName);
 
-                assert (RequiredThreadLocalStreamSetMemory > 0);
-                assert (isa<StaticBuffer>(buffer));
-                assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
-                Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(bn.BufferStart));
-                Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
-                if (LLVM_UNLIKELY(CheckAssertions)) {
-                    DataLayout DL(b->getModule());
-                    Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
-                    Value * const intPtrVal = b->CreatePtrToInt(baseAddress, intPtrTy);
+                        Value * const align = b->getSize(b->getCacheAlignment());
+                        Value * const offset = b->CreateURem(intPtrVal, align);
+                        Value * const valid = b->CreateIsNull(offset);
 
-                    Constant * const bindingName = b->GetString(rd.Binding.get().getName());
-//                    b->CreateAssert(intPtrVal, "%s.%s: thread-local base addresss cannot be null",
-//                                    mCurrentKernelName, bindingName);
+                        b->CreateAssert(valid, "%s.%s: thread local buffer 0x%" PRIx64 " "
+                                               "is not cache aligned (%" PRIu64 ")",
+                                        mCurrentKernelName, bindingName, intPtrVal, align);
+                    }
 
-                    Value * const align = b->getSize(b->getCacheAlignment());
-                    Value * const offset = b->CreateURem(intPtrVal, align);
-                    Value * const valid = b->CreateIsNull(offset);
-
-                    b->CreateAssert(valid, "%s.%s: thread local buffer 0x%" PRIx64 " "
-                                           "is not cache aligned (%" PRIu64 ")",
-                                    mCurrentKernelName, bindingName, intPtrVal, align);
+                    const auto baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
+                    assert (baseCapacity > 0);
+                    Value * const capacity = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(baseCapacity));
+                    buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
+                    buffer->setCapacity(b, capacity);
                 }
-
-                const auto baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
-                assert (baseCapacity > 0);
-                Value * const capacity = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(baseCapacity));
-                buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
-                buffer->setCapacity(b, capacity);
             }
         }
     }
@@ -105,7 +131,6 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal) {
     assert (expectedNumOfStrides);
-
     if (LLVM_UNLIKELY(CheckAssertions)) {
         Value * const valid = b->CreateIsNotNull(expectedNumOfStrides);
         b->CreateAssert(valid,
@@ -146,32 +171,29 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
 
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-
         const BufferNode & bn = mBufferGraph[streamSet];
-        StreamSetBuffer * const buffer = bn.Buffer;
-
-        if (bn.isOwned() && bn.isNonThreadLocal() == nonLocal) {
-
+        if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
+            StreamSetBuffer * const buffer = bn.Buffer;
             if (LLVM_UNLIKELY(bn.isConstant())) {
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
                 generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
             } else {
-                assert (bn.isInternal());
-                const auto pe = in_edge(streamSet, mBufferGraph);
-                const auto producer = source(pe, mBufferGraph);
-                const BufferPort & rd = mBufferGraph[pe];
-                const auto handleName = makeBufferName(producer, rd.Port);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
-
-                if (bn.isNonThreadLocal()) {
+                if (LLVM_LIKELY(bn.isInternal())) {
+                    const auto pe = in_edge(streamSet, mBufferGraph);
+                    const auto producer = source(pe, mBufferGraph);
+                    const BufferPort & rd = mBufferGraph[pe];
+                    const auto handleName = makeBufferName(producer, rd.Port);
+                    Value * const handle = b->getScalarFieldPtr(handleName);
+                    buffer->setHandle(handle);
+                } else {
+                    assert (isFromCurrentFunction(b, buffer->getHandle(), false));
+                }
+                if (nonLocal) {
                     buffer->allocateBuffer(b, expectedNumOfStrides);
                 }
-
             }
-
         }
     }
 
@@ -252,11 +274,10 @@ void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
 void PipelineCompiler::resetInternalBufferHandles() {
     for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
         const BufferNode & bn = mBufferGraph[i];
-        if (LLVM_UNLIKELY(bn.isExternal())) {
-            continue;
+        if (LLVM_UNLIKELY(bn.isInternal())) {
+            StreamSetBuffer * const buffer = bn.Buffer;
+            buffer->setHandle(nullptr);
         }
-        StreamSetBuffer * const buffer = bn.Buffer;
-        buffer->setHandle(nullptr);
     }
 }
 
@@ -313,8 +334,8 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
                 const auto producer = source(f, mBufferGraph);
                 const BufferPort & outputPort = mBufferGraph[f];
                 assert (outputPort.Port.Type == PortType::Output);
-                Value * produced = nullptr;
                 if (LLVM_UNLIKELY(producer == PipelineInput)) {
+                    assert (bn.isExternal());
                     // the output port of the pipeline input is an input streamset of the pipeline kernel.
                     produced = getAvailableInputItems(outputPort.Port.Number);
                     writeTransitoryConsumedItemCount(b, streamSet, produced);
@@ -327,7 +348,7 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
                     }
                 }
             }
-            mLocallyAvailableItems[streamSet] = produced;
+            mLocallyAvailableItems[streamSet] = produced; assert (produced);
         }
     }
 }
@@ -486,7 +507,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
-        Value * const fullyProduced = mFullyProducedItemCount[outputPort];
+        Value * const fullyProduced = mFullyProducedItemCount[outputPort]; assert (fullyProduced);
 
         #ifdef PRINT_DEBUG_MESSAGES
         SmallVector<char, 256> tmp;

@@ -290,6 +290,8 @@ Value * ExternalBuffer::modByCapacity(BuilderPtr /* b */, Value * const offset) 
 }
 
 Value * ExternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const fromPosition, Value * const totalItems, Value * /* overflowItems */) const {
+    assert (totalItems);
+    assert (fromPosition);
     return b->CreateSub(totalItems, fromPosition);
 }
 

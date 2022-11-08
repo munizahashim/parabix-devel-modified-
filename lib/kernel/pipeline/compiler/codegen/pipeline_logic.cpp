@@ -688,7 +688,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         assert (isFromCurrentFunction(b, getHandle()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle()));
 
-
         // generate the pipeline logic for this thread
         start(b);
         branchToInitialPartition(b);

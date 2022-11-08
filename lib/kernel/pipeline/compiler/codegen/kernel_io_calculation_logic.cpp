@@ -731,6 +731,10 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const available = getLocallyAvailableItemCount(b, inputPort);
+    if (!available) {
+        errs() <<  mKernelId << ", ss: " << streamSet << "\n";
+    }
+    assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -904,7 +908,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
     // which could result in free'ing the "old" buffer twice.
 
-    Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);    
+    Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);
     if (isa<DynamicBuffer>(buffer)) {
         assert (buffer->isDynamic());
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
