@@ -62,9 +62,7 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(BuilderRef b, Value * cons
     Value * const initialAccum = b->getScalarField("accum");
     Constant * const sz_ZERO = b->getSize(0);
 
-    Value * const hasMoreItems = b->CreateICmpNE(numOfStrides, sz_ZERO);
-
-    b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
+    b->CreateUnlikelyCondBr(b->isFinal(), exitBlock, loopBlock);
 
     b->SetInsertPoint(loopBlock);
     PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);

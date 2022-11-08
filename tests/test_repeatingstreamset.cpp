@@ -23,11 +23,7 @@ using namespace llvm;
 using namespace testing;
 using namespace boost::integer;
 
-// constexpr auto REPETITION_LENGTH = 5983ULL;
-
-constexpr auto REPETITION_LENGTH = 999983ULL;
-
-// constexpr auto REPETITION_LENGTH = 200ULL;
+constexpr auto REPETITION_LENGTH = 5563ULL;
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
@@ -636,7 +632,7 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    for (unsigned rounds = 0; rounds < 1000; ++rounds) {
+    for (unsigned rounds = 0; rounds < 10; ++rounds) {
         testResult |= runRepeatingStreamSetTest(pxDriver, rng);
     }
     return testResult ? -1 : 0;
