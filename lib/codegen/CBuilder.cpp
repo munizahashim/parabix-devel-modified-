@@ -162,15 +162,15 @@ Value * CBuilder::CreateRoundUp(Value * const number, Value * const divisor, con
 Value * CBuilder::CreateSaturatingAdd(Value * const a, Value * const b, const Twine Name) {
     // TODO: this seems to be an intrinsic in later versions of LLVM. Determine which.
     Value * const c = CreateAdd(a, b);
-    Constant * const max = Constant::getAllOnesValue(a->getType());
+    Constant * const max = ConstantInt::getAllOnesValue(a->getType());
     return CreateSelect(CreateICmpULT(c, a), max, c, Name);
 }
 
 Value * CBuilder::CreateSaturatingSub(Value * const a, Value * const b, const Twine Name) {
     // TODO: this seems to be an intrinsic in later versions of LLVM. Determine which.
     Value * const c = CreateSub(a, b);
-    Constant * const min = Constant::getNullValue(a->getType());
-    return CreateSelect(CreateICmpUGT(c, a), min, c, Name);
+    Constant * const min = ConstantInt::getNullValue(a->getType());
+    return CreateSelect(CreateICmpULT(a, b), min, c, Name);
 }
 
 Value * CBuilder::CreateOpenCall(Value * filename, Value * oflag, Value * mode) {

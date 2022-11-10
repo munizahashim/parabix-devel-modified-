@@ -146,12 +146,13 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
         mIsInternallySynchronized.set(kernelId);
     }
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+    #if defined(DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION)
+    const auto allowDataParallelExecution = false;
+    #elif defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
     const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
     #else
     const auto allowDataParallelExecution = isStateless;
     #endif
-    assert (allowDataParallelExecution == isDataParallel(kernelId));
 
     IntegerType * const sizeTy = b->getSizeTy();
 

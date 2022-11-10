@@ -730,11 +730,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
-    Value * const available = getLocallyAvailableItemCount(b, inputPort);
-    if (!available) {
-        errs() <<  mKernelId << ", ss: " << streamSet << "\n";
-    }
-    assert (available);
+    Value * const available = getLocallyAvailableItemCount(b, inputPort); assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
 
     #ifdef PRINT_DEBUG_MESSAGES

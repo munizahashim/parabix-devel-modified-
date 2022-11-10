@@ -69,6 +69,8 @@ public:
 
         P.makeTerminationPropagationGraph();
 
+        P.determineNumOfThreads();
+
         // Finish the buffer graph
         // P.identifyDirectUpdatesToStateObjects();
         P.addStreamSetsToBufferGraph(b);
@@ -202,6 +204,8 @@ private:
 
     void calculatePartialSumStepFactors();
 
+    void determineNumOfThreads();
+
     // zero extension analysis function
 
     void identifyZeroExtendedStreamSets();
@@ -218,6 +222,7 @@ private:
     // Input truncation analysis functions
 
     void makeInputTruncationGraph();
+
 
 public:
 
@@ -254,6 +259,7 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
+    unsigned                        NumOfThreads = 0;
     bool                            HasZeroExtendedStream = false;
 
     size_t                          RequiredThreadLocalStreamSetMemory = 0;
@@ -285,6 +291,26 @@ public:
     OwningVector<Binding>           mInternalBindings;
     OwningVector<StreamSetBuffer>   mInternalBuffers;
 };
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief determineNumOfThreads
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineAnalysis::determineNumOfThreads() {
+    if (IsNestedPipeline) {
+        NumOfThreads = 1U;
+    } else {
+        const auto numKernels = LastKernel - FirstKernel + 1U;
+        NumOfThreads = mPipelineKernel->getNumOfThreads();
+        if (LLVM_UNLIKELY(numKernels < NumOfThreads)) {
+            for (auto k = FirstKernel; k <= LastKernel; ++k) {
+                if (LLVM_LIKELY(!isKernelStateFree(k))) {
+                    NumOfThreads = numKernels;
+                    break;
+                }
+            }
+        }
+    }
+}
 
 }
 

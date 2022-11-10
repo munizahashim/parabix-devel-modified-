@@ -556,6 +556,8 @@ public:
     bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
 
+    static unsigned selectNumOfThreadsBasedOnPipelineGraph(const unsigned maxThreads, const bool nested, const BufferGraph & G);
+
 protected:
 
     SimulationAllocator                         mAllocator;
@@ -871,7 +873,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 #endif
-, mNumOfThreads(pipelineKernel->getNumOfThreads())
+, mNumOfThreads(P.NumOfThreads)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
 , PipelineOutput(P.PipelineOutput)

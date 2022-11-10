@@ -267,6 +267,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (bn.IsLinear) {
             out << 'L';
         }
+        if (bn.isReturned()) {
+            out << 'R';
+        }
         if (bn.isShared()) {
             out << '*';
         }

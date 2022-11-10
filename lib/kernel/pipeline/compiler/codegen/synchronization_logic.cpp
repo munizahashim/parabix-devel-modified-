@@ -128,12 +128,15 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         b->SetInsertPoint(acquire);
         Value * const currentSegNo = b->CreateAtomicLoadAcquire(waitingOnPtr);
         if (LLVM_UNLIKELY(CheckAssertions)) {
-            Value * const pendingOrReady = b->CreateICmpULE(currentSegNo, segNo);
+            Value * const minExpectedSegNo = b->getSize(0); // b->CreateSaturatingSub(segNo, b->getSize(mNumOfThreads - 1U));
+            Value * const valid = b->CreateICmpUGE(currentSegNo, minExpectedSegNo);
+            Value * const pendingOrReady = b->CreateAnd(valid, b->CreateICmpULE(currentSegNo, segNo));
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
             out << "%s: acquired %ssegment number is %" PRIu64 " "
-                   "but was expected to be within [0,%" PRIu64 "]";
-            b->CreateAssert(pendingOrReady, out.str(), mKernelName[kernelId], __getSyncLockName(b, type), currentSegNo, segNo);
+                   "but was expected to be within [%" PRIu64 ",%" PRIu64 "]";
+            b->CreateAssert(pendingOrReady, out.str(), mKernelName[kernelId], __getSyncLockName(b, type),
+                            currentSegNo, minExpectedSegNo, segNo);
         }
         Value * const ready = b->CreateICmpEQ(segNo, currentSegNo);
         b->CreateLikelyCondBr(ready, acquired, acquire);

@@ -734,7 +734,14 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                         const BufferPort & external = mBufferGraph[output];
                         Value * const ptr = getProcessedInputItemsPtr(external.Port.Number); assert (ptr);
                         const auto prefix = makeBufferName(PipelineInput, external.Port);
-                        Value * const alreadyConsumed = b->getScalarField(prefix + CONSUMED_ITEM_COUNT_SUFFIX); assert (alreadyConsumed);
+                        Value * alreadyConsumedPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+                        if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+                            FixedArray<Value *, 1> indices;
+                            indices[0] = b->getInt32(0);
+                            alreadyConsumedPtr = b->CreateGEP(ptr, indices);
+                        }
+                        Value * const alreadyConsumed = b->CreateLoad(alreadyConsumedPtr);
+                        assert (ptr->getType()->getPointerElementType() == alreadyConsumed->getType());
                         b->CreateStore(alreadyConsumed, ptr);
                         break;
                     }

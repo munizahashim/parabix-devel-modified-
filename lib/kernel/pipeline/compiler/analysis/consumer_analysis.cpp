@@ -28,8 +28,6 @@ void PipelineAnalysis::makeConsumerGraph() {
             continue;
         }
 
-
-
         // copy the producing edge
         const auto pe = in_edge(streamSet, mBufferGraph);
         const BufferPort & output = mBufferGraph[pe];
