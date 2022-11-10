@@ -118,6 +118,9 @@ void ParabixIllustrator::appendStreamText(unsigned streamNo, std::string streamT
 }
 
 void ParabixIllustrator::registerIllustrator(Scalar * illustrator) {
+    if (mDisplayWidth == 0) {
+        llvm::report_fatal_error("Parabix illustrator: display width cannot be 0");
+    }
     mIllustrator = illustrator;
 }
 
