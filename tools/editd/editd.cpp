@@ -204,8 +204,6 @@ preprocessFunctionType preprocessPipeline(CPUDriver & pxDriver) {
     StreamSet * const CCResults = pxDriver.CreateStreamSet(4);
     auto & b = pxDriver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
-    const auto t = codegen::SegmentThreads;
-    codegen::SegmentThreads = 1;
     auto P = pxDriver.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer())}, {{int32Ty, "fileDescriptor"}});
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
@@ -213,9 +211,7 @@ preprocessFunctionType preprocessPipeline(CPUDriver & pxDriver) {
     StreamSet * const BasisBits = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     P->CreateKernelCall<PreprocessKernel>(BasisBits, CCResults);
-    auto f = reinterpret_cast<preprocessFunctionType>(P->compile());
-    codegen::SegmentThreads = t;
-    return f;
+    return reinterpret_cast<preprocessFunctionType>(P->compile());
 }
 
 StreamSetPtr preprocess(preprocessFunctionType preprocess) {
