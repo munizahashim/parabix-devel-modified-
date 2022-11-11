@@ -86,9 +86,14 @@ inline Marker RE_Block_Compiler::compile(RE * const re) {
     return process(re, Marker(mMain.mIndexStream, 1));
 }
 
+inline Marker RE_Block_Compiler::compile(RE * const re, Marker initialMarkers) {
+    return process(re, initialMarkers);
+}
+
 PabloAST * ScanToIndex(PabloAST * cursor, PabloAST * indexStrm, PabloBuilder & pb) {
     return pb.createOr(pb.createAnd(cursor, indexStrm),
-                       pb.createScanTo(pb.createAnd(pb.createNot(indexStrm), cursor), indexStrm));
+                       pb.createScanTo(pb.createAnd(pb.createNot(indexStrm), cursor), indexStrm),
+                       "ScanToIndex");
 }
 
 std::pair<int, int> RE_Block_Compiler::lengthRange(RE * regexp) {
@@ -96,7 +101,7 @@ std::pair<int, int> RE_Block_Compiler::lengthRange(RE * regexp) {
         const auto & nameString = n->getFullName();
         auto f = mMain.mExternalNameMap.find(nameString);
         if (f == mMain.mExternalNameMap.end()) {
-            llvm::report_fatal_error("RE compiler cannot find name: " + nameString);
+            return std::make_pair<int, int>(1, 1);  // default for non-external names
         }
         return f->second.lengthRange();
     }
@@ -184,7 +189,18 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     const auto & nameString = name->getFullName();
     auto f = mMain.mExternalNameMap.find(nameString);
     if (f == mMain.mExternalNameMap.end()) {
-        llvm::report_fatal_error("RE compiler cannot find name: " + nameString);
+        // Names which are not in the external map are required to
+        // be unit length REs.  Compile the definition.
+        RE * defn = name->getDefinition();
+        if (!defn) {
+            llvm::report_fatal_error("RE compiler cannot find name as external or definition: " + nameString);
+        }
+        auto nameMarker = compile(name->getDefinition(), Marker(mPB.createOnes(), 1));
+        PabloAST * nextPos = marker.stream();
+        if (marker.offset() == 0) {
+            nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
+        }
+        return Marker(mPB.createAnd(nextPos, nameMarker.stream(), nameString), nameMarker.offset());
     }
     auto externalMarker = f->second.marker();
     if (marker.stream() == mMain.mIndexStream) {
@@ -246,7 +262,7 @@ Marker RE_Block_Compiler::compileAlt(Alt * const alt, const Marker base) {
         Marker m = process(re, base);
         const unsigned o = m.offset();
         while (o >= accum.size()) {accum.push_back(mPB.createZeroes());}
-        accum[o] = mPB.createOr(accum[o], m.stream(), "alt");
+        accum[o] = mPB.createOr(accum[o], m.stream(), "offset" + std::to_string(o) + "_alt");
     }
     unsigned max_offset = accum.size() - 1;
     if ((max_offset > 0) && !isa<Zeroes>(accum[0])) {
@@ -269,7 +285,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         AlignMarkers(marker, lookback);
         PabloAST * lb = lookback.stream();
         if (a->getSense() == Assertion::Sense::Negative) {
-            lb = mPB.createNot(lb);
+            lb = mPB.createAnd(mPB.createNot(lb), mMain.mIndexStream);
         }
         return Marker(mPB.createAnd(marker.stream(), lb, "lookback"), marker.offset());
     } else if (a->getKind() == Assertion::Kind::Boundary) {
@@ -666,9 +682,8 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 }
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
-    PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1));
-    Marker m = AdvanceMarker(marker, 1);
-    return Marker(mPB.createAnd(m.stream(), SOT, "SOT"), 1);
+    PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1), "SOT");
+    return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {

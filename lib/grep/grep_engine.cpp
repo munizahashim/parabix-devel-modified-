@@ -524,7 +524,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
     std::set<std::string> extNames;
     for (const auto & e : externals) {
         auto name = e->getFullName();
-        if (extNames.count(name) == 0) {
+        if ((extNames.count(name) == 0) && mExternalTable.isDeclared(indexing, name)) {
             extNames.insert(name);
             ExternalStreamObject * ext = mExternalTable.lookup(indexing, name);
             StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, name);
