@@ -192,7 +192,7 @@ void ParabixIllustrator::displayAllCapturedData() {
 BitstreamIllustrator::BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh, char oneCh)
     : pablo::PabloKernel(kb, "BitstreamIllustrator" + std::to_string(zeroCh) + "_" + std::to_string(oneCh),
                   {Binding{"bits", bits}},
-                  {Binding{"displayBasis", displayBasis, FixedRate(), Add1()}}),
+                  {Binding{"displayBasis", displayBasis}}),
                   mZeroCh(zeroCh), mOneCh(oneCh) {}
 
 void BitstreamIllustrator::generatePabloMethod() {
