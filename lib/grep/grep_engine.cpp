@@ -313,9 +313,6 @@ void GrepEngine::initRE(re::RE * re) {
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
     mRE = resolveAnchors(mRE, anchorRE, re::NameTransformationMode::None);
-    if (hasGraphemeClusterBoundary(mRE)) {
-        UnicodeIndexing = true;
-    }
     mRE = regular_expression_passes(mRE);
     if (!validateFixedUTF8(mRE) || (mGrepRecordBreak == GrepRecordBreakKind::Unicode)) {
         setComponent(mExternalComponents, Component::UTF8index);
@@ -579,7 +576,8 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
             indexStream = mU8index;
             options->setIndexing(indexStream);
         }
-        re = toUTF8(re);
+        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
+        re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
     addExternalStreams(P, indexAlphabet, options, re, indexStream);

@@ -190,17 +190,26 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     auto f = mMain.mExternalNameMap.find(nameString);
     if (f == mMain.mExternalNameMap.end()) {
         // Names which are not in the external map are required to
-        // be unit length REs.  Compile the definition.
+        // be unit length Unicode REs, expressed as a code unit
+        // sequences (e.g., sequences of UTF-8 CCs).
         RE * defn = name->getDefinition();
         if (!defn) {
             llvm::report_fatal_error("RE compiler cannot find name as external or definition: " + nameString);
         }
-        auto nameMarker = compile(name->getDefinition(), Marker(mPB.createOnes(), 1));
-        PabloAST * nextPos = marker.stream();
-        if (marker.offset() == 0) {
-            nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
+        if (mMain.mIndexingAlphabet) {
+            // If we have an indexing alphabet, then the marker may be aligned
+            // at the final byte of the code unit sequence.  We compile the
+            // definition and align the marker based on the final position of
+            // the compiled code unit sequence sequence.
+            auto nameMarker = compile(defn, Marker(mPB.createOnes(), 1));
+            PabloAST * nextPos = marker.stream();
+            if (marker.offset() == 0) {
+                nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
+            }
+            return Marker(mPB.createAnd(nextPos, nameMarker.stream(), nameString), nameMarker.offset());
+        } else {
+            return compile(defn, marker);
         }
-        return Marker(mPB.createAnd(nextPos, nameMarker.stream(), nameString), nameMarker.offset());
     }
     auto externalMarker = f->second.marker();
     if (marker.stream() == mMain.mIndexStream) {
