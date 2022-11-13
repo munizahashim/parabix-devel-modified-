@@ -159,7 +159,6 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
             msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
             print(msg.encode('utf-8'))
 
-
 flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             'counting_choices' : ["-c", "-l", "-L"],
             '-v' : [],
@@ -173,14 +172,20 @@ flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             '-EnableTernaryOpt' : []}
 
 def add_random_flags(flags, fileLength):
-    selected = {}
+    selected = list(fixed_flags.keys())
+    for f in selected:
+        flag_val = fixed_flags[f]
+        if flag_val == []:
+            flags[f] = True
+        else:
+            flags[f] = flag_val
     flag_keys = list(flag_map.keys())
     for i in range(options.random_flag_count):
         rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
         # Avoid duplicate flags and expensive test cases
         while rand_flag in selected or (rand_flag == "-v" and fileLength > 4000):
             rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
-        selected[rand_flag] = True
+        selected.append(rand_flag)
         values = flag_map[rand_flag]
         if values == []:
             flags[rand_flag] = True
@@ -188,28 +193,35 @@ def add_random_flags(flags, fileLength):
             choice = values[random.randint(0, len(values) - 1)]
             if rand_flag[0] == "-":
                 flags[rand_flag] = choice
-            else: flags[choice] = True
+            else:
+                flags[choice] = True
+            
+
+def parse_flag_string(flag_string):
+    flags = {}
+    for field in flag_string.split(' '):
+        flag_and_value = field.split('=')
+        flag = flag_and_value[0]
+        if len(flag_and_value) == 1:
+            flags[flag] = True
+        else: flags[flag] = flag_and_value[1]
+    return flags
 
 def start_element_do_test(name, attrs):
     if name == 'grepcase':
         if not 'regexp' in attrs or not 'datafile' in attrs:
             print("Bad grepcase: missing regexp and/or datafile attributes.")
             return
-        flags = {}
+        grep_case_flags = {}
         if 'flags' in attrs:
-            for field in attrs['flags'].split(' '):
-                flag_and_value = field.split('=')
-                flag = flag_and_value[0]
-                if len(flag_and_value) == 1:
-                    flags[flag] = True
-                else: flags[flag] = flag_and_value[1]
+            grep_case_flags = parse_flag_string(attrs['flags'])
         if 'grepcount' in attrs:
-            flags["-c"] = True
+            grep_case_flags["-c"] = True
             expected_result = attrs['grepcount']
-            if "-m" in flags:
-                if int(flags["-m"]) < int(attrs['grepcount']):
-                    expected_result = flags["-m"]
-            execute_grep_test(flags, attrs['regexp'], attrs['datafile'], expected_result)
+            if "-m" in grep_case_flags:
+                if int(grep_case_flags["-m"]) < int(attrs['grepcount']):
+                    expected_result = grep_case_flags["-m"]
+            execute_grep_test(grep_case_flags, attrs['regexp'], attrs['datafile'], expected_result)
         else:
             if not 'greplines' in attrs:
                 raise Exception('Expecting grepcount or greplines in grepcase')
@@ -218,9 +230,9 @@ def start_element_do_test(name, attrs):
             if attrs['greplines'] != '':
                 lineFields = attrs['greplines'].split(' ')
                 lines = [int(f) for f in lineFields]
-            if len(flags) > 0:
-                expected_result = expected_grep_results(attrs['datafile'], lines, flags)
-                execute_grep_test(flags, attrs['regexp'], attrs['datafile'], expected_result)
+            if len(grep_case_flags) > 0:
+                expected_result = expected_grep_results(attrs['datafile'], lines, grep_case_flags)
+                execute_grep_test(grep_case_flags, attrs['regexp'], attrs['datafile'], expected_result)
             else:
                 for i in range(options.tests_per_grepcase):
                     flags = {}
@@ -262,6 +274,9 @@ if __name__ == '__main__':
     option_parser.add_option('-U', '--UTF-16',
                           dest = 'utf16', action='store_true', default=False,
                           help = 'test UTF-16 processing')
+    option_parser.add_option('--grep_flags',
+                          dest = 'fixed_flag_spec', type='string', default='',
+                          help = 'specify fixed grep flags')
     options, args = option_parser.parse_args(sys.argv[1:])
     if len(args) != 1:
         option_parser.print_usage()
@@ -279,4 +294,7 @@ if __name__ == '__main__':
     grep_test_file.close()
 
     make_data_files(grep_test_spec)
+    global fixed_flags
+    if options.fixed_flag_spec == '': fixed_flags = {}
+    else: fixed_flags = parse_flag_string(options.fixed_flag_spec)
     run_tests(grep_test_spec)

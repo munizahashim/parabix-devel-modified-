@@ -110,7 +110,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    unsigned RunGrep(ProgBuilderRef P, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Matches);
+    unsigned RunGrep(ProgBuilderRef P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Matches);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -139,7 +139,7 @@ protected:
     // Prepare external property and GCB streams, if required.
     void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
-    void addExternalStreams(ProgBuilderRef P, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
+    void addExternalStreams(ProgBuilderRef P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
     kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);

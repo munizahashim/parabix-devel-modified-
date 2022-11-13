@@ -534,7 +534,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             value = b->simd_and(sum, b->simd_not(thru), sthru->getName());
         } else if (const ScanTo * sthru = dyn_cast<ScanTo>(stmt)) {
             Value * const marker_expr = compileExpression(b, sthru->getScanFrom());
-            Value * const to = b->simd_xor(compileExpression(b, sthru->getScanTo()), b->getScalarField("EOFmask"));
+            Value * const to = b->simd_or(compileExpression(b, sthru->getScanTo()), b->getScalarField("EOFbit"));
             Value * const sum = mCarryManager->addCarryInCarryOut(b, sthru, marker_expr, b->simd_not(to));
             value = b->simd_and(sum, to, sthru->getName());
         } else if (const AdvanceThenScanThru * sthru = dyn_cast<AdvanceThenScanThru>(stmt)) {
@@ -544,7 +544,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             value = b->simd_and(sum, b->simd_not(thru), sthru->getName());
         } else if (const AdvanceThenScanTo * sthru = dyn_cast<AdvanceThenScanTo>(stmt)) {
             Value * const from = compileExpression(b, sthru->getScanFrom());
-            Value * const to = b->simd_xor(compileExpression(b, sthru->getScanTo()), b->getScalarField("EOFmask"));
+            Value * const to = b->simd_or(compileExpression(b, sthru->getScanTo()), b->getScalarField("EOFbit"));
             Value * const sum = mCarryManager->addCarryInCarryOut(b, sthru, from, b->simd_or(from, b->simd_not(to)));
             value = b->simd_and(sum, to, sthru->getName());
         } else if (const TerminateAt * s = dyn_cast<TerminateAt>(stmt)) {

@@ -209,6 +209,7 @@ struct PropertyStandardization : public RE_Transformer {
         std::string canon = UCD::canonicalize_value_name(val_str);
         auto * propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
         if (auto * obj = dyn_cast<EnumeratedPropertyObject>(propObj)) {
+            if (canon == "") return exp;  // No value to standardize
             int val_code = obj->GetPropertyValueEnumCode(canon);
             if (val_code < 0) return exp;
             exp->setValueString(obj->GetValueFullName(val_code));
@@ -351,13 +352,13 @@ RE * PropertyExternalizer::transformPropertyExpression (PropertyExpression * exp
     std::string val_str = exp->getValueString();
     std::string op_str = val_str == "" ? "" : ":";
     if (op == PropertyExpression::Operator::NEq) op_str = "!" + op_str;
-    RE * defn = exp->getResolvedRE();
+    //RE * defn = exp->getResolvedRE();
     std::string theName = id + op_str + val_str;
     if (exp->getKind() == PropertyExpression::Kind::Codepoint) {
-        return createName(theName, defn);
+        return createName(theName, exp);
     } else {
         theName = "\\b{" + theName + "}";
-        return createName(theName, defn);
+        return createName(theName, exp);
     }
 }
 

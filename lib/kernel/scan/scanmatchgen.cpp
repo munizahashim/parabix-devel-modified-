@@ -279,7 +279,8 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         b->setScalarField("LineNum", strideFinalLineNumPhi);
     }
-    b->setProcessedItemCount("InputStream", strideFinalLineStart);
+    Value * processed = b->CreateSelect(b->isFinal(), avail, strideFinalLineStart);
+    b->setProcessedItemCount("InputStream", processed);
     b->CreateCondBr(b->isFinal(), callFinalizeScan, scanReturn);
 
     b->SetInsertPoint(callFinalizeScan);
@@ -413,6 +414,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * strideBlockIndex = b->CreateAdd(strideBlockOffset, blockNo);
     Value * matchBitBlock = b->loadInputStreamBlock("matchResult", sz_ZERO, strideBlockIndex);
     Value * breakBitBlock = b->loadInputStreamBlock("lineBreak", sz_ZERO, strideBlockIndex);
+
     Value * const anyMatch = b->simd_any(sw.width, matchBitBlock);
     Value * const anyBreak = b->simd_any(sw.width, breakBitBlock);
     if (mLineNumbering) {
@@ -653,7 +655,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         b->setScalarField("LineNum", strideFinalLineNumPhi);
     }
-    b->setProcessedItemCount("InputStream", strideFinalLineStart);
+    Value * processed = b->CreateSelect(b->isFinal(), avail, strideFinalLineStart);
+    b->setProcessedItemCount("InputStream", processed);
     b->CreateCondBr(b->isFinal(), callFinalizeScan, scanReturn);
 
     b->SetInsertPoint(callFinalizeScan);

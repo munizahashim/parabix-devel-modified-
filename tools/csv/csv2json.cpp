@@ -53,13 +53,10 @@ static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parame
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 static cl::opt<bool> UseFilterByMaskKernel("filter-by-mask-kernel", cl::desc("Use experimental FilterByMaskKernel"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<bool> FilterOnly("filter-only", cl::desc("Perform initial CSV filtering only"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<bool> ShowStreams("show-streams", cl::desc("Show CSV parsing streams"), cl::init(false), cl::cat(CSV_Options));
-
-ParabixIllustrator illustrator(50);
 
 typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs) {
+CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
@@ -165,7 +162,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
         P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
         //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-        if (ShowStreams) {
+        if (codegen::IllustratorDisplay > 0) {
             Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
             illustrator.registerIllustrator(illustratorAddr);
             illustrator.captureByteData(P, "bytedata", ByteStream, '?');
@@ -221,6 +218,7 @@ int main(int argc, char *argv[]) {
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
 
+    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
     std::vector<std::string> headers;
     if (HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
@@ -243,7 +241,7 @@ int main(int argc, char *argv[]) {
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    CSVFunctionType fn = generatePipeline(driver, templateStrs);
+    CSVFunctionType fn = generatePipeline(driver, templateStrs, illustrator);
     //  The compile function "fn"  can now be used.   It takes a file
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
@@ -267,7 +265,7 @@ int main(int argc, char *argv[]) {
         jitExecution.stop();
         jitExecution.write(std::cerr);
         #endif
-        if (ShowStreams) {
+        if (codegen::IllustratorDisplay > 0) {
             illustrator.displayAllCapturedData();
         }
     }

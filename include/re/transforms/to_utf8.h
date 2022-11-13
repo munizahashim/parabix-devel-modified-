@@ -32,18 +32,23 @@ protected:
 
 class UTF8_Transformer : public EncodingTransformer {
 public:
-    UTF8_Transformer();
+    UTF8_Transformer(bool useInternalNaming = false);
 protected:
-    RE * transformAny(Any * a) override;
     RE * transformCC(CC * cc) override;
     RE * rangeCodeUnits(codepoint_t lo, codepoint_t hi, unsigned index, const unsigned lgth);
     RE * rangeToUTF8(codepoint_t lo, codepoint_t hi);
 
 private:
     UTF_Encoder mEncoder;
+    bool mInternalNaming;
 };
 
-RE * toUTF8(RE * r, bool convertNameAndAny = false);
+//
+//  Transform all Unicode CCs to an equivalent expansion
+//  using UTF8 CCs.   Embed each transformed Unicode CC in
+//  a name object.
+//
+RE * toUTF8(RE * r, bool useInternalNaming = false);
 }
 
 #endif // TO_UTF8_H

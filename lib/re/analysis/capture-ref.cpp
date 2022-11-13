@@ -66,6 +66,8 @@ void updateReferenceInfo(RE * re, CapturePostfixMap & cm, ReferenceInfo & info) 
         updateReferenceInfo(ix->getRH(), cm, info);
     } else if (Reference * ref = dyn_cast<Reference>(re)) {
         update1reference(ref, cm, info);
+    } else if (Assertion * a = dyn_cast<Assertion>(re)) {
+        updateReferenceInfo(a->getAsserted(), cm, info);
     } else if (PropertyExpression * pe = dyn_cast<PropertyExpression>(re)) {
         RE * defn = pe->getResolvedRE();
         if (defn && isa<Reference>(defn)) {

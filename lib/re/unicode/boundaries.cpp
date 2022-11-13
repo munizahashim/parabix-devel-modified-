@@ -265,6 +265,8 @@ RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj) {
     for (unsigned j = 0; j < enum_count; j++) {
         std::string enumVal = enumObj->GetValueEnumName(j);
         RE * expr = makePropertyExpression(UCD::getPropertyFullName(prop), enumVal);
+        expr = UCD::linkAndResolve(expr);
+        expr = UCD::externalizeProperties(expr);
         alts.push_back(makeSeq({notBehind(expr), Ahead(expr)}));
         alts.push_back(makeSeq({Behind(expr), notAhead(expr)}));
     }
