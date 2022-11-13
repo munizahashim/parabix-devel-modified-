@@ -696,7 +696,10 @@ inline Marker RE_Block_Compiler::compileStart(Marker marker) {
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
-    PabloAST * const nextPos = AdvanceMarker(marker, 1).stream();
+    PabloAST * nextPos = marker.stream();
+    if (marker.offset() == 0) {
+        nextPos = mPB.createAdvance(nextPos, 1);
+    }
     PabloAST * endOfText = mPB.createAtEOF(mPB.createAdvance(mPB.createOnes(), 1), "EOT");
     PabloAST * const EOT_match = mPB.createAnd(endOfText, nextPos, "EOT_match");
     return Marker(EOT_match, 1);
