@@ -264,9 +264,6 @@ void GrepEngine::initRE(re::RE * re) {
 
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
-        if (hasEndAnchor(re)) {
-            UnicodeIndexing = true;
-        }
     } else if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
         mBreakCC = re::makeCC(0, &cc::Unicode);  // Null
     } else {
