@@ -53,7 +53,8 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 
 class SelectField : public PabloKernel {
 public:
-    SelectField(BuilderRef b, StreamSet * Record_separators,
+    SelectField(BuilderRef b, StreamSet * csvMarks,
+                              StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
                               unsigned columnNo);
@@ -62,12 +63,14 @@ protected:
     unsigned mColumnNo;
 };
 
-SelectField::SelectField(BuilderRef b, StreamSet * Record_separators,
-                                          StreamSet * Field_separators,
-                                          StreamSet * toKeep,
-                                          unsigned columnNo)
+SelectField::SelectField(BuilderRef b,  StreamSet * csvMarks,
+                                        StreamSet * Record_separators,
+                                        StreamSet * Field_separators,
+                                        StreamSet * toKeep,
+                                        unsigned columnNo)
 : PabloKernel(b, "SelectField" + std::to_string(columnNo),
-  {Binding{"Record_separators", Record_separators},
+  {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
+   Binding{"Record_separators", Record_separators},
    Binding{"Field_separators", Field_separators}},
   {Binding{"toKeep", toKeep}}), mColumnNo(columnNo)  {}
 
@@ -84,19 +87,28 @@ void SelectField::generatePabloMethod() {
     }
     PabloAST * columnFollow = pb.createScanTo(columnMark, Field_separators);
     PabloAST * columnMask  = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {columnMark, columnFollow});
-    PabloAST * toKeep = pb.createOr(columnMask, Record_separators);
+    PabloAST * notEOF = pb.createNot(pb.createExtract(getInputStreamVar("csvMarks"), pb.getInteger(markEOF)));
+    PabloAST * toKeep = pb.createAnd(pb.createOr(columnMask, Record_separators), notEOF);
     pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), pb.createInFile(toKeep));
 }
 
-typedef void (*CSVFunctionType)(uint32_t fd);
+typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> headers) {
+CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> headers, ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
+                                    Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    //   If the --illustrator-width= parameter is specified, bitstream
+    //   data is to be displayed.
+    Scalar * illustratorAddr = nullptr;
+    if (codegen::IllustratorDisplay > 0) {
+        illustratorAddr = P->getInputScalar("illustratorAddr");
+        illustrator.registerIllustrator(illustratorAddr);
+    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -107,6 +119,10 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    if (codegen::IllustratorDisplay > 0) {
+        illustrator.captureByteData(P, "ByteStream", ByteStream, '_');
+        illustrator.captureBixNum(P, "BasisBits", BasisBits);
+    }
 
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P->CreateStreamSet(5);
@@ -118,14 +134,22 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
     StreamSet * Selected = P->CreateStreamSet(1);
-    P->CreateKernelCall<SelectField>(recordSeparators, fieldSeparators, Selected, columnNo);
+    P->CreateKernelCall<SelectField>(csvCCs, recordSeparators, fieldSeparators, Selected, columnNo);
+    if (codegen::IllustratorDisplay > 0) {
+        illustrator.captureBitstream(P, "recordSeparators", recordSeparators);
+        illustrator.captureBitstream(P, "fieldSeparators", fieldSeparators);
+        illustrator.captureBitstream(P, "Selected", Selected);
+    }
+
     
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     FilterByMask(P, Selected, BasisBits, filteredBasis);
-
     StreamSet * Filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
-
+    if (codegen::IllustratorDisplay > 0) {
+        illustrator.captureBixNum(P, "filteredBasis", filteredBasis);
+        illustrator.captureByteData(P, "Filtered", Filtered, '_');
+    }
     //  The StdOut kernel writes a byte stream to standard output.
     P->CreateKernelCall<StdOutKernel>(Filtered);
     return reinterpret_cast<CSVFunctionType>(P->compile());
@@ -138,7 +162,7 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-
+    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
     std::vector<std::string> headers;
     if (HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
@@ -154,7 +178,7 @@ int main(int argc, char *argv[]) {
     }
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    CSVFunctionType fn = generatePipeline(driver, headers);
+    CSVFunctionType fn = generatePipeline(driver, headers, illustrator);
     //  The compile function "fn"  can now be used.   It takes a file
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
@@ -163,8 +187,11 @@ int main(int argc, char *argv[]) {
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        fn(fd);
+        fn(fd, &illustrator);
         close(fd);
-    }
+        if (codegen::IllustratorDisplay > 0) {
+            illustrator.displayAllCapturedData();
+        }
+   }
     return 0;
 }
