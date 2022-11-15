@@ -255,12 +255,11 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
     // current consumed value; rather than load the old consumed
     // value at the point of production and incur a potential cache
     // miss penalty, just load it here.
-    Value * const current = b->CreateLoad(ptr);
+    Value * const prior = b->CreateLoad(ptr);
     Value * const skipped = b->CreateIsNull(consumed);
-    consumed = b->CreateSelect(skipped, current, consumed);
+    consumed = b->CreateSelect(skipped, prior, consumed);
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
-        Value * const prior = b->CreateLoad(ptr);
         const Binding & output = outputPort.Binding;
         // TODO: cross reference which slot the traced count is for?
 
@@ -289,19 +288,18 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId) {
     ConstantInt * const sz_ZERO = b->getSize(0);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        if (out_degree(streamSet, mConsumerGraph) < 2) {
-            continue;
-        }
-        size_t maxConsumerInJumpRange = 0U;
-        for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-            const auto consumer = target(e, mConsumerGraph);
-            if (consumer >= mKernelId && consumer <= targetKernelId) {
-                maxConsumerInJumpRange = std::max<size_t>(maxConsumerInJumpRange, consumer);
+        if (out_degree(streamSet, mConsumerGraph) != 0) {
+            size_t maxConsumerInJumpRange = 0U;
+            for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+                const auto consumer = target(e, mConsumerGraph);
+                if (consumer >= mKernelId) { // && consumer <= targetKernelId
+                    maxConsumerInJumpRange = 1; // std::max<size_t>(maxConsumerInJumpRange, consumer);
+                }
             }
-        }
-        if (maxConsumerInJumpRange > 0) { // && (consumerFlags & ConsumerEdge::WriteConsumedCount) == 0
-            Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-            b->CreateStore(sz_ZERO, transConsumedPtr);
+            if (maxConsumerInJumpRange > 0) { // && (consumerFlags & ConsumerEdge::WriteConsumedCount) == 0
+                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+                b->CreateStore(sz_ZERO, transConsumedPtr);
+            }
         }
     }
 }

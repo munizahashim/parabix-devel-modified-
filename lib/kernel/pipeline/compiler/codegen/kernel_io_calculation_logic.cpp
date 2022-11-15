@@ -1426,36 +1426,6 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
-
-
-
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-
-        const auto streamSet = getInputBufferVertex(mKernelId, ref);
-        const auto & bn = mBufferGraph[streamSet];
-
-        if (bn.Locality == BufferLocality::ThreadLocal) {
-            Value * const endOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(bn.BufferEnd));
-            Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, endOffset);
-
-            DataLayout dl(b->getModule());
-            IntegerType * const intTy = dl.getIntPtrType(b->getContext());
-
-            Value * const intPtr = b->CreatePtrToInt(currentPtr, intTy);
-            Value * const endPtr = b->CreatePtrToInt(baseAddress, intTy);
-
-             const Binding & binding = partialSumPort.Binding;
-
-            b->CreateAssert(b->CreateICmpULE(intPtr, endPtr),
-                            "%s.%s: partial sum ptr exceeds buffer end"
-                            " (%" PRIu64 " vs. %" PRIu64 ")",
-                            mCurrentKernelName,
-                            b->GetString(binding.getName()),
-                            intPtr, endPtr);
-        }
-
-
-    }
     Value * current = b->CreateLoad(currentPtr);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -1679,7 +1649,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
-        const auto maxStepFactor = round_up_to(mPartialSumStepFactorGraph[e], stepsPerBlock);
+        const auto maxStepFactor = mPartialSumStepFactorGraph[e];
         assert (maxStepFactor >= stepsPerBlock);
         const auto spanLength = (fw * maxStepFactor) / bw;
         assert (spanLength > 0);

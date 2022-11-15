@@ -174,6 +174,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                         }
                     } else {
                         hasInputRateChange = true;
+                        V.reset();
                     }
                 }
             }

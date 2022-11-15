@@ -59,20 +59,19 @@ public:
         P.identifyZeroExtendedStreamSets();
 
         P.determineBufferSize(b);
-        P.determineBufferLayout(b, rng);
 
         P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
 
-        P.calculatePartialSumStepFactors();
+        P.calculatePartialSumStepFactors(b);
 
         P.makeTerminationPropagationGraph();
 
         P.determineNumOfThreads();
 
         // Finish the buffer graph
-        // P.identifyDirectUpdatesToStateObjects();
+        P.determineBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
 
         P.gatherInfo();
@@ -202,7 +201,7 @@ private:
 
     void identifyInterPartitionSymbolicRates();
 
-    void calculatePartialSumStepFactors();
+    void calculatePartialSumStepFactors(BuilderRef b);
 
     void determineNumOfThreads();
 

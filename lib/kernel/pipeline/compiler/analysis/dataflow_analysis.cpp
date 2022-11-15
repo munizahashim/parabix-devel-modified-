@@ -298,7 +298,7 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief calculatePartialSumStepFactors
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::calculatePartialSumStepFactors() {
+void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
 
     PartialSumStepFactorGraph G(LastStreamSet + 1);
 
@@ -329,17 +329,24 @@ void PipelineAnalysis::calculatePartialSumStepFactors() {
             checkForPopCountRef(output);
         }
 
+        const auto bw = b->getBitBlockWidth();
+        const auto fw = b->getSizeTy()->getIntegerBitWidth();
+        assert ((bw % fw) == 0 && bw > fw);
+        const auto stepsPerBlock = bw / fw;
+
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             if (out_degree(streamSet, G) != 0) {
-                unsigned maxStepFactor = 0;
+                unsigned maxStepFactor = 0U;
                 for (const auto e : make_iterator_range(out_edges(streamSet, G))) {
                     maxStepFactor = std::max(maxStepFactor, G[e]);
                 }
                 assert (maxStepFactor > 0);
-               // if (maxStepFactor > 1) {
-                    add_edge(kernel, streamSet, maxStepFactor, G);
-               // }
+                maxStepFactor = round_up_to(maxStepFactor + 1U, stepsPerBlock);
+                add_edge(kernel, streamSet, maxStepFactor, G);
+                const auto spanLength = (fw * maxStepFactor) / bw;
+                BufferNode & bn = mBufferGraph[streamSet];
+                bn.OverflowCapacity = std::max(bn.OverflowCapacity, spanLength - 1U);
             }
         }
     }

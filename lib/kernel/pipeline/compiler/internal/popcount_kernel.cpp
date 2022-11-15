@@ -272,7 +272,7 @@ void PopCountKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const n
 PopCountKernel::PopCountKernel(BuilderRef b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output)
 : MultiBlockKernel(b, TypeId::PopCountKernel, "PopCount" + std::string{type == PopCountType::POSITIVE ? "P" : "N"} + std::to_string(stepFactor)
 // input streams
-,{Binding{INPUT, input, FixedRate(stepFactor), Add1() }}
+,{Binding{INPUT, input, FixedRate(stepFactor) }}
 // output stream
 ,{Binding{OUTPUT_STREAM, output, FixedRate() LOOK_BEHIND_ATTR }}
 // unnused I/O scalars
