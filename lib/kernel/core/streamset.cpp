@@ -1546,11 +1546,6 @@ StaticBuffer::StaticBuffer(const unsigned id, BuilderPtr b, Type * const type,
                            const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::StaticBuffer, b, type, overflowSize, underflowSize, linear, AddressSpace)
 , mCapacity(capacity) {
-    #ifndef NDEBUG
-    assert ("static buffer cannot have 0 capacity" && capacity);
-    assert ("static buffer capacity must be at least twice its max(underflow, overflow)"
-            && (capacity >= (std::max(underflowSize, overflowSize) * 2)));
-    #endif
 }
 
 DynamicBuffer::DynamicBuffer(const unsigned id, BuilderPtr b, Type * const type,
@@ -1558,11 +1553,6 @@ DynamicBuffer::DynamicBuffer(const unsigned id, BuilderPtr b, Type * const type,
                              const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::DynamicBuffer, b, type, overflowSize, underflowSize, linear, AddressSpace)
 , mInitialCapacity(initialCapacity) {
-    #ifndef NDEBUG
-    assert ("dynamic buffer cannot have 0 initial capacity" && initialCapacity);
-    assert ("dynamic buffer initial capacity must be at least twice its max(underflow, overflow)"
-            && (initialCapacity >= (std::max(underflowSize, overflowSize) * 2)));
-    #endif
 }
 
 MMapedBuffer::MMapedBuffer(const unsigned id, BuilderPtr b, Type * const type,
@@ -1570,11 +1560,7 @@ MMapedBuffer::MMapedBuffer(const unsigned id, BuilderPtr b, Type * const type,
                              const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::MMapedBuffer, b, type, overflowSize, underflowSize, linear, AddressSpace)
 , mInitialCapacity(initialCapacity) {
-    #ifndef NDEBUG
-    assert ("dynamic buffer cannot have 0 initial capacity" && initialCapacity);
-    assert ("dynamic buffer initial capacity must be at least twice its max(underflow, overflow)"
-            && (initialCapacity >= (std::max(underflowSize, overflowSize) * 2)));
-    #endif
+
 }
 
 RepeatingBuffer::RepeatingBuffer(const unsigned id, BuilderPtr b, Type * const type)

@@ -1645,26 +1645,25 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         const BufferPort & outputPort = mBufferGraph[output];
         Value * const produced = mProducedAtTermination[outputPort.Port];
 
+        const BufferNode & bn = mBufferGraph[streamSet];
+
         const auto bw = b->getBitBlockWidth();
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
         const auto maxStepFactor = mPartialSumStepFactorGraph[e];
-        assert (maxStepFactor >= stepsPerBlock);
-        const auto spanLength = (fw * maxStepFactor) / bw;
+        const auto spanLength = bn.OverflowCapacity;
         assert (spanLength > 0);
 
-        const auto prefix = makeBufferName(mKernelId, outputPort.Port);
+        // const auto prefix = makeBufferName(mKernelId, outputPort.Port);
 
         ConstantInt * const sz_stepsPerBlock = b->getSize(stepsPerBlock);
         ConstantInt * const sz_ONE = b->getSize(1);
-
         Value * const index = b->CreateSaturatingSub(produced, sz_ONE);
 
         ConstantInt * const sz_maxStepFactor = b->getSize(maxStepFactor);
 
         Value * const start = b->CreateRoundDown(index, sz_maxStepFactor);
-
         StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
 
         VectorType * const vecTy = b->fwVectorType(fw);
@@ -1679,48 +1678,17 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
         Value * const baseValue = b->CreateBlockAlignedLoad(vecAddr);
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
-
         Value * const total = b->CreateExtractElement(baseValue, offset);
 
         Value * const splat = b->simd_fill(fw, total);
         Value * const mask = b->mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b->CreateAnd(splat, mask);
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
-
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
 
-        if (spanLength > 1) {
-            VectorType * const bbTy = b->getBitBlockType();
-            PointerType * const bbPtrTy = bbTy->getPointerTo();
-
-            const auto prefix = makeBufferName(mKernelId, outputPort.Port);
-            BasicBlock * const splatLoopEntry = b->GetInsertBlock();
-            BasicBlock * const nextNode = splatLoopEntry->getNextNode();
-            BasicBlock * const splatLoopBody = b->CreateBasicBlock(prefix + "_popCountSplatLoop", nextNode);
-            BasicBlock * const splatLoopExit = b->CreateBasicBlock(prefix + "_popCountSplatExit", nextNode);
-
-            ConstantInt * const sz_spanLength = b->getSize(spanLength);
-
-            Value * const bbAddr = b->CreatePointerCast(addr, bbPtrTy);
-
-            Value * const start = b->CreateURem(index, sz_maxStepFactor);
-            Value * const initial = b->CreateCeilUDiv(start, sz_stepsPerBlock);
-            Value * const bitblockSplat = b->bitCast(splat);
-            Value * const cond = b->CreateICmpULT(initial, sz_spanLength);
-            b->CreateCondBr(cond, splatLoopBody, splatLoopExit);
-
-            b->SetInsertPoint(splatLoopBody);
-            PHINode * const indexPhi = b->CreatePHI(b->getSizeTy(), 2);
-            indexPhi->addIncoming(initial, splatLoopEntry);
-            Value * const ptr = b->CreateGEP(bbAddr, indexPhi);
-
-            b->CreateBlockAlignedStore(bitblockSplat, ptr);
-            Value * const nextIndex = b->CreateAdd(indexPhi, sz_ONE);
-            indexPhi->addIncoming(nextIndex, splatLoopBody);
-            Value * const nextCond = b->CreateICmpNE(nextIndex, sz_spanLength);
-            b->CreateCondBr(nextCond, splatLoopBody, splatLoopExit);
-
-            b->SetInsertPoint(splatLoopExit);
+        for (unsigned index = 1; index <= spanLength; ++index) {
+            Value * const ptr = b->CreateGEP(vecAddr, b->getSize(index));
+            b->CreateBlockAlignedStore(splat, ptr);
         }
 
         mProducedAtTermination[outputPort.Port] = b->CreateRoundUp(produced, sz_maxStepFactor);
