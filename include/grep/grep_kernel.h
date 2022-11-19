@@ -67,7 +67,7 @@ public:
         U21, PreDefined, CC_External, RE_External, StartAnchored,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
         WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
-        FilterByMask, FixedSpan
+        FilterByMask, FixedSpan, MarkedSpanExternal
     };
     inline Kind getKind() const {
         return mKind;
@@ -331,6 +331,27 @@ private:
     unsigned mOffset;
 };
 
+class MarkedSpanExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::MarkedSpanExternal;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    std::vector<std::string> getParameters() override;
+    MarkedSpanExternal(std::string prefixMarks, unsigned prefixLgth, std::string matchEnds, unsigned offset) :
+        ExternalStreamObject(Kind::FixedSpan),
+        mPrefixMarks(prefixMarks), mPrefixLength(prefixLgth),
+        mMatchMarks(matchEnds), mOffset(offset) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    std::string mPrefixMarks;
+    unsigned mPrefixLength;
+    std::string mMatchMarks;
+    unsigned mOffset;
+};
+
 class UTF8_index : public pablo::PabloKernel {
 public:
     UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index);
@@ -488,7 +509,11 @@ void GraphemeClusterLogic(ProgBuilderRef P,
 void WordBoundaryLogic(ProgBuilderRef P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream);
 
-//  Find longest-match spans in start-end space.   Each 0 bit in start-end space
+//  The LongestMatchMarks kernel computes longest-match spans in start-end space.
+//  Logically, the input is a set of 2 streams marking, respectively, matches
+//  of a necessary prefix of the RE, and matches to the full RE.   However,
+//  a single combined stream may be provided as the start-end stream when these
+//  two cases do not intersect.   In this case,each 0 bit in start-end space
 //  marks the occurrence of a necessary prefix of the RE, while each 1 bit marks
 //  an actual match end for the full RE.  The results produced are (a) the start
 //  position immediately preceding a full match, and (b) the longest full match
@@ -497,7 +522,6 @@ void WordBoundaryLogic(ProgBuilderRef P,
 //  start-end stream:  00111110001100101000100
 //  (a) starts:        .1.......1...1.1...1...
 //  (b) longest end:   ......1....1..1.1...1..
-//  The input in a singleton streamset for the start-end marks.
 //  The output is a set of two streams for the start and longest end marks, respectively.
 
 class LongestMatchMarks final : public pablo::PabloKernel {
@@ -507,26 +531,25 @@ protected:
     void generatePabloMethod() override;
 };
 
-//  Compute match spans given a pair of streams marking a fixed prefix position
-//  of the match, as well as the final position of the match.   The prefix
-//  may be at an offset from the actual start position of the match.
+//  Compute match spans given a set of two streams marking a fixed prefix position
+//  of the match, as well as the final position of the match.   The prefix may
+//  be at an offset from the actual start position of the match, while the suffix
+//  may be at an offset from the last matched position.
 //  For example, the pair of input streams:
 //  prefix:  ...1......1.......1.....
 //  final:   .....1.....1......1.....
-//  the spans computed with a start offset of 2 are:
+//  the spans computed with a prefix offset of 2 and suffix offset of 0 are:
 //  spans    .11111..1111....111.....
 //
 class InclusiveSpans final : public pablo::PabloKernel {
 public:
-    InclusiveSpans(BuilderRef b, StreamSet * marks, StreamSet * spans, unsigned start_offset);
+    InclusiveSpans(BuilderRef b, unsigned prefixOffset, unsigned suffixOffset,
+                   StreamSet * marks, StreamSet * spans);
 protected:
     void generatePabloMethod() override;
 private:
-    unsigned mOffset;
+    unsigned mPrefixOffset;
+    unsigned mSuffixOffset;
 };
-
-void PrefixSuffixSpan(ProgBuilderRef P,
-                      StreamSet * Prefix, StreamSet * Suffix, StreamSet * Spans, unsigned offset = 0);
-
 }
 #endif

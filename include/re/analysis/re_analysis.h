@@ -11,6 +11,8 @@ bool isUnicodeUnitLength(const RE * re);
 
 std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexingAlphabet);
 
+std::pair<RE *, RE *> ExtractFixedLengthPrefix(RE * r, const cc::Alphabet * a);
+
 bool isFixedLength(const RE * re);
 
 int minMatchLength(const RE * re);

@@ -155,6 +155,47 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
     return std::make_pair(0, INT_MAX);
 }
 
+std::pair<RE *, RE *> ExtractFixedLengthPrefix(RE * r, const cc::Alphabet * a) {
+    auto range = getLengthRange(r, a);
+    if (range.first == range.second) {
+        return std::make_pair(r, makeSeq());
+    }
+    if (Seq * seq = dyn_cast<Seq>(r)) {
+        std::vector<RE *> fixedElems;
+        std::vector<RE *> suffixElems;
+        bool fixedSoFar = true;
+        for (RE * e : *seq) {
+            auto erange = getLengthRange(e, a);
+            fixedSoFar &= erange.first == erange.second;
+            if (fixedSoFar) {
+                fixedElems.push_back(e);
+            } else {
+                suffixElems.push_back(e);
+            }
+        }
+        return std::make_pair(makeSeq(fixedElems.begin(), fixedElems.end()),
+                              makeSeq(suffixElems.begin(), suffixElems.end()));
+    } else if (Rep * rep = dyn_cast<Rep>(r)) {
+        RE * e = rep->getRE();
+        auto lb = rep->getLB();
+        auto ub = rep->getUB();
+        if (lb == 0) {
+            return std::make_pair(makeSeq(), rep);
+        }
+        auto erange = getLengthRange(e, a);
+        if (erange.first != erange.second) {
+            RE * prefix, * suffix;
+            std::tie(prefix, suffix) = ExtractFixedLengthPrefix(rep, a);
+            auto newUB = (ub == Rep::UNBOUNDED_REP) ? ub : ub - 1;
+            return std::make_pair(prefix, makeSeq({suffix, makeRep(e, lb - 1, newUB)}));
+        }
+        auto newUB = (ub == Rep::UNBOUNDED_REP) ? ub : ub - lb;
+        return std::make_pair(makeRep(e, lb, lb), makeRep(e, 0, newUB));
+    }
+    // In all other cases, rule that there is no fixed prefix to extract.
+    return std::make_pair(makeSeq(), r);
+}
+
 bool isFixedLength(const RE * re) {
     if (isa<Alt>(re)) {
         auto range = getLengthRange(re, &cc::Unicode);

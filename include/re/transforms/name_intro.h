@@ -44,6 +44,15 @@ private:
     std::string mLgthPrefix;
 };
 
+class FixedPrefixNamer final : public NameIntroduction {
+public:
+    FixedPrefixNamer(const cc::Alphabet * a);
+protected:
+    RE * transform (RE * r) override;
+private:
+    const cc::Alphabet * mAlphabet;
+};
+
 class StartAnchoredAltNamer final : public NameIntroduction {
 public:
     StartAnchoredAltNamer();

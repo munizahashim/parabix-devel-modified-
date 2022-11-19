@@ -348,6 +348,26 @@ void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet
     installStreamSet(spans);
 }
 
+std::vector<std::string> MarkedSpanExternal::getParameters() {
+    return std::vector<std::string>{mPrefixMarks, mMatchMarks};
+}
+
+void MarkedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+    //StreamSet * prefixMarks = inputs[0];
+    StreamSet * suffixMarks = inputs[1];
+    StreamSet * mask = P->CreateStreamSet(1);
+    P->CreateKernelCall<StreamsMerge>(inputs, mask);
+    StreamSet * filteredSuffix = P->CreateStreamSet(1);
+    FilterByMask(P, mask, suffixMarks, filteredSuffix);
+    StreamSet * filteredSpanMarks = P->CreateStreamSet(2);
+    P->CreateKernelCall<LongestMatchMarks>(filteredSuffix, filteredSpanMarks);
+    StreamSet * spanMarks = P->CreateStreamSet(2);
+    SpreadByMask(P, mask, filteredSpanMarks, spanMarks);
+    StreamSet * spans = P->CreateStreamSet(1);
+    P->CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
+    installStreamSet(spans);
+}
+
 void UTF8_index::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<cc::CC_Compiler> ccc;
@@ -936,51 +956,55 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
 }
 
 LongestMatchMarks::LongestMatchMarks(BuilderRef b, StreamSet * start_ends, StreamSet * marks)
-: PabloKernel(b, "LongestMatchMarks",
+: PabloKernel(b, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
               {Binding{"start_ends", start_ends, FixedRate(1), LookAhead(1)}},
               {Binding{"marks", marks}}) {}
 
 void LongestMatchMarks::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * starts_ends = pb.createExtract(getInputStreamVar("start_ends"), pb.getInteger(0));
-    PabloAST * end_follow = pb.createLookahead(starts_ends, 1);
-    PabloAST * span_starts = pb.createAnd(pb.createNot(starts_ends), end_follow, "span_starts");
-    PabloAST * span_ends = pb.createAnd(starts_ends, end_follow, "span_ends");
+    std::vector<PabloAST *> starts_ends = getInputStreamSet("start_ends");
+    PabloAST * starts;
+    PabloAST * ends;
+    if (starts_ends.size() == 2) {
+        starts = starts_ends[0];
+        ends = starts_ends[1];
+    } else {
+        starts = pb.createNot(starts_ends[0]);
+        ends = starts_ends[0];
+    }
+    PabloAST * end_follows = pb.createLookahead(ends, 1);
+    PabloAST * span_starts = pb.createAnd(starts, end_follows, "span_starts");
+    PabloAST * span_ends = pb.createAnd(ends, pb.createNot(end_follows), "span_ends");
     Var * marksVar = getOutputStreamVar("marks");
     pb.createAssign(pb.createExtract(marksVar, pb.getInteger(0)), span_starts);
     pb.createAssign(pb.createExtract(marksVar, pb.getInteger(1)), span_ends);
 }
 
-InclusiveSpans::InclusiveSpans(BuilderRef b, StreamSet * marks, StreamSet * spans, unsigned start_offset = 0)
-: PabloKernel(b, "InclusiveSpans@" + std::to_string(start_offset),
-              {Binding{"marks", marks, FixedRate(1), LookAhead(round_up_to_blocksize(start_offset))}},
+unsigned spanLookAhead(unsigned offset1, unsigned offset2) {
+    return round_up_to_blocksize(std::max(offset1, offset2));
+}
+
+InclusiveSpans::InclusiveSpans(BuilderRef b,
+                               unsigned prefixOffset, unsigned suffixOffset,
+                               StreamSet * marks, StreamSet * spans)
+: PabloKernel(b, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
+              {Binding{"marks", marks, FixedRate(1),
+                                       LookAhead(spanLookAhead(prefixOffset, suffixOffset))}},
               {Binding{"spans", spans}}),
-    mOffset(start_offset) {
+    mPrefixOffset(prefixOffset), mSuffixOffset(suffixOffset) {
 }
 
 void InclusiveSpans::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     Var * marksVar = getInputStreamVar("marks");
     PabloAST * starts = pb.createExtract(marksVar, pb.getInteger(0));
-    if (mOffset > 0) {
-        starts = pb.createLookahead(starts, mOffset);
+    if (mPrefixOffset > 0) {
+        starts = pb.createLookahead(starts, mPrefixOffset);
     }
     PabloAST * ends = pb.createExtract(marksVar, pb.getInteger(1));
+    if (mSuffixOffset > 0) {
+        ends = pb.createLookahead(ends, mSuffixOffset);
+    }
     PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {starts, ends});
     pb.createAssign(pb.createExtract(getOutputStreamVar("spans"), pb.getInteger(0)), spans);
 }
-
-void kernel::PrefixSuffixSpan(ProgBuilderRef P,
-                      StreamSet * Prefix, StreamSet * Suffix, StreamSet * Spans, unsigned offset) {
-    std::vector<StreamSet *> marks = {Prefix, Suffix};
-    StreamSet * mask = P->CreateStreamSet();
-    P->CreateKernelCall<StreamsMerge>(marks, mask);
-    StreamSet * filteredSuffix = P->CreateStreamSet();
-    FilterByMask(P, mask, Suffix, filteredSuffix);
-    StreamSet * matchMarks = P->CreateStreamSet(2);
-    P->CreateKernelCall<LongestMatchMarks>(filteredSuffix, matchMarks);
-    StreamSet * spanMarks = P->CreateStreamSet(2);
-    SpreadByMask(P, mask, matchMarks, spanMarks);
-    P->CreateKernelCall<InclusiveSpans>(spanMarks, Spans, offset);
-}
-
