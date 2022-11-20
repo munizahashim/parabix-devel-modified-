@@ -319,7 +319,8 @@ void GrepEngine::initRE(re::RE * re) {
     // For length 0 regular expressions (e.g. a zero-width assertion like $)
     // there will be no match spans to color.
     if (lgth_range.second == 0) mColoring = false;
-    if ((mLengthAlphabet == &cc::Unicode) && mColoring) UnicodeIndexing = true;
+    //if ((mLengthAlphabet = &cc::Unicode) && mColoring) UnicodeIndexing = true;
+    if (mColoring) UnicodeIndexing = true;
     if (UnicodeIndexing) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
@@ -397,9 +398,9 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (mColoring) {
+        auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
         re::FixedSpanNamer FLnamer(mIndexAlphabet);
         mRE = FLnamer.transformRE(mRE);
-        auto indexing = mExternalTable.getStreamIndex(mLengthAlphabet->getCode());
         for (auto m : FLnamer.mNameMap) {
             auto r = new RE_External(this, m.second, mIndexAlphabet);
             auto lgth = r->getLengthRange().first;
@@ -411,14 +412,24 @@ void GrepEngine::initRE(re::RE * re) {
                 mSpanNames.push_back(spanName);
             }
         }
+        re::UniquePrefixNamer UPnamer;
+        mRE = UPnamer.transformRE(mRE);
+        for (auto m : UPnamer.mNameMap) {
+            std::string nameStr = m.first;
+            re::RE * namedRE = m.second;
+            re::Name * prefixName = cast<re::Name>(cast<re::Seq>(namedRE)->front());
+            std::string prefixStr = prefixName->getFullName();
+            auto pfxExternal = new RE_External(this, prefixName->getDefinition(), mIndexAlphabet);
+            mExternalTable.declareExternal(indexing, prefixStr, pfxExternal);
+            auto fullExt = new RE_External(this, namedRE, mIndexAlphabet);
+            mExternalTable.declareExternal(indexing, nameStr, fullExt);
+            auto prefixLgth = pfxExternal->getLengthRange().first + pfxExternal->getOffset();
+            auto offset = fullExt->getOffset();
+            auto spanName = nameStr + "Span";
+            mExternalTable.declareExternal(indexing, spanName, new MarkedSpanExternal(prefixStr, prefixLgth, nameStr, offset));
+            mSpanNames.push_back(spanName);
+        }
     }
-/*
-    re::StartAnchoredAltNamer SAnamer;
-    mRE = SAnamer.transformRE(mRE);
-    for (auto m : SAnamer.mNameMap) {
-        mExternalTable.declareExternal(Unicode, m.first, new StartAnchoredExternal(this, m.second, mIndexAlphabet));
-    }
-*/
     if (mLengthAlphabet == &cc::Unicode) {
         setComponent(mExternalComponents, Component::S2P);
         setComponent(mExternalComponents, Component::UTF8index);

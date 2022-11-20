@@ -11,7 +11,11 @@ bool isUnicodeUnitLength(const RE * re);
 
 std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexingAlphabet);
 
-std::pair<RE *, RE *> ExtractFixedLengthPrefix(RE * r, const cc::Alphabet * a);
+// Attempt to parse a regular expression into a prefix-suffix pair
+// such that any match to the prefix cannot be matched at any
+// other position within the RE.   If no such parse is found,
+// return a pair consisting of the empty Sequence and the original RE.
+std::pair<RE *, RE *> ParseUniquePrefix(RE * r);
 
 bool isFixedLength(const RE * re);
 

@@ -6,6 +6,7 @@
 #include <re/adt/adt.h>
 #include <re/printer/re_printer.h>
 #include <re/alphabet/multiplex_CCs.h>
+#include <re/analysis/cc_sequence_search.h>
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
@@ -155,44 +156,64 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
     return std::make_pair(0, INT_MAX);
 }
 
-std::pair<RE *, RE *> ExtractFixedLengthPrefix(RE * r, const cc::Alphabet * a) {
-    auto range = getLengthRange(r, a);
-    if (range.first == range.second) {
-        return std::make_pair(r, makeSeq());
+CC * resolveToCC(RE * r) {
+    if (r == nullptr) return nullptr;
+    if (CC * cc = dyn_cast<CC>(r)) {
+        return cc;
+    } else if (PropertyExpression * pe = dyn_cast<PropertyExpression>(r)) {
+        return resolveToCC(pe->getResolvedRE());
+    } else if (Name * n = dyn_cast<Name>(r)) {
+        return resolveToCC(n->getDefinition());
+    } else if (Capture * c = dyn_cast<Capture>(r)) {
+        return resolveToCC(c->getCapturedRE());
+    } else if (Reference * ref = dyn_cast<Reference>(r)) {
+        return resolveToCC(ref->getCapture());
     }
+    return nullptr;
+}
+
+std::pair<RE *, RE *> ParseUniquePrefix(RE * r) {
     if (Seq * seq = dyn_cast<Seq>(r)) {
-        std::vector<RE *> fixedElems;
-        std::vector<RE *> suffixElems;
-        bool fixedSoFar = true;
-        for (RE * e : *seq) {
-            auto erange = getLengthRange(e, a);
-            fixedSoFar &= erange.first == erange.second;
-            if (fixedSoFar) {
-                fixedElems.push_back(e);
-            } else {
-                suffixElems.push_back(e);
+        if (seq->size() < 2) {
+            // No parse possible.
+            return std::make_pair(makeSeq(), r);
+        }
+        // For ambiguity testing, we need to know if an initial
+        // CC sequence can be matched other than at the beginning
+        // of the RE, i.e., by any suffix.
+        RE * suffix1 = makeSeq(seq->begin()+1, seq->end());
+        // A start symbol (^) is always an unambiguous prefix.
+        if (isa<Start>(seq->front())) {
+            return std::make_pair(seq->front(), suffix1);
+        }
+        unsigned i = 0;
+        std::vector<RE *> prefixElems;
+        std::vector<CC *> prefixCCs;
+        while (i < seq->size() - 1) {
+            RE * item = (*seq)[i];
+            CC * cc1 = resolveToCC(item);
+            if (cc1 != nullptr) {
+                prefixCCs.push_back(cc1);
+                if (!CC_Sequence_Search(prefixCCs, suffix1)) {
+                    // Unambiguous prefix found!
+                    return std::make_pair(makeSeq(seq->begin(), seq->begin()+i),
+                                          makeSeq(seq->begin()+i+1, seq->end()));
+                }
             }
+            //  We don't have an expression resolving to a CC.
+            //  But if we have a zerowidth item, we can simply
+            //  skip it and continue to look for a CC sequence.
+            if (isa<Assertion>(item)) {
+                continue;
+            } else if (PropertyExpression * pe = dyn_cast<PropertyExpression>(item)) {
+                if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+                    continue;
+                }
+            }
+            //  Otherwise we report that a unique CC sequence prefix cannot be found.
+            return std::make_pair(makeSeq(), r);
         }
-        return std::make_pair(makeSeq(fixedElems.begin(), fixedElems.end()),
-                              makeSeq(suffixElems.begin(), suffixElems.end()));
-    } else if (Rep * rep = dyn_cast<Rep>(r)) {
-        RE * e = rep->getRE();
-        auto lb = rep->getLB();
-        auto ub = rep->getUB();
-        if (lb == 0) {
-            return std::make_pair(makeSeq(), rep);
-        }
-        auto erange = getLengthRange(e, a);
-        if (erange.first != erange.second) {
-            RE * prefix, * suffix;
-            std::tie(prefix, suffix) = ExtractFixedLengthPrefix(rep, a);
-            auto newUB = (ub == Rep::UNBOUNDED_REP) ? ub : ub - 1;
-            return std::make_pair(prefix, makeSeq({suffix, makeRep(e, lb - 1, newUB)}));
-        }
-        auto newUB = (ub == Rep::UNBOUNDED_REP) ? ub : ub - lb;
-        return std::make_pair(makeRep(e, lb, lb), makeRep(e, 0, newUB));
     }
-    // In all other cases, rule that there is no fixed prefix to extract.
     return std::make_pair(makeSeq(), r);
 }
 
