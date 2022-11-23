@@ -190,7 +190,6 @@ protected:
     const cc::Alphabet * mLengthAlphabet;
     kernel::ExternalStreamTable mExternalTable;
     kernel::StreamSet * mLineBreakStream;
-    kernel::StreamSet * mLineStarts;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
     std::vector<std::string> mSpanNames;

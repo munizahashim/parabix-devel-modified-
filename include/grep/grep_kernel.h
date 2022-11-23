@@ -64,7 +64,7 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        U21, PreDefined, CC_External, RE_External, StartAnchored,
+        U21, PreDefined, LineStarts, CC_External, RE_External, StartAnchored,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
         WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan, MarkedSpanExternal
@@ -105,6 +105,22 @@ public:
     PreDefined(StreamSet * predefined) :
         ExternalStreamObject(Kind::PreDefined) {mStreamSet = predefined;}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override {}
+};
+
+class LineStartsExternal : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::LineStarts;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
+    int getOffset() override {return 1;}
+    std::vector<std::string> getParameters() override {return {"UTF8_LB"};}
+    LineStartsExternal() :
+        ExternalStreamObject(Kind::LineStarts) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 };
 
 class U21_External : public ExternalStreamObject {

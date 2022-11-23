@@ -142,7 +142,6 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mInternalComponents(static_cast<Component>(0)),
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
-    mLineStarts(nullptr),
     mU8index(nullptr),
     mEngineThread(pthread_self()),
     mIllustrator(nullptr) {
@@ -157,7 +156,6 @@ GrepEngine::~GrepEngine() { }
 QuietModeEngine::QuietModeEngine(BaseDriver &driver) : GrepEngine(driver) {
     mEngineKind = EngineKind::QuietMode;
     mMaxCount = 1;
-    mColoring = false;
 }
 
 MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, bool useNullSeparators) :
@@ -166,13 +164,11 @@ MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, b
     mFileSuffix = useNullSeparators ? std::string("\0", 1) : "\n";
     mMaxCount = 1;
     mShowFileNames = true;
-    mColoring = false;
 }
 
 CountOnlyEngine::CountOnlyEngine(BaseDriver &driver) : GrepEngine(driver) {
     mEngineKind = EngineKind::CountOnly;
     mFileSuffix = ":";
-    mColoring = false;
 }
 
 EmitMatchesEngine::EmitMatchesEngine(BaseDriver &driver)
@@ -256,6 +252,9 @@ bool GrepEngine::matchesToEOLrequired () {
 }
 
 void GrepEngine::initRE(re::RE * re) {
+    if ((mEngineKind != EngineKind::EmitMatches) || mInvertMatches) {
+        mColoring = false;
+    }
     mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
 
     mLengthAlphabet = &cc::UTF8;
@@ -320,7 +319,11 @@ void GrepEngine::initRE(re::RE * re) {
     // there will be no match spans to color.
     if (lgth_range.second == 0) mColoring = false;
     //if ((mLengthAlphabet = &cc::Unicode) && mColoring) UnicodeIndexing = true;
-    if (mColoring) UnicodeIndexing = true;
+    if (mColoring) {
+        //mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}, u8_u21));
+        mExternalTable.declareExternal(u8, "LineStarts", new LineStartsExternal());
+        UnicodeIndexing = true;
+    }
     if (UnicodeIndexing) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
@@ -499,11 +502,10 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
+        auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
+        auto u8_LB = new PreDefined(mLineBreakStream);
+        mExternalTable.declareExternal(u8, "UTF8_LB", u8_LB);
         if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
-    }
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        mLineStarts = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<LineStartsKernel>(mLineBreakStream, mLineStarts);
     }
 }
 
@@ -1001,9 +1003,11 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         batchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
         batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
 
-        if (mIllustrator) mIllustrator->captureBitstream(E, "LineStarts", mLineStarts);
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
-        SpreadByMask(E, mLineStarts, MatchesByLine, MatchedLineStarts);
+        auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
+        StreamSet * lineStarts = mExternalTable.getStreamSet(E, u8, "LineStarts");
+        SpreadByMask(E, lineStarts, MatchesByLine, MatchedLineStarts);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchedLineStarts", MatchedLineStarts);
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);

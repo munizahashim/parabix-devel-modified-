@@ -203,6 +203,13 @@ void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;
 }
 
+void LineStartsExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+    StreamSet * linebreaks = inputs[0];
+    StreamSet * linestarts  = b->CreateStreamSet(1);
+    b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
+    installStreamSet(linestarts);
+}
+
 void U21_External::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
     StreamSet * U21 = P->CreateStreamSet(21, 1);
     P->CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
