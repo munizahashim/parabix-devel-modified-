@@ -203,7 +203,6 @@ void PabloKernel::generateFinalBlockMethod(BuilderRef b, Value * const remaining
 void PabloKernel::generateFinalizeMethod(BuilderRef b) {
     mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
     mPabloCompiler->releaseKernelData(b);
-
     if (CompileOptionIsSet(PabloCompilationFlags::EnableProfiling)) {
 
         SmallVector<char, 256> tmp;

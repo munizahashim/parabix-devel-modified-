@@ -412,7 +412,7 @@ enum TerminationCheckFlag : unsigned {
 
 using TerminationChecks = std::vector<unsigned>;
 
-using TerminationPropagationGraph = adjacency_list<vecS, vecS, bidirectionalS>;
+using TerminationPropagationGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, bool>;
 
 enum CountingType : unsigned {
     Unknown = 0

@@ -80,6 +80,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    assert (HasTerminationSignal[mKernelId] == (mIsPartitionRoot || mKernelCanTerminateEarly));
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
     mExecuteStridesIndividually =
@@ -123,7 +124,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         if (mHasExplicitFinalPartialStride || (checkInputChannels && hasAtLeastOneNonGreedyInput()) || checkOutputChannels) {
             mMayLoopToEntry = true;
         }
-        if (StrideStepLength[FirstKernelInPartition] > StrideStepLength[mKernelId]) {
+        if (StrideStepLength[mCurrentPartitionRoot] > StrideStepLength[mKernelId]) {
             mMayLoopToEntry = true;
         }
     }
@@ -153,12 +154,12 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     }
     mKernelInitiallyTerminated = nullptr;
     mKernelJumpToNextUsefulPartition = nullptr;
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         mKernelInitiallyTerminated = b->CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
         // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
         const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
         assert (jumpId > mCurrentPartitionId);
-        if (jumpId != (mCurrentPartitionId + 1) || KernelPartitionId[mKernelId + 1] == mCurrentPartitionId) {
+        if ((jumpId != (mCurrentPartitionId + 1) || KernelPartitionId[mKernelId + 1] == mCurrentPartitionId) && mIsPartitionRoot) {
             SmallVector<char, 256> tmp;
             raw_svector_ostream nm(tmp);
             nm << prefix << "_jumpFromPartition_" << mCurrentPartitionId
@@ -190,7 +191,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     detemineMaximumNumberOfStrides(b);
 
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
     } else {
         b->CreateBr(mKernelLoopEntry);
@@ -219,6 +220,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     b->SetInsertPoint(mKernelLoopEntry);
+    checkPropagatedTerminationSignals(b);
     determineNumOfLinearStrides(b);
     mIsFinalInvocation = mIsFinalInvocationPhi;
 
@@ -280,10 +282,12 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
-    informInputKernelsOfTermination(b);
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+        writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
+        propagateTerminationSignal(b);
+    }
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    writeTerminationSignal(b, mTerminatedSignalPhi);
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         assert (!mKernelCanTerminateEarly);
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
@@ -322,7 +326,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     /// KERNEL INITIALLY TERMINATED EXIT
     /// -------------------------------------------------------------------------------------
 
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeInitiallyTerminatedPartitionExit(b);
     }
 
@@ -341,7 +345,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     b->SetInsertPoint(mKernelExit);
     recordFinalProducedItemCounts(b);
     writeConsumedItemCounts(b);
-    setCurrentTerminationSignal(b, mTerminatedAtExitPhi);
+    mKernelTerminationSignal[mKernelId] = mTerminatedAtExitPhi;
     if (mIsPartitionRoot) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }
@@ -417,9 +421,22 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
 
     Value * terminationSignal = nullptr;
     if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-        terminationSignal = getTerminationSignal(b, TerminationSignal::None);
+        if (mIsPartitionRoot) {
+            terminationSignal = getTerminationSignal(b, TerminationSignal::None);
+        } else {
+            const auto root = getTerminationSignalIndex(mKernelId);
+            assert (KernelPartitionId[root] == mCurrentPartitionId);
+            terminationSignal = mKernelTerminationSignal[root];
+        }
     } else {
         terminationSignal = mIsFinalInvocationPhi; assert (terminationSignal);
+        if (!mIsPartitionRoot) {
+            const auto root = FirstKernelInPartition[mCurrentPartitionId];
+            assert (KernelPartitionId[root] == mCurrentPartitionId);
+            Value * const rootSignal = mKernelTerminationSignal[root];
+            Value * const isFinal = b->CreateIsNotNull(terminationSignal);
+            terminationSignal = b->CreateSelect(isFinal, terminationSignal, rootSignal);
+        }
     }
 
     BasicBlock * const exitBlock = b->GetInsertBlock();
@@ -432,13 +449,13 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     }
     assert (terminationSignal->getType() == mTerminatedSignalPhi->getType());
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
-
+    mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     if (mIsPartitionRoot) {
         assert (mUpdatedNumOfStrides);
         Value * const updatedNumOfStrides = b->CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(updatedNumOfStrides, exitBlock);
+        mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
     }
-
     Value * const isFinal = b->CreateIsNotNull(terminationSignal);
     if (mIsPartitionRoot) {
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
@@ -575,7 +592,11 @@ void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
     Type * const sizeTy = b->getSizeTy();
     const auto prefix = makeKernelName(mKernelId);
     mTerminatedSignalPhi = b->CreatePHI(sizeTy, 2, prefix + "_terminatedSignal");
-
+    PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_currentNumOfStridesAtTermination");
+    mCurrentNumOfStridesAtTerminationPhi = phi;
+    if (mIsPartitionRoot) {
+        mFinalPartialStrideFixedRateRemainderAtTerminationPhi = b->CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesAtTerminationPhi");
+    }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, outputPort);
@@ -583,6 +604,7 @@ void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
         mProducedAtTerminationPhi[outputPort] = phi;
         mProducedAtTermination[outputPort] = phi;
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -809,11 +831,11 @@ void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
     mTerminatedAtLoopExitPhi->addIncoming(mTerminatedSignalPhi, exitBlock);
     mAnyProgressedAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);
     if (mIsPartitionRoot) {
-        Value * finalNumOfStrides = mUpdatedNumOfStrides; assert (mUpdatedNumOfStrides);
-        if (mFinalPartialStrideFixedRateRemainderPhi) {
+        Value * finalNumOfStrides = mCurrentNumOfStridesAtTerminationPhi;
+        if (mFinalPartialStrideFixedRateRemainderAtTerminationPhi) {
             const Rational fixedRateFactor = mFixedRateLCM * Rational{mKernel->getStride()};
             Value * fixedRateItems = b->CreateMulRational(finalNumOfStrides, fixedRateFactor);
-            fixedRateItems = b->CreateAdd(fixedRateItems, mFinalPartialStrideFixedRateRemainderPhi);
+            fixedRateItems = b->CreateAdd(fixedRateItems, mFinalPartialStrideFixedRateRemainderAtTerminationPhi);
             finalNumOfStrides = b->CreateMulRational(fixedRateItems, mPartitionStrideRateScalingFactor / fixedRateFactor);
         } else {
             finalNumOfStrides = b->CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);

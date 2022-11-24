@@ -10,27 +10,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief printGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-template <typename Graph>
-void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") {
-
-    out << "digraph \"" << name << "\" {\n";
-    for (auto v : make_iterator_range(vertices(G))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
-    }
-    for (auto e : make_iterator_range(edges(G))) {
-        const auto s = source(e, G);
-        const auto t = target(e, G);
-        out << "v" << s << " -> v" << t << ";\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief printRelationshipGraph
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name) {

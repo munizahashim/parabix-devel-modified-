@@ -98,10 +98,10 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
-        const auto numOfStrides = MaximumNumOfStrides[FirstKernelInPartition];
+        const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
     } else {
-        const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[FirstKernelInPartition]};
+        const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
         mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
     }

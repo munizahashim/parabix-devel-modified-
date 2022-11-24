@@ -322,6 +322,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     PartitionCount = outputPartitionId + 1U;
 
+    FirstKernelInPartition.resize(PartitionCount + 1U);
+    FirstKernelInPartition[0] = PipelineInput;
 
     auto fixStrideStepLength = [&](const unsigned first, const unsigned last) {
         auto gcd = MaximumNumOfStrides[first];
@@ -335,19 +337,25 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     };
 
     auto currentPartitionId = KernelPartitionId[FirstKernel];
+    assert (currentPartitionId == 1);
     auto firstKernelInPartition = FirstKernel;
+    FirstKernelInPartition[currentPartitionId] = FirstKernel;
     for (auto kernel = (FirstKernel + 1U); kernel <= LastKernel; ++kernel) {
         const auto partitionId = KernelPartitionId[kernel];
         if (partitionId != currentPartitionId) {
+            assert (partitionId == currentPartitionId + 1);
             fixStrideStepLength(firstKernelInPartition, kernel - 1U);
             // set the first kernel for the next partition
             firstKernelInPartition = kernel;
             currentPartitionId = partitionId;
+            FirstKernelInPartition[partitionId] = kernel;
         }
     }
     if (firstKernelInPartition <= LastKernel) {
         fixStrideStepLength(firstKernelInPartition, LastKernel);
     }
+    FirstKernelInPartition[PartitionCount - 1] = newPipelineOutput;
+    FirstKernelInPartition[PartitionCount] = newPipelineOutput;
 
     if (LLVM_UNLIKELY(IsNestedPipeline && (MinimumNumOfStrides[PipelineInput] != 1))) {
         auto checkIO = [](const Bindings & bindings) -> bool {

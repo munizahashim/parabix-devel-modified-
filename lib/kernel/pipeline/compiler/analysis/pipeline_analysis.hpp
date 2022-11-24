@@ -270,7 +270,7 @@ public:
     RelationshipGraph               mScalarGraph;
 
     KernelIdVector                  KernelPartitionId;
-
+    KernelIdVector                  FirstKernelInPartition;
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideStepLength;
@@ -285,6 +285,7 @@ public:
     TerminationChecks               mTerminationCheck;
 
     TerminationPropagationGraph     mTerminationPropagationGraph;
+    BitVector                       HasTerminationSignal;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;
@@ -310,6 +311,28 @@ inline void PipelineAnalysis::determineNumOfThreads() {
         }
     }
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief printGraph
+ ** ------------------------------------------------------------------------------------------------------------- */
+template <typename Graph>
+void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") {
+
+    out << "digraph \"" << name << "\" {\n";
+    for (auto v : make_iterator_range(vertices(G))) {
+        out << "v" << v << " [label=\"" << v << "\"];\n";
+    }
+    for (auto e : make_iterator_range(edges(G))) {
+        const auto s = source(e, G);
+        const auto t = target(e, G);
+        out << "v" << s << " -> v" << t << ";\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+}
+
 
 }
 

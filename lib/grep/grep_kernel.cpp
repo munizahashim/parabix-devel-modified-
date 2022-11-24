@@ -755,9 +755,9 @@ void U8Spans::generatePabloMethod() {
 void PopcountKernel::generatePabloMethod() {
     auto pb = getEntryScope();
     const auto toCount = pb->createExtract(getInputStreamVar("toCount"), pb->getInteger(0));
-    pablo::Var * countResult = getOutputScalarVar("countResult");
-
-    pb->createAssign(countResult, pb->createCount(pb->createInFile(toCount)));
+    const auto countResult = getOutputScalarVar("countResult");
+    const auto newCount = pb->createCount(pb->createInFile(toCount));
+    pb->createAssign(countResult, newCount);
 }
 
 PopcountKernel::PopcountKernel (BuilderRef iBuilder, StreamSet * const toCount, Scalar * countResult)

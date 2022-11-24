@@ -158,9 +158,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     const auto groupId = getCacheLineGroupId(kernelId);
 
-    if (isRoot) {
-        addTerminationProperties(b, kernelId, groupId);
-    }
+    addTerminationProperties(b, kernelId, groupId);
 
     const auto name = makeKernelName(kernelId);
 
@@ -350,10 +348,9 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 
         // Is this the last kernel in a partition? If so, store the accumulated
         // termination signal.
-        const auto nextPartitionId = KernelPartitionId[i + 1];
-        if (terminated && partitionId != nextPartitionId) {
+        if (terminated && HasTerminationSignal[mKernelId]) {
             Value * const signal = b->CreateSelect(terminated, aborted, unterminated);
-            writeTerminationSignal(b, signal);
+            writeTerminationSignal(b, mKernelId, signal);
             terminated = nullptr;
         }
 
@@ -1047,7 +1044,7 @@ void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
 void PipelineCompiler::clearInternalState(BuilderRef b) {
 
     mPartitionEntryPoint.reset(0, PartitionCount);
-    mPartitionTerminationSignal.reset(0, PartitionCount - 1);
+    mKernelTerminationSignal.reset(FirstKernel, LastKernel);
 
     mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
 

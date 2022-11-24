@@ -210,7 +210,6 @@ public:
     BasicBlock * getPartitionExitPoint(BuilderRef b);
     void checkForPartitionEntry(BuilderRef b);
 
-    void identifyPartitionKernelRange();
     void determinePartitionStrideRateScalingFactor();
 
     bool hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const;
@@ -224,8 +223,6 @@ public:
     void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntry);
 
     void phiOutPartitionStateAndReleaseSynchronizationLocks(BuilderRef b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
-
-    unsigned getFirstKernelInTargetPartition(const unsigned partitionId) const;
 
     void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition, Value * const segNo);
     void releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel);
@@ -337,22 +334,22 @@ public:
 // termination codegen functions
 
     void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
-    void setCurrentTerminationSignal(BuilderRef b, Value * const signal);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
  //   Value * isClosed(BuilderRef b, const unsigned streamSet) const;
-
+    unsigned getTerminationSignalIndex(const unsigned consumer) const;
     Value * isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
     void checkIfKernelIsAlreadyTerminated(BuilderRef b);
+    void checkPropagatedTerminationSignals(BuilderRef b);
     Value * readTerminationSignal(BuilderRef b, const unsigned kernelId);
-    void writeTerminationSignal(BuilderRef b, Value * const signal);
+    void writeTerminationSignal(BuilderRef b, const unsigned kernelId, Value * const signal) const;
     Value * hasPipelineTerminated(BuilderRef b);
     void signalAbnormalTermination(BuilderRef b);
     LLVM_READNONE static Constant * getTerminationSignal(BuilderRef b, const TerminationSignal type);
 
     void readCountableItemCountsAfterAbnormalTermination(BuilderRef b);
-    void informInputKernelsOfTermination(BuilderRef b);
+    void propagateTerminationSignal(BuilderRef b);
     void verifyPostInvocationTerminationSignal(BuilderRef b);
 
 // consumer codegen functions
@@ -604,6 +601,7 @@ protected:
     const bool                                  TraceProducedItemCounts;
 
     const KernelIdVector                        KernelPartitionId;
+    const KernelIdVector                        FirstKernelInPartition;
     const std::vector<unsigned>                 StrideStepLength;
     const std::vector<unsigned>                 MaximumNumOfStrides;
     const RelationshipGraph                     mStreamGraph;
@@ -614,8 +612,7 @@ protected:
     const PartialSumStepFactorGraph             mPartialSumStepFactorGraph;
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
-
-    BitVector                                   PartitionOnHybridThread;
+    const BitVector                             HasTerminationSignal;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -666,7 +663,7 @@ protected:
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
     unsigned                                    mCurrentPartitionId = 0;
-    unsigned                                    FirstKernelInPartition = 0;
+    unsigned                                    mCurrentPartitionRoot = 0;
     unsigned                                    LastKernelInPartition = 0;
 
     Rational                                    mPartitionStrideRateScalingFactor;
@@ -675,12 +672,13 @@ protected:
     PHINode *                                   mFinalPartitionSegmentAtLoopExitPhi = nullptr;
     PHINode *                                   mFinalPartitionSegmentAtExitPhi = nullptr;
     PHINode *                                   mFinalPartialStrideFixedRateRemainderPhi = nullptr;
+    PHINode *                                   mFinalPartialStrideFixedRateRemainderAtTerminationPhi = nullptr;
 
     Value *                                     mNumOfPartitionStrides = nullptr;
 
     BasicBlock *                                mCurrentPartitionEntryGuard = nullptr;
     BasicBlock *                                mNextPartitionEntryPoint = nullptr;
-    FixedVector<Value *>                        mPartitionTerminationSignal;
+    FixedVector<Value *>                        mKernelTerminationSignal;
     FixedVector<Value *>                        mInitialConsumedItemCount;
 
     PartitionPhiNodeTable                       mPartitionProducedItemCountPhi;
@@ -697,6 +695,7 @@ protected:
     Value *                                     mInitiallyTerminated = nullptr;
     Value *                                     mMaximumNumOfStrides = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
+    PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;
     PHINode *                                   mTotalNumOfStridesAtLoopExitPhi = nullptr;
     PHINode *                                   mAnyProgressedAtLoopExitPhi = nullptr;
@@ -901,6 +900,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
 
 , KernelPartitionId(std::move(P.KernelPartitionId))
+, FirstKernelInPartition(std::move(P.FirstKernelInPartition))
 , StrideStepLength(std::move(P.StrideStepLength))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
 
@@ -914,6 +914,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
+, HasTerminationSignal(std::move(P.HasTerminationSignal))
+
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
@@ -923,12 +925,12 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 
 , mPartitionEntryPoint(PartitionCount + 1, mAllocator)
 
-, mPartitionTerminationSignal(PartitionCount, mAllocator)
+, mKernelTerminationSignal(FirstKernel, LastKernel, mAllocator)
 , mInitialConsumedItemCount(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mPartitionProducedItemCountPhi(extents[PartitionCount][LastStreamSet - FirstStreamSet + 1])
 , mPartitionConsumedItemCountPhi(extents[PartitionCount][LastStreamSet - FirstStreamSet + 1])
-, mPartitionTerminationSignalPhi(extents[PartitionCount][PartitionCount])
+, mPartitionTerminationSignalPhi(extents[PartitionCount][LastKernel - FirstKernel + 1])
 , mPartitionPipelineProgressPhi(PartitionCount, mAllocator)
 
 , mInitiallyProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
