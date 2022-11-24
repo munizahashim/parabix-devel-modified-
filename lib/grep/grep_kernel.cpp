@@ -14,7 +14,6 @@
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/codegenstate.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>          // for Ones
 #include <pablo/pe_var.h>           // for Var
@@ -721,15 +720,34 @@ void SpansToMarksKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchEndsVar, 1), follows);
 }
 
-U8Spans::U8Spans(BuilderRef b, StreamSet * marks, StreamSet * u8index, StreamSet * spans)
-: PabloKernel(b, "U8Spans",
-{Binding{"marks", marks}, Binding{"u8index", u8index}}, {Binding{"spans", spans}}) {}
+U8Spans::U8Spans(BuilderRef b, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
+: PabloKernel(b, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
+    mBitMovement(m) {
+        if (m == pablo::BitMovementMode::LookAhead) {
+            mInputStreamSets.push_back(Binding{"marks", marks, FixedRate(1), LookAhead(3)});
+            mInputStreamSets.push_back(Binding{"u8index", u8index, FixedRate(1), LookAhead(3)});
+        } else {
+            mInputStreamSets.push_back(Binding{"marks", marks});
+            mInputStreamSets.push_back(Binding{"u8index", u8index});
+        }
+
+    }
 
 void U8Spans::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * marks = getInputStreamSet("marks")[0];
     PabloAST * u8index = getInputStreamSet("u8index")[0];
-    PabloAST * spans = pb.createMatchStar(marks, pb.createNot(u8index));
+    PabloAST * spans = nullptr;
+    if (mBitMovement == BitMovementMode::LookAhead) {
+        PabloAST * back1 = pb.createAnd(pb.createLookahead(marks, 1), pb.createNot(u8index));
+        PabloAST * ix_or_next = pb.createOr(u8index, pb.createLookahead(u8index, 1));
+        PabloAST * back2 = pb.createAnd(pb.createLookahead(marks, 2), pb.createNot(ix_or_next));
+        PabloAST * ix_or_next2 = pb.createOr(ix_or_next, pb.createLookahead(u8index, 2));
+        PabloAST * back3 = pb.createAnd(pb.createLookahead(marks, 3), pb.createNot(ix_or_next2));
+        spans = pb.createOr(marks, pb.createOr3(back1, back2, back3));
+    } else {
+        spans = pb.createMatchStar(marks, pb.createNot(u8index));
+    }
     Var * spansVar = getOutputStreamVar("spans");
     pb.createAssign(pb.createExtract(spansVar, 0), spans);
 }

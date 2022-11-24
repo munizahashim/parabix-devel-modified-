@@ -6,6 +6,7 @@
 #define GREP_KERNEL_H
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
+#include <pablo/pablo_toolchain.h>
 #include <re/alphabet/alphabet.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>
@@ -470,11 +471,21 @@ protected:
     void generatePabloMethod() override;
 };
 
+//  Given selected UTF-8 characters identified in the marks stream, and
+//  a u8index stream marking the last position of each UTF-8 character,
+//  produce a stream of UTF-8 character spans, in which each position of
+//  marked UTF-8 characters are identified with 1 bits.   The marks
+//  stream may be marking the first byte of each UTF-8 sequence in the
+//  BitMovementMode::Advance mode or the last byte of each UTF-8 sequence
+//  in the BitMovementMode::LookAhead mode (default).
 class U8Spans : public pablo::PabloKernel {
 public:
-    U8Spans(BuilderRef builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans);
+    U8Spans(BuilderRef builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans,
+            pablo::BitMovementMode m = pablo::BitMovementMode::LookAhead);
 protected:
     void generatePabloMethod() override;
+private:
+    pablo::BitMovementMode mBitMovement;
 };
 
 class PopcountKernel : public pablo::PabloKernel {

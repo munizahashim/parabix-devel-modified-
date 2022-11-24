@@ -936,12 +936,9 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         if (UnicodeIndexing) {
             StreamSet * u8index1 = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * u8initial = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<LineStartsKernel>(u8index1, u8initial);
             StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, u8initial, MatchSpans, ExpandedSpans);
+            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
             if (mIllustrator) mIllustrator->captureBitstream(E, "ExpandedSpans", ExpandedSpans);
-            if (mIllustrator) mIllustrator->captureBitstream(E, "u8initial", u8initial);
             StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
             if (mIllustrator) mIllustrator->captureBitstream(E, "FilledSpans", FilledSpans);
