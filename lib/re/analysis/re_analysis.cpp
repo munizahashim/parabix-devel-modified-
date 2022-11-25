@@ -196,7 +196,7 @@ std::pair<RE *, RE *> ParseUniquePrefix(RE * r) {
                 prefixCCs.push_back(cc1);
                 if (!CC_Sequence_Search(prefixCCs, suffix1)) {
                     // Unambiguous prefix found!
-                    return std::make_pair(makeSeq(seq->begin(), seq->begin()+i),
+                    return std::make_pair(makeSeq(seq->begin(), seq->begin()+i+1),
                                           makeSeq(seq->begin()+i+1, seq->end()));
                 }
             }
