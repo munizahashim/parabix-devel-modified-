@@ -77,13 +77,13 @@ public:
     // Most externals are computed from the basis bit stremas.
     virtual std::vector<std::string> getParameters() {return std::vector<std::string>{"basis"};}
     virtual void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) = 0;
-    virtual std::pair<int, int> getLengthRange() {return std::make_pair(1,1);}
-    virtual int getOffset() {return 0;}  //default offset unless overridden.
+    std::pair<int, int> getLengthRange() {return mLengthRange;}
+    int getOffset() {return mOffset;}
     bool isResolved() {return mStreamSet != nullptr;}
 protected:
     static Allocator mAllocator;
-    ExternalStreamObject(Kind k) :
-        mKind(k), mStreamSet(nullptr)  {}
+    ExternalStreamObject(Kind k, std::pair<int, int> lgthRange = std::make_pair(1,1), int offset = 0) :
+        mKind(k), mLengthRange(lgthRange), mOffset(offset), mStreamSet(nullptr)  {}
     void installStreamSet(StreamSet * s);
 public:
     void* operator new (std::size_t size) noexcept {
@@ -91,6 +91,8 @@ public:
     }
 protected:
     Kind mKind;
+    std::pair<int, int> mLengthRange;
+    int mOffset;
     StreamSet * mStreamSet;
 };
 
@@ -116,12 +118,12 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
-    int getOffset() override {return 1;}
-    std::vector<std::string> getParameters() override {return {"UTF8_LB"};}
-    LineStartsExternal() :
-        ExternalStreamObject(Kind::LineStarts) {}
+    std::vector<std::string> getParameters() override;
+    LineStartsExternal(std::vector<std::string> parms = {"UTF8_LB"}) :
+        ExternalStreamObject(Kind::LineStarts, std::make_pair(0, 0), 1), mParms(parms) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    std::vector<std::string> mParms;
 };
 
 class U21_External : public ExternalStreamObject {
@@ -161,9 +163,7 @@ public:
     }
     std::vector<std::string> getParameters() override;
     PropertyBoundaryExternal(UCD::property_t p) :
-        ExternalStreamObject(Kind::PropertyBoundary), mProperty(p) {}
-    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
-    int getOffset() override {return 1;}
+        ExternalStreamObject(Kind::PropertyBoundary, std::make_pair(0, 0), 1), mProperty(p) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     UCD::property_t mProperty;
@@ -194,15 +194,13 @@ public:
     }
     std::vector<std::string> getParameters() override {return mParams;}
     RE_External(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::RE_External), mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mOffset(grepOffset(mRE)), mParams(re::gatherExternals(re)) {}
+        ExternalStreamObject(Kind::RE_External, re::getLengthRange(re, a), grepOffset(re)),
+            mGrepEngine(engine), mRE(re), mIndexAlphabet(a), mParams(re::gatherExternals(re)) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    std::pair<int, int> getLengthRange() override;
-    int getOffset() override {return mOffset;}
 private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;
     const cc::Alphabet * mIndexAlphabet;
-    unsigned mOffset;
     std::vector<std::string> mParams;
 };
 
@@ -215,15 +213,13 @@ public:
         return false;
     }
     StartAnchoredExternal(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::StartAnchored), mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
+        ExternalStreamObject(Kind::StartAnchored, re::getLengthRange(re, a), grepOffset(re)),
+            mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    std::pair<int, int> getLengthRange() override;
-    int getOffset() override {return mOffset;}
 private:
     grep::GrepEngine *  mGrepEngine;
     re::RE * mRE;
     const cc::Alphabet * mIndexAlphabet;
-    unsigned mOffset;
 };
 
 class PropertyDistanceExternal : public ExternalStreamObject {
@@ -254,10 +250,8 @@ public:
     }
     std::vector<std::string> getParameters() override;
     GraphemeClusterBreak(grep::GrepEngine * engine, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::GraphemeClusterBreak), mGrepEngine(engine), mIndexAlphabet(a)  {}
+        ExternalStreamObject(Kind::GraphemeClusterBreak, std::make_pair(0, 0), 1), mGrepEngine(engine), mIndexAlphabet(a)  {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
-    int getOffset() override {return 1;}
 private:
     grep::GrepEngine *  mGrepEngine;
     const cc::Alphabet * mIndexAlphabet;
@@ -273,10 +267,8 @@ public:
     }
     std::vector<std::string> getParameters() override;
     WordBoundaryExternal() :
-        ExternalStreamObject(Kind::WordBoundaryExternal) {}
+        ExternalStreamObject(Kind::WordBoundaryExternal, std::make_pair(0, 0), 1) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    std::pair<int, int> getLengthRange() override {return std::make_pair(0, 0);}
-    int getOffset() override {return 1;}
 };
 
 class PropertyBasisExternal : public ExternalStreamObject {
@@ -320,10 +312,9 @@ public:
     std::vector<std::string> getParameters() override;
     StreamIndexCode getBaseIndex() {return mBase;}
     FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
-        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames), mBaseExternal(e) {}
+        ExternalStreamObject(Kind::FilterByMask, e->getLengthRange(), e->getOffset()),
+            mBase(base), mParamNames(paramNames), mBaseExternal(e) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-    std::pair<int, int> getLengthRange() override;
-    int getOffset() override;
 private:
     StreamIndexCode mBase;
     std::vector<std::string> mParamNames;
@@ -339,13 +330,11 @@ public:
         return false;
     }
     std::vector<std::string> getParameters() override;
-    FixedSpanExternal(std::string matchMarks, unsigned lgth, unsigned offset) :
-        ExternalStreamObject(Kind::FixedSpan), mMatchMarks(matchMarks), mLength(lgth), mOffset(offset) {}
+    FixedSpanExternal(std::string matchMarks, unsigned lgth, int offset) :
+        ExternalStreamObject(Kind::FixedSpan, std::make_pair(lgth, lgth), offset), mMatchMarks(matchMarks) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     std::string mMatchMarks;
-    unsigned mLength;
-    unsigned mOffset;
 };
 
 class MarkedSpanExternal : public ExternalStreamObject {
@@ -358,15 +347,13 @@ public:
     }
     std::vector<std::string> getParameters() override;
     MarkedSpanExternal(std::string prefixMarks, unsigned prefixLgth, std::string matchEnds, unsigned offset) :
-        ExternalStreamObject(Kind::FixedSpan),
-        mPrefixMarks(prefixMarks), mPrefixLength(prefixLgth),
-        mMatchMarks(matchEnds), mOffset(offset) {}
+        ExternalStreamObject(Kind::MarkedSpanExternal, std::make_pair(prefixLgth, INT_MAX), offset),
+        mPrefixMarks(prefixMarks), mPrefixLength(prefixLgth), mMatchMarks(matchEnds) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     std::string mPrefixMarks;
     unsigned mPrefixLength;
     std::string mMatchMarks;
-    unsigned mOffset;
 };
 
 class UTF8_index : public pablo::PabloKernel {

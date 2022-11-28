@@ -202,10 +202,19 @@ void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;
 }
 
+std::vector<std::string> LineStartsExternal::getParameters() {
+    return mParms;
+}
+
 void LineStartsExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * linebreaks = inputs[0];
     StreamSet * linestarts  = b->CreateStreamSet(1);
-    b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
+    if (mParms.size() == 1) {
+        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
+    } else {
+        StreamSet * index = inputs[1];
+        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts, index);
+    }
     installStreamSet(linestarts);
 }
 
@@ -240,19 +249,12 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
     installStreamSet(ccStrm);
 }
-std::pair<int, int> RE_External::getLengthRange() {
-    return re::getLengthRange(mRE, mIndexAlphabet);
-}
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
     auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
     assert(offset == mOffset);
     installStreamSet(reStrm);
-}
-
-std::pair<int, int> StartAnchoredExternal::getLengthRange() {
-    return re::getLengthRange(mRE, mIndexAlphabet);
 }
 
 void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
@@ -327,14 +329,6 @@ std::vector<std::string> FilterByMaskExternal::getParameters() {
     return mParamNames;
 }
 
-std::pair<int, int> FilterByMaskExternal::getLengthRange() {
-    return mBaseExternal->getLengthRange();
-}
-
-int FilterByMaskExternal::getOffset() {
-    return mBaseExternal->getOffset();
-}
-
 void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * mask = inputs[0];
     StreamSet * toFilter = inputs[1];
@@ -350,7 +344,7 @@ std::vector<std::string> FixedSpanExternal::getParameters() {
 void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * matchMarks = inputs[0];
     StreamSet * spans = b->CreateStreamSet(1, 1);
-    b->CreateKernelCall<FixedMatchSpansKernel>(mLength, mOffset, matchMarks, spans);
+    b->CreateKernelCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
     installStreamSet(spans);
 }
 
