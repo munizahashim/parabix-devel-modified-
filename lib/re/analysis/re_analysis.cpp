@@ -499,6 +499,27 @@ bool hasEndAnchor(const RE * re) {
     return false; // otherwise
 }
 
+class StartFreeValidator : public RE_Validator {
+public:
+    StartFreeValidator() : RE_Validator("StartFreeValidator") {}
+    bool validateStart(const Start * s) override {return false;}
+};
+
+bool anyStartAnchor(const RE * re) {
+    return !StartFreeValidator().validateRE(re);
+}
+class EndFreeValidator : public RE_Validator {
+public:
+    EndFreeValidator() : RE_Validator("EndFreeValidator") {}
+    bool validateEnd(const End * e) override {return false;}
+};
+
+bool anyEndAnchor(const RE * re) {
+    return !EndFreeValidator().validateRE(re);
+}
+
+
+
 //
 //  Back Reference Analysis
 //

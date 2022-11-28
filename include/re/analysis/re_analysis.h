@@ -30,10 +30,22 @@ bool isTypeForLocal(const RE * re);
 bool hasAssertion(const RE * re);
     
 bool byteTestsWithinLimit(RE * re, unsigned limit);
-    
+
+// Returns true if the given RE must match the
+// start anchor "^" in all cases.
 bool hasStartAnchor(const RE * r);
 
+// Returns true if the given RE must match the
+// end anchor "$" in all cases.
 bool hasEndAnchor(const RE * r);
+    
+// Returns true if the given RE has at least one
+// alternative requiring a match to the start anchor "^".
+bool anyStartAnchor(const RE * r);
+
+// Returns true if the given RE has at least one
+// alternative requiring a match to the end anchor "$".
+bool anyEndAnchor(const RE * r);
     
 bool DefiniteLengthBackReferencesOnly(const RE * re);
     
