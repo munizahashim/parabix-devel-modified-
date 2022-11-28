@@ -691,18 +691,32 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 }
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
-    PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1), "SOT");
-    return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
+    auto f = mMain.mExternalNameMap.find("^");
+    if (f == mMain.mExternalNameMap.end()) {
+        PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1), "SOT");
+        return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
+    }
+    return f->second.marker();
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
-    PabloAST * nextPos = marker.stream();
-    if (marker.offset() == 0) {
-        nextPos = mPB.createAdvance(nextPos, 1);
+    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {marker.stream()});
+
+    auto f = mMain.mExternalNameMap.find("$");
+    if (f == mMain.mExternalNameMap.end()) {
+        PabloAST * nextPos = marker.stream();
+        if (marker.offset() == 0) {
+            nextPos = mPB.createAdvance(nextPos, 1);
+        }
+        PabloAST * endOfText = mPB.createAtEOF(mPB.createAdvance(mPB.createOnes(), 1), "EOT");
+        PabloAST * const EOT_match = mPB.createAnd(endOfText, nextPos, "EOT_match");
+        return Marker(EOT_match, 1);
     }
-    PabloAST * endOfText = mPB.createAtEOF(mPB.createAdvance(mPB.createOnes(), 1), "EOT");
-    PabloAST * const EOT_match = mPB.createAnd(endOfText, nextPos, "EOT_match");
-    return Marker(EOT_match, 1);
+    auto EOLmarker = f->second.marker();
+    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {EOLmarker.stream()});
+
+    AlignMarkers(EOLmarker, marker);
+    return Marker(mPB.createAnd(EOLmarker.stream(), marker.stream()), marker.offset());
 }
 
 inline Marker RE_Block_Compiler::AdvanceMarker(Marker marker, const unsigned offset) {

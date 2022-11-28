@@ -329,16 +329,24 @@ void NullDelimiterKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutput(0), 0), NUL);
 }
 
-LineStartsKernel::LineStartsKernel(BuilderRef b, StreamSet * LineEnds, StreamSet * LineStarts)
-: PabloKernel(b, "LineStarts",
+LineStartsKernel::LineStartsKernel(BuilderRef b, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
+: PabloKernel(b, "LineStarts" + (index == nullptr) ? "" : "@index",
               {Binding{"LineEnds", LineEnds}},
-              {Binding{"LineStarts", LineStarts}}) {}
+              {Binding{"LineStarts", LineStarts}}), mHasIndex(index != nullptr) {
+    if (mHasIndex) {
+        mInputStreamSets.push_back(Binding("index", index));
+    }
+}
 
 void LineStartsKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * lineEnds = getInputStreamSet("LineEnds")[0];
     // Line starts are the positions after every line end, as well as the initial position.
-    PabloAST * lineStarts = pb.createInFile(pb.createNot(pb.createAdvance(pb.createNot(lineEnds), 1)));
+    PabloAST * lineStarts = pb.createNot(pb.createAdvance(pb.createNot(lineEnds), 1));
+    if (mHasIndex) {
+        lineStarts = pb.createScanTo(lineStarts, getInputStreamSet("index")[0]);
+    }
+    lineStarts = pb.createInFile(lineStarts);
     pb.createAssign(pb.createExtract(getOutputStreamVar("LineStarts"), 0), lineStarts);
 }
 

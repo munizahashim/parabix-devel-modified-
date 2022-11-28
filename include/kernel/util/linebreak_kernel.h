@@ -72,11 +72,22 @@ protected:
     UnterminatedLineAtEOF mEOFmode;
 };
 
+//
+// Given a stream marking end of line characters, compute a
+// a stream marking start of line characters, including
+// the first character position in the file.   In case
+// that the input stream has multiple code units per character,
+// an index stream may be provided to mark a single position
+// per code unit sequence.   In this case, the reported LineStarts
+// characters will be marked at positions identified in the index
+// stream.
 class LineStartsKernel final : public pablo::PabloKernel {
 public:
-    LineStartsKernel(BuilderRef b, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts);
+    LineStartsKernel(BuilderRef b, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts, kernel::StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
+private:
+    bool mHasIndex;
 };
 
 class LineSpansKernel final : public pablo::PabloKernel {
