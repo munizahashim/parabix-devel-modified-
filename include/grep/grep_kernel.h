@@ -119,7 +119,7 @@ public:
         return false;
     }
     std::vector<std::string> getParameters() override;
-    LineStartsExternal(std::vector<std::string> parms = {"$"}) :
+    LineStartsExternal(std::vector<std::string> parms = {"UTF8_LB"}) :
         ExternalStreamObject(Kind::LineStarts, std::make_pair(0, 0), 1), mParms(parms) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
