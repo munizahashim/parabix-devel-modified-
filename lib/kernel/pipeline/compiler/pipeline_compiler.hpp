@@ -752,6 +752,7 @@ protected:
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
     InputPortVector<Value *>                    mProcessedItemCountPtr; // exiting the segment loop
     InputPortVector<Value *>                    mProcessedItemCount;
+    InputPortVector<PHINode *>                  mProcessedItemCountAtTerminationPhi;
     InputPortVector<Value *>                    mProcessedDeferredItemCountPtr;
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
 
@@ -944,6 +945,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
+, mProcessedItemCountAtTerminationPhi(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
 

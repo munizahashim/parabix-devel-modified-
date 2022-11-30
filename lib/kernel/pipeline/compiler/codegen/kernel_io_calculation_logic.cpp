@@ -441,11 +441,11 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
+    Value * const closed = isClosed(b, inputPort);
     Value * stepLength = nullptr;
 
     if (StrideStepLength[mKernelId] > 1) {
         stepLength = b->getSize(StrideStepLength[mKernelId]);
-        Value * const closed = isClosed(b, inputPort);
         stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
     }
 
@@ -455,21 +455,16 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
     Value * const required = addLookahead(b, port, strideLength); assert (required);
+    Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
+
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_requiredInput (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
-    #endif
-
-    Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
-    #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_accessible (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), accessible);
-    #endif
-
-    Value * const hasEnough = b->CreateICmpUGE(accessible, required);
-    Value * const closed = isClosed(b, inputPort);
-    #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
-    if (mIsPartitionRoot) {
+
+    Value * hasEnough = b->CreateICmpUGE(accessible, required);
+    if (LLVM_LIKELY(mIsPartitionRoot && !port.IsZeroExtended)) {
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
         } else {
@@ -487,23 +482,23 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         insufficentIO = recordBlockedIO;
     }
 
-    Value * test = sufficientInput;
+    Value * hasEnoughOrIsClosed = sufficientInput;
     Value * insufficient = mBranchToLoopExit;
     if (LLVM_UNLIKELY(TraceIO)) {
         // do not record the block if this not the first execution of the
         // kernel but ensure that the system knows at least one failed.
-        test = sufficientInput;
+        hasEnoughOrIsClosed = sufficientInput;
         if (mExecutedAtLeastOnceAtLoopEntryPhi) {
-            test = b->CreateOr(test, mExecutedAtLeastOnceAtLoopEntryPhi);
+            hasEnoughOrIsClosed = b->CreateOr(hasEnoughOrIsClosed, mExecutedAtLeastOnceAtLoopEntryPhi);
         }
         insufficient = b->CreateOr(mBranchToLoopExit, b->CreateNot(sufficientInput));
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + "_hasInputData = %" PRIu8, test);
+    debugPrint(b, prefix + "_hasInputData = %" PRIu8, hasEnoughOrIsClosed);
     #endif
 
-    b->CreateLikelyCondBr(test, hasInputData, insufficentIO);
+    b->CreateLikelyCondBr(hasEnoughOrIsClosed, hasInputData, insufficentIO);
 
     // When tracing blocking I/O, test all I/O streams but do not execute
     // the kernel if any stream is insufficient.
@@ -771,10 +766,11 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
         Value * const closed = isClosed(b, inputPort);
-        Value * const deferred = mCurrentProcessedDeferredItemCountPhi[inputPort];
-        Value * const itemCount = port.IsDeferred ? deferred : processed;
-        Value * const exhausted = b->CreateICmpUGE(itemCount, available);
+        Value * const exhausted = b->CreateICmpUGE(processed, available);
         Value * const useZeroExtend = b->CreateAnd(closed, exhausted);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_useZeroExtend = %" PRIu8, useZeroExtend);
+        #endif
         mIsInputZeroExtended[inputPort] = useZeroExtend;
         if (LLVM_LIKELY(mHasZeroExtendedInput == nullptr)) {
             mHasZeroExtendedInput = useZeroExtend;
@@ -1100,8 +1096,10 @@ Value * PipelineCompiler::getNumOfAccessibleStrides(BuilderRef b,
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     #endif
+    Value * const ze = mIsInputZeroExtended[inputPort];
     if (LLVM_UNLIKELY(rate.isPartialSum())) {
         numOfStrides = getMaximumNumOfPartialSumStrides(b, port, numOfLinearStrides);
+        // TODO: does a zero-extended popcount make sense?
     } else if (LLVM_UNLIKELY(rate.isGreedy())) {
         return nullptr;
     } else {
@@ -1112,8 +1110,11 @@ Value * PipelineCompiler::getNumOfAccessibleStrides(BuilderRef b,
         debugPrint(b, "< " + prefix + "_strideLength = %" PRIu64, strideLength);
         #endif
         numOfStrides = b->CreateUDiv(subtractLookahead(b, port, accessible), strideLength);
+        if (ze) {
+            Value * const potential = b->CreateCeilUDiv(accessible, strideLength);
+            numOfStrides = b->CreateSelect(isClosed(b, port.Port), potential, numOfStrides);
+        }
     }
-    Value * const ze = mIsInputZeroExtended[inputPort];
     if (ze) {
         numOfStrides = b->CreateSelect(ze, numOfLinearStrides, numOfStrides, "numOfZeroExtendedStrides");
     }

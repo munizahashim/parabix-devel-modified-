@@ -98,6 +98,9 @@ void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t streamSet) {
+#ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
+    return b->getSize(0);
+#else
 
     Value * itemCount = nullptr;
 
@@ -156,6 +159,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
     }
 
     return itemCount;
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

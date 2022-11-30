@@ -156,6 +156,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
 
+        Rational maxItemsPerSegment{mKernel->getStride() * rate.getUpperBound()};
+
         if (LLVM_LIKELY(rate.isFixed())) {
 
             // TODO: support popcount/partialsum
@@ -418,6 +420,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         // Simply ignore any external buffers for the purpose of zeroing out
         // unnecessary data.
         if (bn.isUnowned()) {
+            assert (bn.isNonThreadLocal());
             continue;
         }
 
@@ -446,7 +449,6 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             maskOffset = b->CreateAnd(position, BLOCK_MASK);
         }
         Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
-
         BasicBlock * const maskLoop = b->CreateBasicBlock(prefix + "_zeroUnwrittenLoop", mKernelLoopExit);
         BasicBlock * const maskExit = b->CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
         Value * const numOfStreams = buffer->getStreamSetCount(b);
@@ -466,18 +468,16 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         } else {
             ptr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
         }
-        #ifdef PRINT_DEBUG_MESSAGES
-        // debugPrint(b, prefix + "_zeroUnwritten_packStart = %" PRIu64, b->CreateSub(startInt, epochInt));
-        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptr);
-        #endif
-        Value * const value = b->CreateBlockAlignedLoad(ptr);
-        Value * const maskedValue = b->CreateAnd(value, mask);
-        b->CreateBlockAlignedStore(maskedValue, ptr);
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(ptr->getType());
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
+        Value * const ptrInt = b->CreatePtrToInt(ptr, intPtrTy);
+        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
+        Value * const value = b->CreateBlockAlignedLoad(ptr);
+        Value * const maskedValue = b->CreateAnd(value, mask);
+        b->CreateBlockAlignedStore(maskedValue, ptr);
         if (itemWidth > 1) {
             // Since packs are laid out sequentially in memory, it will hopefully be cheaper to zero them out here
             // because they may be within the same cache line.
@@ -488,7 +488,6 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const endInt = b->CreatePtrToInt(end, intPtrTy);
             Value * const remainingPackBytes = b->CreateSub(endInt, startInt);
             #ifdef PRINT_DEBUG_MESSAGES
-            // debugPrint(b, prefix + "_zeroUnwritten_packStart = %" PRIu64, b->CreateSub(startInt, epochInt));
             debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
             debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
             #endif
@@ -504,11 +503,9 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         // Zero out any blocks we could potentially touch
 
         Rational strideLength{0};
-        const auto bufferVertex = getOutputBufferVertex(port);
-        for (const auto e : make_iterator_range(out_edges(bufferVertex, mBufferGraph))) {
+        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];
             const Binding & input = rd.Binding;
-
             Rational R{rd.Maximum};
             if (LLVM_UNLIKELY(input.hasLookahead())) {
                 R += input.getLookahead();
@@ -521,16 +518,13 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         if (blocksToZero > 1) {
             Value * const nextBlockIndex = b->CreateAdd(blockIndex, ONE);
             Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
-            Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, nextOffset);
+            Value * const startPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, nextOffset);
             Value * const startPtrInt = b->CreatePtrToInt(startPtr, intPtrTy);
-            Value * const endOffset = b->CreateRoundUp(nextOffset, b->getSize(blocksToZero));
-            Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, endOffset);
+           // Value * const endOffset = b->CreateRoundUp(nextOffset, b->getSize(blocksToZero));
+            Value * const endPtr = b->CreateGEP(startPtr, b->getSize(blocksToZero));
             Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b->CreateSub(endPtrInt, startPtrInt);
             #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_blockIndex = %" PRIu64, blockIndex);
-            debugPrint(b, prefix + "_zeroUnwritten_nextOffset = %" PRIu64, nextOffset);
-            debugPrint(b, prefix + "_zeroUnwritten_endOffset = %" PRIu64, endOffset);
             debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b->CreateSub(startPtrInt, epochInt));
             debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
             #endif

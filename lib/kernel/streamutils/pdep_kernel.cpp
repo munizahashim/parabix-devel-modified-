@@ -224,6 +224,7 @@ void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
             numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
         }
         kb->CreateBr(processBlock);
+
         kb->SetInsertPoint(processBlock);
         PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
         blockOffsetPhi->addIncoming(ZERO, entry);
@@ -237,6 +238,7 @@ void FieldDepositKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
         blockOffsetPhi->addIncoming(nextBlk, processBlock);
         Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
         kb->CreateCondBr(moreToDo, processBlock, done);
+
         kb->SetInsertPoint(done);
     }
 }

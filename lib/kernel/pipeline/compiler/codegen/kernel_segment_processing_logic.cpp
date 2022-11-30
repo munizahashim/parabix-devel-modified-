@@ -442,6 +442,11 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     BasicBlock * const exitBlock = b->GetInsertBlock();
 
     // update KernelTerminated phi nodes
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto inputPort = mBufferGraph[e].Port;
+        Value * const itemCount = mProcessedItemCount[inputPort]; assert (itemCount);
+        mProcessedItemCountAtTerminationPhi[inputPort]->addIncoming(itemCount, exitBlock);
+    }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         assert (mProducedItemCount[port]);
@@ -596,6 +601,12 @@ void PipelineCompiler::initializeKernelTerminatedPhis(BuilderRef b) {
     mCurrentNumOfStridesAtTerminationPhi = phi;
     if (mIsPartitionRoot) {
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi = b->CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesAtTerminationPhi");
+    }
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto inputPort = mBufferGraph[e].Port;
+        const auto prefix = makeBufferName(mKernelId, inputPort);
+        PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_finalProcessed");
+        mProcessedItemCountAtTerminationPhi[inputPort] = phi;
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;

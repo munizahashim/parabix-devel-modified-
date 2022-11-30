@@ -124,7 +124,6 @@ void DeletionKernel::generateFinalBlockMethod(const std::unique_ptr<KernelBuilde
 
 void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
     Value * delMask = kb->loadInputStreamBlock("delMaskSet", kb->getInt32(0));
-    kb->CallPrintRegister("delMask", delMask);
     const auto move_masks = parallel_prefix_deletion_masks(kb, mDeletionFieldWidth, delMask);
     for (unsigned j = 0; j < mStreamCount; ++j) {
         Value * input = kb->loadInputStreamBlock("inputStreamSet", kb->getInt32(j));
@@ -132,7 +131,6 @@ void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
         kb->storeOutputStreamBlock("outputStreamSet", kb->getInt32(j), output);
     }
     Value * unitCount = kb->simd_popcount(mDeletionFieldWidth, kb->simd_not(delMask));
-    kb->CallPrintRegister("unitCount", unitCount);
     kb->storeOutputStreamBlock("unitCounts", kb->getInt32(0), kb->bitCast(unitCount));
 }
 
@@ -169,10 +167,7 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
     BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
     BasicBlock * done = kb->CreateBasicBlock("done");
     Constant * const ZERO = kb->getSize(0);
-    Value * numOfBlocks = numOfStrides;
-    if (getStride() != kb->getBitBlockWidth()) {
-        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
-    }
+    assert (getStride() == kb->getBitBlockWidth());
     kb->CreateBr(processBlock);
 
     kb->SetInsertPoint(processBlock);
@@ -193,15 +188,23 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
         }
         for (unsigned j = 0; j < input.size(); ++j) {
             Value * fieldVec = kb->fwCast(mFW, input[j]);
-            Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), blockOffsetPhi);
-            outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
+            Value * output = UndefValue::get(extractionMask->getType());
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = kb->CreateExtractElement(fieldVec, kb->getInt32(i));
                 Value * compressed = kb->CreatePextract(field, mask[i]);
                 // Pextract is returning 32-bit integers but fieldTy is 16 bit?
                 compressed = kb->CreateZExtOrTrunc(compressed, fieldTy);
-                kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
+
+                output = kb->CreateInsertElement(output, compressed, kb->getInt32(i));
+
+
+
+                // kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
             }
+
+            Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), blockOffsetPhi);
+            kb->CreateStore(kb->CreateBitCast(output, kb->getBitBlockType()), outputPtr);
+
         }
     } else {
         std::vector<Value *> output = kb->simd_pext(mFW, input, maskVec[0]);
@@ -211,8 +214,9 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
     }
     Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, processBlock);
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
-    kb->CreateCondBr(moreToDo, processBlock, done);
+    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfStrides);
+    kb->CreateLikelyCondBr(moreToDo, processBlock, done);
+
     kb->SetInsertPoint(done);
 }
 
@@ -341,7 +345,6 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
     }
 
     Value * const produced = b->getProducedItemCount("compressedOutput");
-
     Value * const pendingItemCount = b->CreateAnd(b->CreateZExtOrTrunc(produced, fwTy), BLOCK_MASK);
 
     // TODO: we could make this kernel stateless but would have to use "bitblock_mask_to" on the
@@ -404,6 +407,7 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
         pendingFieldIdx[blk] = b->CreateUDiv(pendingItems[blk], CFW);
         offsets[blk] = b->simd_add(mFW, b->mvmd_slli(mFW, partialSum, 1), splatPending);
         offsets[blk] = b->simd_and(offsets[blk], fwMaskSplat); // parallel URem fw
+
         //
         // Determine the relative field number for each output field.   Note that the total
         // number of fields involved is numFields + 1.   However, the first field always
@@ -417,7 +421,7 @@ void StreamCompressKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * c
         // bits for the current output field will be shifted by the offset.
         // Create a mask for selecting current field bits.
         currentFieldMask[blk] = b->simd_sllv(mFW, b->allOnes(), offsets[blk]);
-        
+
         // Now compress the data fields, eliminating duplicate field numbers.
         // However, field number operations will sometimes produce a zero, for
         // fields that are not selected.  So we add 1 to field numbers first.

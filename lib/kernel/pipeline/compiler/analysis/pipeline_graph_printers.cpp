@@ -5,7 +5,7 @@
 #include <boost/graph/strong_components.hpp>
 #include <llvm/Support/Format.h>
 
-#define USE_SIMPLE_BUFFER_GRAPH
+// #define USE_SIMPLE_BUFFER_GRAPH
 
 namespace kernel {
 
@@ -195,9 +195,14 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         return out;
     };
 
-    auto printStreamSet = [&](const unsigned streamSet) {
-        out << "v" << streamSet << " [shape=record,";
+    auto printStreamSet = [&](const unsigned streamSet, const bool internal) {
+
         const BufferNode & bn = mBufferGraph[streamSet];
+
+        const auto isInternal = (bn.Locality == BufferLocality::ThreadLocal || bn.Locality == BufferLocality::PartitionLocal);
+        if (isInternal ^ internal) return;
+
+        out << "v" << streamSet << " [shape=record,";
         switch (bn.Locality) {
             case BufferLocality::GloballyShared:
             case BufferLocality::PartitionLocal:
@@ -206,12 +211,8 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 break;
         }
 
-        switch (bn.Locality) {
-            case BufferLocality::ThreadLocal:
-            case BufferLocality::PartitionLocal:
-                out << "color=blue,";
-            default:
-                break;
+        if (isInternal) {
+            out << "color=blue,";
         }
 
         const StreamSetBuffer * const buffer = bn.Buffer;
@@ -298,9 +299,6 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         }
         if (bn.MaxAdd) {
             out << "|+" << bn.MaxAdd;
-        }
-        if (bn.CrossesHybridThreadBarrier) {
-            out << "|Hybrid";
         }
         #endif
 
@@ -398,10 +396,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         #endif
         out << "];\n";
 
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            printStreamSet(target(e, mBufferGraph), true);
+        }
+
         firstKernelInPartition = false;
     };
-
-
 
     out << "digraph \"" << StringRef(mPipelineKernel->getName()) << "\" {\n"
            "rankdir=tb;"
@@ -433,7 +433,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
     firstKernelOfPartition[PartitionCount - 1] = PipelineOutput;
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        printStreamSet(streamSet);
+        printStreamSet(streamSet, false);
     }
 
     for (auto e : make_iterator_range(edges(mBufferGraph))) {

@@ -326,7 +326,7 @@ std::vector<Value *> loadInputSelectionsBlock(BuilderRef b, SelectedInputList op
             for (auto const & binding : selop.bindings) {
                 std::string const & iStreamSetName = binding.first;
                 for (auto const & index : binding.second) {
-                    Value * const block = b->loadInputStreamBlock(iStreamSetName, b->getInt32(index), blockOffset);
+                    Value * block = b->loadInputStreamBlock(iStreamSetName, b->getInt32(index), blockOffset);
                     selectedSet.push_back(block);
                 }
             }

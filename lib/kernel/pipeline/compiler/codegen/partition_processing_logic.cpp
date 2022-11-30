@@ -628,10 +628,10 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
             }
         }
 
-//        const auto firstKernelOfNextPartition = FirstKernelInPartition[nextPartitionId];
-//        assert (firstKernelOfNextPartition <= PipelineOutput);
+        const auto firstKernelOfNextPartition = FirstKernelInPartition[nextPartitionId];
+        assert (firstKernelOfNextPartition <= PipelineOutput);
 
-        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+        for (auto kernel = FirstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
             PHINode * const termPhi = mPartitionTerminationSignalPhi[nextPartitionId][kernel - FirstKernel];
             if (termPhi) {
                 assert (isFromCurrentFunction(b, termPhi, false));

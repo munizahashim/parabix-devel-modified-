@@ -190,6 +190,13 @@ void PipelineCompiler::checkPropagatedTerminationSignals(BuilderRef b) {
         if (mIsPartitionRoot) {
             mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(b->getSize(0), entryPoint);
         }
+
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const auto inputPort = mBufferGraph[e].Port;
+            Value * const itemCount = mInitiallyProcessedItemCount[inputPort]; assert (itemCount);
+            mProcessedItemCountAtTerminationPhi[inputPort]->addIncoming(itemCount, entryPoint);
+        }
+
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto port = mBufferGraph[e].Port;
             const auto streamSet = target(e, mBufferGraph);
@@ -244,6 +251,12 @@ void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(BuilderRe
     }
     BasicBlock * const exitBlock = b->GetInsertBlock();
 
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto inputPort = mBufferGraph[e].Port;
+        Value * const itemCount = mProcessedItemCount[inputPort]; assert (itemCount);
+        mProcessedItemCountAtTerminationPhi[inputPort]->addIncoming(itemCount, exitBlock);
+    }
+
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const StreamSetPort port (PortType::Output, i);
         mProducedAtTerminationPhi[port]->addIncoming(finalProduced[i], exitBlock);
@@ -268,7 +281,7 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
                 fullyConsumed = closed;
             } else {
                 Value * const avail = getLocallyAvailableItemCount(b, br.Port);
-                Value * const processed = mProcessedItemCount[br.Port]; assert (processed);
+                Value * const processed = mProcessedItemCountAtTerminationPhi[br.Port]; assert (processed);
                 fullyConsumed = b->CreateAnd(closed, b->CreateICmpULE(avail, processed));
             }
 

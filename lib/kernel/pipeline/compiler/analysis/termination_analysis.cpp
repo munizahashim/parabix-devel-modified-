@@ -84,8 +84,6 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
     // isn't necessary but if a pipeline has multiple outputs, we could end up needlessly producing
     // data that will never be consumed.
 
-    using TerminationGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
-
     mTerminationPropagationGraph = TerminationPropagationGraph(LastKernel + 1U);
 
     HasTerminationSignal.resize(LastKernel + 1U);
@@ -135,8 +133,8 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
     const auto end = ordering.end();
 
     for (auto i = first; i != end; ++i) {
-        TerminationPropagationGraph::out_edge_iterator ei_begin, ei_end;
-        std::tie(ei_begin, ei_end) = out_edges(*i, mTerminationPropagationGraph);
+        TerminationPropagationGraph::in_edge_iterator ei_begin, ei_end;
+        std::tie(ei_begin, ei_end) = in_edges(*i, mTerminationPropagationGraph);
         bool anyPropagate = false;
         bool allPropagate = true;
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
@@ -145,11 +143,22 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
             allPropagate &= p;
         }
         if (anyPropagate) {
+            const Kernel * const kernelObj = getKernel(*i); assert (kernelObj);
+            for (const auto & attr : kernelObj->getAttributes()) {
+                switch (attr.getKind()) {
+                    case AttrId::MustExplicitlyTerminate:
+                    case AttrId::SideEffecting:
+                        goto disable_propagated_signals;
+                    default:
+                        break;
+                }
+            }
             if (allPropagate) {
-                for (auto e : make_iterator_range(in_edges(*i, mTerminationPropagationGraph))) {
+                for (auto e : make_iterator_range(out_edges(*i, mTerminationPropagationGraph))) {
                     mTerminationPropagationGraph[e] = true;
                 }
             } else {
+disable_propagated_signals:
                 for (auto ei = ei_begin; ei != ei_end; ++ei) {
                     mTerminationPropagationGraph[*ei] = false;
                 }

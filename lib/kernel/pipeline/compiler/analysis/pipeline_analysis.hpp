@@ -16,8 +16,15 @@ public:
 
         PipelineAnalysis P(pipelineKernel);
 
+//SEED: 2622027106
+//SEED: 388749444
+
         std::random_device rd;
-        pipeline_random_engine rng{rd()};
+        //pipeline_random_engine rng{rd()};
+
+//        const unsigned seed = rd();
+        const unsigned seed = 388749444;
+        pipeline_random_engine rng{seed};
 
 //        P.generateRandomPipelineGraph(b, graphSeed, 50, 70, 10);
 
