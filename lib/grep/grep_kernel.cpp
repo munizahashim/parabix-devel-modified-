@@ -554,6 +554,7 @@ std::string GrepKernelOptions::makeSignature() {
         sig << mSource->getNumElements() << 'x' << mSource->getFieldWidth();
         sig << '/' << mCodeUnitAlphabet->getName();
     }
+    if (mIndexStream) sig << "+ix";
     for (const auto & e : mExternalBindings) {
         sig << '_' << e.getName();
     }
@@ -580,6 +581,10 @@ mOptions(std::move(options)),
 mSignature(mOptions->makeSignature()) {
     addAttribute(InfrequentlyUsed());
     mOffset = grepOffset(mOptions->mRE);
+    if (grep::ShowExternals) {
+        llvm::errs() << "ICGrep signature: " << mSignature << "\n";
+        llvm::errs() << "signature hash:" << getStringHash(mSignature) << "\n";
+    }
 }
 
 StringRef ICGrepKernel::getSignature() const {
