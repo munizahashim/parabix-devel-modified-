@@ -597,19 +597,13 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
-StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
-
+StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream) {
     mExternalTable.resetExternals();
-
     StreamSet * SourceStream = getBasis(P, InputStream);
-
     grepPrologue(P, SourceStream);
-
     prepareExternalStreams(P, SourceStream);
-
     StreamSet * Matches = P->CreateStreamSet();
     RunGrep(P, mIndexAlphabet, mRE, SourceStream, Matches);
-
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
@@ -617,24 +611,37 @@ StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) 
         SpreadByMask(P, u8index1, Matches, Results);
         Matches = Results;
     }
+    if (mIllustrator) mIllustrator->captureBitstream(P, "ICgrep kernel matches", Matches);
+    return Matches;
+}
 
+StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatches) {
+    StreamSet * MatchedLineEnds = nullptr;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
-        Matches = MovedMatches;
+        P->CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
+        MatchedLineEnds = MovedMatches;
+    } else {
+        MatchedLineEnds = initialMatches;
     }
     if (mInvertMatches) {
         StreamSet * const InvertedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<InvertMatchesKernel>(Matches, mLineBreakStream, InvertedMatches);
-        Matches = InvertedMatches;
+        P->CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
+        MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
         StreamSet * const TruncatedMatches = P->CreateStreamSet();
         Scalar * const maxCount = P->getInputScalar("maxCount");
-        P->CreateKernelCall<UntilNkernel>(maxCount, Matches, TruncatedMatches);
-        Matches = TruncatedMatches;
+        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
+        MatchedLineEnds = TruncatedMatches;
     }
-    return Matches;
+    if (mIllustrator) mIllustrator->captureBitstream(P, "MatchedLineEnds", MatchedLineEnds);
+    return MatchedLineEnds;
+}
+
+StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
+    StreamSet * Matches = initialMatches(P, InputStream);
+    return matchedLines(P, Matches);
 }
 
 
@@ -917,66 +924,11 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 }
 
 void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
-    mExternalTable.resetExternals();
-
-    StreamSet * SourceStream = getBasis(E, ByteStream);
-
-    grepPrologue(E, SourceStream);
-
-    prepareExternalStreams(E, SourceStream);
-
-    StreamSet * Matches = E->CreateStreamSet();
-    RunGrep(E, mIndexAlphabet, mRE, SourceStream, Matches);
-    if (mIllustrator) mIllustrator->captureBitstream(E, "ICGrep Matches", Matches);
-    if (hasComponent(mExternalComponents, Component::MatchSpans)) {
-        StreamSet * MatchSpans;
-        MatchSpans = getMatchSpan(E, mRE, Matches);
-        if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
-        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
-        if (UnicodeIndexing) {
-            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
-            if (mIllustrator) mIllustrator->captureBitstream(E, "ExpandedSpans", ExpandedSpans);
-            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
-            if (mIllustrator) mIllustrator->captureBitstream(E, "FilledSpans", FilledSpans);
-            Matches = FilledSpans;
-        } else {
-            Matches = MatchSpans;
-        }
-    } else {
-        if (mIndexAlphabet == &cc::Unicode) {
-            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * Results = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, u8index1, Matches, Results);
-            Matches = Results;
-        }
-    }
-
-    StreamSet * MatchedLineEnds = Matches;
-    if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
-        StreamSet * const MovedMatches = E->CreateStreamSet();
-        E->CreateKernelCall<MatchedLinesKernel>(Matches, mLineBreakStream, MovedMatches);
-        MatchedLineEnds = MovedMatches;
-    }
-    if (mInvertMatches) {
-        StreamSet * const InvertedMatches = E->CreateStreamSet();
-        E->CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
-        MatchedLineEnds = InvertedMatches;
-    }
-    if (mMaxCount > 0) {
-        StreamSet * const TruncatedMatches = E->CreateStreamSet();
-        Scalar * const maxCount = E->getInputScalar("maxCount");
-        E->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
-        MatchedLineEnds = TruncatedMatches;
-    }
+    StreamSet * Matches = initialMatches(E, ByteStream);
+    StreamSet * MatchedLineEnds = matchedLines(E, Matches);
 
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     bool needsColoring = mColoring && !mInvertMatches;
-    if (mIllustrator) mIllustrator->captureBitstream(E, "MatchedLineEnds", MatchedLineEnds);
     StreamSet * MatchesByLine = nullptr;
     if (needsColoring | hasContext) {
         MatchesByLine = E->CreateStreamSet(1, 1);
@@ -1012,8 +964,24 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
 
+        StreamSet * MatchSpans;
+        MatchSpans = getMatchSpan(E, mRE, Matches);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "Matches", Matches);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "MatchSpans", MatchSpans);
+        if (UnicodeIndexing) {
+            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
+            StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
+            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "ExpandedSpans", ExpandedSpans);
+            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
+            E->CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
+            if (mIllustrator) mIllustrator->captureBitstream(E, "FilledSpans", FilledSpans);
+            MatchSpans = FilledSpans;
+        }
+
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
-        FilterByMask(E, MatchedLineSpans, Matches, FilteredMatchSpans);
+        FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {

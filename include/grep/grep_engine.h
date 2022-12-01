@@ -140,6 +140,8 @@ protected:
     void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
     kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
     void addExternalStreams(ProgBuilderRef P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
+    kernel::StreamSet * initialMatches(ProgBuilderRef P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * matchedLines(ProgBuilderRef P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
