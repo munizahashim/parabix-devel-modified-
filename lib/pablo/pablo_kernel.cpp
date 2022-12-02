@@ -258,6 +258,7 @@ llvm::IntegerType * PabloKernel::getInt1Ty() const {
 }
 
 std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
+    assert (name.length() > 0);
     if (DebugOptionIsSet(DumpTrace)) {
         name += "+Dump";
     }

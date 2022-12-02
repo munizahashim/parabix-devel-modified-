@@ -330,7 +330,11 @@ void NullDelimiterKernel::generatePabloMethod() {
 }
 
 LineStartsKernel::LineStartsKernel(BuilderRef b, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
-: PabloKernel(b, "LineStarts" + (index == nullptr) ? "" : "@index",
+    : PabloKernel(b, [&]() -> std::string {
+                    std::string nm = "LineStarts";
+                    if (index) nm += "@index";
+                    return nm;
+                  }(),
               {Binding{"LineEnds", LineEnds}},
               {Binding{"LineStarts", LineStarts}}), mHasIndex(index != nullptr) {
     if (mHasIndex) {

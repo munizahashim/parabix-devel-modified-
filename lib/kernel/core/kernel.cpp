@@ -1263,7 +1263,6 @@ Kernel::Kernel(BuilderRef b,
 , mInternalScalars( std::move(internal_scalars))
 , mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
 
-
 }
 
 Kernel::~Kernel() { }
