@@ -121,6 +121,7 @@ def make_data_files(greptest_xml):
 
 def escape_quotes(e):  return e.replace(u"'", u"'\\''")
 
+test_count = 0
 failure_count = 0
 
 
@@ -129,7 +130,9 @@ def filter_colorization(grep_output):
     return colorizationRE.sub("", grep_output)
 
 def execute_grep_test(flags, regexp, datafile, expected_result):
+    global test_count
     global failure_count
+    test_count +=1
     flag_string = ""
     for f in flags:
         if flag_string != "": flag_string += u" "
@@ -152,7 +155,7 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
     filtered_out = filter_colorization(grep_out)
     if filtered_out != expected_result:
         msg = u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out)
-        print(msg.encode('utf-8'))
+        print(msg)
         failure_count += 1
     else:
         if options.verbose:
@@ -241,10 +244,12 @@ def start_element_do_test(name, attrs):
                     execute_grep_test(flags, attrs['regexp'], attrs['datafile'], expected_result)
 
 def run_tests(greptest_xml):
+    global test_count
     global failure_count
     p = xml.parsers.expat.ParserCreate()
     p.StartElementHandler = start_element_do_test
     p.Parse(greptest_xml, 1)
+    print("%i tests executed, %i faliures\n"  % (test_count, failure_count))
     if failure_count > 0: exit(1)
 
 if __name__ == '__main__':
