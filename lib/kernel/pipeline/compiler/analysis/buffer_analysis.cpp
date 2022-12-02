@@ -646,10 +646,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
-            // if (LLVM_LIKELY(N.isOwned() && N.Locality != BufferLocality::ThreadLocal)) {
-            if (LLVM_UNLIKELY(N.isUnowned())) {
-                outputRate.CanModifySegmentLength = !N.IsLinear;
-            }
+            outputRate.CanModifySegmentLength = !N.IsLinear;
         }
     }
 }

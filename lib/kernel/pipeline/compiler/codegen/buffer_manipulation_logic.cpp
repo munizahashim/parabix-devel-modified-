@@ -514,14 +514,13 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         }
 
         const auto blocksToZero = ceiling(strideLength * Rational{1, blockWidth});
-
         if (blocksToZero > 1) {
             Value * const nextBlockIndex = b->CreateAdd(blockIndex, ONE);
             Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
-            Value * const startPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, nextOffset);
+            Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, nextOffset);
             Value * const startPtrInt = b->CreatePtrToInt(startPtr, intPtrTy);
-           // Value * const endOffset = b->CreateRoundUp(nextOffset, b->getSize(blocksToZero));
-            Value * const endPtr = b->CreateGEP(startPtr, b->getSize(blocksToZero));
+            Value * const endOffset = b->CreateRoundUp(nextOffset, b->getSize(blocksToZero));
+            Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, endOffset);
             Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b->CreateSub(endPtrInt, startPtrInt);
             #ifdef PRINT_DEBUG_MESSAGES

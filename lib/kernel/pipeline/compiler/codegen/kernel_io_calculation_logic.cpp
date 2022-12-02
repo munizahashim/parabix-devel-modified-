@@ -764,9 +764,11 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
         // NOTE: the producer of this stream will zero out all data after its last produced item
         // that can be read by a single iteration of any consuming kernel.
 
+        Value * const deferred = mCurrentProcessedDeferredItemCountPhi[inputPort];
+        Value * const itemCount = port.IsDeferred ? deferred : processed;
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
         Value * const closed = isClosed(b, inputPort);
-        Value * const exhausted = b->CreateICmpUGE(processed, available);
+        Value * const exhausted = b->CreateICmpUGE(itemCount, available);
         Value * const useZeroExtend = b->CreateAnd(closed, exhausted);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_useZeroExtend = %" PRIu8, useZeroExtend);
