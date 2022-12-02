@@ -257,7 +257,15 @@ void GrepEngine::initRE(re::RE * re) {
     }
     mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
 
+    // Determine the unit of length for the RE.  If the RE involves
+    // fixed length UTF-8 sequences only, then UTF-8 can be used
+    // for most efficient processing.   Otherwise we must use full
+    // Unicode length calculations.
     mLengthAlphabet = &cc::UTF8;
+    if (!validateFixedUTF8(mRE) || (mGrepRecordBreak == GrepRecordBreakKind::Unicode)) {
+        setComponent(mExternalComponents, Component::UTF8index);
+        mLengthAlphabet = &cc::Unicode;
+    }
     StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
     StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
@@ -320,7 +328,6 @@ void GrepEngine::initRE(re::RE * re) {
     if (lgth_range.second == 0) mColoring = false;
     //if ((mLengthAlphabet = &cc::Unicode) && mColoring) UnicodeIndexing = true;
     if (mColoring) {
-        //mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}, u8_u21));
         mExternalTable.declareExternal(u8, "LineStarts", new LineStartsExternal());
         UnicodeIndexing = true;
     }
@@ -472,27 +479,15 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         mNullMode = NullCharMode::Break;
     }
     mLineBreakStream = P->CreateStreamSet(1, 1);
-    mU8index = P->CreateStreamSet(1, 1);
     if (mIllustrator && hasComponent(mExternalComponents, Component::S2P)) mIllustrator->captureBixNum(P, "basis", SourceStream);
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
+        mU8index = P->CreateStreamSet(1, 1);
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
-        auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
-        mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
-        auto u8_LB = new PreDefined(mLineBreakStream);
-        mExternalTable.declareExternal(u8, "UTF8_LB", u8_LB);
-        if (UnicodeIndexing) {
-            auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
-            mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}, u8_LB));
-        }
     }
     else {
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
+            mU8index = P->CreateStreamSet(1, 1);
             P->CreateKernelCall<UTF8_index>(SourceStream, mU8index);
-            if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
-            auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
-            mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
         }
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
             Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
@@ -502,10 +497,19 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
+    }
+    auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
+    if (mU8index) {
+        if (mIllustrator) mIllustrator->captureBitstream(P, "mU8index", mU8index);
         auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
-        auto u8_LB = new PreDefined(mLineBreakStream);
-        mExternalTable.declareExternal(u8, "UTF8_LB", u8_LB);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
+        mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
+    }
+    if (mIllustrator) mIllustrator->captureBitstream(P, "mLineBreakStream", mLineBreakStream);
+    auto u8_LB = new PreDefined(mLineBreakStream);//, std::make_pair(0, 0), 1);
+    mExternalTable.declareExternal(u8, "UTF8_LB", u8_LB);
+    if (UnicodeIndexing) {
+        auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
+        mExternalTable.declareExternal(Unicode, "UTF8_LB", new FilterByMaskExternal(u8, {"u8index", "UTF8_LB"}, u8_LB));
     }
 }
 
@@ -620,6 +624,7 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
         P->CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "MovedMatches", MovedMatches);
         MatchedLineEnds = MovedMatches;
     } else {
         MatchedLineEnds = initialMatches;
@@ -627,12 +632,14 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
     if (mInvertMatches) {
         StreamSet * const InvertedMatches = P->CreateStreamSet();
         P->CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "InvertedMatches", InvertedMatches);
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
         StreamSet * const TruncatedMatches = P->CreateStreamSet();
         Scalar * const maxCount = P->getInputScalar("maxCount");
         P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedMatches", TruncatedMatches);
         MatchedLineEnds = TruncatedMatches;
     }
     if (mIllustrator) mIllustrator->captureBitstream(P, "MatchedLineEnds", MatchedLineEnds);
@@ -953,8 +960,8 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
 
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
-        auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
-        StreamSet * lineStarts = mExternalTable.getStreamSet(E, u8, "LineStarts");
+        StreamSet * lineStarts = E->CreateStreamSet(1, 1);
+        E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
         SpreadByMask(E, lineStarts, MatchesByLine, MatchedLineStarts);
         if (mIllustrator) mIllustrator->captureBitstream(E, "MatchedLineStarts", MatchedLineStarts);
 

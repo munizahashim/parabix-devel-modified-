@@ -105,8 +105,8 @@ public:
         return false;
     }
     std::vector<std::string> getParameters() override {return {};}
-    PreDefined(StreamSet * predefined) :
-        ExternalStreamObject(Kind::PreDefined) {mStreamSet = predefined;}
+    PreDefined(StreamSet * predefined, std::pair<int, int> lgthRange = std::make_pair(1,1), int offset = 0) :
+        ExternalStreamObject(Kind::PreDefined, lgthRange, offset) {mStreamSet = predefined;}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override {}
 };
 
