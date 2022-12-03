@@ -65,7 +65,7 @@ class ExternalStreamObject {
 public:
     using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
-        U21, PreDefined, LineStarts, CC_External, RE_External, StartAnchored,
+        U21, PreDefined, LineStarts, CC_External, RE_External,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
         WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan, MarkedSpanExternal
@@ -202,24 +202,6 @@ private:
     re::RE * mRE;
     const cc::Alphabet * mIndexAlphabet;
     std::vector<std::string> mParams;
-};
-
-class StartAnchoredExternal : public ExternalStreamObject {
-public:
-    static inline bool classof(const ExternalStreamObject * ext) {
-        return ext->getKind() == Kind::StartAnchored;
-    }
-    static inline bool classof(const void *) {
-        return false;
-    }
-    StartAnchoredExternal(grep::GrepEngine * engine, re::RE * re, const cc::Alphabet * a) :
-        ExternalStreamObject(Kind::StartAnchored, re::getLengthRange(re, a), grepOffset(re)),
-            mGrepEngine(engine), mRE(re), mIndexAlphabet(a) {}
-    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
-private:
-    grep::GrepEngine *  mGrepEngine;
-    re::RE * mRE;
-    const cc::Alphabet * mIndexAlphabet;
 };
 
 class PropertyDistanceExternal : public ExternalStreamObject {

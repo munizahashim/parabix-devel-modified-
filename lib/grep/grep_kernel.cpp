@@ -257,12 +257,6 @@ void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     installStreamSet(reStrm);
 }
 
-void StartAnchoredExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * reStrm  = b->CreateStreamSet(1);
-    mOffset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
-    installStreamSet(reStrm);
-}
-
 void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * propertyBasis = inputs[0];
     StreamSet * distStrm = b->CreateStreamSet(1);

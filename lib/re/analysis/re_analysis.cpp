@@ -178,6 +178,10 @@ std::pair<RE *, RE *> ParseUniquePrefix(RE * r) {
             // No parse possible.
             return std::make_pair(makeSeq(), r);
         }
+        if (isa<Start>(seq->front())) {
+            return std::make_pair(seq->front(),
+                                  makeSeq(seq->begin()+1, seq->end()));
+        }
         // For ambiguity testing, we need to know if an initial
         // CC sequence can be matched other than at the beginning
         // of the RE, i.e., by any suffix.

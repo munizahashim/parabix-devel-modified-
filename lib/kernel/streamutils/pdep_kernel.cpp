@@ -58,7 +58,7 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements()),
     mOptimization(opt) {
-        //setStride(4 * b->getBitBlockWidth());
+        setStride(4 * b->getBitBlockWidth());
     }
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {

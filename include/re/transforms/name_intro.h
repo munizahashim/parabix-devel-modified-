@@ -50,12 +50,4 @@ public:
 protected:
     RE * transform (RE * r) override;
 };
-
-class StartAnchoredAltNamer final : public NameIntroduction {
-public:
-    StartAnchoredAltNamer();
-protected:
-    RE * transformAlt (Alt * a) override;
-    RE * transformSeq (Seq * s) override;
-};
 }
