@@ -1021,7 +1021,7 @@ void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
 Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
     Value * instance = nullptr;
     if (hasThreadLocal()) {
-        assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 1 : 0)));
+        assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
         Function * const init = getInitializeThreadLocalFunction(b);
         instance = b->CreateCall(init->getFunctionType(), init, args);
     }
@@ -1032,7 +1032,7 @@ Value * Kernel::initializeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> ar
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) const {
-    assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 2 : 0)));
+    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 2u : 0u)));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
     b->CreateCall(init->getFunctionType(), init, args);
 }
@@ -1042,7 +1042,7 @@ void Kernel::finalizeThreadLocalInstance(BuilderRef b, ArrayRef<Value *> args) c
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::finalizeInstance(BuilderRef b, ArrayRef<Value *> args) const {
     Function * const termFunc = getFinalizeFunction(b);
-    assert (args.size() == ((isStateful() ? 1 : 0) + (hasThreadLocal() ? 1 : 0)));
+    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
     Value * result = b->CreateCall(termFunc->getFunctionType(), termFunc, args);
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
