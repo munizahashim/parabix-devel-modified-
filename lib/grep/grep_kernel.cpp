@@ -450,23 +450,30 @@ void UTF8_index::generatePabloMethod() {
     it.createAssign(u8invalid, it.createOr(pfx_invalid, it.createOr(mismatch, EF_invalid)));
     PabloAST * const u8valid = it.createNot(u8invalid, "u8valid");
     //
-    //
     it.createAssign(nonFinal, it.createAnd(nonFinal, u8valid));
-    //pb.createAssign(nonFinal, pb.createOr(nonFinal, CRLF));
-    //PabloAST * unterminatedLineAtEOF = pb.createAtEOF(pb.createAdvance(pb.createNot(LineBreak), 1), "unterminatedLineAtEOF");
 
     Var * const u8index = getOutputStreamVar("u8index");
     PabloAST * u8final = pb.createInFile(pb.createNot(nonFinal));
+    if (getNumOfStreamInputs() > 1) {
+        u8final = pb.createOr(u8final, getInputStreamSet("u8_LB")[0]);
+    }
     pb.createAssign(pb.createExtract(u8index, pb.getInteger(0)), u8final);
 }
 
-UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index)
-: PabloKernel(kb, "UTF8_index_" + std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()),
-// input
-{Binding{"source", Source}},
-// output
-{Binding{"u8index", u8index}}) {
-
+UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
+: PabloKernel(kb, [&]() -> std::string {
+    std::stringstream s;
+    s << "UTF8_index_";
+    s << Source->getNumElements() << "x" << Source->getFieldWidth();
+    if (u8_LB) {
+        s << "_LB";
+    }
+    return s.str();}(),
+{}, {Binding{"u8index", u8index}}) {
+    mInputStreamSets.push_back(Binding{"source", Source});
+    if (u8_LB) {
+        mInputStreamSets.push_back(Binding{"u8_LB", u8_LB, FixedRate(), Principal()});
+    }
 }
 
 void GrepKernelOptions::setIndexing(StreamSet * idx) {

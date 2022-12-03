@@ -119,7 +119,7 @@ public:
         return false;
     }
     std::vector<std::string> getParameters() override;
-    LineStartsExternal(std::vector<std::string> parms = {"UTF8_LB"}) :
+    LineStartsExternal(std::vector<std::string> parms = {"$"}) :
         ExternalStreamObject(Kind::LineStarts, std::make_pair(0, 0), 1), mParms(parms) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
@@ -356,9 +356,16 @@ private:
     std::string mMatchMarks;
 };
 
+//
+// Compute a stream marking UTF-8 character positions.   Each valid
+// character is marked at the position of its final UTF-8 byte.
+// If the optional linebreak parameter is included, also include
+// any positions marked in this stream, including a possible extra
+// bit just past EOF if the file is unterminated.
+//
 class UTF8_index : public pablo::PabloKernel {
 public:
-    UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index);
+    UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, StreamSet * linebreak = nullptr);
 protected:
     void generatePabloMethod() override;
 };
