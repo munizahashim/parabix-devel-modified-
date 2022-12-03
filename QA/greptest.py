@@ -249,7 +249,7 @@ def run_tests(greptest_xml):
     p = xml.parsers.expat.ParserCreate()
     p.StartElementHandler = start_element_do_test
     p.Parse(greptest_xml, 1)
-    print("%i tests executed, %i faliures\n"  % (test_count, failure_count))
+    print("%i tests executed, %i failures\n"  % (test_count, failure_count))
     if failure_count > 0: exit(1)
 
 if __name__ == '__main__':
