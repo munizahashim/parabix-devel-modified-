@@ -33,6 +33,8 @@
 #include <string>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
+#include <pablo/builder.hpp>
+#include <pablo/pablo_kernel.h>
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -43,6 +45,7 @@
 
 #define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
 #define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
+#define SHOW_BYTES(name) if (illustratorAddr) illustrator.captureByteData(P, #name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -58,6 +61,45 @@ static cl::opt<bool> UseFilterByMaskKernel("filter-by-mask-kernel", cl::desc("Us
 static cl::opt<bool> FilterOnly("filter-only", cl::desc("Perform initial CSV filtering only"), cl::init(false), cl::cat(CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+
+class Invert : public PabloKernel {
+public:
+    Invert(BuilderRef kb, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(kb, "Invert",
+                      {Binding{"mask", mask}},
+                      {Binding{"inverted", inverted}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void Invert::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * mask = getInputStreamSet("mask")[0];
+    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
+    Var * outVar = getOutputStreamVar("inverted");
+    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
+}
+
+class BasisCombine : public PabloKernel {
+public:
+    BasisCombine(BuilderRef kb, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
+        : PabloKernel(kb, "BasisCombine",
+                      {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
+                      {Binding{"combined", combined}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void BasisCombine::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis1 = getInputStreamSet("basis1");
+    std::vector<PabloAST *> basis2 = getInputStreamSet("basis2");
+    Var * outVar = getOutputStreamVar("combined");
+    for (unsigned i = 0; i < basis1.size(); i++) {
+        PabloAST * combined = pb.createOr(basis1[i], basis2[i]);
+        pb.createAssign(pb.createExtract(outVar, pb.getInteger(i)), combined);
+    }
+}
 
 CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
@@ -138,7 +180,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
-
+    
     StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
     P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
@@ -153,6 +195,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, 0, GammaDistribution(5.0f, 0.1f));
     SHOW_BIXNUM(ExpandedBasis);
 
+#define USE_REPEATING_STREAMSET
+#ifndef USE_REPEATING_STREAMSET
     // We need to insert strings at all positions marked by 0s in the
     // SpreadMask, plus the additional 0 at the delimiter position.
     //StreamSet * InsertMask = P->CreateStreamSet(1);
@@ -173,6 +217,35 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     SHOW_BIXNUM(InstantiatedBasis);
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
+#else
+    std::vector<uint64_t> templatePattern;
+    unsigned repeatSize = 0;
+    for (auto amt : insertionAmts) { repeatSize += amt;}
+    templatePattern.resize(repeatSize);
+    for (auto & tmpStr : templateStrs) {
+        unsigned j = 0;
+        unsigned sz = tmpStr.size();
+        for (unsigned i = 0; i < std::min(maxInsertAmt, sz); i++) {
+            templatePattern[j] = static_cast<uint64_t>(tmpStr[i]);
+            j++;
+        }
+    }
+    
+    StreamSet * RepeatingTemplate = P->CreateRepeatingStreamSet(/*fw = */ 8, templatePattern);
+
+    StreamSet * RepeatingBasis = P->CreateStreamSet(8);
+    Selected_S2P(P, RepeatingTemplate, RepeatingBasis);
+
+    StreamSet * InvertedMask = P->CreateStreamSet(1);
+    P->CreateKernelCall<Invert>(SpreadMask, InvertedMask);
+    
+    StreamSet * TemplateBasis = P->CreateStreamSet(8);
+    SpreadByMask(P, InvertedMask, RepeatingBasis, TemplateBasis, 0, GammaDistribution(5.0f, 0.1f));
+    SHOW_BIXNUM(TemplateBasis);
+    
+    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<BasisCombine>(ExpandedBasis, TemplateBasis, InstantiatedBasis);
+#endif
     StreamSet * Instantiated = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
 
@@ -180,6 +253,8 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     P->CreateKernelCall<StdOutKernel>(Instantiated);
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
+
+
 
 const unsigned MaxHeaderSize = 24;
 
