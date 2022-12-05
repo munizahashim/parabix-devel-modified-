@@ -41,6 +41,9 @@
 #include <util/papi_helper.hpp>
 #endif
 
+#define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
+#define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
+
 using namespace kernel;
 using namespace llvm;
 using namespace pablo;
@@ -64,6 +67,11 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
                                     Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * illustratorAddr = nullptr;
+    if (codegen::IllustratorDisplay > 0) {
+        illustratorAddr = P->getInputScalar("illustratorAddr");
+        illustrator.registerIllustrator(illustratorAddr);
+    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -74,140 +82,102 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P->CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
-
+    SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P->CreateStreamSet(5);
     P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
-
     StreamSet * recordSeparators = P->CreateStreamSet(1);
     StreamSet * fieldSeparators = P->CreateStreamSet(1);
     StreamSet * quoteEscape = P->CreateStreamSet(1);
+    SHOW_STREAM(recordSeparators);
+    SHOW_STREAM(fieldSeparators);
+    SHOW_STREAM(quoteEscape);
+
     P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     StreamSet * toKeep = P->CreateStreamSet(1);
     P->CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
-    // DEBUGGING
-    if (FilterOnly) {
-        StreamSet * filteredBasis = P->CreateStreamSet(8);
-        //FilterByMask(P, toKeep, translatedBasis, filteredBasis);
-        if (UseFilterByMaskKernel) {
-            P->CreateKernelCall<FilterByMaskKernel>(Select(toKeep, {0}),
-                                                    SelectOperationList{Select(BasisBits, streamutils::Range(0, 8))},
-                                                    filteredBasis);
-        } else {
-            FilterByMask(P, toKeep, BasisBits, filteredBasis);
-        }
-        StreamSet * filtered = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
-        P->CreateKernelCall<StdOutKernel>(filtered);
-    } else {
-    //  NORMAL
-        StreamSet * recordsByField = P->CreateStreamSet(1);
-        if (UseFilterByMaskKernel) {
-            P->CreateKernelCall<FilterByMaskKernel>
-                (Select(fieldSeparators, {0}),
-                 SelectOperationList{Select(recordSeparators, {0})},
-                 recordsByField);
-        } else {
-            FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
-        }
-        // P->CreateKernelCall<DebugDisplayKernel>("recordsByField", recordsByField);
+    SHOW_STREAM(toKeep);
+    //
+    // Create a short stream which is 1-to-1 with the (field/record) separators,
+    // having 0 bits for field separators and 1 bits for record separators.
+    // Normally this will be a stream having exactly one bit set for every
+    // N positions, where N is the number of entries per row.
+    StreamSet * recordsByField = P->CreateStreamSet(1);
+    FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
+    SHOW_STREAM(recordsByField);
 
-        StreamSet * translatedBasis = P->CreateStreamSet(8);
-        P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
+    StreamSet * translatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<CSV_Char_Replacement>(recordSeparators, fieldSeparators, quoteEscape, BasisBits, translatedBasis);
+    SHOW_BIXNUM(translatedBasis);
+    StreamSet * filteredBasis = P->CreateStreamSet(8);
+    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
+    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    SHOW_BIXNUM(filteredBasis);
+    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
+    SHOW_STREAM(filteredFieldSeparators);
+    
+    const unsigned fieldCount = templateStrs.size();
+    const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
+    StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
+    P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, RunIndex::Kind::RunOf0);
+    SHOW_BIXNUM(compressedSepNum);
 
-        StreamSet * filteredBasis = P->CreateStreamSet(8);
-        StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-        if (UseFilterByMaskKernel) {
-            P->CreateKernelCall<FilterByMaskKernel>
-                (Select(toKeep, {0}),
-                 SelectOperationList{Select(translatedBasis, streamutils::Range(0, 8))},
-                 filteredBasis);
-            P->CreateKernelCall<FilterByMaskKernel>
-                (Select(toKeep, {0}),
-                 SelectOperationList{Select(fieldSeparators, {0})},
-                 filteredFieldSeparators);
-        } else {
-            FilterByMask(P, toKeep, translatedBasis, filteredBasis);
-            FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
-        }
+    StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
+    P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
+    SHOW_BIXNUM(compressedFieldNum);
 
-        //P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
-        //P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
+    StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
+    SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
+    SHOW_BIXNUM(fieldNum);
 
-        const unsigned fieldCount = templateStrs.size();
-        const unsigned fieldCountBits = ceil_log2(fieldCount + 1);  // 1-based numbering
-        StreamSet * compressedSepNum = P->CreateStreamSet(fieldCountBits);
-
-        P->CreateKernelCall<RunIndex>(recordsByField, compressedSepNum, nullptr, RunIndex::Kind::RunOf0);
-        //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
-
-        StreamSet * compressedFieldNum = P->CreateStreamSet(fieldCountBits);
-        P->CreateKernelCall<FieldNumberingKernel>(compressedSepNum, recordsByField, compressedFieldNum);
-        //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
-
-        StreamSet * fieldNum = P->CreateStreamSet(fieldCountBits);
-        SpreadByMask(P, filteredFieldSeparators, compressedFieldNum, fieldNum);
-
-        //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
-
-        std::vector<unsigned> insertionAmts;
-        unsigned maxInsertAmt = 0;
-        for (auto & s : templateStrs) {
-            unsigned insertAmt = s.size();
-            insertionAmts.push_back(insertAmt);
-            if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
-        }
-        const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
-
-        StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
-        P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
-        //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-        if (codegen::IllustratorDisplay > 0) {
-            Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
-            illustrator.registerIllustrator(illustratorAddr);
-            illustrator.captureByteData(P, "bytedata", ByteStream, '?');
-            illustrator.captureBitstream(P, "recordSeparators", recordSeparators, '_', '1');
-            illustrator.captureBitstream(P, "fieldSeparators", fieldSeparators);
-            illustrator.captureBitstream(P, "filteredFieldSeparators", filteredFieldSeparators);
-            illustrator.captureBixNum(P, "InsertBixNum", InsertBixNum);
-        }
-
-        // TODO: these aren't very tight bounds but works for now
-        StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before,
-                                                           GammaDistribution(5.0f, 0.1f), NormalDistribution(0.7f, 0.05f));
-        // P->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
-
-        // Baais bit streams expanded with 0 bits for each string to be inserted.
-        StreamSet * ExpandedBasis = P->CreateStreamSet(8);
-        SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, 0, GammaDistribution(5.0f, 0.1f));
-        // P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
-
-        // We need to insert strings at all positions marked by 0s in the
-        // SpreadMask, plus the additional 0 at the delimiter position.
-        //StreamSet * InsertMask = P->CreateStreamSet(1);
-        //P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
-
-        // For each run of 0s marking insert positions, create a parallel
-        // bixnum sequentially numbering the string insert positions.
-        StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
-        P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-        //P->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
-
-        StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
-        SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum, 0, GammaDistribution(5.0f, 0.1f));
-        // P->CreateKernelCall<DebugDisplayKernel>("expandedFieldNum", expandedFieldNum);
-
-        StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
-        P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -1);
-
-        // The computed output can be converted back to byte stream form by the
-        // P2S kernel (parallel-to-serial).
-        StreamSet * Instantiated = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
-
-        //  The StdOut kernel writes a byte stream to standard output.
-        P->CreateKernelCall<StdOutKernel>(Instantiated);
+    std::vector<unsigned> insertionAmts;
+    unsigned maxInsertAmt = 0;
+    for (auto & s : templateStrs) {
+        unsigned insertAmt = s.size();
+        insertionAmts.push_back(insertAmt);
+        if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
+    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
+
+    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<ZeroInsertBixNum>(insertionAmts, fieldNum, InsertBixNum);
+    SHOW_BIXNUM(InsertBixNum);
+
+    // TODO: these aren't very tight bounds but works for now
+    StreamSet * const SpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before,
+                                                       GammaDistribution(5.0f, 0.1f), NormalDistribution(0.7f, 0.05f));
+    SHOW_STREAM(SpreadMask);
+
+    // Baais bit streams expanded with 0 bits for each string to be inserted.
+    StreamSet * ExpandedBasis = P->CreateStreamSet(8);
+    SpreadByMask(P, SpreadMask, filteredBasis, ExpandedBasis, 0, GammaDistribution(5.0f, 0.1f));
+    SHOW_BIXNUM(ExpandedBasis);
+
+    // We need to insert strings at all positions marked by 0s in the
+    // SpreadMask, plus the additional 0 at the delimiter position.
+    //StreamSet * InsertMask = P->CreateStreamSet(1);
+    //P->CreateKernelCall<Extend1Zeroes>(SpreadMask, InsertMask);
+
+    // For each run of 0s marking insert positions, create a parallel
+    // bixnum sequentially numbering the string insert positions.
+    StreamSet * const InsertIndex = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+    SHOW_BIXNUM(InsertIndex);
+
+    StreamSet * expandedFieldNum = P->CreateStreamSet(fieldCountBits);
+    SpreadByMask(P, SpreadMask, fieldNum, expandedFieldNum, 0, GammaDistribution(5.0f, 0.1f));
+    SHOW_BIXNUM(expandedFieldNum);
+
+    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
+    P->CreateKernelCall<StringReplaceKernel>(templateStrs, ExpandedBasis, SpreadMask, expandedFieldNum, InsertIndex, InstantiatedBasis, /* offset = */ -1);
+    SHOW_BIXNUM(InstantiatedBasis);
+    // The computed output can be converted back to byte stream form by the
+    // P2S kernel (parallel-to-serial).
+    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(InstantiatedBasis, Instantiated);
+
+    //  The StdOut kernel writes a byte stream to standard output.
+    P->CreateKernelCall<StdOutKernel>(Instantiated);
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }
 
