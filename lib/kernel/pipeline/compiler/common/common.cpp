@@ -246,7 +246,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
                 return false;
         }
 
-        if (p.IsDeferred) {
+        if (p.isDeferred()) {
             return false;
         }
     }
@@ -269,7 +269,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
                 return false;
         }
 
-        if (p.IsDeferred || p.LookBehind) {
+        if (p.isDeferred() || p.LookBehind) {
             return false;
         }
     }

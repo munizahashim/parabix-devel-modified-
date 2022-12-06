@@ -118,7 +118,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
             outerProcessedPhis[br.Port.Number] = phi;
             mCurrentProcessedItemCountPhi[br.Port] = phi;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 PHINode * const phi = b->CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
                 outerProcessedDeferredPhis[br.Port.Number] = phi;
@@ -136,7 +136,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
             outerProducedPhis[br.Port.Number] = phi;
             mCurrentProducedItemCountPhi[br.Port] = phi;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 PHINode * const phi = b->CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
                 outerProducedDeferredPhis[br.Port.Number] = phi;
@@ -185,7 +185,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
             phi->addIncoming(outerProcessedPhis[br.Port.Number], oneStrideArgsExit);
             mCurrentProcessedItemCountPhi[br.Port] = phi;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 PHINode * const phi = b->CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
                 phi->addIncoming(outerProcessedDeferredPhis[br.Port.Number], oneStrideArgsExit);
@@ -203,7 +203,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
             phi->addIncoming(outerProducedPhis[br.Port.Number], oneStrideArgsExit);
             mCurrentProducedItemCountPhi[br.Port] = phi;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 PHINode * const phi = b->CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
                 phi->addIncoming(outerProducedDeferredPhis[br.Port.Number], oneStrideArgsExit);
@@ -416,7 +416,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
 
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
             Value * processed = nullptr;
-            if (rt.IsDeferred) {
+            if (rt.isDeferred()) {
                 processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
                 processed = mCurrentProcessedItemCountPhi[rt.Port];
@@ -432,13 +432,13 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
                 addNextArg(isClosed(b, StreamSetPort(PortType::Input, i)));
             }
 
-            mReturnedProcessedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.IsDeferred, processed);
+            mReturnedProcessedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.isDeferred(), processed);
 
             if (LLVM_UNLIKELY(requiresItemCount(rt.Binding))) {
                 // calculate how many linear items are from the *deferred* position
                 Value * inputItems = mLinearInputItemsPhi[rt.Port]; assert (inputItems);
 
-                if (rt.IsDeferred) {
+                if (rt.isDeferred()) {
                     const auto prefix = makeBufferName(mKernelId, rt.Port);
                     Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[rt.Port], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
                     inputItems = b->CreateAdd(inputItems, diff);
@@ -462,12 +462,9 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
         const StreamSetBuffer * const buffer = bn.Buffer;
         Value * produced = mCurrentProducedItemCountPhi[rt.Port];
 
-        if (LLVM_UNLIKELY(rt.IsShared)) {
-            if (CheckAssertions) {
-                b->CreateAssert(buffer->getHandle(), "handle?");
-            }
+        if (LLVM_UNLIKELY(rt.isShared())) {
             addNextArg(b->CreatePointerCast(buffer->getHandle(), voidPtrTy));
-        } else if (LLVM_UNLIKELY(rt.IsManaged)) {
+        } else if (LLVM_UNLIKELY(rt.isManaged())) {
             if (LLVM_UNLIKELY(numOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
                 auto vba = b->CreateAllocaAtEntryPoint(voidPtrTy);
                 mVirtualBaseAddressPtr.push_back(vba);
@@ -488,9 +485,9 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             addNextArg(b->CreatePointerCast(vba, voidPtrTy));
         }
 
-        mReturnedProducedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.IsDeferred || mKernelCanTerminateEarly, produced);
+        mReturnedProducedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.isDeferred() || mKernelCanTerminateEarly, produced);
 
-        if (LLVM_UNLIKELY(rt.IsShared || rt.IsManaged)) {
+        if (LLVM_UNLIKELY(rt.isShared() || rt.isManaged())) {
             addNextArg(readConsumedItemCount(b, streamSet));
         } else if (requiresItemCount(rt.Binding)) {
             addNextArg(mLinearOutputItemsPhi[rt.Port]);

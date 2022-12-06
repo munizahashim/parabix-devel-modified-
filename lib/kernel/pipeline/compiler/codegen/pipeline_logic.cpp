@@ -178,7 +178,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
                 mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
             }
         }
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
+        if (LLVM_UNLIKELY(br.isDeferred())) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
@@ -194,7 +194,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
                 mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
             }
         }
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
+        if (LLVM_UNLIKELY(br.isDeferred())) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }

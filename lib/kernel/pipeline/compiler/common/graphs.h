@@ -321,14 +321,23 @@ struct BufferNode {
 
 };
 
+enum BufferPortType : unsigned {
+    IsPrincipal = 1,
+    IsZeroExtended = 2,
+    IsDeferred = 4,
+    IsShared = 8,
+    IsManaged = 16,
+    CanModifySegmentLength = 64
+};
+
 struct BufferPort {
 
     RelationshipType Port;
     BindingRef Binding;
     Rational Minimum;
     Rational Maximum;
+    unsigned Flags = 0;
 
-    bool CanModifySegmentLength = false;
 
     unsigned SymbolicRateId = 0U;
 
@@ -339,15 +348,33 @@ struct BufferPort {
     unsigned LookAhead = 0;
     unsigned LookBehind = 0;
 
-    bool IsPrincipal = false;
-    bool IsZeroExtended = false;
-    bool IsDeferred = false;
-    bool IsShared = false;
-    bool IsManaged = false;
-
-    bool IsGeneratedSequence = false;
+    //bool mCanModifySegmentLength = false;
 
     int TransitiveAdd = 0;
+
+    bool isPrincipal() const {
+        return (Flags & BufferPortType::IsPrincipal) != 0;
+    }
+
+    bool isZeroExtended() const {
+        return (Flags & BufferPortType::IsZeroExtended) != 0;
+    }
+
+    bool isDeferred() const {
+        return (Flags & BufferPortType::IsDeferred) != 0;
+    }
+
+    bool isShared() const {
+        return (Flags & BufferPortType::IsShared) != 0;
+    }
+
+    bool isManaged() const {
+        return (Flags & BufferPortType::IsManaged) != 0;
+    }
+
+    bool canModifySegmentLength() const {
+        return (Flags & BufferPortType::CanModifySegmentLength) != 0;
+    }
 
     bool operator < (const BufferPort & rn) const {
         if (LLVM_LIKELY(Port.Type == rn.Port.Type)) {

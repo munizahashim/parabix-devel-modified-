@@ -44,9 +44,17 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
                                        Scalar * base,
                                        const StreamExpandOptimization opt,
                                        const unsigned FieldWidth, ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability)
-    : MultiBlockKernel(b, "streamExpand" + std::to_string(FieldWidth) + ((opt == StreamExpandOptimization::NullCheck) ? "nullcheck" : "")
-+ "_" + std::to_string(source->getNumElements())
-+ ":" + std::to_string(expanded->getNumElements()),
+: MultiBlockKernel(b, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "streamExpand"  << codegen::StreamExpandStrideSize << ':' << FieldWidth;
+                        if (opt == StreamExpandOptimization::NullCheck)  {
+                            nm << 'N';
+                        }
+                        nm << '_' << source->getNumElements() << ':' << expanded->getNumElements();
+                        nm.flush();
+                        return tmp;
+                    }(),
 // input stream sets
 {Bind("marker", mask, Principal()),
  Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth()))},
@@ -58,7 +66,7 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements()),
     mOptimization(opt) {
-        setStride(4 * b->getBitBlockWidth());
+        setStride(codegen::StreamExpandStrideSize * b->getBitBlockWidth());
     }
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
@@ -77,7 +85,9 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     BasicBlock * expansionDone = b->CreateBasicBlock("expansionDone");
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+        assert ((getStride() % b->getBitBlockWidth()) == 0);
+        ConstantInt * const mult = b->getSize(getStride() / b->getBitBlockWidth());
+        numOfBlocks = b->CreateMul(numOfStrides, mult);
     }
     Value * processedSourceItems = b->getProcessedItemCount("source");
     Value * initialSourceOffset = b->CreateURem(processedSourceItems, BLOCK_WIDTH);

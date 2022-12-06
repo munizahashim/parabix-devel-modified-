@@ -67,6 +67,8 @@ enum DebugFlags {
 extern bool PabloTransposition;
 extern bool SplitTransposition;
 
+extern unsigned StreamExpandStrideSize; // temp debugging setting
+
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
 
 bool LLVM_READONLY AnyDebugOptionIsSet();

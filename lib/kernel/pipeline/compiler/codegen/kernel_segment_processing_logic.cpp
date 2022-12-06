@@ -102,7 +102,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
-        if (port.CanModifySegmentLength) {
+        if (port.canModifySegmentLength()) {
             checkInputChannels = true;
             break;
         }
@@ -111,7 +111,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     bool checkOutputChannels = false;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
-        if (port.CanModifySegmentLength) {
+        if (port.canModifySegmentLength()) {
             checkOutputChannels = true;
             break;
         }
@@ -754,7 +754,7 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
             const auto & br = mBufferGraph[e];
             const auto port = br.Port;
             Value * produced = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 produced = mAlreadyProducedDeferredPhi[port];
             } else {
                 produced = mAlreadyProducedPhi[port];
@@ -814,7 +814,7 @@ void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b
         const auto streamSet = target(e, mBufferGraph);
         const BufferPort & br = mBufferGraph[e];
         Value * produced = nullptr;
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
+        if (LLVM_UNLIKELY(br.isDeferred())) {
             produced = mInitiallyProducedDeferredItemCount[streamSet];
         } else {
             produced = mInitiallyProducedItemCount[streamSet];

@@ -74,14 +74,14 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
         // were possible (i.e., blocked on first iteration)
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const auto & bp = mBufferGraph[e];
-            if (bp.CanModifySegmentLength) {
+            if (bp.canModifySegmentLength()) {
                 const auto prefix = makeBufferName(kernelId, bp.Port);
                 mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
             }
         }
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto & bp = mBufferGraph[e];
-            if (bp.CanModifySegmentLength) {
+            if (bp.canModifySegmentLength()) {
                 const auto prefix = makeBufferName(kernelId, bp.Port);
                 mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
             }
@@ -653,7 +653,7 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(BuilderRef b) {
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
 
                 const BufferPort & binding = mBufferGraph[e];
-                if (binding.CanModifySegmentLength) {
+                if (binding.canModifySegmentLength()) {
                     args.push_back(STDERR);
                     if (kernelName) {
                         args.push_back(firstLine);
@@ -689,7 +689,7 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(BuilderRef b) {
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
 
                 const BufferPort & binding = mBufferGraph[e];
-                if (binding.CanModifySegmentLength) {
+                if (binding.canModifySegmentLength()) {
                     args.push_back(STDERR);
                     if (kernelName) {
                         args.push_back(firstLine);
@@ -759,12 +759,12 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
             unsigned count = 0;
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     ++count;
                 }
             }
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     ++count;
                 }
             }
@@ -792,12 +792,12 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
         format << "SEG #";
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     goto has_ports;
                 }
             }
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     goto has_ports;
                 }
             }
@@ -805,13 +805,13 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
 has_ports:
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
                 const auto & bp = mBufferGraph[e];
-                if (bp.CanModifySegmentLength) {
+                if (bp.canModifySegmentLength()) {
                     format << ",I" << bp.Port.Number << ':' << source(e, mBufferGraph);
                 }
             }
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
                 const auto & bp = mBufferGraph[e];
-                if (bp.CanModifySegmentLength) {
+                if (bp.canModifySegmentLength()) {
                     format << ",O" << bp.Port.Number << ':' << source(e, mBufferGraph);
                 }
             }
@@ -827,12 +827,12 @@ has_ports:
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
             unsigned count = 0;
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     ++count;
                 }
             }
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                if (mBufferGraph[e].CanModifySegmentLength) {
+                if (mBufferGraph[e].canModifySegmentLength()) {
                     ++count;
                 }
             }
@@ -861,7 +861,7 @@ has_ports:
 
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
                 const auto & bp = mBufferGraph[e];
-                if (bp.CanModifySegmentLength) {
+                if (bp.canModifySegmentLength()) {
                     const auto prefix = makeBufferName(i, bp.Port);
                     Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);
@@ -872,7 +872,7 @@ has_ports:
             }
             for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
                 const auto & bp = mBufferGraph[e];
-                if (bp.CanModifySegmentLength) {
+                if (bp.canModifySegmentLength()) {
                     const auto prefix = makeBufferName(i, bp.Port);
                     Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);

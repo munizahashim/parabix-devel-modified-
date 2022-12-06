@@ -82,7 +82,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory;
 
             if (LLVM_UNLIKELY(rate.getKind() == RateId::Unknown)) {
-                bp.IsManaged = true;
+                bp.Flags |= BufferPortType::IsManaged;
                 cannotBePlacedIntoThreadLocalMemory = true;
             }
 
@@ -109,18 +109,18 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bp.Truncate = std::max(bp.Truncate, attr.amount());
                         break;
                     case AttrId::Principal:
-                        bp.IsPrincipal = true;
+                        bp.Flags |= BufferPortType::IsPrincipal;
                         break;
                     case AttrId::Deferred:
                         bn.Locality = BufferLocality::PartitionLocal;
-                        bp.IsDeferred = true;
+                        bp.Flags |= BufferPortType::IsDeferred;
                         break;
                     case AttrId::SharedManagedBuffer:
                         bn.Locality = BufferLocality::PartitionLocal;
-                        bp.IsShared = true;
+                        bp.Flags |= BufferPortType::IsShared;
                         break;                        
                     case AttrId::ManagedBuffer:
-                        bp.IsManaged = true;
+                        bp.Flags |= BufferPortType::IsManaged;
                         break;
                     case AttrId::ReturnedBuffer:
                         bn.Type |= BufferType::Returned;
@@ -441,12 +441,12 @@ void PipelineAnalysis::identifyOwnedBuffers() {
     for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
-            if (LLVM_UNLIKELY(rate.IsManaged)) {
+            if (LLVM_UNLIKELY(rate.isManaged())) {
                 const auto streamSet = target(e, mBufferGraph);
                 BufferNode & bn = mBufferGraph[streamSet];
                 // Every managed buffer is considered linear to the pipeline
                 bn.Type |= BufferType::Unowned;
-                if (rate.IsShared) {
+                if (rate.isShared()) {
                     bn.Type |= BufferType::Shared;
                 }
             }
@@ -633,12 +633,10 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             if (LLVM_UNLIKELY(N.isConstant())) continue;
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
-            inputRate.CanModifySegmentLength = true;
+            inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             #else
-            if (isPartitionRoot) {
-                inputRate.CanModifySegmentLength = true;
-            } else {
-                inputRate.CanModifySegmentLength = !N.IsLinear;
+            if (isPartitionRoot || !N.IsLinear) {
+                inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             }
             #endif
         }
@@ -646,7 +644,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
-            outputRate.CanModifySegmentLength = !N.IsLinear;
+            if (!N.IsLinear) {
+                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+            }
         }
     }
 }

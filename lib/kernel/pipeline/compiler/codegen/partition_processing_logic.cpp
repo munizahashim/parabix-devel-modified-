@@ -251,7 +251,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 produced = mLocallyAvailableItems[streamSet];
             } else if (kernel == mKernelId && !mAllowDataParallelExecution) {
                 if (fromKernelEntryBlock) {
-                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mInitiallyProducedDeferredItemCount[streamSet];
                     } else {
                         produced = mInitiallyProducedItemCount[streamSet];
@@ -259,7 +259,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 } else if (mProducedAtJumpPhi[br.Port]) {
                     produced = mProducedAtJumpPhi[br.Port];
                 } else {
-                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mAlreadyProducedDeferredPhi[br.Port];
                     } else {
                         produced = mAlreadyProducedPhi[br.Port];
@@ -267,7 +267,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 }
             } else { // if (kernel > mKernelId) {
                 const auto prefix = makeBufferName(kernel, br.Port);
-                if (LLVM_UNLIKELY(br.IsDeferred)) {
+                if (LLVM_UNLIKELY(br.isDeferred())) {
                     produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 } else {
                     produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
@@ -469,7 +469,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & br = mBufferGraph[e];
             Value * produced = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 produced = mInitiallyProducedDeferredItemCount[streamSet];
             } else {
                 produced = mInitiallyProducedItemCount[streamSet];
@@ -667,13 +667,13 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                         Value * itemCount = nullptr;
                         if (producer == mKernelId) {
                             if (mMayLoopToEntry && fromKernelEntry) {
-                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                     itemCount = mAlreadyProducedDeferredPhi[outputPort.Port]; assert (itemCount);
                                 } else {
                                     itemCount = mAlreadyProducedPhi[outputPort.Port]; assert (itemCount);
                                 }
                             } else {
-                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                     itemCount = mInitiallyProducedDeferredItemCount[streamSet]; assert (itemCount);
                                 } else {
                                     itemCount = mInitiallyProducedItemCount[streamSet]; assert (itemCount);
@@ -681,7 +681,7 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                             }
                         } else {
                             const auto prefix = makeBufferName(producer, outputPort.Port);
-                            if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                 itemCount = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                             } else {
                                 itemCount = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);

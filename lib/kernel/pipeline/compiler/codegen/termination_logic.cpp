@@ -277,7 +277,7 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
             Value * const closed = isClosed(b, br.Port);
 
             Value * fullyConsumed = nullptr;
-            if (LLVM_UNLIKELY(br.IsZeroExtended)) {
+            if (LLVM_UNLIKELY(br.isZeroExtended())) {
                 fullyConsumed = closed;
             } else {
                 Value * const avail = getLocallyAvailableItemCount(b, br.Port);
@@ -285,7 +285,7 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
                 fullyConsumed = b->CreateAnd(closed, b->CreateICmpULE(avail, processed));
             }
 
-            if (LLVM_UNLIKELY(br.IsPrincipal)) {
+            if (LLVM_UNLIKELY(br.isPrincipal())) {
                 if (atLeastOneExhausted) {
                     RecursivelyDeleteTriviallyDeadInstructions(atLeastOneExhausted);
                 }

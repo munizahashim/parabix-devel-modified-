@@ -110,7 +110,7 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
             if (partitionId != prodPartitionId) {
                 const Binding & binding = inputData.Binding;
                 if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::ZeroExtended))) {
-                    inputData.IsZeroExtended = true;
+                    inputData.Flags |= BufferPortType::IsZeroExtended;
                 }
                 HasZeroExtendedStream = true;
             }

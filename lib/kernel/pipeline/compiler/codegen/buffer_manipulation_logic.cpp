@@ -20,7 +20,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
 
         const BufferPort & br = mBufferGraph[e];
-        if (br.IsZeroExtended) {
+        if (br.isZeroExtended()) {
 
             assert (HasZeroExtendedStream);
 
@@ -370,7 +370,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
 
-            if (port.IsDeferred) {
+            if (port.isDeferred()) {
                 args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
             } else {
                 args[2] = mCurrentProcessedItemCountPhi[inputPort];
