@@ -1068,24 +1068,30 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     PartitionGraph J(PartitionCount);
 
     for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
-        const auto output = in_edge(streamSet, mBufferGraph);
-        const auto & outputPort = mBufferGraph[output];
-        const Binding & binding = outputPort.Binding;
 
-        const auto hasVarOutput = isNonSynchronousRate(binding);
+        if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
+        } else {
+            const auto output = in_edge(streamSet, mBufferGraph);
+            const auto & outputPort = mBufferGraph[output];
+            const Binding & binding = outputPort.Binding;
 
-        const auto producer = source(output, mBufferGraph);
-        const auto pid = KernelPartitionId[producer];
+            const auto hasVarOutput = isNonSynchronousRate(binding);
 
-        auto rateId = nextRateId;
-        nextRateId += hasVarOutput ? 1 : 0;
-        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(input, mBufferGraph);
-            const auto cid = KernelPartitionId[consumer];
-            if (cid != pid) {
-                add_edge(pid, cid, J);
-                if (hasVarOutput) {
-                    addRateId(cid, rateId);
+            const auto producer = source(output, mBufferGraph);
+            const auto pid = KernelPartitionId[producer];
+
+            auto rateId = nextRateId;
+            nextRateId += hasVarOutput ? 1 : 0;
+            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                const auto cid = KernelPartitionId[consumer];
+                if (cid != pid) {
+                    add_edge(pid, cid, J);
+                    if (hasVarOutput) {
+                        addRateId(cid, rateId);
+                    }
                 }
             }
         }
