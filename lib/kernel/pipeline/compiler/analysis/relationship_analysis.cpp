@@ -1003,7 +1003,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, ProgramGraph 
                             } else {
                                 relationship = source(e, G);
                                 assert (G[relationship].Type == RelationshipNode::IsRelationship);
-                                assert (isa<StreamSet>(G[relationship].Relationship));
+                                assert (isa<StreamSet>(G[relationship].Relationship) || isa<RepeatingStreamSet>(G[relationship].Relationship));
                             }
                         }
                         inputs[port.Number] = std::make_pair(relationship, ref);

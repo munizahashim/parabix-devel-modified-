@@ -281,8 +281,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            isFinalSegment = mAnyClosed;
-            assert ("partition has no inputs?" && isFinalSegment);
+            isFinalSegment = mAnyClosed ? mAnyClosed : b->getFalse();
         } else {
             isFinalSegment = mFinalPartitionSegment;
         }

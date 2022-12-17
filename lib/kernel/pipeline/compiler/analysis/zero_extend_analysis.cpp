@@ -40,24 +40,24 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
             assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
             const auto isConstant = isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
             const auto zeroExtend = binding.hasAttribute(AttrId::ZeroExtended);
-            if (LLVM_UNLIKELY(isConstant || zeroExtend)) {
+            if (LLVM_UNLIKELY(isConstant && zeroExtend)) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream msg(tmp);
+                msg << kernelObj->getName() << '.' << binding.getName();
+                msg << " cannot ZeroExtend a repeating streamset";
+                report_fatal_error(msg.str());
+            }
+            if (LLVM_UNLIKELY(zeroExtend)) {
                 add_edge(port.Number, numOfInputs, H);
-                if (LLVM_UNLIKELY(isConstant && zeroExtend)) {
-                    SmallVector<char, 256> tmp;
-                    raw_svector_ostream msg(tmp);
-                    msg << kernelObj->getName() << '.' << binding.getName();
-                    msg << " cannot ZeroExtend a repeating streamset";
-                    report_fatal_error(msg.str());
-                }
                 if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::Principal))) {
                     SmallVector<char, 256> tmp;
                     raw_svector_ostream msg(tmp);
                     msg << kernelObj->getName() << '.' << binding.getName();
-                    if (zeroExtend) {
+//                    if (zeroExtend) {
                         msg << " cannot have both ZeroExtend and Principal attributes";
-                    } else {
-                        msg << " cannot have a Principal repeating streamset";
-                    }
+//                    } else {
+//                        msg << " cannot have a Principal repeating streamset";
+//                    }
                     report_fatal_error(msg.str());
                 }
             }
