@@ -294,10 +294,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->SetInsertPoint(individualStrideLoopExit);
     }
 
-    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
-    }
-
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
     }

@@ -438,9 +438,10 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
             terminationSignal = b->CreateSelect(isFinal, terminationSignal, rootSignal);
         }
     }
-
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+    }
     BasicBlock * const exitBlock = b->GetInsertBlock();
-
     // update KernelTerminated phi nodes
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;

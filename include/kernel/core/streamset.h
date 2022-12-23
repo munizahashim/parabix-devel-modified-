@@ -170,7 +170,7 @@ protected:
     const unsigned                  mOverflow;
     const unsigned                  mUnderflow;
     const unsigned                  mAddressSpace;
-    const bool                      mLinear; 
+    const bool                      mLinear;
 };
 
 class ExternalBuffer final : public StreamSetBuffer {
@@ -240,7 +240,7 @@ public:
 
     llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const final;
 
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * const fromPosition, llvm::Value * const consumedItems, llvm::Value * overflowItems = nullptr) const final;
+    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * overflowItems = nullptr) const override;
 
 protected:
 
@@ -303,7 +303,7 @@ private:
 
 class DynamicBuffer final : public InternalBuffer {
 
-    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity };
+    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, InitialConsumedCount };
 
 public:
 
@@ -334,6 +334,8 @@ public:
     void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * const fromPosition, llvm::Value * const consumedItems, llvm::Value * overflowItems = nullptr) const override;
 
     size_t getInitialCapacity() const {
         return mInitialCapacity;

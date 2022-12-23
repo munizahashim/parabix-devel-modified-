@@ -290,11 +290,9 @@ Value * CarryManager::generateEntrySummaryTest(BuilderRef b, Value * condition) 
         if (LLVM_LIKELY(condition->getType() == b->getBitBlockType())) {
             condition = b->bitblock_any(condition);
         }
-       // b->CallPrintInt(" --- entry condition0", condition);
         const auto n = mNonCarryCollapsingModeStack.size();
         Value * const lastIncomingCarryIteration = mNonCarryCollapsingModeStack[n - 3];
         condition = b->CreateOr(condition, b->CreateIsNotNull(lastIncomingCarryIteration));
-       // b->CallPrintInt(" --- entry condition", condition);
     } else if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
         assert ("summary condition cannot be null!" && condition);
         assert ("summary test was not generated" && mNextSummaryTest);
@@ -1039,7 +1037,7 @@ void CarryManager::writeCarryOutSummary(BuilderRef b, Value * const summary) con
 void CarryManager::addToCarryOutSummary(BuilderRef b, Value * const value) {
     assert (mCarryInfo->hasSummary());
     // No need to add to summary if using an implicit summary
-    if (mCarryInfo->hasExplicitSummary()) {
+    if (mCarryInfo->hasSummary()) {
         assert ("cannot add null summary value!" && value);
         assert ("summary stack is empty!" && !mCarrySummaryStack.empty());
         Value * & summary = mCarrySummaryStack.back();
