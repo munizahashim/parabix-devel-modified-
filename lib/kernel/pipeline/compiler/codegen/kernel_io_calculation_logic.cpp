@@ -601,7 +601,6 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasMoreInput
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -615,79 +614,66 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
     if (mIsPartitionRoot) {
 
-        ConstantInt * const i1_TRUE = b->getTrue();
+        ConstantInt * const i1_FALSE = b->getFalse();
+        Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
 
-        BasicBlock * const insertBefore = mKernelCompletionCheck->getNextNode();
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
 
-        BasicBlock * const lastTestExit = b->CreateBasicBlock("", insertBefore);
+        BasicBlock * const lastTestExit = b->CreateBasicBlock("", nextNode);
         PHINode * const enoughInputPhi = PHINode::Create(b->getInt1Ty(), 4, "", lastTestExit);
 
-        bool firstTest = true;
-
-        graph_traits<BufferGraph>::in_edge_iterator ei, ei_end;
-        std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
+        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
+        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
 
         Value * enoughInput = b->CreateAnd(notAtSegmentLimit, nonFinal);
 
         ConstantInt * const amount = b->getSize(StrideStepLength[mKernelId]);
         Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
 
-        while (ei != ei_end) {
-            const auto e = *ei++;
-            const auto streamSet = source(e, mBufferGraph);
+        for (auto ei = ei_begin; ei != ei_end; ++ei) {
+
+            const auto streamSet = source(*ei, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_UNLIKELY(bn.isConstant())) continue;
-            const BufferPort & port =  mBufferGraph[e];
-            if (LLVM_UNLIKELY(port.isZeroExtended())) {
-                continue;
+            const BufferPort & port =  mBufferGraph[*ei];
+            const Binding & binding = port.Binding;
+            const ProcessingRate & rate = binding.getRate();
+
+            // If the next rate we check is a PartialSum, always check it; otherwise we expect that
+            // if this test passes the first check, it will pass the remaining ones so don't bother
+            // creating a branch for the remaining checks.
+
+            if (rate.isPartialSum() || ei == ei_begin) {
+                BasicBlock * const nextTest = b->CreateBasicBlock("", lastTestExit);
+                enoughInputPhi->addIncoming(i1_FALSE, b->GetInsertBlock());
+
+                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
+                b->SetInsertPoint(nextTest);
+                enoughInput = nullptr;
             }
 
-            Value * const processed = mProcessedItemCount[port.Port]; // mAlreadyProcessedPhi[port.Port];
-
-            Value * avail = getLocallyAvailableItemCount(b, port.Port);
-
+            Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
+            Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
             Value * const closed = isClosed(b, port.Port);
 
-            if (port.Add) {
-                Constant * const ZERO = b->getSize(0);
-                Constant * const ADD = b->getSize(port.Add);
-                Value * const added = b->CreateSelect(closed, ADD, ZERO);
+            if (LLVM_UNLIKELY(port.isZeroExtended())) {
+                avail = b->CreateSelect(closed, MAX_INT, avail);
+            } else if (port.Add) {
+                Value * const added = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
                 avail = b->CreateAdd(avail, added);
             }
 
             Value * const remaining = b->CreateSub(avail, processed, "remaining");
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+            Value * const hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
 
-            Value * hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
-
-            // If the next rate we check is a PartialSum, always check it; otherwise we expect that
-            // if this test passes the first check, it will pass the remaining ones so don't bother
-            // creating a branch for the remaining checks.
-            bool useBranch = firstTest;
-            for (auto ej = ei; ej != ei_end; ++ej) {
-                const BufferPort & next =  mBufferGraph[*ej];
-                if (LLVM_UNLIKELY(next.isZeroExtended())) {
-                    continue;
-                }
-                const Binding & binding = next.Binding;
-                const ProcessingRate & rate = binding.getRate();
-                useBranch = rate.isPartialSum();
-                break;
-            }
-
-            if (useBranch) {
-                BasicBlock * const nextTest = b->CreateBasicBlock("", insertBefore);
-                BasicBlock * const exitBlock = b->GetInsertBlock();
-                enoughInputPhi->addIncoming(b->getFalse(), exitBlock);
+            if (enoughInput) {
                 enoughInput = b->CreateAnd(enoughInput, hasEnough);
-
-                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
-                b->SetInsertPoint(nextTest);
-                enoughInput = i1_TRUE;
             } else {
-                enoughInput = b->CreateAnd(enoughInput, hasEnough);
+                enoughInput = hasEnough;
             }
+
         }
         enoughInputPhi->addIncoming(enoughInput, b->GetInsertBlock());
         b->CreateBr(lastTestExit);
@@ -700,8 +686,6 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
    }
 
 }
-
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
