@@ -49,7 +49,7 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 + ":" + std::to_string(expanded->getNumElements()),
 // input stream sets
 {Bind("marker", mask, Principal()),
- Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth()))},
+ Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth()))},
 // output stream set
 {Binding{"output", expanded}},
 // input scalar
