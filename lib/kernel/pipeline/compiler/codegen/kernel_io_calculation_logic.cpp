@@ -186,7 +186,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = b->CreateSelect(cond, numOfLinearStrides, numOfLinearOutputStrides);
     }
 
-
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
@@ -836,7 +835,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     Value * priorBufferPtr = nullptr;
-    if (isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+    if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
         priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
         Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
@@ -892,7 +891,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, bn, port, buffer);
         }
-        if (mNumOfThreads != 1 || mIsNestedPipeline) {
+        if (isMultithreaded()) {
             b->CreateStore(priorBuffer, priorBufferPtr);
         } else {
             b->CreateFree(priorBuffer);

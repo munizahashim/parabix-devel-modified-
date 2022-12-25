@@ -288,8 +288,9 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     }
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
+    // We do not release the pre-invocation synchronization lock in the execution phase
+    // when a kernel is terminating.
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mKernelCanTerminateEarly);
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
     updatePhisAfterTermination(b);
@@ -694,29 +695,49 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
                         mCurrentKernelName);
     }
 
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+    }
+
+
     Value * currentNumOfStrides = nullptr;
     if (mMayLoopToEntry || (mIsPartitionRoot && !mKernelJumpToNextUsefulPartition)) {
         assert (mCurrentNumOfStridesAtLoopEntryPhi);
         currentNumOfStrides = b->CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
     }
 
+//    const auto addDataParallelSynchronization =
+//        mAllowDataParallelExecution && (mMayLoopToEntry || !mKernelJumpToNextUsefulPartition);
+
+    BasicBlock * loopExit = mKernelLoopExit;
+
+//    if (LLVM_UNLIKELY(addDataParallelSynchronization)) {
+//        loopExit = b->CreateBasicBlock("", mKernelLoopExit);
+//    }
+
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+    }
+
     if (mKernelJumpToNextUsefulPartition) {
         assert (mIsPartitionRoot);
         if (mMayLoopToEntry) {
-            // TODO: check whether we need to release/acquire the pre/post locks here too
-            b->CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, mKernelLoopExit, mKernelJumpToNextUsefulPartition);
+            b->CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, loopExit, mKernelJumpToNextUsefulPartition);
         } else {
             b->CreateBr(mKernelJumpToNextUsefulPartition);
         }
     } else {
         // if this is not a partition root, it is not responsible for determining
         // whether the partition is out of input
-        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
-        }
-        b->CreateBr(mKernelLoopExit);
+        b->CreateBr(loopExit);
     }
+
+//    if (LLVM_UNLIKELY(addDataParallelSynchronization)) {
+//        b->SetInsertPoint(loopExit);
+//        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+//        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+//        b->CreateBr(mKernelLoopExit);
+//    }
 
     BasicBlock * const exitBlock = b->GetInsertBlock();
 
