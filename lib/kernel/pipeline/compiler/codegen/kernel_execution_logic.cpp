@@ -39,15 +39,18 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         if (mCurrentKernelIsStateFree) {
-            readAndUpdateInternalProcessedAndProducedItemCounts(b);
+            updateProcessedAndProducedItemCounts(b);
         }
 
-        BasicBlock * resumeKernelExecution = nullptr;
+        // If this is the final subsegment before termination, we do not release the
+        // pre-invocation synchronization until *after* we've written the termination
+        // status. Although most of the time, this would not be a severe issue ---
+        // assuming the internal kernel can safely execute a 0-item segment --- when
+        // inputs to a kernel have differing lengths, this could mean we might produce
+        // output data that wouldn't be observed in a single-threaded run.
 
-        Value *  waitToRelease = b->CreateIsNotNull(mIsFinalInvocation);
-
-        // If we can loop back to the entry, we assume that its to handle the final block.
-        if (LLVM_UNLIKELY(mMayLoopToEntry)) {
+        Value * waitToRelease = b->CreateIsNotNull(mIsFinalInvocation);
+        if (mMayLoopToEntry) {
             mHasMoreInput = hasMoreInput(b);
             waitToRelease = b->CreateOr(waitToRelease, mHasMoreInput);
         }
@@ -60,14 +63,19 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         BasicBlock * const releaseSyncLock =
             b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
-        resumeKernelExecution =
+        BasicBlock * const resumeKernelExecution =
             b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
         b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
 
         b->SetInsertPoint(releaseSyncLock);
-        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-        b->CreateBr(resumeKernelExecution);
 
+        if (mCurrentKernelIsStateFree) {
+            writeInternalProcessedAndProducedItemCounts(b);
+        }
+
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+
+        b->CreateBr(resumeKernelExecution);
         b->SetInsertPoint(resumeKernelExecution);
     }
 
@@ -506,7 +514,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
 
     Value * rejectedTermSignal = nullptr;
     if (mustExplicitlyTerminate) {
-        assert (mTerminatedExplicitly);
+        assert (mTerminatedExplicitly && !mCurrentKernelIsStateFree);
         rejectedTermSignal = b->CreateAnd(b->CreateIsNull(mCurrentNumOfLinearStrides), b->CreateIsNull(mTerminatedExplicitly));
     }
 
@@ -658,9 +666,9 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief readAndUpdateInternalProcessedAndProducedItemCounts
+ * @brief writeInternalProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b) {
+void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -668,34 +676,12 @@ void PipelineCompiler::readAndUpdateInternalProcessedAndProducedItemCounts(Build
     // calculate or read the item counts (assuming this kernel did not terminate)
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const auto inputPort = StreamSetPort{PortType::Input, i};
-        const Binding & input = getInputBinding(inputPort);
-        const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
-            Value * const ptr = mProcessedItemCountPtr[inputPort];
-            Value * const processed = b->CreateAdd(mAlreadyProcessedPhi[inputPort], mLinearInputItemsPhi[inputPort]);
-            b->CreateStore(processed, ptr);
-            #ifdef PRINT_DEBUG_MESSAGES
-            const auto prefix = makeBufferName(mKernelId, inputPort);
-            debugPrint(b, prefix + "_internal_processed = %" PRIu64, processed);
-            #endif
-            mProcessedItemCount[inputPort] = processed;
-        }
+        b->CreateStore(mProcessedItemCount[inputPort], mProcessedItemCountPtr[inputPort]);
     }
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto outputPort = StreamSetPort{PortType::Output, i};
-        const Binding & output = getOutputBinding(outputPort);
-        const ProcessingRate & rate = output.getRate();
-        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
-            Value * const ptr = mProducedItemCountPtr[outputPort];
-            Value * const produced = b->CreateAdd(mAlreadyProducedPhi[outputPort], mLinearOutputItemsPhi[outputPort]);
-            b->CreateStore(produced, ptr);
-            #ifdef PRINT_DEBUG_MESSAGES
-            const auto prefix = makeBufferName(mKernelId, outputPort);
-            debugPrint(b, prefix + "_internal_produced = %" PRIu64, produced);
-            #endif
-            mProducedItemCount[outputPort] = produced;
-        }
+        b->CreateStore(mProducedItemCount[outputPort], mProducedItemCountPtr[outputPort]);
     }
 
 }

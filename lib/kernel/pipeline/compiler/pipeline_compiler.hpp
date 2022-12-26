@@ -225,7 +225,7 @@ public:
     void phiOutPartitionStateAndReleaseSynchronizationLocks(BuilderRef b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
 
     void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition, Value * const segNo);
-    void releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel);
+    void releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel, const bool acquirePostInvocationLock = false);
 
     void writeInitiallyTerminatedPartitionExit(BuilderRef b);
     void checkForPartitionExit(BuilderRef b);
@@ -278,6 +278,7 @@ public:
     void writeKernelCall(BuilderRef b);
     void buildKernelCallArgumentList(BuilderRef b, ArgVec & args);
     void updateProcessedAndProducedItemCounts(BuilderRef b);
+    void writeInternalProcessedAndProducedItemCounts(BuilderRef b);
     void readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b);
     void readReturnedOutputVirtualBaseAddresses(BuilderRef b) const;
     Value * addVirtualBaseAddressArg(BuilderRef b, const StreamSetBuffer * buffer, ArgVec & args);
@@ -449,7 +450,9 @@ public:
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
+    void verifyPostSynchronizationLock(BuilderRef b) ;
     Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
+    inline LLVM_READNONE bool isMultithreaded() const;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * obtainNextSegmentNumber(BuilderRef b);
     #endif
@@ -1005,6 +1008,10 @@ inline LLVM_READNONE unsigned getItemWidth(const Type * ty ) {
         ty = ty->getArrayElementType();
     }
     return cast<IntegerType>(cast<FixedVectorType>(ty)->getElementType())->getBitWidth();
+}
+
+bool PipelineCompiler::isMultithreaded() const {
+    return true; // mNumOfThreads != 1 || mIsNestedPipeline;
 }
 
 } // end of namespace

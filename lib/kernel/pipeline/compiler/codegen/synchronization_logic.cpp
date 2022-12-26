@@ -90,6 +90,16 @@ void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const ex
 
 namespace  {
 
+LLVM_READNONE std::string __getSyncLockNameString(const unsigned type) {
+    switch (type) {
+        case SYNC_LOCK_PRE_INVOCATION: return "pre";
+        case SYNC_LOCK_POST_INVOCATION: return "post";
+        case SYNC_LOCK_FULL: return "full";
+        default: llvm_unreachable("unknown sync lock?");
+    }
+    return nullptr;
+}
+
 LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
     switch (type) {
         case SYNC_LOCK_PRE_INVOCATION: return b->GetString("pre-invocation ");
@@ -109,10 +119,9 @@ LLVM_READNONE Constant * __getSyncLockName(BuilderRef b, const unsigned type) {
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (mNumOfThreads != 1 || mIsNestedPipeline) {
+    if (isMultithreaded()) {
         // TODO: make this an function?
-
-        const auto prefix = makeKernelName(kernelId);
+        const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(type);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
         const unsigned waitingOnIdx = serialize ? LastKernel : kernelId;
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx, type);
@@ -155,15 +164,12 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (mNumOfThreads != 1 || mIsNestedPipeline || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
-        const auto prefix = makeKernelName(kernelId);
+    if (isMultithreaded() || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
-
         Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(1));
-
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, segNo, nextSegNo,
-                                                           AtomicOrdering::Release, AtomicOrdering::Acquire);
+                                          AtomicOrdering::Release, AtomicOrdering::Acquire);
             Value * const observed = b->CreateExtractValue(updated, { 0 });
             Value * const success = b->CreateExtractValue(updated, { 1 });
             SmallVector<char, 256> tmp;
@@ -171,13 +177,40 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
             out << "%s: released %ssegment number is %" PRIu64
                    " but was expected to be %" PRIu64;
             b->CreateAssert(success, out.str(), mKernelName[kernelId], __getSyncLockName(b, type), observed, segNo);
-
         } else {
             b->CreateAtomicStoreRelease(nextSegNo, waitingOnPtr);
         }
         #ifdef PRINT_DEBUG_MESSAGES
+        const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(type);
         debugPrint(b, prefix + ": released %ssegment number %" PRIu64, __getSyncLockName(b, type), segNo);
         #endif
+    }
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief verifyPostSynchronizationLock
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::verifyPostSynchronizationLock(BuilderRef b) {
+    if (isMultithreaded()) {
+        auto checkLockVal = [&](unsigned typeId) {
+            Value * const lockPtr = getSynchronizationLockPtrForKernel(b, mKernelId, typeId);
+            return b->CreateICmpUGE(b->CreateLoad(lockPtr), mSegNo);
+        };
+
+        Value * valid = nullptr;
+
+        if (isDataParallel(mKernelId)) {
+            Value * const A = checkLockVal(SYNC_LOCK_PRE_INVOCATION);
+            Value * const B = checkLockVal(SYNC_LOCK_POST_INVOCATION);
+            valid = b->CreateAnd(A, B);
+        } else {
+            Value * const F = checkLockVal(SYNC_LOCK_FULL);
+            valid = F;
+        }
+
+        b->CreateAssert(valid, "%s: invalid post-synchronization segment number detected!",
+                        mKernelName[mKernelId]);
     }
 }
 
@@ -185,7 +218,9 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
-    return getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
+    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
+    ptr->setName(makeKernelName(kernelId) + __getSyncLockNameString(type));
+    return ptr;
 }
 
 #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS

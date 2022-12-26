@@ -38,7 +38,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
-        if (bn.isOwned() && isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+        if (bn.isOwned() && isa<DynamicBuffer>(buffer) && isMultithreaded()) {
             assert (bn.Locality != BufferLocality::ThreadLocal);
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
@@ -218,7 +218,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
  * @brief freePendingFreeableDynamicBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
-    if (LLVM_LIKELY(mNumOfThreads != 1 || mIsNestedPipeline)) {
+    if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
             if (bn.isNonThreadLocal() && bn.isOwned()) {
@@ -366,7 +366,7 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
 
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree && bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         Value * const processedPtr = b->getScalarFieldPtr(prefix + suffix);
@@ -394,7 +394,7 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
 
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree && bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         Value * const produced = b->getScalarFieldPtr(prefix + suffix);
@@ -442,7 +442,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree && bn.isInternal()) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {
@@ -479,7 +479,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree && bn.isInternal()) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {

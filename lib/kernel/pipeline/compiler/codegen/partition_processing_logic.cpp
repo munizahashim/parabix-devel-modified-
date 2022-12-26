@@ -133,7 +133,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     readPAPIMeasurement(b, FirstKernel, PAPIReadInitialMeasurementArray);
     #endif
     mKernelStartTime = startCycleCounter(b);
-    if (mNumOfThreads != 1 || mIsNestedPipeline) {
+    if (isMultithreaded()) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
         updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
@@ -368,13 +368,16 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     assert (firstKernelInTargetPartition <= PipelineOutput);
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    const auto targetLock = firstKernelInTargetPartition;
-    #else
-    const auto targetLock = (firstKernelInTargetPartition == PipelineOutput) ? LastKernel : firstKernelInTargetPartition;
+    assert (firstKernelInTargetPartition != PipelineOutput);
     #endif
-    const auto type = isDataParallel(targetLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
 
-    acquireSynchronizationLock(b, targetLock, type, segNo);
+    if (firstKernelInTargetPartition == PipelineOutput) {
+        const auto type = isDataParallel(LastKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLock(b, LastKernel, type, segNo);
+    } else {
+        const auto type = isDataParallel(firstKernelInTargetPartition) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
+    }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         const auto partId = KernelPartitionId[firstKernelInTargetPartition];
@@ -389,13 +392,16 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief releaseAllSynchronizationLocksUntil
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel) {
+void PipelineCompiler::releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel, const bool acquirePostInvocationLock) {
 
     if (KernelPartitionId[kernel - 1] != KernelPartitionId[kernel]) {
         recordStridesPerSegment(b, kernel, b->getSize(0));
     }
     if (isDataParallel(kernel)) {
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+        if (LLVM_UNLIKELY(acquirePostInvocationLock)) {
+            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+        }
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_POST_INVOCATION, mSegNo);
     } else {
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_FULL, mSegNo);
@@ -508,6 +514,7 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     assert (mCurrentPartitionId < jumpPartitionId);
     const auto targetKernelId = FirstKernelInPartition[jumpPartitionId];
     assert (targetKernelId > (mKernelId + 1U));
+
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
@@ -647,6 +654,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
  * @brief ensureAnyExternalProcessedAndProducedCountsAreUpdated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry) {
+#if 0
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isExternal())) {
@@ -714,6 +722,7 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
             }
         }
     }
+#endif
 }
 
 } // end of namespace kernel
