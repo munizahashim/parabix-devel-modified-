@@ -247,7 +247,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * TemplateBasis = P->CreateStreamSet(8);
     SpreadByMask(P, FieldPrefixMask2, RepeatingBasis, TemplateBasis);
     SHOW_BIXNUM(TemplateBasis);
-    
+
     StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<BasisCombine>(ExpandedBasis, TemplateBasis, InstantiatedBasis);
     SHOW_BIXNUM(InstantiatedBasis);

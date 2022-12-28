@@ -27,30 +27,40 @@ using BuilderRef = Kernel::BuilderRef;
 void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset,
+                  bool zeroExtend,
                   StreamExpandOptimization opt,
                   unsigned expansionFieldWidth,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
     unsigned streamCount = outputs->getNumElements();
     StreamSet * const expanded = P.CreateStreamSet(streamCount);
     Scalar * base = P.CreateConstant(P.getDriver().getBuilder()->getSize(streamOffset));
-    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, opt, expansionFieldWidth, itemsPerOutputUnit);
+    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
     P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
+
+const unsigned StreamExpandStrideSize = 4;
 
 StreamExpandKernel::StreamExpandKernel(BuilderRef b,
                                        StreamSet * mask,
                                        StreamSet * source,
                                        StreamSet * expanded,
                                        Scalar * base,
+                                       bool zeroExtend,
                                        const StreamExpandOptimization opt,
                                        const unsigned FieldWidth, ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability)
-    : MultiBlockKernel(b, "streamExpand" + std::to_string(FieldWidth) + ((opt == StreamExpandOptimization::NullCheck) ? "nullcheck" : "")
-+ "_" + std::to_string(source->getNumElements())
-+ ":" + std::to_string(expanded->getNumElements()),
-// input stream sets
-{Bind("marker", mask, Principal()),
- Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth()))},
-// output stream set
+: MultiBlockKernel(b, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "streamExpand"  << StreamExpandStrideSize << ':' << FieldWidth;
+                        if (opt == StreamExpandOptimization::NullCheck)  {
+                            nm << 'N';
+                        }
+                        nm << '_' << source->getNumElements() << ':' << expanded->getNumElements();
+                        if (zeroExtend) nm << "z";
+                        nm.flush();
+                        return tmp;
+                    }(),
+{Bind("marker", mask, Principal())},
 {Binding{"output", expanded}},
 // input scalar
 {Binding{"base", base}},
@@ -58,7 +68,12 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements()),
     mOptimization(opt) {
-        setStride(4 * b->getBitBlockWidth());
+        setStride(StreamExpandStrideSize * b->getBitBlockWidth());
+        if (zeroExtend) {
+            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth())));
+        } else {
+            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth())));
+        }
     }
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
@@ -77,7 +92,9 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     BasicBlock * expansionDone = b->CreateBasicBlock("expansionDone");
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+        assert ((getStride() % b->getBitBlockWidth()) == 0);
+        ConstantInt * const mult = b->getSize(getStride() / b->getBitBlockWidth());
+        numOfBlocks = b->CreateMul(numOfStrides, mult);
     }
     Value * processedSourceItems = b->getProcessedItemCount("source");
     Value * initialSourceOffset = b->CreateURem(processedSourceItems, BLOCK_WIDTH);
@@ -612,14 +629,14 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
     /* Spread out the counts so that there are two positions for each nonzero entry. */
     StreamSet * spread_counts = P.CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, 0, itemsPerOutputUnit);
+    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0, itemsPerOutputUnit);
     /* Divide the count at each original position equally into the
        two positions that were created by the unit spread process. */
     StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
     P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
     StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
     StreamSet * finalmask = P.CreateStreamSet(1);
-    SpreadByMask(P, submask, spread1_mask, finalmask, 0, itemsPerOutputUnit);
+    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0, itemsPerOutputUnit);
     return finalmask;
 }
 }

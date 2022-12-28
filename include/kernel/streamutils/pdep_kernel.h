@@ -30,6 +30,9 @@ enum class StreamExpandOptimization {None, NullCheck};
     The input streams to process are selected sequentially from the stream set toSpread,
     starting from the position indicated by the streamOffset value.
 
+    If zeroExtend is set, the input stream will be zeroExtended as required
+    to match the mask stream.
+
     Depending on the expected density of the mask stream, different optimizations
     can be chosen.   The expansionFieldWidth parameter may also affect performance.
 
@@ -40,6 +43,7 @@ enum class StreamExpandOptimization {None, NullCheck};
 void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset = 0,
+                  bool zeroExtend = false,
                   StreamExpandOptimization opt = StreamExpandOptimization::None,
                   unsigned expansionFieldWidth = 64,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
@@ -47,22 +51,25 @@ void SpreadByMask(PipelineBuilder & P,
 inline void SpreadByMask(PipelineBuilder & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                          unsigned streamOffset = 0,
+                         bool zeroExtend = false,
                          ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
-    return SpreadByMask(P, mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+    return SpreadByMask(P, mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
 
 inline void SpreadByMask(const std::unique_ptr<PipelineBuilder> & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                          unsigned streamOffset = 0,
+                         bool zeroExtend = false,
                          ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
-    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
 
 inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                          unsigned streamOffset = 0,
+                         bool zeroExtend = false,
                          ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
-    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
+    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
 
 /*  Create a spread mask for inserting a single item into a stream for each position
@@ -71,8 +78,6 @@ inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
     for each position at which the bixnum is greater than zero.    */
 
 enum class InsertPosition {Before, After};
-
-
 
 StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P,
                                     StreamSet * insertion_mask,
@@ -138,6 +143,7 @@ public:
                        StreamSet * source,
                        StreamSet * expanded,
                        Scalar * base,
+                       bool zeroExtend,
                        const StreamExpandOptimization = StreamExpandOptimization::None,
                        const unsigned FieldWidth = sizeof(size_t) * 8,
                        ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability = UniformDistribution());
