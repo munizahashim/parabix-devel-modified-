@@ -37,6 +37,8 @@ void SpreadByMask(PipelineBuilder & P,
     P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
 
+const unsigned StreamExpandStrideSize= 4;
+
 StreamExpandKernel::StreamExpandKernel(BuilderRef b,
                                        StreamSet * mask,
                                        StreamSet * source,
@@ -47,7 +49,7 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 : MultiBlockKernel(b, [&]() -> std::string {
                         std::string tmp;
                         raw_string_ostream nm(tmp);
-                        nm << "streamExpand"  << codegen::StreamExpandStrideSize << ':' << FieldWidth;
+                        nm << "streamExpand"  << StreamExpandStrideSize << ':' << FieldWidth;
                         if (opt == StreamExpandOptimization::NullCheck)  {
                             nm << 'N';
                         }
@@ -66,7 +68,7 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements()),
     mOptimization(opt) {
-        setStride(codegen::StreamExpandStrideSize * b->getBitBlockWidth());
+        setStride(StreamExpandStrideSize * b->getBitBlockWidth());
     }
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
