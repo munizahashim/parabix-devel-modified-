@@ -27,23 +27,25 @@ using BuilderRef = Kernel::BuilderRef;
 void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset,
+                  bool zeroExtend,
                   StreamExpandOptimization opt,
                   unsigned expansionFieldWidth,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
     unsigned streamCount = outputs->getNumElements();
     StreamSet * const expanded = P.CreateStreamSet(streamCount);
     Scalar * base = P.CreateConstant(P.getDriver().getBuilder()->getSize(streamOffset));
-    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, opt, expansionFieldWidth, itemsPerOutputUnit);
+    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
     P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
 
-const unsigned StreamExpandStrideSize= 4;
+const unsigned StreamExpandStrideSize = 4;
 
 StreamExpandKernel::StreamExpandKernel(BuilderRef b,
                                        StreamSet * mask,
                                        StreamSet * source,
                                        StreamSet * expanded,
                                        Scalar * base,
+                                       bool zeroExtend,
                                        const StreamExpandOptimization opt,
                                        const unsigned FieldWidth, ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability)
 : MultiBlockKernel(b, [&]() -> std::string {
@@ -54,13 +56,11 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
                             nm << 'N';
                         }
                         nm << '_' << source->getNumElements() << ':' << expanded->getNumElements();
+                        if (zeroExtend) nm << "z";
                         nm.flush();
                         return tmp;
                     }(),
-// input stream sets
-{Bind("marker", mask, Principal()),
- Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth()))},
-// output stream set
+{Bind("marker", mask, Principal())},
 {Binding{"output", expanded}},
 // input scalar
 {Binding{"base", base}},
@@ -69,6 +69,11 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 , mSelectedStreamCount(expanded->getNumElements()),
     mOptimization(opt) {
         setStride(StreamExpandStrideSize * b->getBitBlockWidth());
+        if (zeroExtend) {
+            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth())));
+        } else {
+            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth())));
+        }
     }
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
@@ -624,14 +629,14 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
     /* Spread out the counts so that there are two positions for each nonzero entry. */
     StreamSet * spread_counts = P.CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, 0, itemsPerOutputUnit);
+    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0, itemsPerOutputUnit);
     /* Divide the count at each original position equally into the
        two positions that were created by the unit spread process. */
     StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
     P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
     StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
     StreamSet * finalmask = P.CreateStreamSet(1);
-    SpreadByMask(P, submask, spread1_mask, finalmask, 0, itemsPerOutputUnit);
+    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0, itemsPerOutputUnit);
     return finalmask;
 }
 }

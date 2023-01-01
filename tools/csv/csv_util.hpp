@@ -41,17 +41,15 @@ std::vector<std::string> get_CSV_headers(std::string filename) {
     return headers;
 }
 
-std::vector<std::string> createJSONtemplateStrings(std::vector<std::string> headers) {
+std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) {
     std::vector<std::string> tmp;
-    if (headers.size() == 0) return tmp;
-    tmp.push_back("\"},\n{\"" + headers[0] + "\":");
-    for (unsigned i = 1; i < headers.size(); i++) {
-        tmp.push_back("\",\"" + headers[i] + "\":");
+    if (fieldNames.size() == 0) return tmp;
+    for (unsigned i = 0; i < fieldNames.size(); i++) {
+        tmp.push_back("\"" + fieldNames[i] + "\":\"");
     }
-    tmp.push_back("\"},\n");
+    tmp[0] = "{" + tmp[0];
     return tmp;
 }
-
 
 char charLF = 0xA;
 char charCR = 0xD;
@@ -190,10 +188,10 @@ void FieldNumberingKernel::generatePabloMethod() {
 
 class CSV_Char_Replacement : public PabloKernel {
 public:
-    CSV_Char_Replacement(BuilderRef kb, StreamSet * separatorsLF, StreamSet * separatorsComma, StreamSet * quoteEscape, StreamSet * basis,
+    CSV_Char_Replacement(BuilderRef kb, StreamSet * quoteEscape, StreamSet * basis,
                          StreamSet * translatedBasis)
         : PabloKernel(kb, "CSV_Char_Replacement",
-                      {Binding{"separatorsLF", separatorsLF}, Binding{"separatorsComma", separatorsComma}, Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
+                      {Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
                       {Binding{"translatedBasis", translatedBasis}}) {}
 protected:
     void generatePabloMethod() override;
@@ -201,23 +199,18 @@ protected:
 
 void CSV_Char_Replacement::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * separatorsLF = getInputStreamSet("separatorsLF")[0];
-    PabloAST * separatorsComma = getInputStreamSet("separatorsComma")[0];
-    separatorsComma = pb.createAnd(separatorsComma, pb.createNot(separatorsLF));
     PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     //
     // Translate "" to \"  ASCII value of " = 0x22, ASCII value of \ = 0x5C
-    // Translate , to "    ASCII value of , = 0x2C, ASCII value of " = 0x22
-    // Translate LF to "   ASCII value of LF = 0x0A, ASCII value of " = 0x22
     std::vector<PabloAST *> translated_basis(8, nullptr);
     translated_basis[0] = basis[0];
-    translated_basis[1] = pb.createXor(basis[1], pb.createOr(quoteEscape, separatorsComma));
-    translated_basis[2] = pb.createXor(basis[2], pb.createOr(quoteEscape, separatorsComma));
-    translated_basis[3] = pb.createXor(basis[3], pb.createOr3(quoteEscape, separatorsLF, separatorsComma));
-    translated_basis[4] = pb.createXor(basis[4], quoteEscape);  // flip only for quoteEscape
-    translated_basis[5] = pb.createXor(basis[5], pb.createOr(quoteEscape, separatorsLF));  // flip
-    translated_basis[6] = pb.createXor(basis[6], quoteEscape);  // flip only for quoteEscape
+    translated_basis[1] = pb.createXor(basis[1], quoteEscape);
+    translated_basis[2] = pb.createXor(basis[2], quoteEscape);
+    translated_basis[3] = pb.createXor(basis[3], quoteEscape);
+    translated_basis[4] = pb.createXor(basis[4], quoteEscape);
+    translated_basis[5] = pb.createXor(basis[5], quoteEscape);
+    translated_basis[6] = pb.createXor(basis[6], quoteEscape);
     translated_basis[7] = basis[7];
 
     Var * translatedVar = getOutputStreamVar("translatedBasis");
@@ -226,21 +219,48 @@ void CSV_Char_Replacement::generatePabloMethod() {
     }
 }
 
-class Extend1Zeroes : public PabloKernel {
+class AddFieldSuffix : public PabloKernel {
 public:
-    Extend1Zeroes(BuilderRef kb, StreamSet * mask, StreamSet * extended)
-    : PabloKernel(kb, "Extend1Zeroes",
-                  {Binding{"mask", mask}},
-                  {Binding{"extended", extended}}) {}
+    AddFieldSuffix(BuilderRef kb, StreamSet * suffixSpreadMask, StreamSet * basis,
+                         StreamSet * updatedBasis)
+        : PabloKernel(kb, "AddFieldSuffix",
+                      {Binding{"suffixSpreadMask", suffixSpreadMask}, Binding{"basis", basis}},
+                      {Binding{"updatedBasis", updatedBasis}}) {}
 protected:
     void generatePabloMethod() override;
 };
 
-void Extend1Zeroes::generatePabloMethod() {
+void AddFieldSuffix::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createNot(mask);
-    PabloAST * extended = pb.createNot(pb.createOr(inverted, pb.createAdvance(inverted, 1)));
-    Var * outputVar = getOutputStreamVar("extended");
-    pb.createAssign(pb.createExtract(outputVar, pb.getInteger(0)), extended);
+    PabloAST * mask = getInputStreamSet("suffixSpreadMask")[0];
+    //
+    // The suffixSpreadMask marks position for suffix data with
+    // either a single 0 (insertion position before comma) or a
+    // run of three 0s (insertion position before newline).
+    PabloAST * quotePos = pb.createAnd(pb.createAdvance(mask, 1), pb.createNot(mask));
+    PabloAST * RbracePos = pb.createAnd(pb.createAdvance(quotePos, 1), pb.createNot(mask));
+    PabloAST * afterRbrace = pb.createAdvance(RbracePos, 1);
+    PabloAST * commaPos = pb.createAnd(afterRbrace, pb.createNot(mask));
+
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    // Quotes are ASCII 0x22 - only need to set bits 5 and 2.
+    basis[1] = pb.createOr(basis[1], quotePos);
+    basis[5] = pb.createOr(basis[5], quotePos);
+    //
+    // Add } (ASCII 7d) after " at recordSeparator.
+    basis[0] = pb.createOr(basis[0], RbracePos);
+    basis[2] = pb.createOr(basis[2], RbracePos);
+    basis[3] = pb.createOr(basis[3], RbracePos);
+    basis[4] = pb.createOr(basis[4], RbracePos);
+    basis[5] = pb.createOr(basis[5], RbracePos);
+    basis[6] = pb.createOr(basis[6], RbracePos);
+    //
+    // Add , (ASCII 2c) after } at recordSeparator.
+    basis[2] = pb.createOr(basis[2], commaPos);
+    basis[3] = pb.createOr(basis[3], commaPos);
+    basis[5] = pb.createOr(basis[5], commaPos);
+    Var * translatedVar = getOutputStreamVar("updatedBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        pb.createAssign(pb.createExtract(translatedVar, pb.getInteger(i)), basis[i]);
+    }
 }
