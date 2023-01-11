@@ -183,7 +183,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
     for (const auto & binding : mInputScalars) {
         b->setScalarField(binding.getName(), nextArg());
     }
-    bindFamilyInitializationArguments(b, arg, arg_end);
+    bindAdditionalInitializationArguments(b, arg, arg_end);
     assert (arg == arg_end);    
     // TODO: we could permit shared managed buffers here if we passed in the buffer
     // into the init method. However, since there are no uses of this in any written
@@ -203,7 +203,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::bindFamilyInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) const {
+void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) const {
 
 }
 

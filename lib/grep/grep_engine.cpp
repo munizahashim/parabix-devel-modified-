@@ -787,6 +787,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // has repeating streamset
+                         , false
                          // kernel list
                          , {}
                          // called functions

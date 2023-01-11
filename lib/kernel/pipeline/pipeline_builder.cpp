@@ -89,7 +89,9 @@ enum class VertexType { Kernel, StreamSet, Scalar };
 
 using AttrId = Attribute::KindId;
 
-using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, VertexType, unsigned>;
+using TypeId = Relationship::ClassTypeId;
+
+using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, const Relationship *, unsigned>;
 
 using Vertex = Graph::vertex_descriptor;
 using Map = flat_map<const Relationship *, Vertex>;
@@ -100,15 +102,7 @@ inline typename graph_traits<Graph>::edge_descriptor out_edge(const typename gra
     return *out_edges(u, G).first;
 }
 
-inline char getRelationshipType(const VertexType type) {
-    switch (type) {
-        case VertexType::StreamSet:
-            return 'S';
-        case VertexType::Scalar:
-            return 'V';
-        default: llvm_unreachable("unknown relationship type");
-    }
-}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAttributesFrom
@@ -189,146 +183,11 @@ Kernel * PipelineBuilder::makeKernel() {
 //        }
 //    }
 
-    constexpr auto pipelineInput = 0U;
-    constexpr auto firstKernel = 1U;
-    const auto firstCall = firstKernel + numOfKernels;
-    const auto pipelineOutput = firstCall + numOfCalls;
-
-    Graph G(pipelineOutput + 1);
-    Map M;
-
-
-    auto enumerateProducerBindings = [&](const VertexType type, const Vertex producer, const Bindings & bindings) {
-        const auto n = bindings.size();
-        for (unsigned i = 0; i < n; ++i) {
-            Relationship * const rel = bindings[i].getRelationship();
-            if (LLVM_UNLIKELY(isa<ScalarConstant>(rel))) continue;
-            const auto f = M.find(rel);
-            if (LLVM_UNLIKELY(f != M.end())) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                const auto existingProducer = target(out_edge(f->second, G), G);
-                out << bindings[i].getName() << " is ";
-                if (LLVM_UNLIKELY(existingProducer == pipelineInput)) {
-                    out << "an input to the pipeline";
-                } else {
-                    out << "produced by " << mKernels[existingProducer - firstKernel]->getName();
-                }
-                out << " and ";
-                if (LLVM_UNLIKELY(producer == pipelineOutput)) {
-                    out << "an output of the pipeline";
-                } else {
-                    out << "produced by " << mKernels[producer - firstKernel]->getName();
-                }
-                out << ".";
-                report_fatal_error(out.str());
-            }
-            const auto bufferVertex = add_vertex(type, G);
-            M.emplace(rel, bufferVertex);
-            add_edge(bufferVertex, producer, i, G); // buffer -> producer ordering
-        }
-    };
-
-    enumerateProducerBindings(VertexType::Scalar, pipelineInput, mInputScalars);
-    enumerateProducerBindings(VertexType::StreamSet, pipelineInput, mInputStreamSets);
-    for (unsigned i = 0; i < numOfKernels; ++i) {
-        const Kernel * const k = mKernels[i];
-        enumerateProducerBindings(VertexType::Scalar, firstKernel + i, k->getOutputScalarBindings());
-        enumerateProducerBindings(VertexType::StreamSet, firstKernel + i, k->getOutputStreamSetBindings());
-    }
-
-    struct RelationshipVector {
-        size_t size() const {
-            if (LLVM_LIKELY(mUseBindings)) {
-                return mBindings->size();
-            } else {
-                return mArgs->size();
-            }
-        }
-
-        Relationship * getRelationship(unsigned i) const {
-            if (LLVM_LIKELY(mUseBindings)) {
-                return (*mBindings)[i].getRelationship();
-            } else {
-                return (*mArgs)[i];
-            }
-        }
-
-        RelationshipVector(const Bindings & bindings)
-        : mUseBindings(true)
-        , mBindings(&bindings) {
-
-        }
-
-        RelationshipVector(const Scalars & args)
-        : mUseBindings(false)
-        , mArgs(&args) {
-
-        }
-
-    private:
-        const bool mUseBindings;
-        union {
-        const Bindings * const mBindings;
-        const Scalars * const mArgs;
-        };
-    };
-
-    auto enumerateConsumerBindings = [&](const VertexType type, const Vertex consumerVertex, const RelationshipVector array) {
-        const auto n = array.size();
-        for (unsigned i = 0; i < n; ++i) {
-            Relationship * const rel = array.getRelationship(i);
-            assert ("relationship cannot be null!" && rel);
-            if (LLVM_UNLIKELY(isa<ScalarConstant>(rel) || isa<RepeatingStreamSet>(rel))) continue;
-            const auto f = M.find(rel);
-            if (LLVM_UNLIKELY(f == M.end())) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                if (consumerVertex < firstCall) {
-                    const Kernel * const consumer = mKernels[consumerVertex - firstKernel];
-                    const Binding & input = ((type == VertexType::Scalar)
-                                               ? consumer->getInputScalarBinding(i)
-                                               : consumer->getInputStreamSetBinding(i));
-                    out << "input " << i << " (" << input.getName() << ") of ";
-                    out << "kernel " << consumer->getName();
-                } else { // TODO: function calls should retain name
-                    out << "argument " << i << " of ";
-                    out << "function call " << (consumerVertex - mKernels.size() + 1);
-                }
-                out << " is not a constant, produced by a kernel or an input to the pipeline";
-                report_fatal_error(out.str());
-            }
-            const auto bufferVertex = f->second;
-            assert (bufferVertex < num_vertices(G));
-            assert (G[bufferVertex] == type);
-            add_edge(consumerVertex, bufferVertex, i, G); // consumer -> buffer ordering
-        }
-    };
-
-    bool noFamilyKernels = true;
-    for (unsigned i = 0; i < numOfKernels; ++i) {
-        Kernel * const k = mKernels[i];
-        k->ensureLoaded();
-        if (k->hasFamilyName()) noFamilyKernels = false;
-        enumerateConsumerBindings(VertexType::Scalar, firstKernel + i, k->getInputScalarBindings());
-        enumerateConsumerBindings(VertexType::StreamSet, firstKernel + i, k->getInputStreamSetBindings());
-    }
-    for (unsigned i = 0; i < numOfCalls; ++i) {
-        enumerateConsumerBindings(VertexType::Scalar, firstCall + i, mCallBindings[i].Args);
-    }
-    enumerateConsumerBindings(VertexType::Scalar, pipelineOutput, mOutputScalars);
-    enumerateConsumerBindings(VertexType::StreamSet, pipelineOutput, mOutputStreamSets);
-
     std::string signature;
     signature.reserve(1024);
     raw_string_ostream out(signature);
 
-    out << 'P' << mNumOfThreads;
-    // TODO: create a pipeline executor that can check the arg types and capture any outputs;
-    // it should pass buffer segments in so that it can be given to the allocation function.
-    if (noFamilyKernels) {
-        out << 'B' << codegen::BufferSegments;
-    }
+    out << 'P' << mNumOfThreads << 'B' << codegen::BufferSegments;
     if (mExternallySynchronized) {
         out << 'E';
     }
@@ -375,31 +234,252 @@ Kernel * PipelineBuilder::makeKernel() {
         }
     }
     #endif
-    for (unsigned i = 0; i < numOfKernels; ++i) {
-        out << "_K" << mKernels[i]->getFamilyName();
-    }
-    for (unsigned i = 0; i < numOfCalls; ++i) {
-        out << "_C" << mCallBindings[i].Name;
-    }
-    const auto firstRelationship = pipelineOutput + 1;
-    const auto lastRelationship = num_vertices(G);
 
-    for (auto i = firstRelationship; i != lastRelationship; ++i) {
-        if (LLVM_UNLIKELY(out_degree(i, G) == 0)) continue;
-        out << '@' << getRelationshipType(G[i]);
-        const auto e = out_edge(i, G);
-        const auto j = target(e, G);
-        out << j << '.' << G[e];
-        for (const auto e : make_iterator_range(in_edges(i, G))) {
-            const auto k = source(e, G);
-            out << '_' << k << '.' << G[e];
+    bool hasRepeatingStreamSet = false;
+
+    if (mUniqueName.empty()) {
+
+        constexpr auto pipelineInput = 0U;
+        constexpr auto firstKernel = 1U;
+        const auto firstCall = firstKernel + numOfKernels;
+        const auto pipelineOutput = firstCall + numOfCalls;
+
+        Graph G(pipelineOutput + 1);
+        Map M;
+
+        auto enumerateProducerBindings = [&](const Vertex producer, const Bindings & bindings) {
+            const auto n = bindings.size();
+            for (unsigned i = 0; i < n; ++i) {
+                Relationship * const rel = bindings[i].getRelationship();
+                const auto f = M.find(rel);
+                if (LLVM_UNLIKELY(f != M.end())) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream out(tmp);
+                    const auto existingProducer = target(out_edge(f->second, G), G);
+                    out << bindings[i].getName() << " is ";
+                    if (LLVM_UNLIKELY(existingProducer == pipelineInput)) {
+                        out << "an input to the pipeline";
+                    } else {
+                        out << "produced by " << mKernels[existingProducer - firstKernel]->getName();
+                    }
+                    out << " and ";
+                    if (LLVM_UNLIKELY(producer == pipelineOutput)) {
+                        out << "an output of the pipeline";
+                    } else {
+                        out << "produced by " << mKernels[producer - firstKernel]->getName();
+                    }
+                    out << ".";
+                    report_fatal_error(out.str());
+                }
+                const auto bufferVertex = add_vertex(rel, G);
+                M.emplace(rel, bufferVertex);
+                add_edge(bufferVertex, producer, i, G); // buffer -> producer ordering
+            }
+        };
+
+        enumerateProducerBindings(pipelineInput, mInputScalars);
+        enumerateProducerBindings(pipelineInput, mInputStreamSets);
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            Kernel * const k = mKernels[i];
+            k->ensureLoaded();
+            enumerateProducerBindings(firstKernel + i, k->getOutputScalarBindings());
+            enumerateProducerBindings(firstKernel + i, k->getOutputStreamSetBindings());
+        }
+
+        struct RelationshipVector {
+            size_t size() const {
+                if (LLVM_LIKELY(mUseBindings)) {
+                    return mBindings->size();
+                } else {
+                    return mArgs->size();
+                }
+            }
+
+            Relationship * getRelationship(unsigned i) const {
+                if (LLVM_LIKELY(mUseBindings)) {
+                    return (*mBindings)[i].getRelationship();
+                } else {
+                    return (*mArgs)[i];
+                }
+            }
+
+            RelationshipVector(const Bindings & bindings)
+            : mUseBindings(true)
+            , mBindings(&bindings) {
+
+            }
+
+            RelationshipVector(const Scalars & args)
+            : mUseBindings(false)
+            , mArgs(&args) {
+
+            }
+
+        private:
+            const bool mUseBindings;
+            union {
+            const Bindings * const mBindings;
+            const Scalars * const mArgs;
+            };
+        };
+
+        auto enumerateConsumerBindings = [&](const Vertex consumerVertex, const RelationshipVector array) {
+            const auto n = array.size();
+            for (unsigned i = 0; i < n; ++i) {
+                Relationship * const rel = array.getRelationship(i);
+                assert ("relationship cannot be null!" && rel);
+                auto f = M.find(rel);
+                if (LLVM_UNLIKELY(f == M.end())) {
+                    // TODO: should we record the consumers of a repeating streamset or is knowing
+                    // their count sufficient?
+                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel) || isa<ScalarConstant>(rel))) {
+                        const auto bufferVertex = add_vertex(rel, G);
+                        f = M.emplace(rel, bufferVertex).first;
+                    } else {
+                        SmallVector<char, 256> tmp;
+                        raw_svector_ostream out(tmp);
+                        if (consumerVertex < firstCall) {
+                            const Kernel * const consumer = mKernels[consumerVertex - firstKernel];
+                            const Binding & input = ((rel->getClassTypeId() == TypeId::Scalar)
+                                                       ? consumer->getInputScalarBinding(i)
+                                                       : consumer->getInputStreamSetBinding(i));
+                            out << "input " << i << " (" << input.getName() << ") of ";
+                            out << "kernel " << consumer->getName();
+                        } else { // TODO: function calls should retain name
+                            out << "argument " << i << " of ";
+                            out << "function call " << (consumerVertex - mKernels.size() + 1);
+                        }
+                        out << " is not a constant, produced by a kernel or an input to the pipeline";
+                        report_fatal_error(out.str());
+                    }
+                }
+                const auto bufferVertex = f->second;
+                assert (bufferVertex < num_vertices(G));
+                add_edge(consumerVertex, bufferVertex, i, G); // consumer -> buffer ordering
+            }
+        };
+
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            Kernel * const k = mKernels[i];
+            enumerateConsumerBindings(firstKernel + i, k->getInputScalarBindings());
+            enumerateConsumerBindings(firstKernel + i, k->getInputStreamSetBindings());
+        }
+        for (unsigned i = 0; i < numOfCalls; ++i) {
+            enumerateConsumerBindings(firstCall + i, mCallBindings[i].Args);
+        }
+        enumerateConsumerBindings(pipelineOutput, mOutputScalars);
+        enumerateConsumerBindings(pipelineOutput, mOutputStreamSets);
+
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            out << "_K" << mKernels[i]->getFamilyName();
+        }
+        for (unsigned i = 0; i < numOfCalls; ++i) {
+            out << "_C" << mCallBindings[i].Name;
+        }
+        out << '@';
+
+        const auto firstRelationship = pipelineOutput + 1;
+        const auto lastRelationship = num_vertices(G);
+
+        for (auto i = firstRelationship; i != lastRelationship; ++i) {
+            const Relationship * const r = G[i]; assert (r);
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
+                const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
+                const auto numElements = rs->getNumElements();
+                const auto fieldWidth = rs->getNumElements();
+                out << 'R' << numElements << 'x' << fieldWidth;
+                if (rs->isDynamic()) {
+                    hasRepeatingStreamSet = true;
+                } else {
+                    const auto width = fieldWidth / 4UL;
+                    SmallVector<char, 16> tmp(width + 1);
+                    for (unsigned i = 0;;) {
+                        assert (i < numElements);
+                        const auto & vec = rs->getPattern(i);
+                        out << ':';
+                        // write to hex code
+                        for (auto v : vec) {
+                            unsigned j = 0;
+                            while (v) {
+                                const auto c = (v & 15);
+                                v >>= 4;
+                                if (c < 10) {
+                                    tmp[j] = '0' + c;
+                                } else {
+                                    tmp[j] = 'A' + (c - 10U);
+                                }
+                                ++j;
+                            }
+                            for (auto k = j; k < width; ++k) {
+                                out << '0';
+                            }
+                            while (j) {
+                                out << tmp[--j];
+                            }
+                        }
+                        if ((++i) == numElements) {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                char typeCode;
+                switch (r->getClassTypeId()) {
+                    case TypeId::StreamSet:
+                        typeCode = 'S';
+                        break;
+                    case TypeId::ScalarConstant:
+                        typeCode = 'C';
+                        break;
+                    case TypeId::Scalar:
+                        typeCode = 'V';
+                        break;
+                    default: llvm_unreachable("unknown relationship type");
+                }
+                out << typeCode;
+            }
+
+
+
+
+
+            if (LLVM_LIKELY(out_degree(i, G) != 0)) {
+                const auto e = out_edge(i, G);
+                const auto j = target(e, G);
+                out << j << '.' << G[e];
+            }
+
+            for (const auto e : make_iterator_range(in_edges(i, G))) {
+                const auto k = source(e, G);
+                out << '_' << k << '.' << G[e];
+            }
+        }
+    } else { // the programmer provided a unique name
+        out << mUniqueName;
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            Kernel * const k = mKernels[i];
+            k->ensureLoaded();
+            if (k->generatesDynamicRepeatingStreamSets()) {
+                hasRepeatingStreamSet = true;
+                break;
+            }
+            for (unsigned i = 0; i < k->getNumOfStreamInputs(); ++i) {
+                const StreamSet * const in = k->getInputStreamSet(i);
+                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(in))) {
+                    if (cast<RepeatingStreamSet>(in)->isDynamic()) {
+                        hasRepeatingStreamSet = true;
+                        break;
+                    }
+                }
+            }
         }
     }
+
     out.flush();
 
     PipelineKernel * const pipeline =
         new PipelineKernel(mDriver.getBuilder(), std::move(signature),
-                           mNumOfThreads,
+                           mNumOfThreads, hasRepeatingStreamSet,
                            std::move(mKernels), std::move(mCallBindings),
                            std::move(mInputStreamSets), std::move(mOutputStreamSets),
                            std::move(mInputScalars), std::move(mOutputScalars),
@@ -412,6 +492,7 @@ Kernel * PipelineBuilder::makeKernel() {
 
     return pipeline;
 }
+
 
 using AttributeCombineSet = flat_map<AttrId, unsigned>;
 

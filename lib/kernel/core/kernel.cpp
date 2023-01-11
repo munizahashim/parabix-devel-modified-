@@ -450,7 +450,7 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         for (const Binding & binding : mInputScalars) {
             params.push_back(binding.getType());
         }
-        addFamilyInitializationArgTypes(b, params);
+        addAdditionalInitializationArgTypes(b, params);
         FunctionType * const initType = FunctionType::get(b->getSizeTy(), params, false);
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
         initFunc->setCallingConv(CallingConv::C);
@@ -478,7 +478,7 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::addFamilyInitializationArgTypes(BuilderRef /* b */, InitArgTypes & /* argTypes */) const {
+void Kernel::addAdditionalInitializationArgTypes(BuilderRef /* b */, InitArgTypes & /* argTypes */) const {
 
 }
 
@@ -1054,7 +1054,7 @@ Value * Kernel::finalizeInstance(BuilderRef b, ArrayRef<Value *> args) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params, NestedStateObjs & toFree) const {
+Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamMap & params, NestedStateObjs & toFree) const {
 
     // TODO: need to test for termination on init call
 
@@ -1088,6 +1088,10 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
     }
 
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
+    if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
+        ParamMap repeatingStreamSets;
+        recursivelyConstructRepeatingStreamSets(b, initArgs, repeatingStreamSets, 1U);
+    }
     Function * const init = getInitializeFunction(b);
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b->CreateCall(init->getFunctionType(), init, initArgs);
@@ -1118,7 +1122,14 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::recursivelyConstructFamilyKernels(BuilderRef /* b */, InitArgs & /* args */, const ParamMap & /* params */, NestedStateObjs & /* toFree */) const {
+void Kernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recursivelyConstructRepeatingStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
 
 }
 

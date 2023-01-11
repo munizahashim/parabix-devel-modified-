@@ -59,6 +59,9 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 
+static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(false), cl::cat(CSV_Options));
+
+
 typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
 class Invert : public PabloKernel {
@@ -111,7 +114,7 @@ StreamSet * CreateRepeatingBixNum(const std::unique_ptr<ProgramBuilder> & P, uns
             templatePattern[i][j] = static_cast<uint64_t>((nums[j] >> i) & 1U);
         }
     }
-    return P->CreateRepeatingStreamSet(1, templatePattern);
+    return P->CreateRepeatingStreamSet(1, templatePattern, TestDynamicRepeatingFile);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {

@@ -17,12 +17,17 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         StreamSetBuffer * const buffer = bn.Buffer;
 
 
-
         // external buffers already have a buffer handle
-        if (LLVM_LIKELY(bn.isInternal())) {
+        if (LLVM_LIKELY(bn.isInternal() || bn.isConstant())) {
             Type * const handleType = buffer->getHandleType(b);
             // We automatically assign the buffer memory according to the buffer start position
-            if (bn.Locality == BufferLocality::ThreadLocal) {
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(buffer))) {
+                if (cast<RepeatingStreamSet>(buffer)->isDynamic()) {
+                    mTarget->addInternalScalar(handleType, prefix, groupId);
+                } else {
+                    mTarget->addNonPersistentScalar(handleType, prefix);
+                }
+            } else if (bn.Locality == BufferLocality::ThreadLocal) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addNonPersistentScalar(handleType, prefix);
             } else if (LLVM_LIKELY(bn.isOwned())) {
@@ -83,8 +88,16 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
+                const auto & sn = mStreamGraph[streamSet];
+                assert (sn.Type == RelationshipNode::IsRelationship);
+                if (cast<RepeatingStreamSet>(sn.Relationship)->isDynamic()) {
+                    const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
+                    Value * const mod = b->getScalarField(lengthName);
+                    cast<RepeatingBuffer>(buffer)->setModulus(mod);
+                } else {
+                    assert(isa<Constant>(cast<RepeatingBuffer>(buffer)->getModulus()));
+                }
             } else {
-
                 const auto pe = in_edge(streamSet, mBufferGraph);
                 const auto producer = source(pe, mBufferGraph);
                 const BufferPort & rd = mBufferGraph[pe];
@@ -175,9 +188,6 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
             if (LLVM_UNLIKELY(bn.isConstant())) {
-                const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
                 generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
             } else {
                 if (LLVM_LIKELY(bn.isInternal())) {

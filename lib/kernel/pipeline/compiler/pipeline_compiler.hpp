@@ -86,6 +86,7 @@ const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 
 const static std::string REPEATING_STREAMSET_HANDLE_PREFIX = "@RSS.";
+const static std::string REPEATING_STREAMSET_LENGTH_PREFIX = "@RSSL.";
 const static std::string REPEATING_STREAMSET_MALLOCED_DATA_PREFIX = "@RSSD.";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
@@ -149,6 +150,7 @@ public:
     void generateFinalizeThreadLocalMethod(BuilderRef b);
     std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
     void runOptimizationPasses(BuilderRef b);
+    void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const override;
 
 
     static void linkPThreadLibrary(BuilderRef b);
@@ -202,6 +204,7 @@ public:
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void clearInternalState(BuilderRef b);
     void updateExternalPipelineIO(BuilderRef b);
+    void writeMaximumStrideLengthMetadata(BuilderRef b) const;
 
 // partitioning codegen functions
 
@@ -384,6 +387,9 @@ public:
     void generateGlobalDataForRepeatingStreamSet(BuilderRef b, const unsigned streamSet, Value * const expectedNumOfStrides);
     void addRepeatingStreamSetBufferProperties(BuilderRef b);
     void deallocateRepeatingBuffers(BuilderRef b);
+    void generateMetaDataForRepeatingStreamSets(BuilderRef b);
+
+    void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
 // prefetch instructions
 
@@ -458,7 +464,7 @@ public:
 
     void addFamilyKernelProperties(BuilderRef b, const unsigned kernelId, const unsigned groupId) const;
 
-    void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const override;
+    void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
 // thread local functions
 
@@ -613,6 +619,7 @@ protected:
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
     const BitVector                             HasTerminationSignal;
+    const std::vector<unsigned>                 DynamicRepeatingStreamSetId;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -916,6 +923,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
+, DynamicRepeatingStreamSetId(std::move(P.mDynamicRepeatingStreamSetId))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

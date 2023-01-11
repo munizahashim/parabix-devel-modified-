@@ -62,7 +62,7 @@ public:
 
     using InitArgTypes = llvm::SmallVector<llvm::Type *, 32>;
 
-    using ParamMap = llvm::DenseMap<const Scalar *, llvm::Value *>;
+    using ParamMap = llvm::DenseMap<const Relationship *, llvm::Value *>;
 
     struct LinkedFunction {
         const std::string  Name;
@@ -203,6 +203,10 @@ public:
         return hasFamilyName();
     }
 
+    LLVM_READNONE virtual bool generatesDynamicRepeatingStreamSets() const {
+        return false;
+    }
+
     LLVM_READNONE virtual const std::string getFamilyName() const {
         if (hasFamilyName()) {
             return getDefaultFamilyName();
@@ -247,7 +251,9 @@ public:
     }
 
     LLVM_READNONE StreamSet * getInputStreamSet(const unsigned i) const {
-        return llvm::cast<StreamSet>(getInputStreamSetBinding(i).getRelationship());
+        auto streamSet = getInputStreamSetBinding(i).getRelationship();
+        assert (llvm::isa<StreamSet>(streamSet) || llvm::isa<RepeatingStreamSet>(streamSet));
+        return static_cast<StreamSet *>(streamSet);
     }
 
     LLVM_READNONE unsigned getNumOfStreamInputs() const {
@@ -434,11 +440,13 @@ public:
 
 protected:
 
-    llvm::Value * constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, const ParamMap & params, NestedStateObjs & toFree) const;
+    llvm::Value * constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamMap & params, NestedStateObjs & toFree) const;
 
-    virtual void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
+    virtual void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
 
-    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const;
+    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap &params, NestedStateObjs & toFree) const;
+
+    virtual void recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const;
 
 protected:
 

@@ -443,13 +443,17 @@ public:
 
     llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void setModulus(llvm::Constant * const modulus) {
+    void setModulus(llvm::Value * const modulus) {
         mModulus = modulus;
+    }
+
+    llvm::Value * getModulus() const {
+        return mModulus;
     }
 
 private:
 
-    llvm::Constant * mModulus;
+    llvm::Value * mModulus;
 
 };
 

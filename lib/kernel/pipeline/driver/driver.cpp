@@ -36,10 +36,10 @@ StreamSet * BaseDriver::CreateStreamSet(const unsigned NumElements, const unsign
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-RepeatingStreamSet * BaseDriver::CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t>> && stringSet) noexcept {
+RepeatingStreamSet * BaseDriver::CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t>> && stringSet, const bool isDynamic) noexcept {
     RelationshipAllocator A(mAllocator);
     // TODO: the stringSet will probably cause a memleak
-    return new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet));
+    return new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet), isDynamic);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

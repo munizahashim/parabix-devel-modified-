@@ -42,7 +42,7 @@ public:
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 
-    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet) noexcept;
+    kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet, const bool isDynamic = true) noexcept;
 
     kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType) noexcept;
 

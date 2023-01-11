@@ -1481,11 +1481,11 @@ Value * RepeatingBuffer::modByCapacity(BuilderPtr b, Value * const offset) const
 }
 
 Value * RepeatingBuffer::getCapacity(BuilderPtr b) const {
-    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
 }
 
 Value * RepeatingBuffer::getInternalCapacity(BuilderPtr b) const {
-    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
 }
 
 void RepeatingBuffer::setCapacity(BuilderPtr b, Value * capacity) const {

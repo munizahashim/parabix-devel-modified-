@@ -53,6 +53,13 @@ public:
         : Name(std::move(Name)), Type(Type), FunctionPointer(FunctionPointer), Args(Args.begin(), Args.end()), Callee(nullptr) { }    
     };
 
+    struct RepeatingStreamSetInfo {
+        llvm::GlobalVariable * StreamSet;
+        llvm::Constant * RunLength;
+        RepeatingStreamSetInfo(llvm::GlobalVariable * streamSet, llvm::Constant * runLength)
+        : StreamSet(streamSet), RunLength(runLength) {}
+    };
+
     using CallBindings = std::vector<CallBinding>;
 
     using LengthAssertion = std::array<const StreamSet *, 2>;
@@ -64,6 +71,10 @@ public:
     bool isCachable() const override;
 
     bool externallyInitialized() const override;
+
+    LLVM_READNONE bool generatesDynamicRepeatingStreamSets() const override {
+        return mHasRepeatingStreamSet;
+    }
 
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
@@ -106,6 +117,7 @@ protected:
     PipelineKernel(BuilderRef b,
                    std::string && signature,
                    const unsigned numOfThreads,
+                   const bool hasRepeatingStreamSet,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -115,9 +127,11 @@ protected:
 
 private:
 
-    void addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
+    void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
 
-    void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const final;
+    void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
+
+    void recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const final;
 
     void linkExternalMethods(BuilderRef b) final;
 
@@ -145,7 +159,12 @@ private:
 
 protected:
 
+    RepeatingStreamSetInfo createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const unsigned maxStrideLength) const;
+
+protected:
+
     const unsigned                            mNumOfThreads;
+    const bool                                mHasRepeatingStreamSet;
     const std::string                         mSignature;
     Kernels                                   mKernels;
     CallBindings                              mCallBindings;

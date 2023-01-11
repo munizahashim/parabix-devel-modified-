@@ -364,7 +364,7 @@ public:
 
     void callGenerateInitializeMethod(BuilderRef b);
 
-    virtual void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    virtual void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
     void callGenerateInitializeThreadLocalMethod(BuilderRef b);
 

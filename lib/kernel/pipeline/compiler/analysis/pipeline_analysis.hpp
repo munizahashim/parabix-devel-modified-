@@ -77,6 +77,8 @@ public:
 
         P.determineNumOfThreads();
 
+        P.numberDynamicRepeatingStreamSets();
+
         // Finish the buffer graph
         P.determineBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
@@ -210,6 +212,8 @@ private:
 
     void calculatePartialSumStepFactors(BuilderRef b);
 
+    void numberDynamicRepeatingStreamSets();
+
     void determineNumOfThreads();
 
     // zero extension analysis function
@@ -293,6 +297,8 @@ public:
 
     TerminationPropagationGraph     mTerminationPropagationGraph;
     BitVector                       HasTerminationSignal;
+
+    std::vector<unsigned>           mDynamicRepeatingStreamSetId;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;

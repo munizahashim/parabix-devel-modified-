@@ -54,7 +54,8 @@ void addConsumerRelationships(const PortType portType, const unsigned consumer, 
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    if (isa<StreamSet>(array[0].getRelationship()) || isa<RepeatingStreamSet>(array[0].getRelationship())) {
+    const auto r = array[0].getRelationship();
+    if (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r)) {
         for (unsigned i = 0; i < n; ++i) {
             const Binding & item = array[i];
             const auto binding = G.add(&item);

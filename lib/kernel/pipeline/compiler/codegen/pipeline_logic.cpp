@@ -49,6 +49,18 @@ void destroyStateObject(BuilderRef b, Value * threadState) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief bindAdditionalInitializationArguments
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {
+    bindFamilyInitializationArguments(b, arg, arg_end);
+    const PipelineKernel * const pk = cast<PipelineKernel>(mTarget);
+    if (LLVM_UNLIKELY(pk->generatesDynamicRepeatingStreamSets())) {
+        bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
+    }
+    assert (arg == arg_end);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateImplicitKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
@@ -119,11 +131,12 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         }
         #endif
     }
-    addRepeatingStreamSetBufferProperties(b);
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         mTarget->addThreadLocalScalar(b->getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
+    addRepeatingStreamSetBufferProperties(b);
+    generateMetaDataForRepeatingStreamSets(b);
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
@@ -279,7 +292,6 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addInternalScalar(StructType::get(C, traceStruct),
                                            name + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX, groupId);
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

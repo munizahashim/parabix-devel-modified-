@@ -80,6 +80,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // has repeating streamset
+                         , false
                          // make kernel list
                          , [&]() -> Kernels {
                              Kernels kernels;
