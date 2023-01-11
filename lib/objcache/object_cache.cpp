@@ -245,22 +245,20 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 Function::Create(f.getFunctionType(), Function::ExternalLinkage, f.getName(), H.get());
             }
         }
-#warning if this works, move signature into kernel metadata permanently
         for (const auto & og : M->named_metadata()) {
-            if (og.getName() == SIGNATURE) continue;
             NamedMDNode * const md = H->getOrInsertNamedMetadata(og.getName());
             const auto n = og.getNumOperands();
             for (unsigned i = 0; i < n; ++i) {
                 md->addOperand(og.getOperand(i));
             }
         }
-        const MDString * const sig = getSignature(M);
-        if (sig) {
-            NamedMDNode * const md = H->getOrInsertNamedMetadata(SIGNATURE);
-            assert (md->getNumOperands() == 0);
-            MDString * const sigCopy = MDString::get(H->getContext(), sig->getString());
-            md->addOperand(MDNode::get(H->getContext(), {sigCopy}));
+        #ifndef NDEBUG
+        assert ((getSignature(M) == nullptr) ^ (getSignature(H.get()) != nullptr));
+        if (getSignature(M)) {
+            assert (getSignature(H.get()));
+            assert (getSignature(M)->getString() == getSignature(H.get())->getString());
         }
+        #endif
 
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
         WriteBitcodeToFile(H.get(), kernelFile);

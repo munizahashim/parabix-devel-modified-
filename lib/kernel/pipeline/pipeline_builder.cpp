@@ -439,10 +439,6 @@ Kernel * PipelineBuilder::makeKernel() {
                 out << typeCode;
             }
 
-
-
-
-
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
                 const auto e = out_edge(i, G);
                 const auto j = target(e, G);
