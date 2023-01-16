@@ -173,7 +173,11 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
 }
 
 void ParabixIllustrator::displayAllCapturedData() {
-    unsigned pages = (mStreamData[0].size() + mDisplayWidth - 1)/ mDisplayWidth;
+    unsigned maxStreamSize = 0;
+    for (unsigned i = 0; i < mStreamData.size(); i++) {
+        if (mStreamData[i].size() > maxStreamSize) maxStreamSize = mStreamData[i].size();
+    }
+    unsigned pages = (maxStreamSize + mDisplayWidth - 1)/ mDisplayWidth;
     for (unsigned page = 0; page < pages; page++) {
         unsigned pagePos = mDisplayWidth * page;
         for (unsigned i = 0; i < mStreamData.size(); i++) {
