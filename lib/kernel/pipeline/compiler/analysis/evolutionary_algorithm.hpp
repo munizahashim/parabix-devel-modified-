@@ -132,12 +132,12 @@ private:
 protected:
 
     PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
-                                         , const unsigned maxRounds
+                                         , const unsigned maxTime
                                          , const unsigned maxStallRounds
                                          , const unsigned maxCandidates
                                          , pipeline_random_engine & rng)
     : candidateLength(candidateLength)
-    , maxGenerations(maxRounds)
+    , maxTime(maxTime)
     , maxCandidates(maxCandidates)
     , averageStallThreshold(3)
     , maxStallThreshold(3)
@@ -149,7 +149,7 @@ protected:
 protected:
 
     const CandidateLengthType candidateLength;
-    const unsigned maxGenerations;
+    const unsigned maxTime;
     const unsigned maxCandidates;
 
     const FitnessValueType averageStallThreshold;

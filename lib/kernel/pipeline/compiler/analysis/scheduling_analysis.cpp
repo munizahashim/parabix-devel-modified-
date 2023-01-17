@@ -9,8 +9,6 @@
 #include <fstream>
 #include <iostream>
 
-#define EXPERIMENTAL_SCHEDULING_ALGORITHM
-
 namespace kernel {
 
 constexpr static unsigned INITIAL_TOPOLOGICAL_POPULATION_SIZE = 10;
@@ -23,15 +21,13 @@ constexpr static unsigned PARITION_SCHEDULING_GA_ROUNDS = 50;
 
 constexpr static unsigned PARITION_SCHEDULING_GA_STALLS = 10;
 
-
 constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
 
-constexpr static unsigned JUMP_SCHEDULING_GA_ROUNDS = 200;
+constexpr static unsigned JUMP_SCHEDULING_GA_MAX_TIME_SECONDS = 10;
 
 constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
-
-constexpr static unsigned PROGRAM_SCHEDULING_GA_ROUNDS = 4; // 50;
+constexpr static unsigned PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS = 2; // 50;
 
 constexpr static unsigned PROGRAM_SCHEDULING_GA_STALLS = 10;
 
@@ -47,7 +43,7 @@ constexpr static double MAX_CUT_HS_AVERAGE_STALL_THRESHOLD = 3.0;
 
 constexpr static unsigned MAX_CUT_HS_MAX_AVERAGE_STALLS = 20;
 
-constexpr static unsigned INITIAL_SCHEDULING_POPULATION_ATTEMPTS = 1000;
+constexpr static unsigned INITIAL_SCHEDULING_POPULATION_ATTEMPTS = 50;
 
 constexpr static unsigned INITIAL_SCHEDULING_POPULATION_SIZE = 20;
 
@@ -1510,8 +1506,6 @@ using BitSet = dynamic_bitset<>;
 
 using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, BitSet, no_property>;
 
-#ifdef EXPERIMENTAL_SCHEDULING_ALGORITHM
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1758,7 +1752,7 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                               const std::vector<unsigned> & initialDegree,
                               const unsigned numOfUnlinkedPartitions,
                               pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_ROUNDS,
+    : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_MAX_TIME_SECONDS,
                                             JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, srcRng)
     , worker(G, P, initialDegree, numOfUnlinkedPartitions, srcRng) {
 
@@ -1770,8 +1764,6 @@ private:
     ProgramSchedulingJumpAnalysisWorker worker;
 
 };
-
-#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
@@ -2069,7 +2061,7 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
                               const OrderingDAWG & I,
                               const unsigned numOfKernels,
                               pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_ROUNDS,
+    : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS,
                                             PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, srcRng)
     , worker(S, I, numOfKernels, srcRng) {
 

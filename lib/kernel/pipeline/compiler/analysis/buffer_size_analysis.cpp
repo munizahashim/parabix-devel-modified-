@@ -17,7 +17,7 @@ constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS = 200;
 
 constexpr static unsigned BUFFER_SIZE_POPULATION_SIZE = 30;
 
-constexpr static unsigned BUFFER_SIZE_GA_ROUNDS = 1000;
+constexpr static unsigned BUFFER_SIZE_GA_MAX_TIME_SECONDS = 10;
 
 constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
 
@@ -135,7 +135,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
                          , const std::vector<unsigned> & weight
                          , pipeline_random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
-                                             BUFFER_SIZE_GA_ROUNDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, srcRng)
+                                             BUFFER_SIZE_GA_MAX_TIME_SECONDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, srcRng)
     , I(std::move(I))
     , C(std::move(C))
     , weight(weight)

@@ -1,4 +1,9 @@
 #include "evolutionary_algorithm.hpp"
+#include <chrono>
+
+using namespace std::chrono;
+
+using TimePoint = time_point<system_clock, seconds>;
 
 namespace kernel {
 
@@ -48,13 +53,15 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
     flat_set<unsigned> chosen;
     chosen.reserve(maxCandidates);
 
-    for (unsigned g = 0; g < maxGenerations; ++g) {
+    const auto limit = system_clock::now() + seconds(maxTime);
+
+    for (unsigned g = 0; system_clock::now() < limit; ++g) {
 
         const auto populationSize = population.size();
         assert (populationSize > 1);
 
         const auto c = maxStallGenerations - std::max(averageStallCount, bestStallCount);
-        const auto d = std::min(maxGenerations - g, c);
+        const auto d = std::min(maxTime - g, c);
         assert (d >= 1);
         const double currentMutationRate = (double)(d) / (double)(maxStallGenerations) + 0.03;
         const double currentCrossoverRate = 1.0 - currentMutationRate;
@@ -62,7 +69,6 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
         // CROSSOVER:
 
         for (unsigned i = 1; i < populationSize; ++i) {
-
             for (unsigned j = 0; j < i; ++j) {
                 if (zeroToOneReal(rng) <= currentCrossoverRate) {
 
