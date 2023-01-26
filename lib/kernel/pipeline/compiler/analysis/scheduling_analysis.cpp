@@ -15,19 +15,42 @@ constexpr static unsigned INITIAL_TOPOLOGICAL_POPULATION_SIZE = 10;
 
 constexpr static unsigned MAX_PARTITION_POPULATION_SIZE = 20;
 
-constexpr static unsigned MAX_PROGRAM_POPULATION_SIZE = 20;
+constexpr static unsigned PARITION_SCHEDULING_GA_INIT_TIME = 1;
 
-constexpr static unsigned PARITION_SCHEDULING_GA_ROUNDS = 50;
+constexpr static unsigned MAX_INIT_PARTITION_POPULATION_SIZE = 10;
+
+constexpr static unsigned PARITION_SCHEDULING_GA_MAX_TIME = 2;
+
+constexpr static unsigned MAX_PROGRAM_POPULATION_SIZE = 20;
 
 constexpr static unsigned PARITION_SCHEDULING_GA_STALLS = 10;
 
-constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
+constexpr static unsigned JUMP_SCHEDULING_GA_MAX_INIT_TIME_SECONDS = 2;
+
+constexpr static unsigned MAX_INIT_JUMP_POPULATION_SIZE = 10;
 
 constexpr static unsigned JUMP_SCHEDULING_GA_MAX_TIME_SECONDS = 10;
 
+constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
+
 constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
-constexpr static unsigned PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS = 2; // 50;
+//    PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
+//    MAX_INIT_PROGRAM_POPULATION_SIZE,
+    //    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
+    //                                         , const unsigned maxInitTime
+    //                                         , const unsigned maxInitCandidates
+    //                                         , const unsigned maxRunTime
+    //                                         , const unsigned maxCandidates
+    //                                         , const unsigned maxStallRounds
+    //                                         , pipeline_random_engine & rng)
+
+
+constexpr static unsigned PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS = 2; // 50;
+
+constexpr static unsigned MAX_INIT_PROGRAM_POPULATION_SIZE = 20; // 50;
+
+constexpr static unsigned PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS = 5; // 50;
 
 constexpr static unsigned PROGRAM_SCHEDULING_GA_STALLS = 10;
 
@@ -909,19 +932,19 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief SchedulingAnalysisWorker
  ** ------------------------------------------------------------------------------------------------------------- */
-struct SchedulingAnalysisWorker {
+struct SchedulingAnalysisWorker : public PermutationBasedEvolutionaryAlgorithmWorker {
 
     using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    virtual void repair(Candidate & candidate) = 0;
+    virtual void repair(Candidate & candidate, pipeline_random_engine & rng) = 0;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness
      ** ------------------------------------------------------------------------------------------------------------- */
-    virtual size_t fitness(const Candidate & candidate) {
+    size_t fitness(const Candidate & candidate, pipeline_random_engine & rng) final {
         return analyzer.analyze(candidate);
     }
 
@@ -957,7 +980,7 @@ struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & L) override {
+    void repair(Candidate & L, pipeline_random_engine & rng) override {
 
         for (unsigned i = 0; i != numOfKernels; ++i) {
             remaining[i] = in_degree(i, D) + 1;
@@ -1020,6 +1043,10 @@ private:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
+    WorkerPtr makeWorker(pipeline_random_engine & rng) final {
+        return std::make_unique<PartitionSchedulingAnalysisWorker>(S, D, candidateLength, rng);
+    }
+
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
      ** ------------------------------------------------------------------------------------------------------------- */
@@ -1031,23 +1058,9 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
         // solution space.
 
         return enumerateUpToNTopologicalOrderings(D, INITIAL_TOPOLOGICAL_POPULATION_SIZE, [&](const Candidate & L) {
-            insertCandidate(Candidate{L}, initialPopulation, false);
+            insertCandidate(Candidate{L}, initialPopulation);
         });
 
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repair
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void repairCandidate(Candidate & candidate) override {
-        worker.repair(candidate);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate) override {
-        return worker.fitness(candidate);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -1055,17 +1068,22 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
      ** ------------------------------------------------------------------------------------------------------------- */
     PartitionSchedulingAnalysis(const SchedulingGraph & S, const PartitionDependencyGraph & D,
                                 const unsigned numOfKernels, pipeline_random_engine & rng)
-    : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PARITION_SCHEDULING_GA_ROUNDS, PARITION_SCHEDULING_GA_STALLS, MAX_PARTITION_POPULATION_SIZE, rng)
-    , D(D)
-    , worker(S, D, numOfKernels, rng) {
+    : PermutationBasedEvolutionaryAlgorithm(numOfKernels,
+                                            PARITION_SCHEDULING_GA_INIT_TIME,
+                                            MAX_INIT_PARTITION_POPULATION_SIZE,
+                                            PARITION_SCHEDULING_GA_MAX_TIME,
+                                            MAX_PARTITION_POPULATION_SIZE,
+                                            PARITION_SCHEDULING_GA_STALLS,
+                                            rng)
+    , S(S)
+    , D(D) {
 
     }
 
 private:
 
+    const SchedulingGraph & S;
     const PartitionDependencyGraph & D;
-
-    PartitionSchedulingAnalysisWorker worker;
 
 };
 
@@ -1127,11 +1145,8 @@ void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, pipel
         // a schedule that permits a minimum memory schedule.
 
         PartitionSchedulingAnalysis SA(S, D, numOfKernels + 2U, rng);
-
         SA.runGA();
-
         auto H = SA.getResult();
-
         const auto t = postorder_minimize(H);
 
         // We make a fake input and output vertex in each partition graph to enable
@@ -1509,7 +1524,7 @@ using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, BitSet,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingJumpAnalysisWorker final {
+struct ProgramSchedulingJumpAnalysisWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
 
     using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
 
@@ -1518,9 +1533,10 @@ struct ProgramSchedulingJumpAnalysisWorker final {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & L) {
+    void repair(Candidate & L, pipeline_random_engine & rng) final {
 
-        assert (L.size() == candidateLength);
+        const auto candidateLength = L.size();
+
         for (unsigned i = 0; i != candidateLength; ++i) {
             remaining[i] = in_degree(i, G) + 1;
         }
@@ -1555,14 +1571,13 @@ struct ProgramSchedulingJumpAnalysisWorker final {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness
      ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate) {
+    size_t fitness(const Candidate & candidate, pipeline_random_engine & rng) final {
 
         const auto n = candidate.size();
         assert (n == num_vertices(jumpGraph));
         for (unsigned i = 0; i < n; ++i) {
             clear_vertex(i, jumpGraph);
         }
-
 
         for (unsigned i = 0; i < (n - 1); ++i) {
             const auto a = candidate[i];
@@ -1618,13 +1633,13 @@ struct ProgramSchedulingJumpAnalysisWorker final {
 
 
     /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief makeRandomCandidate
+     * @brief newCandidate
      ** ------------------------------------------------------------------------------------------------------------- */
-    Candidate makeRandomCandidate() {
-        Candidate candidate;
-        candidate.reserve(candidateLength);
+    void newCandidate(Candidate & candidate, pipeline_random_engine & rng) final {
 
         // random topological ordering
+
+        const auto candidateLength = candidate.size();
 
         std::vector<unsigned> deg(initialDegree);
 
@@ -1636,14 +1651,15 @@ struct ProgramSchedulingJumpAnalysisWorker final {
             }
         }
 
-        for (;;) {
+        for (unsigned i = 0; i < candidateLength; ++i) {
+
+            assert (!Q.empty());
 
             std::shuffle(Q.begin(), Q.end(), rng);
-
             const auto u = Q.back();
             Q.pop_back();
 
-            candidate.push_back(u);
+            candidate[i] = u;
 
             assert (deg[u] == 0);
             for (const auto e : make_iterator_range(out_edges(u, G))) {
@@ -1655,15 +1671,13 @@ struct ProgramSchedulingJumpAnalysisWorker final {
                 }
             }
 
-            if (Q.empty()) {
-                break;
-            }
+//            if (Q.empty()) {
+//                break;
+//            }
 
         }
 
         assert (candidate.size() == candidateLength);
-
-        return candidate;
     }
 
 public:
@@ -1678,8 +1692,7 @@ public:
                                         pipeline_random_engine & rng)
     : G(G)
     , P(P)
-    , candidateLength(candidateLength)
-    , rng(rng)
+    //, candidateLength(candidateLength)
     , initialDegree(initialDegree)
     , jumpGraph(candidateLength)
     , pathCount(candidateLength)
@@ -1692,12 +1705,13 @@ public:
         assert (candidateLength == num_vertices(P));
     }
 
+    virtual ~ProgramSchedulingJumpAnalysisWorker() {}
+
 private:
 
     const GlobalDependencyGraph & G;
     const PartitionGraph & P;
-    const unsigned candidateLength;
-    pipeline_random_engine & rng;
+    //const unsigned candidateLength;
 
     const std::vector<unsigned> & initialDegree;
 
@@ -1708,7 +1722,6 @@ private:
     std::vector<unsigned> remaining;
     Candidate replacement;
 
-
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1716,32 +1729,8 @@ private:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief initGA
-     ** ------------------------------------------------------------------------------------------------------------- */
-    bool initGA(Population & initialPopulation) override {
-        for (unsigned i = 0; i < INITIAL_SCHEDULING_POPULATION_ATTEMPTS; ++i) {
-            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation, false)) {
-                if (initialPopulation.size() >= INITIAL_SCHEDULING_POPULATION_SIZE) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repair
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void repairCandidate(Candidate & candidate) override {
-        worker.repair(candidate);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate) override {
-        return worker.fitness(candidate);
+    WorkerPtr makeWorker(pipeline_random_engine & rng) final {
+        return std::make_unique<ProgramSchedulingJumpAnalysisWorker>(G, P, initialDegree, numOfUnlinkedPartitions, rng);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -1752,16 +1741,23 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                               const std::vector<unsigned> & initialDegree,
                               const unsigned numOfUnlinkedPartitions,
                               pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions, JUMP_SCHEDULING_GA_MAX_TIME_SECONDS,
-                                            JUMP_SCHEDULING_GA_STALLS, MAX_JUMP_POPULATION_SIZE, srcRng)
-    , worker(G, P, initialDegree, numOfUnlinkedPartitions, srcRng) {
-
+    : PermutationBasedEvolutionaryAlgorithm(numOfUnlinkedPartitions,
+                                            JUMP_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
+                                            MAX_INIT_JUMP_POPULATION_SIZE,
+                                            JUMP_SCHEDULING_GA_MAX_TIME_SECONDS,
+                                            MAX_JUMP_POPULATION_SIZE,
+                                            JUMP_SCHEDULING_GA_STALLS,
+                                            srcRng)
+    , G(G), P(P), initialDegree(initialDegree), numOfUnlinkedPartitions(numOfUnlinkedPartitions) {
 
     }
 
 private:
 
-    ProgramSchedulingJumpAnalysisWorker worker;
+    const GlobalDependencyGraph & G;
+    const PartitionGraph & P;
+    const std::vector<unsigned> & initialDegree;
+    const unsigned numOfUnlinkedPartitions;
 
 };
 
@@ -1775,7 +1771,7 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & candidate) override {
+    void repair(Candidate & candidate, pipeline_random_engine & rng) override {
 
         assert (candidate.size() == numOfKernels);
         assert (index.size() == numOfKernels);
@@ -1949,13 +1945,13 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief makeRandomCandidate
      ** ------------------------------------------------------------------------------------------------------------- */
-    Candidate makeRandomCandidate() {
-        Candidate candidate;
-        candidate.reserve(candidateLength);
+    void newCandidate(Candidate & candidate, pipeline_random_engine & rng) final {
 
         // choose a random path and generate the candidate from the DAWG labels
         unsigned u = 0;
-        for (;;) {
+        const auto n = candidate.size();
+        assert (n == numOfKernels);
+        for (unsigned i = 0; i < n; ++i) {
             const auto d = out_degree(u, I);
             if (LLVM_UNLIKELY(d == 0)) {
                 break;
@@ -1966,11 +1962,10 @@ struct ProgramSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
                 std::uniform_int_distribution<> dist(0, d - 1);
                 std::advance(ei, dist(rng));
             }
-            candidate.push_back(I[*ei]);
+            candidate[i] = I[*ei];
             u = target(*ei, I);
         }
-        assert (candidate.size() == numOfKernels);
-        return candidate;
+
     }
 
 public:
@@ -2026,32 +2021,8 @@ private:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief initGA
-     ** ------------------------------------------------------------------------------------------------------------- */
-    bool initGA(Population & initialPopulation) override {
-        for (unsigned i = 0; i < INITIAL_SCHEDULING_POPULATION_ATTEMPTS; ++i) {
-            if (insertCandidate(worker.makeRandomCandidate(), initialPopulation, false)) {
-                if (initialPopulation.size() >= INITIAL_SCHEDULING_POPULATION_SIZE) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repair
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void repairCandidate(Candidate & candidate) override {
-        worker.repair(candidate);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate) override {
-        return worker.fitness(candidate);
+    WorkerPtr makeWorker(pipeline_random_engine & rng) final {
+        return std::make_unique<ProgramSchedulingAnalysisWorker>(S, I, numOfKernels, rng);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -2061,15 +2032,23 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
                               const OrderingDAWG & I,
                               const unsigned numOfKernels,
                               pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm(numOfKernels, PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS,
-                                            PROGRAM_SCHEDULING_GA_STALLS, MAX_PROGRAM_POPULATION_SIZE, srcRng)
-    , worker(S, I, numOfKernels, srcRng) {
+    : PermutationBasedEvolutionaryAlgorithm(numOfKernels,
+                                            PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
+                                            MAX_INIT_PROGRAM_POPULATION_SIZE,
+                                            PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS,
+                                            MAX_PROGRAM_POPULATION_SIZE,
+                                            PROGRAM_SCHEDULING_GA_STALLS,
+                                            srcRng)
+    , S(S), I(I), numOfKernels(numOfKernels) {
 
     }
 
 private:
 
-    ProgramSchedulingAnalysisWorker worker;
+    const SchedulingGraph & S;
+    const OrderingDAWG & I;
+    const unsigned numOfKernels;
+
 
 };
 

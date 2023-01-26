@@ -2,22 +2,9 @@
 #include <llvm/Support/Format.h>
 #include <llvm/ADT/DenseMap.h>
 
-//TODO: cleanup this code if the approach works
-
-namespace  {
-
-template<typename T>
-T abs_subtract(const T a, const T b) {
-    if (a < b) {
-        return b - a;
-    } else {
-        return a - b;
-    }
-}
-
-}
-
 namespace kernel {
+
+class PermutationBasedEvolutionaryAlgorithmWorker;
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief PermutationBasedEvolutionaryAlgorithm
@@ -36,6 +23,8 @@ public:
 
     using Candidate = std::vector<Vertex>;
 
+//    using Queue = boost::lockfree::queue<Candidate>;
+
     using FitnessValueType = size_t;
 
     using Candidates = std::map<Candidate, FitnessValueType>;
@@ -43,6 +32,8 @@ public:
     using Individual = typename Candidates::const_iterator;
 
     using Population = std::vector<Individual>;
+
+    using WorkerPtr = std::unique_ptr<PermutationBasedEvolutionaryAlgorithmWorker>;
 
     struct FitnessValueEvaluator {
         constexpr static bool eval(const FitnessValueType a,const FitnessValueType b) {
@@ -85,7 +76,7 @@ public:
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief initGA
      ** ------------------------------------------------------------------------------------------------------------- */
-    virtual bool initGA(Population & initialPopulation) = 0;
+    virtual bool initGA(Population & initial) { return false; };
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief runGA
@@ -107,20 +98,16 @@ public:
 
 protected:
 
+    virtual WorkerPtr makeWorker(pipeline_random_engine & rng) = 0;
+
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief insertCandidate
+     *
+     * NOTE: not threadsafe; intended just for initGA function.
      ** ------------------------------------------------------------------------------------------------------------- */
-    bool insertCandidate(Candidate && candidate, Population & population, const bool alwaysAddToPopulation);
+    bool insertCandidate(Candidate && candidate, Population & population);
 
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repairCandidate
-     ** ------------------------------------------------------------------------------------------------------------- */
-    virtual void repairCandidate(Candidate & candidate) = 0;
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    virtual size_t fitness(const Candidate & candidate) = 0;
+    virtual ~PermutationBasedEvolutionaryAlgorithm() { };
 
 private:
 
@@ -132,12 +119,16 @@ private:
 protected:
 
     PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
-                                         , const unsigned maxTime
-                                         , const unsigned maxStallRounds
+                                         , const unsigned maxInitTime
+                                         , const unsigned maxInitCandidates
+                                         , const unsigned maxRunTime
                                          , const unsigned maxCandidates
+                                         , const unsigned maxStallRounds
                                          , pipeline_random_engine & rng)
     : candidateLength(candidateLength)
-    , maxTime(maxTime)
+    , MaxInitTime(maxInitTime)
+    , MaxInitCandidates(maxInitCandidates)
+    , MaxRunTime(maxRunTime)
     , maxCandidates(maxCandidates)
     , averageStallThreshold(3)
     , maxStallThreshold(3)
@@ -148,19 +139,41 @@ protected:
 
 protected:
 
+
+
     const CandidateLengthType candidateLength;
-    const unsigned maxTime;
+    const unsigned MaxInitTime;
+    const unsigned MaxInitCandidates;
+    const unsigned MaxRunTime;
     const unsigned maxCandidates;
 
     const FitnessValueType averageStallThreshold;
     const FitnessValueType maxStallThreshold;
     const unsigned maxStallGenerations;
 
+    WorkerPtr mainWorker;
+
     Population population;
 
     std::map<Candidate, FitnessValueType> candidates;
 
     pipeline_random_engine & rng;
+
+};
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief SchedulingAnalysisWorker
+ ** ------------------------------------------------------------------------------------------------------------- */
+class PermutationBasedEvolutionaryAlgorithmWorker {
+public:
+    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Population = PermutationBasedEvolutionaryAlgorithm::Population;
+
+    virtual void repair(Candidate & candidate, pipeline_random_engine & rng) = 0;
+
+    virtual size_t fitness(const Candidate & candidate, pipeline_random_engine & rng)  = 0;
+
+    virtual void newCandidate(Candidate & candidate, pipeline_random_engine & rng);
 
 };
 

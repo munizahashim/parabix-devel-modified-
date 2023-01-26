@@ -9,11 +9,9 @@ namespace kernel {
 // TODO: nested pipeline kernels could report how much internal memory they require
 // and reason about that here (and in the scheduling phase)
 
-namespace { // anonymous namespace
+constexpr static unsigned BUFFER_SIZE_INIT_POPULATION_SIZE = 15;
 
-constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATES = 30;
-
-constexpr static unsigned BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS = 200;
+constexpr static unsigned BUFFER_SIZE_GA_MAX_INIT_TIME_SECONDS = 3;
 
 constexpr static unsigned BUFFER_SIZE_POPULATION_SIZE = 30;
 
@@ -32,42 +30,22 @@ using IntervalSet = interval_set<unsigned>;
 
 using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
 
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
 
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief initGA
-     ** ------------------------------------------------------------------------------------------------------------- */
-    bool initGA(Population & initialPopulation) override {
-
-        for (unsigned r = 0; r < BUFFER_LAYOUT_INITIAL_CANDIDATE_ATTEMPTS; ++r) {
-            Candidate C(candidateLength);
-            std::iota(C.begin(), C.end(), 0);
-            std::shuffle(C.begin(), C.end(), rng);
-
-            if (insertCandidate(std::move(C), initialPopulation, false)) {
-                if (initialPopulation.size() >= BUFFER_LAYOUT_INITIAL_CANDIDATES) {
-                    return false;
-                }
-            }
-
-        }
-
-        return true;
-    }
+struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
      ** ------------------------------------------------------------------------------------------------------------- */
-    void repairCandidate(Candidate & /* candidate */) override { }
+    void repair(Candidate & /* candidate */, pipeline_random_engine & rng) final { }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness
      ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate) override {
+    size_t fitness(const Candidate & candidate, pipeline_random_engine & rng) final {
 
-        assert (candidate.size() == candidateLength);
+        const auto candidateLength = candidate.size();
 
-        unsigned max_colours = 0;
+        size_t max_colours = 0;
         for (unsigned i = 0; i < candidateLength; ++i) {
             const auto a = candidate[i];
             assert (a < candidateLength);
@@ -75,7 +53,9 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 
             assert (GC_IntervalSet.empty());
             for (unsigned j = 0; j != i; ++j) {
+                assert (j < candidateLength);
                 const auto b = candidate[j];
+                assert (b < candidateLength);
                 if (edge(a, b, I).second) {
                     const auto & interval = GC_Intervals[b];
                     auto l = interval.lower();
@@ -88,8 +68,8 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
                 }
             }
 
-            unsigned start = 0;
-            unsigned end = w;
+            size_t start = 0;
+            size_t end = w;
 
             if (!GC_IntervalSet.empty()) {
                 for (const auto & interval : GC_IntervalSet) {
@@ -102,6 +82,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
                 }
                 GC_IntervalSet.clear();
             }
+            assert (a < candidateLength);
             GC_Intervals[a] = Interval::right_open(start, end);
             max_colours = std::max(max_colours, end);
         }
@@ -112,7 +93,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief getIntervals
      ** ------------------------------------------------------------------------------------------------------------- */
-    const std::vector<Interval> & getIntervals(const OrderingDAWG & O) {
+    const std::vector<Interval> & getIntervals(const OrderingDAWG & O, const unsigned candidateLength, pipeline_random_engine & rng) {
         Candidate chosen;
         chosen.reserve(candidateLength);
         Vertex u = 0;
@@ -122,9 +103,39 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
             chosen.push_back(k);
             u = target(e, O);
         }
-        assert (chosen.size() == candidateLength);
-        fitness(chosen);
+        fitness(chosen, rng);
         return GC_Intervals;
+    }
+
+    BufferLayoutOptimizerWorker(const IntervalGraph & I, const IntervalGraph & C, const std::vector<unsigned> & weight,
+                                const unsigned candidateLength, pipeline_random_engine & rng)
+    : I(I), C(C), weight(weight), GC_Intervals(candidateLength) {
+        assert (num_vertices(I) == candidateLength);
+        assert (num_vertices(C) == candidateLength);
+        assert (weight.size() >= candidateLength);
+    }
+
+private:
+    const IntervalGraph & I;
+    const IntervalGraph & C;
+    const std::vector<unsigned> & weight;
+
+    IntervalSet GC_IntervalSet;
+    std::vector<Interval> GC_Intervals;
+};
+
+struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief getIntervals
+     ** ------------------------------------------------------------------------------------------------------------- */
+    const std::vector<Interval> & getIntervals(const OrderingDAWG & O, pipeline_random_engine & rng) {
+        auto w = (BufferLayoutOptimizerWorker *)mainWorker.get();
+        return w->getIntervals(O, candidateLength, rng);
+    }
+
+    std::unique_ptr<PermutationBasedEvolutionaryAlgorithmWorker> makeWorker(pipeline_random_engine & rng) final {
+        return std::make_unique<BufferLayoutOptimizerWorker>(I, C, weight, candidateLength, rng);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -132,14 +143,18 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      ** ------------------------------------------------------------------------------------------------------------- */
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
                          , IntervalGraph && I, IntervalGraph && C
-                         , const std::vector<unsigned> & weight
+                         , std::vector<unsigned> && weight
                          , pipeline_random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
-                                             BUFFER_SIZE_GA_MAX_TIME_SECONDS, BUFFER_SIZE_GA_STALLS, BUFFER_SIZE_POPULATION_SIZE, srcRng)
+                                             BUFFER_SIZE_GA_MAX_INIT_TIME_SECONDS,
+                                             BUFFER_SIZE_INIT_POPULATION_SIZE,
+                                             BUFFER_SIZE_GA_MAX_TIME_SECONDS,                                             
+                                             BUFFER_SIZE_POPULATION_SIZE,
+                                             BUFFER_SIZE_GA_STALLS,
+                                             srcRng)
     , I(std::move(I))
     , C(std::move(C))
-    , weight(weight)
-    , GC_Intervals(numOfLocalStreamSets) {
+    , weight(weight) {
 
     }
 
@@ -148,14 +163,9 @@ private:
 
     const IntervalGraph I;
     const IntervalGraph C;
-    const std::vector<unsigned> & weight;
-    IntervalSet GC_IntervalSet;
-
-    std::vector<Interval> GC_Intervals;
+    const std::vector<unsigned> weight;
 
 };
-
-} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineBufferLayout
@@ -169,6 +179,8 @@ private:
  * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engine & rng) {
+
+   // errs() << "determineBufferLayout\n";
 
     // Construct the weighted interval graph for our local streamsets
 
@@ -338,7 +350,14 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
         }
         #endif
 
-        BufferLayoutOptimizer BA(count, std::move(I), std::move(C), weight, rng);
+      //  printGraph(C, errs() , "C");
+
+      //  errs() << "BA: " << count << "\n";
+
+        BufferLayoutOptimizer BA(count, std::move(I), std::move(C), std::move(weight), rng);
+
+      //  errs() << "runGA\n";
+
         BA.runGA();
 
         #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -353,13 +372,24 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
 
         RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
 
+       // errs() << "getResult\n";
+
         auto O = BA.getResult();
 
         // TODO: apart from total memory, when would one layout be better than another?
         // Can we quantify it based on the buffer graph order? Currently, we just take
         // the first one.
 
-        const auto intervals = BA.getIntervals(O);
+
+       // errs() << "getInterals\n";
+
+
+        const auto intervals = BA.getIntervals(O, rng);
+
+
+
+       // errs() << "x0\n";
+
 
         for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
@@ -378,6 +408,8 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
             }
         }
 
+
+       // errs() << "x1\n";
     };
 
 
