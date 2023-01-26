@@ -80,8 +80,6 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgorithm::runGA() {
 
-    constexpr unsigned THREAD_COUNT = 4;
-
     assert (candidateLength > 0);
 
     population.reserve(3 * maxCandidates);
@@ -115,7 +113,7 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
 
     std::atomic<size_t> activeThreads{0};
 
-    for (unsigned i = 1; i < THREAD_COUNT; ++i) {
+    for (unsigned i = 1; i < threadCount; ++i) {
         threads.emplace_back([&]() {
             pipeline_random_engine threadRng(rng());
             auto worker = makeWorker(threadRng);
@@ -128,7 +126,7 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
                     activeThreads.fetch_add(-1, std::memory_order_seq_cst);
                 } else { // sleep 1/10 ms then check if we're finished.
                     std::this_thread::sleep_for(nanoseconds(100));
-                    assert (activeThreads.load(std::memory_order_relaxed) < THREAD_COUNT);
+                    assert (activeThreads.load(std::memory_order_relaxed) < threadCount);
                     if (finishedProcessing) {
                         break;
                     }
@@ -172,7 +170,7 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
             assert (workQueue.empty());
             for (;;) {
                 const auto c = activeThreads.load(std::memory_order_relaxed);
-                assert (c < THREAD_COUNT);
+                assert (c < threadCount);
                 if (c == 0) break;
             }
             break;
@@ -340,7 +338,7 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
                 assert (workQueue.empty());
                 for (;;) {
                     const auto c = activeThreads.load(std::memory_order_relaxed);
-                    assert (c < THREAD_COUNT);
+                    assert (c < threadCount);
                     if (c == 0) break;
                 }
                 break;

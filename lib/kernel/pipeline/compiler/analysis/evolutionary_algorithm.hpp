@@ -124,6 +124,7 @@ protected:
                                          , const unsigned maxRunTime
                                          , const unsigned maxCandidates
                                          , const unsigned maxStallRounds
+                                         , const unsigned threadCount
                                          , pipeline_random_engine & rng)
     : candidateLength(candidateLength)
     , MaxInitTime(maxInitTime)
@@ -133,6 +134,7 @@ protected:
     , averageStallThreshold(3)
     , maxStallThreshold(3)
     , maxStallGenerations(maxStallRounds)
+    , threadCount(threadCount)
     , rng(rng) {
         population.reserve(maxCandidates * 3);
     }
@@ -150,6 +152,8 @@ protected:
     const FitnessValueType averageStallThreshold;
     const FitnessValueType maxStallThreshold;
     const unsigned maxStallGenerations;
+
+    const unsigned threadCount;
 
     WorkerPtr mainWorker;
 
@@ -174,6 +178,8 @@ public:
     virtual size_t fitness(const Candidate & candidate, pipeline_random_engine & rng)  = 0;
 
     virtual void newCandidate(Candidate & candidate, pipeline_random_engine & rng);
+
+    virtual ~PermutationBasedEvolutionaryAlgorithmWorker() { };
 
 };
 

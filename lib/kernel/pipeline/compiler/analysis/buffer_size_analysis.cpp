@@ -151,6 +151,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
                                              BUFFER_SIZE_GA_MAX_TIME_SECONDS,                                             
                                              BUFFER_SIZE_POPULATION_SIZE,
                                              BUFFER_SIZE_GA_STALLS,
+                                             std::max(codegen::SegmentThreads, codegen::TaskThreads),
                                              srcRng)
     , I(std::move(I))
     , C(std::move(C))
@@ -179,8 +180,6 @@ private:
  * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engine & rng) {
-
-   // errs() << "determineBufferLayout\n";
 
     // Construct the weighted interval graph for our local streamsets
 
@@ -350,14 +349,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
         }
         #endif
 
-      //  printGraph(C, errs() , "C");
-
-      //  errs() << "BA: " << count << "\n";
-
         BufferLayoutOptimizer BA(count, std::move(I), std::move(C), std::move(weight), rng);
-
-      //  errs() << "runGA\n";
-
         BA.runGA();
 
         #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -372,25 +364,12 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
 
         RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
 
-       // errs() << "getResult\n";
-
         auto O = BA.getResult();
 
         // TODO: apart from total memory, when would one layout be better than another?
         // Can we quantify it based on the buffer graph order? Currently, we just take
         // the first one.
-
-
-       // errs() << "getInterals\n";
-
-
         const auto intervals = BA.getIntervals(O, rng);
-
-
-
-       // errs() << "x0\n";
-
-
         for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
@@ -408,12 +387,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
             }
         }
 
-
-       // errs() << "x1\n";
     };
-
-
-
 
     auto currentPartitionId = KernelPartitionId[FirstKernel];
     auto firstKernelInPartition = FirstKernel;

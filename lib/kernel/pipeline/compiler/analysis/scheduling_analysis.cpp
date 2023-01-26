@@ -527,25 +527,31 @@ private:
         TransitiveGraph G(l);
 
         unsigned streamSetId = 0;
+        #ifndef NDEBUG
         unsigned priorProducerRank = 0;
-
+        #endif
         ++Depth;
 
         for (const auto kernel : candidate) {
+            #ifndef NDEBUG
             for (const auto output : make_iterator_range(out_edges(kernel, S))) {
-#ifndef NDEBUG
                 const auto streamSet = target(output, S);
                 const SchedulingNode & node = S[streamSet];
                 assert (node.Type != SchedulingNode::IsKernel);
                 assert (node.Type == SchedulingNode::IsStreamSet);
                 assert (streamSetId < numOfStreamSets);
-#endif
+            }
+            #endif
+            for (auto d = out_degree(kernel, S); d--; ) {
+
                 const auto i = streamSetId++;
 
                 // Each node value in I marks the schedule position.
                 const auto producerRank = ordinal[i];
+                #ifndef NDEBUG
                 assert (priorProducerRank <= producerRank);
                 priorProducerRank = producerRank;
+                #endif
 
                 auto consumerRank = producerRank;
                 for (const auto e : make_iterator_range(out_edges(i, I))) {
@@ -1074,6 +1080,7 @@ struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAl
                                             PARITION_SCHEDULING_GA_MAX_TIME,
                                             MAX_PARTITION_POPULATION_SIZE,
                                             PARITION_SCHEDULING_GA_STALLS,
+                                            std::max(codegen::SegmentThreads, codegen::TaskThreads),
                                             rng)
     , S(S)
     , D(D) {
@@ -1671,10 +1678,6 @@ struct ProgramSchedulingJumpAnalysisWorker final : public PermutationBasedEvolut
                 }
             }
 
-//            if (Q.empty()) {
-//                break;
-//            }
-
         }
 
         assert (candidate.size() == candidateLength);
@@ -1692,7 +1695,6 @@ public:
                                         pipeline_random_engine & rng)
     : G(G)
     , P(P)
-    //, candidateLength(candidateLength)
     , initialDegree(initialDegree)
     , jumpGraph(candidateLength)
     , pathCount(candidateLength)
@@ -1730,7 +1732,7 @@ private:
 struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
 
     WorkerPtr makeWorker(pipeline_random_engine & rng) final {
-        return std::make_unique<ProgramSchedulingJumpAnalysisWorker>(G, P, initialDegree, numOfUnlinkedPartitions, rng);
+        return std::make_unique<ProgramSchedulingJumpAnalysisWorker>(G, P, initialDegree, candidateLength, rng);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -1747,8 +1749,9 @@ struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionary
                                             JUMP_SCHEDULING_GA_MAX_TIME_SECONDS,
                                             MAX_JUMP_POPULATION_SIZE,
                                             JUMP_SCHEDULING_GA_STALLS,
+                                            std::max(codegen::SegmentThreads, codegen::TaskThreads),
                                             srcRng)
-    , G(G), P(P), initialDegree(initialDegree), numOfUnlinkedPartitions(numOfUnlinkedPartitions) {
+    , G(G), P(P), initialDegree(initialDegree) {
 
     }
 
@@ -1757,7 +1760,6 @@ private:
     const GlobalDependencyGraph & G;
     const PartitionGraph & P;
     const std::vector<unsigned> & initialDegree;
-    const unsigned numOfUnlinkedPartitions;
 
 };
 
@@ -2038,6 +2040,7 @@ struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgo
                                             PROGRAM_SCHEDULING_GA_MAX_TIME_SECONDS,
                                             MAX_PROGRAM_POPULATION_SIZE,
                                             PROGRAM_SCHEDULING_GA_STALLS,
+                                            std::max(codegen::SegmentThreads, codegen::TaskThreads),
                                             srcRng)
     , S(S), I(I), numOfKernels(numOfKernels) {
 
