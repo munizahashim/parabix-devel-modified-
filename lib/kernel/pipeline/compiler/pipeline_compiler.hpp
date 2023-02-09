@@ -51,7 +51,9 @@ enum PAPIKernelCounter {
 };
 #endif
 
-const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY = "BLSM";
+const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY = "LSM";
+
+const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES = "LSMb";
 
 const static std::string EXPECTED_NUM_OF_STRIDES_MULTIPLIER = "EnSM";
 
@@ -75,6 +77,8 @@ const static std::string INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX = ".ISS";
 const static std::string DEBUG_FD = ".DFd";
 
 const static std::array<std::string, 2> OPT_BR_INFIX = { ".0", ".1" };
+
+const static std::string SCALED_SLIDING_WINDOW_SIZE_PREFIX = "@SWS";
 
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
@@ -235,6 +239,16 @@ public:
 
     void ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry);
 
+// flow control functions
+
+    void addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
+    void initializeInitialSlidingWindowSegmentLengths(BuilderRef b, Value * const segmentLengthScalingFactor);
+    void initializeFlowControl(BuilderRef b);
+    void loadCurrentThreadLocalMemoryRequired(BuilderRef b);
+    void detemineMaximumNumberOfStrides(BuilderRef b);
+    void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const segmentLength);
+    void updateThreadLocalBuffersForSlidingWindow(BuilderRef b);
+
 // inter-kernel codegen functions
 
     void readAvailableItemCounts(BuilderRef b);
@@ -249,7 +263,6 @@ public:
     void initializeKernelLoopExitPhis(BuilderRef b);
     void initializeKernelExitPhis(BuilderRef b);
 
-    void detemineMaximumNumberOfStrides(BuilderRef b);
     void determineNumOfLinearStrides(BuilderRef b);
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
@@ -327,8 +340,6 @@ public:
     Value * addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const;
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
 
-    Value * getLocallyAvailableItemCount(BuilderRef b, const StreamSetPort inputPort) const;
-
     unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
     Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset) const;
     Value * getMaximumNumOfPartialSumStrides(BuilderRef b, const BufferPort &port, Value * const numOfLinearStrides);
@@ -371,6 +382,7 @@ public:
     void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index, const unsigned groupId);
     void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
     void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
+    void remapThreadLocalBufferMemory(BuilderRef b);
     void releaseOwnedBuffers(BuilderRef b);
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
@@ -609,6 +621,7 @@ protected:
     const KernelIdVector                        KernelPartitionId;
     const KernelIdVector                        FirstKernelInPartition;
     const std::vector<unsigned>                 StrideStepLength;
+    const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
@@ -636,6 +649,8 @@ protected:
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mCurrentThreadTerminationSignalPtr = nullptr;
+    Value *                                     mThreadLocalMemorySizePtr = nullptr;
+
     BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
@@ -681,6 +696,8 @@ protected:
     PHINode *                                   mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     PHINode *                                   mFinalPartialStrideFixedRateRemainderAtTerminationPhi = nullptr;
 
+
+
     Value *                                     mNumOfPartitionStrides = nullptr;
 
     BasicBlock *                                mCurrentPartitionEntryGuard = nullptr;
@@ -701,6 +718,9 @@ protected:
     Value *                                     mInitialTerminationSignal = nullptr;
     Value *                                     mInitiallyTerminated = nullptr;
     Value *                                     mMaximumNumOfStrides = nullptr;
+    PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
+    PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
+    Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;
@@ -714,6 +734,8 @@ protected:
     PHINode *                                   mTerminatedAtExitPhi = nullptr;
     PHINode *                                   mTotalNumOfStridesAtExitPhi = nullptr;
     Value *                                     mNumOfLinearStrides = nullptr;
+    Value *                                     mPotentialSegmentLength = nullptr;
+    PHINode *                                   mPotentialSegmentLengthAtLoopExitPhi = nullptr;
     Value *                                     mCurrentNumOfLinearStrides = nullptr;
     Value *                                     mHasZeroExtendedInput = nullptr;
     Value *                                     mInternallySynchronizedSubsegmentNumber = nullptr;
@@ -723,7 +745,7 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
-    Value *                                     mAnyClosed;
+    Value *                                     mAnyClosed = nullptr;
     BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
@@ -910,6 +932,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
 , StrideStepLength(std::move(P.StrideStepLength))
+, MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
 
 , mStreamGraph(std::move(P.mStreamGraph))

@@ -45,10 +45,7 @@ void PipelineCompiler::start(BuilderRef b) {
     #endif
 
     mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
-    if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
-        mThreadLocalStreamSetBaseAddress = b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
-    }
-
+    initializeFlowControl(b);
     readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
@@ -68,6 +65,8 @@ void PipelineCompiler::start(BuilderRef b) {
     mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
     mPipelineProgress = b->getFalse();
     obtainCurrentSegmentNumber(b, entryBlock);
+    loadCurrentThreadLocalMemoryRequired(b);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -187,9 +186,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     readConsumedItemCounts(b);
     prepareLinearThreadLocalOutputBuffers(b);
     recordUnconsumedItemCounts(b);
-
     detemineMaximumNumberOfStrides(b);
-
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
@@ -319,6 +316,9 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     computeMinimumConsumedItemCounts(b);
     writeLookAheadLogic(b);
     computeFullyProducedItemCounts(b, terminated);
+    if (mIsPartitionRoot) {
+        updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);
+    }
     replacePhiCatchWithCurrentBlock(b, mKernelLoopExitPhiCatch, mKernelExit);
     b->CreateBr(mKernelExit);
 
@@ -357,6 +357,11 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
         assert (mFinalPartitionSegmentAtExitPhi);
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
+        // NOTE: we use the partition root's max num of strides as a common scaling factor for
+        // thread local buffer memory placement. Since we won't actually know how many strides
+        // have been executed until after the root kernel has finished processing, we assume the
+        // maximum was used.
+        mThreadLocalScalingFactor = mMaximumNumOfStridesAtLoopExitPhi;
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {        
@@ -455,15 +460,15 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     assert (terminationSignal->getType() == mTerminatedSignalPhi->getType());
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
+    Value * const isFinal = b->CreateIsNotNull(terminationSignal);
     if (mIsPartitionRoot) {
         assert (mUpdatedNumOfStrides);
         Value * const updatedNumOfStrides = b->CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(updatedNumOfStrides, exitBlock);
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
-    }
-    Value * const isFinal = b->CreateIsNotNull(terminationSignal);
-    if (mIsPartitionRoot) {
+        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getFalse(), exitBlock);
+        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLength, exitBlock);
     }
     b->CreateUnlikelyCondBr(isFinal, mKernelTerminated, mKernelLoopExit);
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -631,6 +636,7 @@ void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b->CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
+    mMaximumNumOfStridesAtJumpPhi = b->CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtJumpPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -669,9 +675,13 @@ void PipelineCompiler::initializeKernelLoopExitPhis(BuilderRef b) {
     if (mIsPartitionRoot) {
         mTotalNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
         mFinalPartitionSegmentAtLoopExitPhi = b->CreatePHI(boolTy, 2, prefix + "_finalPartitionSegmentAtLoopExitPhi");
+        mMaximumNumOfStridesAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtLoopExit");
+        mPotentialSegmentLengthAtLoopExitPhi = b->CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtLoopExit");
     } else {
         mTotalNumOfStridesAtLoopExitPhi = nullptr;
         mFinalPartitionSegmentAtLoopExitPhi = nullptr;
+        mMaximumNumOfStridesAtLoopExitPhi = nullptr;
+        mPotentialSegmentLengthAtLoopExitPhi = nullptr;
     }
 }
 
@@ -699,21 +709,30 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         currentNumOfStrides = b->CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
     }
 
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+    }
+
     if (mKernelJumpToNextUsefulPartition) {
         assert (mIsPartitionRoot);
+        BasicBlock * const exitBlock = b->GetInsertBlock();
+        mMaximumNumOfStridesAtJumpPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         if (mMayLoopToEntry) {
             // TODO: check whether we need to release/acquire the pre/post locks here too
             b->CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, mKernelLoopExit, mKernelJumpToNextUsefulPartition);
+            if (mIsPartitionRoot) {
+                Constant * const ZERO = b->getSize(0);
+                mMaximumNumOfStridesAtLoopExitPhi->addIncoming(ZERO, exitBlock);
+                mPotentialSegmentLengthAtLoopExitPhi->addIncoming(ZERO, exitBlock);
+            }
         } else {
             b->CreateBr(mKernelJumpToNextUsefulPartition);
         }
     } else {
         // if this is not a partition root, it is not responsible for determining
         // whether the partition is out of input
-        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
-        }
+        assert (!mIsPartitionRoot);
         b->CreateBr(mKernelLoopExit);
     }
 
@@ -852,13 +871,16 @@ void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
             finalNumOfStrides = b->CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);
         }
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(finalNumOfStrides, exitBlock);
+        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
+        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLength, exitBlock);
     }
     if (mIsPartitionRoot) {
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b->getTrue(), exitBlock);
     }
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
-        Value * const totalCount = getLocallyAvailableItemCount(b, port);
+        const auto streamSet = source(e, mBufferGraph);
+        Value * const totalCount = mLocallyAvailableItems[streamSet];
         mUpdatedProcessedPhi[port]->addIncoming(totalCount, exitBlock);
         if (mUpdatedProcessedDeferredPhi[port]) {
             mUpdatedProcessedDeferredPhi[port]->addIncoming(totalCount, exitBlock);
@@ -902,7 +924,7 @@ void PipelineCompiler::end(BuilderRef b) {
 
     b->SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
     #endif
-
+    updateThreadLocalBuffersForSlidingWindow(b);
     Value * terminated = nullptr;
     if (mIsNestedPipeline) {
         if (mCurrentThreadTerminationSignalPtr) {
@@ -910,9 +932,7 @@ void PipelineCompiler::end(BuilderRef b) {
         }
         b->CreateBr(mPipelineEnd);
     } else {
-
         terminated = hasPipelineTerminated(b);
-
         Value * const done = b->CreateIsNotNull(terminated);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);

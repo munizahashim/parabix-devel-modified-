@@ -280,7 +280,8 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
             if (LLVM_UNLIKELY(br.IsZeroExtended)) {
                 fullyConsumed = closed;
             } else {
-                Value * const avail = getLocallyAvailableItemCount(b, br.Port);
+                const auto streamSet = source(e, mBufferGraph);
+                Value * const avail = mLocallyAvailableItems[streamSet];
                 Value * const processed = mProcessedItemCountAtTerminationPhi[br.Port]; assert (processed);
                 fullyConsumed = b->CreateAnd(closed, b->CreateICmpULE(avail, processed));
             }

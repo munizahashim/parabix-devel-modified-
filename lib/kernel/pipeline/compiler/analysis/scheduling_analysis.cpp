@@ -129,8 +129,6 @@ void PipelineAnalysis::schedulePartitionedProgram(PartitionGraph & P, pipeline_r
 
 }
 
-namespace { // start of anonymous namespace
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief postorder_minimize
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1093,8 +1091,6 @@ private:
     const PartitionDependencyGraph & D;
 
 };
-
-} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief analyzeDataflowWithinPartitions

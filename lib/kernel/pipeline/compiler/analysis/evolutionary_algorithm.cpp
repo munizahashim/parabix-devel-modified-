@@ -10,37 +10,29 @@ using namespace std::chrono;
 using TimePoint = time_point<system_clock, seconds>;
 using Candidate = kernel::PermutationBasedEvolutionaryAlgorithm::Candidate;
 
-struct TTASLock {
-//    void lock() {
-//        for (;;) {
-//          if (!_lock.exchange(true, std::memory_order_acquire)) {
-//            break;
-//          }
-//          while (_lock.load(std::memory_order_relaxed));
-//        }
-//    }
-
-    void lock() {
+struct TASLock {
+    inline void lock() {
         while(_lock.exchange(true, std::memory_order_acquire));
     }
-
-    void unlock() {
+    inline void unlock() {
         _lock.store(false, std::memory_order_release);
     }
 private:
     std::atomic<bool> _lock = {false};
 };
 
-struct CandidateQueue {
+template <typename T>
+struct WorkQueue {
 
-    bool empty() const {
+    inline bool empty() const {
+        // NOTE: not thread safe; used only for debugging.
         return _queue.empty();
     }
 
-    CandidateQueue() = default;
+    WorkQueue() = default;
 
-    inline bool pop(Candidate & c) {
-        std::lock_guard<TTASLock> lock(_lock);
+    inline bool pop(T & c) {
+        std::lock_guard<TASLock> lock(_lock);
         if (_queue.empty()) {
             return false;
         }
@@ -49,20 +41,22 @@ struct CandidateQueue {
         return true;
     }
 
-    inline void push(Candidate && item) {
-       std::lock_guard<TTASLock> lock(_lock);
+    inline void push(T && item) {
+       std::lock_guard<TASLock> lock(_lock);
         _queue.push(std::move(item));
     }
 
     inline size_t size() {
-        std::lock_guard<TTASLock> lock(_lock);
+        std::lock_guard<TASLock> lock(_lock);
         return _queue.size();
     }
 
 private:
-    mutable std::queue<Candidate> _queue;
-    TTASLock _lock;
+    mutable std::queue<T> _queue;
+    TASLock _lock;
 };
+
+using CandidateQueue = WorkQueue<Candidate>;
 
 template<typename T>
 T abs_subtract(const T a, const T b) {
@@ -94,8 +88,8 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
 
     bool finishedProcessing = false;
 
-    TTASLock candidateMapLock;
-    TTASLock nextGenLock;
+    TASLock candidateMapLock;
+    TASLock nextGenLock;
 
     auto processCandidate = [&](WorkerPtr & worker, Candidate && C, pipeline_random_engine & rng) {
         assert (C.size() == candidateLength);

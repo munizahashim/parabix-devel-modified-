@@ -478,6 +478,9 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             assert (isFromCurrentFunction(b, produced, false));
             mProducedAtJumpPhi[port]->addIncoming(produced, mKernelInitiallyTerminatedExit);
         }
+
+        mMaximumNumOfStridesAtJumpPhi->addIncoming(b->getSize(0), mKernelInitiallyTerminatedExit);
+
         b->CreateBr(mKernelJumpToNextUsefulPartition);
     } else {
 
@@ -512,6 +515,8 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
     #endif
+
+    updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b->getSize(0));
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     if (LLVM_LIKELY(targetKernelId != PipelineOutput)) {

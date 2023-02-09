@@ -94,6 +94,9 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
+        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+        mTarget->addThreadLocalScalar(sizeTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, 0);
+        #endif
     }
     // NOTE: both the shared and thread local objects are parameters to the kernel.
     // They get automatically set by reading in the appropriate params.
@@ -177,6 +180,10 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
     mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+
+    if (isRoot) {
+        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
+    }
 
     addConsumerKernelProperties(b, kernelId);
 
@@ -375,6 +382,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
+    initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
     allocateOwnedBuffers(b, expectedNumOfStrides, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
@@ -401,11 +409,18 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
 void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     assert (mTarget->hasThreadLocal());
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
-        ConstantInt * const reqMemory = b->getSize(RequiredThreadLocalStreamSetMemory);
+        auto size = RequiredThreadLocalStreamSetMemory;
+        #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+        size *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+        #endif
+        ConstantInt * const reqMemory = b->getSize(size);
         Value * const memorySize = b->CreateMul(reqMemory, expectedNumOfStrides);
         Value * const base = b->CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
+        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+        b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
+        #endif
     }
     allocateOwnedBuffers(b, expectedNumOfStrides, false);
     resetInternalBufferHandles();

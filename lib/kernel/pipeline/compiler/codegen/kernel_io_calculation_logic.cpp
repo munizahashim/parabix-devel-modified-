@@ -85,30 +85,6 @@ void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief detemineMaximumNumberOfStrides
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
-    // The partition root kernel determines the amount of data processed based on the partition input.
-    // During normal execution, it always performs max num of strides worth of work. However, if this
-    // segment is the last segment, mPartitionSegmentLength is artificially raised to a value of ONE
-    // even though we likely can only execute a partial segment worth of work. The root kernel
-    // calculates how many strides can be performed and sets mNumOfPartitionStrides to that value.
-
-    // To avoid having every kernel test their I/O during normal execution, the non-root kernels in
-    // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
-
-    if (mIsPartitionRoot) {
-        const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
-        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
-    } else {
-        const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
-        const auto factor = ratio / mPartitionStrideRateScalingFactor;
-        mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
-    }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineNumOfLinearStrides
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
@@ -151,13 +127,21 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
+    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+    const auto hasDynamicSlidingWindow = true;
+    #else
+    const auto hasDynamicSlidingWindow = false;
+    #endif
+
     Value * numOfLinearStrides = nullptr;
-    if (mMayLoopToEntry) {
-        numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-    } else {
-        numOfLinearStrides = mMaximumNumOfStrides;
+    assert (mMaximumNumOfStrides);
+    if (!mIsPartitionRoot || !hasDynamicSlidingWindow) {
+        if (mMayLoopToEntry) {
+            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        } else {
+            numOfLinearStrides = mMaximumNumOfStrides;
+        }
     }
-    assert (numOfLinearStrides);
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -167,11 +151,33 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
                 numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
             }
         }
-        assert ("no non-greedy input?" && numOfLinearStrides);
     } else if (!isSourceKernel) {
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
+    } else {
+        numOfLinearStrides = mMaximumNumOfStrides;
     }
+
+    mPotentialSegmentLength = numOfLinearStrides;
+    if (mIsPartitionRoot && hasDynamicSlidingWindow) {
+        assert (numOfLinearStrides);
+        Value * maxNumOfLinearStrides = nullptr;
+        if (mMayLoopToEntry) {
+            maxNumOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
+            // of some buffer each
+            mPotentialSegmentLength = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mPotentialSegmentLength);
+        } else {
+            maxNumOfLinearStrides = mMaximumNumOfStrides;
+        }
+        numOfLinearStrides = b->CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
+    }
+
+    if (numOfLinearStrides == nullptr) {
+        errs() << mKernelId << "\n";
+    }
+
+    assert (numOfLinearStrides);
 
     Value * numOfLinearOutputStrides = numOfLinearStrides;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -579,7 +585,7 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
                 Value * const processed = mCurrentProcessedItemCountPhi[br.Port];
                 Value * const accessible = getAccessibleInputItems(b, br);
                 Value * const total = b->CreateAdd(processed, accessible);
-                Value * const avail = getLocallyAvailableItemCount(b, br.Port);
+                Value * const avail = mLocallyAvailableItems[streamSet];
                 Value * const fullyReadable = b->CreateICmpEQ(total, avail);
                 fullyConsumed = b->CreateAnd(closed, fullyReadable);
             }
@@ -643,7 +649,7 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
             Value * const processed = mProcessedItemCount[port.Port]; // mAlreadyProcessedPhi[port.Port];
 
-            Value * avail = getLocallyAvailableItemCount(b, port.Port);
+            Value * avail = mLocallyAvailableItems[streamSet];
 
             Value * const closed = isClosed(b, port.Port);
 
@@ -724,7 +730,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
-    Value * const available = getLocallyAvailableItemCount(b, inputPort); assert (available);
+    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
 
     #ifdef PRINT_DEBUG_MESSAGES

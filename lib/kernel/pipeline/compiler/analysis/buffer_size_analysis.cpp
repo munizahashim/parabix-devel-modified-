@@ -168,6 +168,8 @@ private:
 
 };
 
+
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineBufferLayout
  *
@@ -352,13 +354,7 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
         BufferLayoutOptimizer BA(count, std::move(I), std::move(C), std::move(weight), rng);
         BA.runGA();
 
-        #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-        #define SCALE_BY_CAPACITY_MULT(x) (x * THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER)
-        #else
-        #define SCALE_BY_CAPACITY_MULT(x) (x)
-        #endif
-
-        const auto requiredMemory = SCALE_BY_CAPACITY_MULT(BA.getBestFitnessValue());
+        const auto requiredMemory = BA.getBestFitnessValue();
 
         assert (requiredMemory > 0);
 
@@ -381,8 +377,8 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
                 } else {
                     BufferNode & bn = mBufferGraph[streamSet];
                     const auto & interval = intervals[j];
-                    bn.BufferStart = SCALE_BY_CAPACITY_MULT(interval.lower());
-                    bn.BufferEnd = SCALE_BY_CAPACITY_MULT(interval.upper());
+                    bn.BufferStart = interval.lower();
+                    bn.BufferEnd = interval.upper();
                 }
             }
         }
