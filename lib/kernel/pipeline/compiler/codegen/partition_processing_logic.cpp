@@ -606,6 +606,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         PHINode * const progressPhi = mPartitionPipelineProgressPhi[nextPartitionId];
         progressPhi->addIncoming(mPipelineProgress, exitBlock);
         mPipelineProgress = progressPhi;
+
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
             mPartitionExitSegNoPhi->addIncoming(nextSegNo, exitBlock);

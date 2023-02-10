@@ -157,7 +157,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     } else {
         numOfLinearStrides = mMaximumNumOfStrides;
     }
-
+    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     mPotentialSegmentLength = numOfLinearStrides;
     if (mIsPartitionRoot && hasDynamicSlidingWindow) {
         assert (numOfLinearStrides);
@@ -172,10 +172,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
         numOfLinearStrides = b->CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
     }
-
-    if (numOfLinearStrides == nullptr) {
-        errs() << mKernelId << "\n";
-    }
+    #endif
 
     assert (numOfLinearStrides);
 

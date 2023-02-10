@@ -244,7 +244,7 @@ public:
     void addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
     void initializeInitialSlidingWindowSegmentLengths(BuilderRef b, Value * const segmentLengthScalingFactor);
     void initializeFlowControl(BuilderRef b);
-    void loadCurrentThreadLocalMemoryRequired(BuilderRef b);
+    void loadCurrentThreadLocalMemoryAddress(BuilderRef b);
     void detemineMaximumNumberOfStrides(BuilderRef b);
     void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const segmentLength);
     void updateThreadLocalBuffersForSlidingWindow(BuilderRef b);
@@ -720,6 +720,7 @@ protected:
     Value *                                     mMaximumNumOfStrides = nullptr;
     PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
     PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
+    PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
     Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
@@ -735,6 +736,7 @@ protected:
     PHINode *                                   mTotalNumOfStridesAtExitPhi = nullptr;
     Value *                                     mNumOfLinearStrides = nullptr;
     Value *                                     mPotentialSegmentLength = nullptr;
+    PHINode *                                   mPotentialSegmentLengthAtTerminationPhi = nullptr;
     PHINode *                                   mPotentialSegmentLengthAtLoopExitPhi = nullptr;
     Value *                                     mCurrentNumOfLinearStrides = nullptr;
     Value *                                     mHasZeroExtendedInput = nullptr;

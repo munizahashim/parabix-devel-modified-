@@ -54,12 +54,10 @@ void PipelineCompiler::initializeFlowControl(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadCurrentThreadLocalMemoryRequired
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadCurrentThreadLocalMemoryRequired(BuilderRef b) {
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+void PipelineCompiler::loadCurrentThreadLocalMemoryAddress(BuilderRef b) {
     if (RequiredThreadLocalStreamSetMemory > 0) {
         mThreadLocalStreamSetBaseAddress = b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
     }
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -76,6 +74,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
+
         #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         mMaximumNumOfStrides = b->getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
         assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
@@ -110,7 +109,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             b->CreateFree(b->CreateLoad(threadLocalPtr));
             // At minimum, we want to double the required space to minimize future reallocs
             Value * expanded = b->CreateRoundUp(memoryForSegment, currentMem);
-            b->CallPrintInt(" -- expanded thread local" + std::to_string(mKernelId), expanded);
             b->CreateStore(expanded, mThreadLocalMemorySizePtr);
             #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
             expanded = b->CreateMul(expanded, b->getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
@@ -121,7 +119,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
             b->SetInsertPoint(afterExpansion);
             mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalPtr);
-            b->CallPrintInt("mThreadLocalStreamSetBaseAddress", mThreadLocalStreamSetBaseAddress);
         } else {
             mThreadLocalStreamSetBaseAddress = nullptr;
         }
@@ -129,16 +126,12 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
         #endif
+        mThreadLocalScalingFactor = mMaximumNumOfStrides;
     } else {
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
-
-        b->CallPrintInt("numOfPartitionStrides" + std::to_string(mKernelId), mNumOfPartitionStrides);
-
         mMaximumNumOfStrides = b->CreateMulRational(mNumOfPartitionStrides, factor);
     }
-
-    b->CallPrintInt("mMaximumNumOfStrides" + std::to_string(mKernelId), mMaximumNumOfStrides);
 }
 
 
@@ -156,14 +149,10 @@ void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const m
         return b->CreateUDiv(F, b->getSize(weightA + 1), "wsc");
     };
 
-    b->CallPrintInt("maxNumOfStrides" + std::to_string(mKernelId), maxNumOfStrides);
-    b->CallPrintInt("segmentLength" + std::to_string(mKernelId), segmentLength);
     Value * const A = makeWeightedVal(segmentLength, INCREASE_WEIGHT_FACTOR, maxNumOfStrides);
     Value * const B = makeWeightedVal(maxNumOfStrides, DECREASE_WEIGHT_FACTOR, segmentLength);
     Value * const higher = b->CreateICmpUGT(segmentLength, maxNumOfStrides);
     Value * const nextSegmentLength = b->CreateSelect(higher, A, B);
-
-    b->CallPrintInt("nextSegmentLength", nextSegmentLength);
 
     b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId), nextSegmentLength);
     #endif

@@ -101,10 +101,8 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
                 #ifndef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-                if (bn.isThreadLocal() && mThreadLocalStreamSetBaseAddress) {
-
-                    b->CallPrintInt("mThreadLocalStreamSetBaseAddress", mThreadLocalStreamSetBaseAddress);
-
+                if (bn.isThreadLocal()) {
+                    assert (mThreadLocalStreamSetBaseAddress);
                     assert (RequiredThreadLocalStreamSetMemory > 0);
                     assert (isa<StaticBuffer>(buffer));
                     assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
@@ -181,35 +179,30 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
     // Assuming we use a the doubling strategy, how often would we really see a resize if shared
     // values are used? They would probably be front loaded but would that be bad for short files?
 
-    if (mThreadLocalStreamSetBaseAddress) {
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isThreadLocal()) {
+            assert (mThreadLocalStreamSetBaseAddress);
+            auto start = bn.BufferStart;
+            #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+            start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+            #endif
+            Rational scaledStart(start, MaximumNumOfStrides[mCurrentPartitionRoot]);
+            Value * const startOffset = b->CreateMulRational(mThreadLocalScalingFactor, scaledStart);
+            Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
 
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-            const auto streamSet = target(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isThreadLocal()) {
-                auto start = bn.BufferStart;
-                #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                #endif
-                Rational scaledStart(start, MaximumNumOfStrides[mCurrentPartitionRoot]);
-                Value * const startOffset = b->CreateMulRational(mThreadLocalScalingFactor, scaledStart);
-                Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
+            const size_t baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
+            Rational scaledCapacity(baseCapacity, MaximumNumOfStrides[mCurrentPartitionRoot]);
+            Value * const capacity = b->CreateMulRational(mThreadLocalScalingFactor, scaledCapacity);
 
-                const size_t baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
-                Rational scaledCapacity(baseCapacity, MaximumNumOfStrides[mCurrentPartitionRoot]);
-                Value * const capacity = b->CreateMulRational(mThreadLocalScalingFactor, scaledCapacity);
-
-                StreamSetBuffer * const buffer = bn.Buffer;
-                buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
-                buffer->setCapacity(b, capacity);
-
-            }
+            StreamSetBuffer * const buffer = bn.Buffer;
+            buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
+            buffer->setCapacity(b, capacity);
 
         }
 
-
     }
-
 
 }
 
