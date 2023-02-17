@@ -318,7 +318,9 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
-    uint64_t patternLength = blockWidth;
+    // TODO: with single element streamsets, we just need to ensure we have a byte aligned value
+    const auto baseUnitSize = blockWidth;
+    uint64_t patternLength = baseUnitSize;
     for (unsigned i = 0; i < numElements; ++i) {
         const auto & vec = ss->getPattern(i);
         const auto L = vec.size();
