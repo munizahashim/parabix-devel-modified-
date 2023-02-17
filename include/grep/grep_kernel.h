@@ -52,6 +52,7 @@ public:
     void resetExternals();  // Reset all externals to unresolved.
     void resolveExternals(ProgBuilderRef b);
     void setIllustrator(kernel::ParabixIllustrator * illustrator) {mIllustrator = illustrator;}
+    ~ExternalStreamTable();
 private:
     std::vector<StreamIndexInfo> mStreamIndices;
     std::vector<std::map<std::string, ExternalStreamObject *>> mExternalMap;
@@ -63,7 +64,6 @@ using ExternalMapRef = ExternalStreamTable *;
 class ExternalStreamObject {
     friend class ExternalStreamTable;
 public:
-    using Allocator = SlabAllocator<ExternalStreamObject *>;
     enum class Kind : unsigned {
         U21, PreDefined, LineStarts, CC_External, RE_External,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
@@ -80,15 +80,11 @@ public:
     std::pair<int, int> getLengthRange() {return mLengthRange;}
     int getOffset() {return mOffset;}
     bool isResolved() {return mStreamSet != nullptr;}
+    virtual ~ExternalStreamObject() {}
 protected:
-    static Allocator mAllocator;
     ExternalStreamObject(Kind k, std::pair<int, int> lgthRange = std::make_pair(1,1), int offset = 0) :
         mKind(k), mLengthRange(lgthRange), mOffset(offset), mStreamSet(nullptr)  {}
     void installStreamSet(StreamSet * s);
-public:
-    void* operator new (std::size_t size) noexcept {
-        return mAllocator.allocate<uint8_t>(size);
-    }
 protected:
     Kind mKind;
     std::pair<int, int> mLengthRange;

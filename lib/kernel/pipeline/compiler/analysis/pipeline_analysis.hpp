@@ -80,7 +80,7 @@ public:
         P.numberDynamicRepeatingStreamSets();
 
         // Finish the buffer graph
-        P.determineBufferLayout(b, rng);
+        P.determineInitialThreadLocalBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
 
         P.gatherInfo();
@@ -185,7 +185,7 @@ private:
 
     void determineBufferSize(BuilderRef b);
 
-    void determineBufferLayout(BuilderRef b, pipeline_random_engine & rng);
+    void determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng);
 
     void identifyOwnedBuffers();
 
@@ -284,7 +284,9 @@ public:
     KernelIdVector                  FirstKernelInPartition;
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
-    std::vector<unsigned>           StrideStepLength;
+    std::vector<unsigned>           StrideRepetitionVector;
+    std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
+    std::vector<Rational>           PartitionOverflowStrides;
 
     BufferGraph                     mBufferGraph;
 

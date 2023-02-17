@@ -184,10 +184,10 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readConsumedItemCounts(b);
-    prepareLinearThreadLocalOutputBuffers(b);
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);
+    prepareLinearThreadLocalOutputBuffers(b);
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);

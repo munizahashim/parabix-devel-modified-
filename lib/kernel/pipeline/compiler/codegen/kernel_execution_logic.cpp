@@ -226,7 +226,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     #endif
     Value * const beforeKernelCall = startCycleCounter(b);
 
-    b->CallPrintInt(" -- starting kernel", mSegNo);
 
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
@@ -241,8 +240,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     } else {
         doSegmentRetVal = b->CreateCall(doSegFuncType, doSegment, args);
     }
-
-    b->CallPrintInt(" -- ending kernel", mSegNo);
 
     updateCycleCounter(b, mKernelId, beforeKernelCall, CycleCounter::KERNEL_EXECUTION);
     #ifdef ENABLE_PAPI

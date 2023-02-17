@@ -578,6 +578,8 @@ Value * StaticBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * 
 }
 
 void StaticBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consumed, Value * required) const {
+    unsupported("linearCopyBack", "Static");
+#if 0
     if (mLinear) {
         const auto blockWidth = b->getBitBlockWidth();
         assert (is_pow2(blockWidth));
@@ -603,9 +605,12 @@ void StaticBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consum
         b->CreateStore(newBaseAddress, baseAddrField);
         b->CreateStore(effectiveCapacity, capacityField);
     }
+#endif
 }
 
 Value * StaticBuffer::expandBuffer(BuilderPtr b, Value * produced, Value * consumed, Value * const required) const  {
+    unsupported("expandBuffer", "Static");
+#if 0
     if (mLinear) {
 
         SmallVector<char, 200> buf;
@@ -718,6 +723,7 @@ Value * StaticBuffer::expandBuffer(BuilderPtr b, Value * produced, Value * consu
     }
 
     return nullptr;
+#endif
 }
 
 // Dynamic Buffer

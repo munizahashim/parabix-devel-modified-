@@ -62,11 +62,6 @@ using namespace pablo;
 using namespace re;
 using namespace llvm;
 
-namespace kernel {
-ExternalStreamObject::Allocator ExternalStreamObject::mAllocator;
-}
-
-
 StreamIndexCode ExternalStreamTable::declareStreamIndex(std::string name, StreamIndexCode base, std::string indexStreamName) {
     StreamIndexCode newCode = mStreamIndices.size();
     mStreamIndices.push_back({name, base, indexStreamName});
@@ -92,14 +87,21 @@ void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externa
         }
         llvm::errs() << ")\n";
     }
-    auto f = mExternalMap[c].find(externalName);
-    if (f != mExternalMap[c].end()) {
+
+    auto & E = mExternalMap[c];
+    auto f = E.find(externalName);
+    if (LLVM_UNLIKELY(f != E.end())) {
         if (grep::ShowExternals) {
             llvm::errs() << "  redeclaration!  Discarding previous declaration.\n";
         }
-        f->second = ext;
+        const auto curr = f->second;
+        if (LLVM_LIKELY(curr != ext)) {
+            delete curr;
+            f->second = ext;
+        }
+    } else {
+        E.emplace(externalName, ext);
     }
-    mExternalMap[c].emplace(externalName, ext);
 }
 
 ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::string ssname) {
@@ -126,9 +128,9 @@ bool ExternalStreamTable::hasReferenceTo(StreamIndexCode c, std::string ssname) 
 }
 
 StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string ssname) {
-    ExternalStreamObject * ext = lookup(c, ssname);
+    const auto & ext = lookup(c, ssname);
     if (!ext->isResolved()) {
-        std::vector<std::string> paramNames = ext->getParameters();
+        auto paramNames = ext->getParameters();
         if (grep::ShowExternals) {
             llvm::errs() << "resolving External: " << mStreamIndices[c].name << "_" << ssname << "(";
             auto parms = ext->getParameters();
@@ -197,6 +199,15 @@ void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
         }
     }
 }
+
+ExternalStreamTable::~ExternalStreamTable() {
+//    for (std::map<std::string, ExternalStreamObject *> & M : mExternalMap) {
+//        for (auto & m : M) {
+//            delete m.second;
+//        }
+//    }
+}
+
 
 void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;

@@ -662,7 +662,8 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isUnowned() || bn.Locality == BufferLocality::ConstantShared)) {
+
+        if (bn.isThreadLocal() || bn.isUnowned() || bn.isConstant()) {
             continue;
         }
 
@@ -675,33 +676,6 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto producer = source(producerOutput, mBufferGraph);
 
-//        const RelationshipNode & node = mStreamGraph[producer];
-//        const Kernel * const kernelObj = node.Kernel;
-//        const auto isPopCountStreamSet = isa<PopCountKernel>(kernelObj);
-
-        //    for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
-
-        //        const RelationshipNode & node = mStreamGraph[kernel];
-        //        const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
-        //        if (isa<PopCountKernel>(kernelObj)) {
-        //            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-        //                const auto streamSet = target(output, mBufferGraph);
-        //                BufferNode & bn = mBufferGraph[streamSet];
-        //                if (bn.Locality == BufferLocality::ThreadLocal) {
-        //                    bn.Locality = BufferLocality::GloballyShared;
-        //                }
-        //            }
-        //        }
-
-
-        //    }
-
-        #ifndef NDEBUG
-        const auto & processingRate = producerRate.Binding.get().getRate();
-        assert (!processingRate.isGreedy() || producerRate.Minimum <= producerRate.Maximum);
-        assert (!processingRate.isFixed() || producerRate.Minimum == producerRate.Maximum);
-        #endif
-
         auto bMin = floor(producerRate.Minimum * MinimumNumOfStrides[producer]);
         const auto max = std::max(MaximumNumOfStrides[producer], 1U);
         auto bMax = ceiling(producerRate.Maximum * max);
@@ -711,12 +685,6 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
             const BufferPort & consumerRate = mBufferGraph[e];
 
             const auto consumer = target(e, mBufferGraph);
-
-            #ifndef NDEBUG
-            const auto & processingRate = consumerRate.Binding.get().getRate();
-            assert (!processingRate.isUnknown() || consumerRate.Minimum <= consumerRate.Maximum);
-            assert (!processingRate.isFixed() || consumerRate.Minimum == consumerRate.Maximum);
-            #endif
 
             const auto min = std::max(MinimumNumOfStrides[consumer], 1U);
 
@@ -765,7 +733,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
                 const BufferPort & consumerRate = mBufferGraph[e];
                 const auto kernel = target(e, mBufferGraph);
                 const auto cpl = calculateCopyLength(consumerRate, kernel);
-                const auto cf = (cpl * StrideStepLength[kernel]) + consumerRate.LookAhead;
+                const auto cf = (cpl * StrideRepetitionVector[kernel]) + consumerRate.LookAhead;
                 copyForwards = std::max(copyForwards, cf);
             }
             if (copyForwards > blockWidth || copyBack > blockWidth) {
@@ -819,7 +787,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         }
 
         StreamSetBuffer * buffer = nullptr;
-        if (LLVM_UNLIKELY(bn.Locality == BufferLocality::ConstantShared)) {
+        if (LLVM_UNLIKELY(bn.isConstant())) {
             const auto consumerInput = first_out_edge(streamSet, mBufferGraph);
             const BufferPort & consumerRate = mBufferGraph[consumerInput];
             const Binding & input = consumerRate.Binding;
@@ -828,8 +796,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
-            if (LLVM_UNLIKELY(bn.isUnowned())) {
-                assert (bn.Locality != BufferLocality::ThreadLocal);
+            if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal())) {
                 buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
             } else { // is internal buffer
 
@@ -857,12 +824,10 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
                 } else {
                     auto bufferSize = bn.RequiredCapacity;
-                    if (bn.Locality == BufferLocality::PartitionLocal) {
-                        bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
-                        #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                        bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                        #endif
-                    }
+                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
+                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+                    #endif
                     buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
                 }
             }

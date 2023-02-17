@@ -100,11 +100,12 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 const auto handleName = makeBufferName(producer, rd.Port);
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
+#if 0
                 #ifndef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
                 if (bn.isThreadLocal()) {
                     assert (mThreadLocalStreamSetBaseAddress);
                     assert (RequiredThreadLocalStreamSetMemory > 0);
-                    assert (isa<StaticBuffer>(buffer));
+                    assert (isa<ExternalBuffer>(buffer));
                     assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
                     auto start = bn.BufferStart;
                     #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -137,73 +138,12 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                     buffer->setCapacity(b, capacity);
                 }
                 #endif
+
+
+#endif
             }
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief assignThreadLocalBufferMemoryForPartition
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
-    // Should I remap all of the buffers on realloc or map them at the point of entering a partition?
-
-    // The difficulty of remapping all of them is that we could end up increasing the segment length
-    // of a partition that requires substantially less memory than other partitions s.t. it does not
-    // trigger a realloc. We'd need a better check at the end for that case but could still better
-    // amortize the recalculations.
-
-    // Repeating streamsets are a big issue. To enable state free work, they're sized to be
-    // LCM(pattern length, block width) + max segment length. But if the max segment length changes
-    // then we either neet to expand them or treat them as circular buffers. The issue here is like
-    // above: testing only the total bytes required is not sufficient to determine when we need to
-    // expand them.
-
-    // Store a single bit to say some segment exceeds its largest prior one? That might not necessarily
-    // be its current older one. A repeating streamset may also be shared amongst multiple consumers and
-    // "resized" in multiple places if we do it at the kernel.
-
-    // We could add synchronization but do not want to needlessly add in another step here.
-
-    // We can make them thread local but then add to the potential cache contention.
-
-    // Ideally, we'd like to have the new max seg length to be shared instead of thread local but
-    // that opens the problem that we'd read the "current" value and write a new value in places
-    // that are guarded by different pre/post sync locks with stateless kernels. Will it matter?
-
-    // Another issue with sharing max seg length is we no longer know if the thread local data space
-    // is sufficient since all threads would be updating it. That alone may prohibit the use of
-    // shared max seg values unless we want to check at the start of each partition whether to
-    // resize the thread local buffers.
-
-    // Assuming we use a the doubling strategy, how often would we really see a resize if shared
-    // values are used? They would probably be front loaded but would that be bad for short files?
-
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
-            assert (mThreadLocalStreamSetBaseAddress);
-            auto start = bn.BufferStart;
-            #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-            start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-            #endif
-            Rational scaledStart(start, MaximumNumOfStrides[mCurrentPartitionRoot]);
-            Value * const startOffset = b->CreateMulRational(mThreadLocalScalingFactor, scaledStart);
-            Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
-
-            const size_t baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
-            Rational scaledCapacity(baseCapacity, MaximumNumOfStrides[mCurrentPartitionRoot]);
-            Value * const capacity = b->CreateMulRational(mThreadLocalScalingFactor, scaledCapacity);
-
-            StreamSetBuffer * const buffer = bn.Buffer;
-            buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
-            buffer->setCapacity(b, capacity);
-
-        }
-
-    }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -269,6 +209,16 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                 }
                 if (nonLocal) {
                     buffer->allocateBuffer(b, expectedNumOfStrides);
+
+                    #ifdef PRINT_DEBUG_MESSAGES
+                    const auto pe = in_edge(streamSet, mBufferGraph);
+                    const auto producer = source(pe, mBufferGraph);
+                    const BufferPort & rd = mBufferGraph[pe];
+                    const auto prefix = makeBufferName(producer, rd.Port);
+                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ")",
+                               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
+                    #endif
+
                 }
             }
         }
@@ -927,19 +877,140 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     b->SetInsertPoint(copyExit);
 }
 
+#warning MAKE CUSTOM THREADLOCAL STREAMSET BUFFER
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief prepareLinearBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::prepareLinearThreadLocalOutputBuffers(BuilderRef b) {
+#if 0
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.Locality == BufferLocality::ThreadLocal && bn.IsLinear)) {
+        if (bn.isThreadLocal()) {
+            assert (mThreadLocalStreamSetBaseAddress);
+            assert (bn.IsLinear);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             // purely threadlocal buffers are guaranteed to consume every produced
             // item each segment.
-            assert (isa<StaticBuffer>(bn.Buffer));
-            bn.Buffer->linearCopyBack(b, produced, produced, nullptr);
+            cast<StaticBuffer>(bn.Buffer)->linearCopyBack(b, produced, produced, nullptr);
+        }
+    }
+#endif
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief assignThreadLocalBufferMemoryForPartition
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
+    // Should I remap all of the buffers on realloc or map them at the point of entering a partition?
+
+    // The difficulty of remapping all of them is that we could end up increasing the segment length
+    // of a partition that requires substantially less memory than other partitions s.t. it does not
+    // trigger a realloc. We'd need a better check at the end for that case but could still better
+    // amortize the recalculations.
+
+    // Repeating streamsets are a big issue. To enable state free work, they're sized to be
+    // LCM(pattern length, block width) + max segment length. But if the max segment length changes
+    // then we either neet to expand them or treat them as circular buffers. The issue here is like
+    // above: testing only the total bytes required is not sufficient to determine when we need to
+    // expand them.
+
+    // Store a single bit to say some segment exceeds its largest prior one? That might not necessarily
+    // be its current older one. A repeating streamset may also be shared amongst multiple consumers and
+    // "resized" in multiple places if we do it at the kernel.
+
+    // We could add synchronization but do not want to needlessly add in another step here.
+
+    // We can make them thread local but then add to the potential cache contention.
+
+    // Ideally, we'd like to have the new max seg length to be shared instead of thread local but
+    // that opens the problem that we'd read the "current" value and write a new value in places
+    // that are guarded by different pre/post sync locks with stateless kernels. Will it matter?
+
+    // Another issue with sharing max seg length is we no longer know if the thread local data space
+    // is sufficient since all threads would be updating it. That alone may prohibit the use of
+    // shared max seg values unless we want to check at the start of each partition whether to
+    // resize the thread local buffers.
+
+    // Assuming we use a the doubling strategy, how often would we really see a resize if shared
+    // values are used? They would probably be front loaded but would that be bad for short files?
+
+    DataLayout DL(b->getModule());
+
+    IntegerType * const int8Ty = b->getInt8Ty();
+
+    auto getTypeSize = [&](Type * const type) -> uint64_t {
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+        return DL.getTypeAllocSize(type);
+        #else
+        return DL.getTypeAllocSize(type).getFixedSize();
+        #endif
+    };
+
+    Type * const intPtrTy = DL.getIntPtrType(mThreadLocalScalingFactor->getType());
+
+    ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+
+    Value * mult = nullptr;
+
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isThreadLocal()) {
+            assert (mThreadLocalStreamSetBaseAddress);
+            assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == int8Ty);
+            auto start = bn.BufferStart;
+            assert ((start % b->getCacheAlignment()) == 0);
+            #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+            start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+            #endif
+
+            #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+            if (mult == nullptr) {
+
+                // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
+
+                const auto & BC = PartitionOverflowStrides[mCurrentPartitionId];
+                const auto & XY = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
+
+                Value * V = mThreadLocalScalingFactor;
+                if (BC.denominator() > 1) {
+                    V = b->CreateMul(V, b->getSize(BC.denominator()));
+                }
+                if (BC.numerator() > 0) {
+                    V = b->CreateAdd(V, b->getSize(BC.numerator()));
+                }
+                if (XY.denominator() > 1) {
+                    V = b->CreateMul(V, b->getSize(XY.denominator()));
+                }
+                const auto cx = BC.denominator() * XY.numerator(); assert (cx > 0);
+                if (cx > 1) {
+                    V = b->CreateCeilUDiv(V, b->getSize(cx));
+                }
+                mult = V;
+
+//                b->CallPrintInt("mThreadLocalScalingFactor", mThreadLocalScalingFactor);
+//                const auto S = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
+//                assert (S.numerator() > 0);
+//                mult = b->CreateCeilUDivRational(mThreadLocalScalingFactor, S);
+//                b->CallPrintInt("mult", mult);
+            }
+            Value * const startOffset = b->CreateMul(b->getSize(start), mult);
+            #else
+            Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
+            #endif
+
+            ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
+            Value * const produced = mInitiallyProducedItemCount[streamSet];
+            PointerType * const ptrTy = buffer->getPointerType();
+            Constant * const bytesPerPack = ConstantExpr::getSizeOf(ptrTy->getElementType());
+            Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
+
+            Value * const offset = b->CreateSub(startOffset, producedBytes);
+            Value * ba = b->CreateGEP(mThreadLocalStreamSetBaseAddress, offset);
+            ba = b->CreatePointerCast(ba, ptrTy);
+            buffer->setBaseAddress(b, ba);
         }
     }
 }

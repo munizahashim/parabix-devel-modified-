@@ -246,7 +246,7 @@ public:
     void initializeFlowControl(BuilderRef b);
     void loadCurrentThreadLocalMemoryAddress(BuilderRef b);
     void detemineMaximumNumberOfStrides(BuilderRef b);
-    void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const segmentLength);
+    void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
     void updateThreadLocalBuffersForSlidingWindow(BuilderRef b);
 
 // inter-kernel codegen functions
@@ -623,6 +623,8 @@ protected:
     const std::vector<unsigned>                 StrideStepLength;
     const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
+    const std::vector<Rational>                 PartitionRootStridesPerThreadLocalPage;
+    const std::vector<Rational>                 PartitionOverflowStrides;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -933,10 +935,11 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
-, StrideStepLength(std::move(P.StrideStepLength))
+, StrideStepLength(std::move(P.StrideRepetitionVector))
 , MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
-
+, PartitionRootStridesPerThreadLocalPage(std::move(P.PartitionRootStridesPerThreadLocalPage))
+, PartitionOverflowStrides(std::move(P.PartitionOverflowStrides))
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))

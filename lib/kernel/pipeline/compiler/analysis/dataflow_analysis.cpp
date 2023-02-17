@@ -333,7 +333,6 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
-
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             if (out_degree(streamSet, G) != 0) {
@@ -349,6 +348,7 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
                 bn.OverflowCapacity = std::max(bn.OverflowCapacity, spanLength);
             }
         }
+
     }
 
     mPartialSumStepFactorGraph = G;

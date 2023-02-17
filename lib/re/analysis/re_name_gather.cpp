@@ -39,11 +39,11 @@ struct ExternalCollector final : public RE_Inspector {
         ExternalSet.insert(n->getFullName());
     }
 
-    void inspectStart(Start * s) final {
+    void inspectStart(Start *) final {
         ExternalSet.insert("^");
     }
 
-    void inspectEnd(End * e) final {
+    void inspectEnd(End *) final {
         ExternalSet.insert("$");
     }
 
@@ -64,7 +64,7 @@ std::vector<std::string> gatherExternals(RE * const re) {
     collector.inspectRE(re);
     std::vector<std::string> externals;
     for (auto & e : collector.ExternalSet) {
-        externals.push_back(e);
+        externals.emplace_back(std::move(e));
     }
     return externals;
 }

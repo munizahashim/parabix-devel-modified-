@@ -536,9 +536,9 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
         auto name = e->getFullName();
         if ((extNames.count(name) == 0) && mExternalTable.isDeclared(indexing, name)) {
             extNames.insert(name);
-            ExternalStreamObject * ext = mExternalTable.lookup(indexing, name);
+            const auto & ext = mExternalTable.lookup(indexing, name);
             StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, name);
-            unsigned offset = ext->getOffset();
+            const auto offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
         }

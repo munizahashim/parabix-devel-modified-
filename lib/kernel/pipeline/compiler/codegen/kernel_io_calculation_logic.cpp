@@ -439,6 +439,8 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) return;
 
+    assert (bn.isNonThreadLocal());
+
     // Only the partition root dictates how many strides this kernel will end up doing. All other kernels
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
@@ -817,7 +819,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.Locality != BufferLocality::GloballyShared || bn.isUnowned()) {
+    if (bn.isThreadLocal() || bn.isUnowned()) {
         return;
     }
 

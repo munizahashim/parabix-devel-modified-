@@ -1,4 +1,4 @@
-#include "pipeline_analysis.hpp"
+﻿#include "pipeline_analysis.hpp"
 #include "evolutionary_algorithm.hpp"
 #include <boost/icl/interval_set.hpp>
 
@@ -49,9 +49,10 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
         for (unsigned i = 0; i < candidateLength; ++i) {
             const auto a = candidate[i];
             assert (a < candidateLength);
-            const auto w = weight[a];
+            size_t w = weight[a];
 
             assert (GC_IntervalSet.empty());
+
             for (unsigned j = 0; j != i; ++j) {
                 assert (j < candidateLength);
                 const auto b = candidate[j];
@@ -60,29 +61,41 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
                     const auto & interval = GC_Intervals[b];
                     auto l = interval.lower();
                     auto r = interval.upper();
-                    if (edge(a, b, C).second) {
-                        l = round_down_to(l, NON_HUGE_PAGE_SIZE);
-                        r = round_up_to(r, NON_HUGE_PAGE_SIZE);
-                    }
                     GC_IntervalSet.insert(Interval::right_open(l, r));
                 }
             }
 
             size_t start = 0;
-            size_t end = w;
-
+            auto end = w;
             if (!GC_IntervalSet.empty()) {
+//                auto d = w;
                 for (const auto & interval : GC_IntervalSet) {
                     if (end < interval.lower()) {
                         break;
                     } else {
-                        start = round_up_to(interval.upper(), SPATIAL_PREFETCHER_ALIGNMENT);
-                        end = start + w;
+                        const auto l = interval.lower();
+                        const auto r = interval.upper();
+                        // We want memory to be laid out s.t. when we expand it at run time,
+                        // we're guaranteed that we won't overlap another buffer and ideally
+                        // optimize to a solution that won't require a huge amount of
+                        // additional space. To do so, we increase the weight (bytes required)
+                        // so that the size of each placement in sequence is non-decreasing.
+
+                        // NOTE: this is not the final size of the placement.
+
+                        // TODO: is max sufficient? do we need a LCM?
+//                        const auto m = r - l;
+//                        if (d < m) {
+//                            d = m;
+//                        }
+                        start = r;
+                        end = r + w;
                     }
                 }
                 GC_IntervalSet.clear();
             }
             assert (a < candidateLength);
+//            const auto end = start + w;
             GC_Intervals[a] = Interval::right_open(start, end);
             max_colours = std::max(max_colours, end);
         }
@@ -171,7 +184,7 @@ private:
 
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineBufferLayout
+ * @brief determineInitialThreadLocalBufferLayout
  *
  * Given our buffer graph, we want to identify the best placement to maximize sequential prefetching behavior with
  * the minimal total memory required. Although this assumes that the memory-aware scheduling algorithm was first
@@ -181,9 +194,11 @@ private:
  * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
  * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engine & rng) {
+void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng) {
 
-    // Construct the weighted interval graph for our local streamsets
+    // This process serves two purposes: (1) generate the initial memory layout for our thread-local
+    // streamsets. (2) determine how many the number of pages to assign each streamset based on the
+    // number of strides executed by the parition root.
 
     const auto n = LastStreamSet - FirstStreamSet + 1U;
 
@@ -195,10 +210,16 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
 
     RequiredThreadLocalStreamSetMemory = 0;
 
+    PartitionRootStridesPerThreadLocalPage.resize(PartitionCount);
+
+    PartitionOverflowStrides.resize(PartitionCount);
+
     BEGIN_SCOPED_REGION
 
     // The buffer graph is constructed in order of how the compiler will structure the pipeline program
     // (i.e., the invocation order of its kernels.)
+
+    std::vector<Rational> streamSetFactor(n);
 
     DataLayout DL(b->getModule());
 
@@ -210,44 +231,135 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
         std::fill_n(mapping.begin(), n, -1U);
         #endif
 
+        const auto blockWidth = b->getBitBlockWidth();
+
+        const auto baseRV = StrideRepetitionVector[firstKernel];
+
+        // Calculate the memory requirements of each thread local streamset for this partition as
+        // generated by a single stride of work from the root kernel.
+
+        // NOTE: the repetition value of a root may differ from that of the other kernels
+
+//        size_t denomLCM = 1;
+
+        const size_t pageSize = b->getPageSize();
+
+        Rational minVal{pageSize};
+
+        Rational requiredOverflowStrides{0};
+
         for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+
+            const auto strideLength = getKernel(kernel)->getStride();
+
+            // Because data is layed out in a "strip mined" format within streamsets, the type of
+            // each "chunk" will be blockwidth items in length.
+
+            const Rational weightScale{strideLength * StrideRepetitionVector[kernel], blockWidth * baseRV };
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
+                BufferNode & bn = mBufferGraph[streamSet];
 
-                if (bn.Locality == BufferLocality::ThreadLocal) {
-                    // determine the number of bytes this streamset requires
+                if (bn.isThreadLocal()) {
+                    // determine the number of bytes this streamset requires per *root kernel* stride
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
-
                     Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
                     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
                     const auto typeSize = DL.getTypeAllocSize(type);
                     #else
                     const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
                     #endif
-                    assert (typeSize > 0);
-                    const auto c = bn.UnderflowCapacity + bn.RequiredCapacity + bn.OverflowCapacity;
-                    assert (c > 0);
-                    const auto w = c * typeSize;
-                    assert (w > 0);
+                    const ProcessingRate & rate = outputRate.getRate(); assert (rate.isFixed());
+                    const auto S = (typeSize * weightScale) * rate.getLowerBound();
+                    if (S < minVal) {
+                        minVal = S;
+                    }
+
+                    assert (bn.UnderflowCapacity == 0);
+
+//                    errs() << "STREAMSET: " << streamSet << " -> " << S.numerator() << "/" << S.denominator() << "\n";
+
+//                    denomLCM = boost::lcm(denomLCM, S.denominator());
+
+                    if (bn.OverflowCapacity) {
+
+                        const auto k = bn.OverflowCapacity / weightScale;
+                        requiredOverflowStrides = std::max(requiredOverflowStrides, k);
+                    }
+
+                    streamSetFactor[streamSet - FirstStreamSet] = S;
+                }
+            }
+        }
+
+
+
+
+//        if (maxVal.numerator() == 0) return;
+
+        // We now know the size of the largest unit of work resulting from a single partition root stride.
+        //
+
+
+        // Scale the layout s.t. the effective size of a placement is at least as large as the prior ones?
+        // This would permit a easier rescaling option at runtime.
+
+
+
+
+        Rational rPageSize{pageSize};
+
+        // Every M strides requires will cause all of the streamsets to completely fill their
+
+        const auto M = rPageSize / minVal;
+
+        assert (M.numerator() > 0);
+
+        #ifndef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+        // ROUNDUP(x,a/b) = a * CEILING((b*x)/a))/b
+        const auto a = M.numerator();
+        const auto b = M.denominator();
+        const auto c = MaximumNumOfStrides[firstKernel] * b;
+        const auto d = (c + a - 1U) / a;
+        assert ((a * d) % b == 0);
+        const auto V = ((a * d) / b);
+        #else
+        const auto & V = M;
+        #endif
+
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal()) {
                     const auto i = streamSet - FirstStreamSet;
                     assert (i < n);
                     const auto j = count++;
                     assert (mapping[i] == -1U);
                     mapping[i] = j;
-                    weight[j] = w;
+                    const auto S = streamSetFactor[i] * V;
+                    assert (S.denominator() == 1);
+                    weight[j] = S.numerator();
+                    bn.RequiredCapacity = S.numerator();
                 }
             }
         }
 
-        if (LLVM_UNLIKELY(count == 0)) {
-            return;
-        }
+        if (count == 0) return;
+
+        // Construct the weighted interval graph for our local streamsets
 
         IntervalGraph I(count); // live memory interval graph
 
+        #ifdef PREVENT_THREAD_LOCAL_BUFFERS_FROM_SHARING_MEMORY
+        for (unsigned i = 1; i < count; ++i) {
+            for (unsigned j = 0; j < i; ++j) {
+                add_edge(j, i, I);
+            }
+        }
+        #else
         for (auto kernel = firstKernel, m = 0U; kernel <= lastKernel; ++kernel) {
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
@@ -297,15 +409,11 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
             }
         }
 
+        #endif
+
         IntervalGraph C(count); // co-used interval graph
 
-        #ifdef PREVENT_THREAD_LOCAL_BUFFERS_FROM_SHARING_MEMORY
-        for (unsigned i = 1; i < count; ++i) {
-            for (unsigned j = 0; j < i; ++j) {
-                add_edge(j, i, C);
-            }
-        }
-        #else
+        #if 0
 
         flat_set<unsigned> coused;
 
@@ -358,30 +466,55 @@ void PipelineAnalysis::determineBufferLayout(BuilderRef b, pipeline_random_engin
 
         assert (requiredMemory > 0);
 
-        RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
-
         auto O = BA.getResult();
+
+        // If we know memory was laid out in such a way that we can trust the scaling of
+        // buffers to not overlap, how do we transform the
+
+
 
         // TODO: apart from total memory, when would one layout be better than another?
         // Can we quantify it based on the buffer graph order? Currently, we just take
         // the first one.
         const auto intervals = BA.getIntervals(O, rng);
-        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
 
+        size_t maxEnd = 0;
+
+        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
                 const auto i = streamSet - FirstStreamSet;
                 const auto j = mapping[i];
                 if (j == -1U) {
-                    assert (mBufferGraph[streamSet].Locality != BufferLocality::ThreadLocal);
+                    assert (mBufferGraph[streamSet].isNonThreadLocal());
                 } else {
                     BufferNode & bn = mBufferGraph[streamSet];
                     const auto & interval = intervals[j];
                     bn.BufferStart = interval.lower();
                     bn.BufferEnd = interval.upper();
+                    maxEnd = std::max<size_t>(maxEnd, bn.BufferEnd);
+                    assert (bn.BufferEnd <= requiredMemory);
                 }
             }
         }
+
+        assert (maxEnd == requiredMemory);
+
+        const auto partId = KernelPartitionId[firstKernel];
+        PartitionRootStridesPerThreadLocalPage[partId] = M;
+        PartitionOverflowStrides[partId] = requiredOverflowStrides;
+
+
+        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+        const auto & P = PartitionRootStridesPerThreadLocalPage[partId];
+        Rational X(requiredMemory * MaximumNumOfStrides[firstKernel] * P.denominator(), P.numerator());
+        const auto K = (X.numerator() + X.denominator() - 1U) / X.denominator();
+        RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, K);
+        #else
+        RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
+        #endif
+
+
 
     };
 

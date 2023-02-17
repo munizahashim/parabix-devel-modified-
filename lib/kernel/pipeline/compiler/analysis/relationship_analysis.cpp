@@ -249,7 +249,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     MinimumNumOfStrides.resize(numOfKernels);
     MaximumNumOfStrides.resize(numOfKernels);
-    StrideStepLength.resize(numOfKernels);
+    StrideRepetitionVector.resize(numOfKernels);
 
     KernelPartitionId[PipelineInput] = 0;
 
@@ -267,10 +267,10 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         const auto k = std::find(K.begin(), K.end(), kernelId);
         assert (k != K.end());
         const auto j = std::distance(K.begin(), k);
-        const Rational stepLength = P.Repetitions[j];
-        assert (stepLength.denominator() == 1);
-        const auto sl = stepLength.numerator();
-        StrideStepLength[newKernelId] = sl;
+        const Rational & rep = P.Repetitions[j];
+        assert (rep.denominator() == 1);
+        const auto sl = rep.numerator();
+        StrideRepetitionVector[newKernelId] = sl;
         const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
         Rational ONE{1};
         const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
@@ -333,7 +333,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         }
         for (auto i = first; i <= last; ++i) {
             assert ((MaximumNumOfStrides[i] % gcd) == 0); // sanity test
-            StrideStepLength[i] = (MaximumNumOfStrides[i] / gcd);
+            StrideRepetitionVector[i] = (MaximumNumOfStrides[i] / gcd);
         }
     };
 

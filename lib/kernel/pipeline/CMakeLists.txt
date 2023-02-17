@@ -20,7 +20,6 @@ SRC
     # driver/NVPTXDriver.cpp
     compiler/analysis/add_analysis.cpp
     compiler/analysis/buffer_analysis.cpp
-    compiler/analysis/buffer_size_analysis.cpp
     compiler/analysis/consumer_analysis.cpp
     compiler/analysis/dataflow_analysis.cpp
     compiler/analysis/evolutionary_algorithm.cpp
@@ -29,6 +28,7 @@ SRC
     compiler/analysis/relationship_analysis.cpp
     compiler/analysis/scheduling_analysis.cpp
     compiler/analysis/termination_analysis.cpp
+    compiler/analysis/thread_local_analysis.cpp
     compiler/analysis/variable_rate_analysis.cpp
     compiler/analysis/zero_extend_analysis.cpp
     compiler/common/common.cpp
