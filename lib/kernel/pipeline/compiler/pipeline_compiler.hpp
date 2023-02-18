@@ -400,7 +400,7 @@ public:
     void addRepeatingStreamSetBufferProperties(BuilderRef b);
     void deallocateRepeatingBuffers(BuilderRef b);
     void generateMetaDataForRepeatingStreamSets(BuilderRef b);
-
+    Value * reduceMaximumNumOfStridesForRepeatingStreamSets(BuilderRef b, const unsigned streamSet, Value * const maxNumOfStrides) const;
     void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
 // prefetch instructions

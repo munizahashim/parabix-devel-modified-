@@ -65,6 +65,28 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief reduceMaximumNumOfStridesForRepeatingStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::reduceMaximumNumOfStridesForRepeatingStreamSets(BuilderRef b, const unsigned streamSet, Value * maxNumOfStrides) const {
+    const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(isa<RepeatingBuffer>(bn.Buffer))) {
+        assert ("using dynamic scaling segment size requires that repeating buffers can loop to entry" && mMayLoopToEntry);
+        Rational ub{0U};
+        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(e, mBufferGraph);
+            assert (consumer >= FirstKernel && consumer <= PipelineOutput);
+            const auto m = MaximumNumOfStrides[consumer];
+            const BufferPort & bp = mBufferGraph[e];
+            ub = std::max(ub, bp.Maximum * m);
+        }
+        assert (ub.denominator() == 1);
+        ConstantInt * const safeLimit = b->getSize(ub.numerator());
+        maxNumOfStrides = b->CreateUMin(maxNumOfStrides, safeLimit);
+    }
+    return maxNumOfStrides;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindRepeatingStreamSetInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {
@@ -94,7 +116,7 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef 
             buffer->setHandle(handle);
             Value * const ba = b->CreatePointerCast(addr, buffer->getPointerType());
             buffer->setBaseAddress(b, ba);
-            buffer->setModulus(runLength);
+            buffer->setModulus(runLength);            
             const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
             b->setScalarField(lengthName, runLength);
         }

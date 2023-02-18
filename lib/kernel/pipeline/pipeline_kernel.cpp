@@ -316,18 +316,16 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
     const auto numElements = ss->getNumElements();
     const auto blockWidth = b->getBitBlockWidth();
 
-    const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
+    const auto maxVal = (1ULL << static_cast<size_t>(fieldWidth)) - 1ULL;
 
-    // TODO: with single element streamsets, we just need to ensure we have a byte aligned value
-    const auto baseUnitSize = blockWidth;
-    uint64_t patternLength = baseUnitSize;
+    size_t patternLength = blockWidth;
     for (unsigned i = 0; i < numElements; ++i) {
         const auto & vec = ss->getPattern(i);
         const auto L = vec.size();
         if (LLVM_UNLIKELY(L == 0)) {
             report_fatal_error("Zero-length repeating streamset elements are not permitted");
         }
-        patternLength = boost::lcm<uint64_t>(patternLength, L);
+        patternLength = boost::lcm<size_t>(patternLength, L);
         #ifndef NDEBUG
         for (auto v : vec) {
             if (LLVM_UNLIKELY(v > maxVal)) {

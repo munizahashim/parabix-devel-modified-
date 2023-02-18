@@ -506,6 +506,8 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 
+    assert (mIsPartitionRoot);
+
     b->SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto jumpPartitionId = PartitionJumpTargetId[mCurrentPartitionId];
     assert (mCurrentPartitionId < jumpPartitionId);

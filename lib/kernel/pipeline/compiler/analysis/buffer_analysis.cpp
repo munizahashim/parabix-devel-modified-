@@ -635,10 +635,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.CanModifySegmentLength = true;
             #else
-            if (isPartitionRoot) {
+            if (isPartitionRoot || !N.IsLinear) {
                 inputRate.CanModifySegmentLength = true;
-            } else {
-                inputRate.CanModifySegmentLength = !N.IsLinear;
+//            } else {
+//                const RelationshipNode & rn = mStreamGraph[streamSet];
+//                assert (rn.Type == RelationshipNode::IsRelationship);
+//                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rn.Relationship))) {
+//                    inputRate.CanModifySegmentLength = true;
+//                }
             }
             #endif
         }

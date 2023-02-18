@@ -107,11 +107,14 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     BufferGraph::in_edge_iterator ei, ei_end;
     std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
 
+    Value * maxSegmentLength = mMaximumNumOfStrides;
+
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
         if (port.CanModifySegmentLength) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
+            maxSegmentLength = reduceMaximumNumOfStridesForRepeatingStreamSets(b, streamSet, maxSegmentLength);
         } else { // make sure we have read/initialized the accessible item count
             getAccessibleInputItems(b, port);
         }
@@ -137,9 +140,9 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     assert (mMaximumNumOfStrides);
     if (!mIsPartitionRoot || !hasDynamicSlidingWindow) {
         if (mMayLoopToEntry) {
-            numOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            numOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
         } else {
-            numOfLinearStrides = mMaximumNumOfStrides;
+            numOfLinearStrides = maxSegmentLength;
         }
     }
 
@@ -155,7 +158,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     } else {
-        numOfLinearStrides = mMaximumNumOfStrides;
+        numOfLinearStrides = maxSegmentLength;
     }
     #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     mPotentialSegmentLength = numOfLinearStrides;
@@ -163,12 +166,12 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         assert (numOfLinearStrides);
         Value * maxNumOfLinearStrides = nullptr;
         if (mMayLoopToEntry) {
-            maxNumOfLinearStrides = b->CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            maxNumOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
             // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
             // of some buffer each
             mPotentialSegmentLength = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mPotentialSegmentLength);
         } else {
-            maxNumOfLinearStrides = mMaximumNumOfStrides;
+            maxNumOfLinearStrides = maxSegmentLength;
         }
         numOfLinearStrides = b->CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
     }

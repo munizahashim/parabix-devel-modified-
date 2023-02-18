@@ -749,10 +749,9 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
     }
 
     if (hasBranchToLoopExit && mIsPartitionRoot) {
-        Constant * const ZERO = b->getSize(0);
-        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(ZERO, exitBlock);
+        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(ZERO, exitBlock);
+        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b->getSize(0), exitBlock);
         #endif
     }
 

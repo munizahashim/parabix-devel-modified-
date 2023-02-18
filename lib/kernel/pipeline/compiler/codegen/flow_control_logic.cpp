@@ -87,6 +87,10 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
             const auto firstKernelOfNextPartition = FirstKernelInPartition[mCurrentPartitionId + 1];
 
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, "%s.maxNumOfStrides=%" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
+            #endif
+
             // calculate how much memory is required by this partition relative to max num of strides
             // and determine if the current thread local buffer can fit it.
 
@@ -103,6 +107,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             // value ought I be considering here?
 
             size_t maxMemory = 0;
+            bool hasAnyRepeatingStreamSets = false;
             for (auto kernel = mKernelId; kernel < firstKernelOfNextPartition; ++kernel) {
                 for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                     const auto streamSet = target(output, mBufferGraph);
@@ -186,7 +191,9 @@ void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const m
     ConstantInt * const TWO = b->getSize(2);
     Value * const A = b->CreateMul(maxNumOfStrides, TWO);
     Value * const B = b->CreateAdd(maxNumOfStrides, actualNumOfStrides);
-    Value * const C = b->CreateRoundUpRational(B, StrideStepLength[mKernelId] * 2);
+    assert (StrideStepLength[mKernelId] > 0);
+    ConstantInt * const stepLength = b->getSize(StrideStepLength[mKernelId] * 2U);
+    Value * const C = b->CreateRoundUp(B, stepLength);
     Value * const D = b->CreateUDiv(C, TWO);
     Value * const higher = b->CreateICmpUGT(actualNumOfStrides, maxNumOfStrides);
     Value * const nextMaxNumOfStrides = b->CreateSelect(higher, A, D);
