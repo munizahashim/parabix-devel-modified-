@@ -133,9 +133,8 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
         auto paramNames = ext->getParameters();
         if (grep::ShowExternals) {
             llvm::errs() << "resolving External: " << mStreamIndices[c].name << "_" << ssname << "(";
-            auto parms = ext->getParameters();
             bool at_start = true;
-            for (auto & p : parms) {
+            for (auto & p : paramNames) {
                 llvm::errs() << (!at_start ? ", " : "") << p;
                 at_start = false;
             }
@@ -213,7 +212,7 @@ void ExternalStreamObject::installStreamSet(StreamSet * s) {
     mStreamSet = s;
 }
 
-std::vector<std::string> LineStartsExternal::getParameters() {
+const std::vector<std::string> LineStartsExternal::getParameters() {
     return mParms;
 }
 
@@ -241,7 +240,7 @@ void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet 
     installStreamSet(pStrm);
 }
 
-std::vector<std::string> PropertyBoundaryExternal::getParameters() {
+const std::vector<std::string> PropertyBoundaryExternal::getParameters() {
     std::string basis_name = UCD::getPropertyFullName(mProperty) + "_basis";
     return std::vector<std::string>{basis_name, "u8index"};
 }
@@ -263,8 +262,8 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
-    assert(offset == mOffset);
+    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
+    assert(offset == static_cast<unsigned>(mOffset));
     installStreamSet(reStrm);
 }
 
@@ -275,7 +274,7 @@ void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<St
     installStreamSet(distStrm);
 }
 
-std::vector<std::string> PropertyDistanceExternal::getParameters() {
+const std::vector<std::string> PropertyDistanceExternal::getParameters() {
     if (mProperty == UCD::identity) return {"basis"};
     return {UCD::getPropertyFullName(mProperty) + "_basis"};
 }
@@ -305,7 +304,7 @@ void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamS
     installStreamSet(u8CharClasses);
 }
 
-std::vector<std::string> GraphemeClusterBreak::getParameters() {
+const std::vector<std::string> GraphemeClusterBreak::getParameters() {
     return std::vector<std::string>{"UCD:" + getPropertyFullName(UCD::GCB) + "_basis", "Extended_Pictographic"};
 }
 
@@ -320,7 +319,7 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     installStreamSet(GCBstream);
 }
 
-std::vector<std::string> WordBoundaryExternal::getParameters() {
+const std::vector<std::string> WordBoundaryExternal::getParameters() {
     return std::vector<std::string>{"basis", "u8index"};
 }
 
@@ -328,10 +327,6 @@ void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     StreamSet * wb = b->CreateStreamSet(1);
     WordBoundaryLogic(b, inputs[0], inputs[1], wb);
     installStreamSet(wb);
-}
-
-std::vector<std::string> FilterByMaskExternal::getParameters() {
-    return mParamNames;
 }
 
 void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
@@ -342,7 +337,7 @@ void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     installStreamSet(filtered);
 }
 
-std::vector<std::string> FixedSpanExternal::getParameters() {
+const std::vector<std::string> FixedSpanExternal::getParameters() {
     return std::vector<std::string>{mMatchMarks};
 }
 
@@ -353,7 +348,7 @@ void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet
     installStreamSet(spans);
 }
 
-std::vector<std::string> MarkedSpanExternal::getParameters() {
+const std::vector<std::string> MarkedSpanExternal::getParameters() {
     return std::vector<std::string>{mPrefixMarks, mMatchMarks};
 }
 

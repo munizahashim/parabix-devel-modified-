@@ -191,6 +191,20 @@ Kernel * PipelineBuilder::makeKernel() {
     if (mExternallySynchronized) {
         out << 'E';
     }
+
+    switch (codegen::PipelineCompilationMode) {
+        case codegen::PipelineCompilationModeOptions::DefaultFast:
+            out << 'F';
+            break;
+        case codegen::PipelineCompilationModeOptions::Expensive:
+            out << 'X';
+            break;
+    }
+
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
+        out << "+AML";
+    }
+
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
             out << "+CYC";

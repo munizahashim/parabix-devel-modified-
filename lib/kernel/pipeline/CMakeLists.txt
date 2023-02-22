@@ -27,6 +27,8 @@ SRC
     compiler/analysis/pipeline_graph_printers.cpp
     compiler/analysis/relationship_analysis.cpp
     compiler/analysis/scheduling_analysis.cpp
+    compiler/analysis/simple_scheduling_analysis.cpp
+    compiler/analysis/simple_variable_rate_analysis.cpp
     compiler/analysis/termination_analysis.cpp
     compiler/analysis/thread_local_analysis.cpp
     compiler/analysis/variable_rate_analysis.cpp

@@ -35,7 +35,16 @@ public:
         // are within each partition in a topological order
         auto initialGraph = P.initialPartitioningPass();
         P.computeIntraPartitionRepetitionVectors(initialGraph);
-        P.estimateInterPartitionDataflow(initialGraph, rng);
+
+        switch (codegen::PipelineCompilationMode) {
+            case codegen::PipelineCompilationModeOptions::DefaultFast:
+                P.simpleEstimateInterPartitionDataflow(initialGraph, rng);
+                break;
+            case codegen::PipelineCompilationModeOptions::Expensive:
+                P.estimateInterPartitionDataflow(initialGraph, rng);
+                break;
+        }
+
         auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
 
         P.schedulePartitionedProgram(partitionGraph, rng);
@@ -215,6 +224,8 @@ private:
     void numberDynamicRepeatingStreamSets();
 
     void determineNumOfThreads();
+
+    void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
     // zero extension analysis function
 

@@ -81,10 +81,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
 
 
-
-
 std::string ShowIROption = OmittedOption;
-
 static cl::opt<std::string, true> IROutputOption("ShowIR", cl::location(ShowIROption), cl::ValueOptional,
                                                          cl::desc("Print optimized LLVM IR to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
 
@@ -106,6 +103,8 @@ static cl::opt<std::string, true> ASMOutputFilenameOption("ShowASM", cl::locatio
 #endif
 
 // Enable Debug Options to be specified on the command line
+
+
 static cl::opt<CodeGenOpt::Level, true>
 OptimizationLevel("optimization-level", cl::location(OptLevel), cl::init(CodeGenOpt::None), cl::desc("Set the front-end optimization level:"),
                   cl::values(clEnumValN(CodeGenOpt::None, "none", "no optimizations (default)"),
@@ -120,6 +119,16 @@ BackEndOptOption("backend-optimization-level", cl::location(BackEndOptLevel), cl
                              clEnumValN(CodeGenOpt::Default, "standard", "standard optimizations"),
                              clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")
                 CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
+
+PipelineCompilationModeOptions PipelineCompilationMode = PipelineCompilationModeOptions::DefaultFast;
+
+static cl::opt<PipelineCompilationModeOptions, true>
+PipelineCompilationModeOption("pipeline-optimization-level", cl::location(PipelineCompilationMode),
+                  cl::init(PipelineCompilationModeOptions::DefaultFast),
+                  cl::desc("Set the pipeline optimization level:"),
+                  cl::values(clEnumValN(PipelineCompilationModeOptions::DefaultFast, "fast", "minimal analysis(default)"),
+                             clEnumValN(PipelineCompilationModeOptions::Expensive, "aggressive", "full analysis")
+                  CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
 
 static cl::opt<bool, true> EnableObjectCacheOption("enable-object-cache", cl::location(EnableObjectCache), cl::init(true),
                                                    cl::desc("Enable object caching"), cl::cat(CodeGenOptions));

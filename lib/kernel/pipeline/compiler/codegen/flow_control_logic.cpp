@@ -75,17 +75,32 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
     if (mIsPartitionRoot) {
 
-        // TODO: check what partitions are strictly fixed-rate (i.e., consume data at a fixed rate
-        // from strictly fixed-rate partitions that produced it at a fixed rate. Scaling will never
-        // change for such partitions.)
+        assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
+        assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
+        const auto firstKernelOfNextPartition = FirstKernelInPartition[mCurrentPartitionId + 1];
+        size_t maxMemory = 0;
+        for (auto kernel = mKernelId; kernel < firstKernelOfNextPartition; ++kernel) {
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal()) {
+                    maxMemory = std::max<size_t>(maxMemory, bn.BufferEnd);
+                    assert (RequiredThreadLocalStreamSetMemory >= maxMemory);
+                }
+            }
+        }
+
+        Value * threadLocalPtr = nullptr;
+        if (maxMemory) {
+            threadLocalPtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
+        }
 
         #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-        if (in_degree(mKernelId, mBufferGraph) > 0) {
+        // If the min and max num of strides is equal, we almost certainly have strictly fixed
+        // rate input into this partition.
+        if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId]) {
 
             mMaximumNumOfStrides = b->getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
-            assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
-            assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
-            const auto firstKernelOfNextPartition = FirstKernelInPartition[mCurrentPartitionId + 1];
 
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, "%s.maxNumOfStrides=%" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
@@ -106,19 +121,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             // we increased to reflect to a page alignment, this wouldn't be meaningful. So what
             // value ought I be considering here?
 
-            size_t maxMemory = 0;
-            bool hasAnyRepeatingStreamSets = false;
-            for (auto kernel = mKernelId; kernel < firstKernelOfNextPartition; ++kernel) {
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        maxMemory = std::max<size_t>(maxMemory, bn.BufferEnd);
-                    }
-                }
-            }
             if (maxMemory > 0) {
-                assert (RequiredThreadLocalStreamSetMemory > 0);
 
                 // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
 
@@ -140,7 +143,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                     V = b->CreateCeilUDiv(V, b->getSize(cx));
                 }
                 Value * memoryForSegment = b->CreateMul(V, b->getSize(maxMemory));
-                Value * const threadLocalPtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
                 BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
                 BasicBlock * const afterExpansion = b->CreateBasicBlock();
                 Value * const currentMem = b->CreateLoad(mThreadLocalMemorySizePtr);
@@ -161,15 +163,19 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                 b->CreateBr(afterExpansion);
 
                 b->SetInsertPoint(afterExpansion);
-                mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalPtr);
-            } else {
-                mThreadLocalStreamSetBaseAddress = nullptr;
             }
 
         } else {
             const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
             mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
         }
+
+        if (maxMemory > 0) {
+            mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalPtr);
+        } else {
+            mThreadLocalStreamSetBaseAddress = nullptr;
+        }
+
         #else
         const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));

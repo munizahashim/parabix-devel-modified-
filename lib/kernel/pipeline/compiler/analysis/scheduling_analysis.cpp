@@ -1,6 +1,3 @@
-#ifndef SCHEDULING_ANALYSIS_HPP
-#define SCHEDULING_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
 #include "evolutionary_algorithm.hpp"
 #include "lexographic_ordering.hpp"
@@ -2727,5 +2724,3 @@ void PipelineAnalysis::addSchedulingConstraints(const std::vector<unsigned> & pr
 }
 
 } // end of namespace kernel
-
-#endif // SCHEDULING_ANALYSIS_HPP

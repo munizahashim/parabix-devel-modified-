@@ -1,6 +1,3 @@
-#ifndef VARIABLE_RATE_ANALYSIS_HPP
-#define VARIABLE_RATE_ANALYSIS_HPP
-
 #include "pipeline_analysis.hpp"
 #include "lexographic_ordering.hpp"
 #include "../internal/popcount_kernel.h"
@@ -2305,5 +2302,3 @@ equivalent_relationship_already_exists:
 }
 
 }
-
-#endif // VARIABLE_RATE_ANALYSIS_HPP

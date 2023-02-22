@@ -225,6 +225,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
     auto optimizeThreadLocalBufferLayout = [&](const unsigned firstKernel, const unsigned lastKernel) {
 
+         // errs() << "OPT: " << firstKernel << " -> " << lastKernel << "\n";
+
         unsigned count = 0;
 
         #ifndef NDEBUG
@@ -257,6 +259,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
             const Rational weightScale{strideLength * StrideRepetitionVector[kernel], blockWidth * baseRV };
 
+             // errs() << "weightScale_" << kernel << ": " << weightScale.numerator() << "/" << weightScale.denominator() << "\n";
+
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
                 BufferNode & bn = mBufferGraph[streamSet];
@@ -271,15 +275,19 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     #else
                     const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
                     #endif
-                    const ProcessingRate & rate = outputRate.getRate(); assert (rate.isFixed());
+                    const ProcessingRate & rate = outputRate.getRate();
+                    assert (rate.isFixed());
                     const auto S = (typeSize * weightScale) * rate.getLowerBound();
+
+                     // errs() << "S_" << streamSet << ": " << S.numerator() << "/" << S.denominator() << "\n";
+
                     if (S < minVal) {
                         minVal = S;
                     }
 
                     assert (bn.UnderflowCapacity == 0);
 
-//                    errs() << "STREAMSET: " << streamSet << " -> " << S.numerator() << "/" << S.denominator() << "\n";
+//                     // errs() << "STREAMSET: " << streamSet << " -> " << S.numerator() << "/" << S.denominator() << "\n";
 
 //                    denomLCM = boost::lcm(denomLCM, S.denominator());
 
@@ -307,13 +315,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
         // This would permit a easier rescaling option at runtime.
 
 
-
-
-        Rational rPageSize{pageSize};
-
         // Every M strides requires will cause all of the streamsets to completely fill their
 
-        const auto M = rPageSize / minVal;
+        const auto M = Rational{pageSize} / minVal;
 
         assert (M.numerator() > 0);
 
@@ -498,23 +502,43 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             }
         }
 
+
+//        partId 5: 8192
+//        maxStrides: 64
+//        P: 128/1
+//        X: 4096/1
+//        K: 4096
+
+
+
         assert (maxEnd == requiredMemory);
 
         const auto partId = KernelPartitionId[firstKernel];
+
+         // errs() << "partId " << partId << ": " << requiredMemory << "\n";
+
         PartitionRootStridesPerThreadLocalPage[partId] = M;
         PartitionOverflowStrides[partId] = requiredOverflowStrides;
 
 
         #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         const auto & P = PartitionRootStridesPerThreadLocalPage[partId];
-        Rational X(requiredMemory * MaximumNumOfStrides[firstKernel] * P.denominator(), P.numerator());
-        const auto K = (X.numerator() + X.denominator() - 1U) / X.denominator();
+
+        auto K = requiredMemory;
+        if (P < MaximumNumOfStrides[firstKernel]) {
+            Rational X(requiredMemory * MaximumNumOfStrides[firstKernel] * P.denominator(), P.numerator());
+            K = (X.numerator() + X.denominator() - 1U) / X.denominator();
+        }
         RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, K);
         #else
         RequiredThreadLocalStreamSetMemory = std::max(RequiredThreadLocalStreamSetMemory, requiredMemory);
         #endif
 
+        assert (MaximumNumOfStrides[firstKernel] > 0);
 
+         // errs() << "RequiredThreadLocalStreamSetMemory: " << RequiredThreadLocalStreamSetMemory << "\n";
+
+        assert (K >= requiredMemory);
 
     };
 

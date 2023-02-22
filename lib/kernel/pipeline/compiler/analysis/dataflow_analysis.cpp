@@ -41,18 +41,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     };
 
     const auto ONE = Z3_mk_int(ctx, 1, intType);
-
     const auto m = num_vertices(Relationships);
-
-
-
-
-
     std::vector<Z3_ast> VarList(m);
-
-
-
-
 
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];

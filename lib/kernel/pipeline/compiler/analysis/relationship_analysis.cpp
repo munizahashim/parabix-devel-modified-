@@ -276,6 +276,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
         const auto max = ceiling(ONE + cov3);
         assert (min <= max);
+
+
         MinimumNumOfStrides[newKernelId] = sl * min;
         MaximumNumOfStrides[newKernelId] = sl * max;
     };
