@@ -73,7 +73,7 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
                     if (end < interval.lower()) {
                         break;
                     } else {
-                        const auto l = interval.lower();
+//                        const auto l = interval.lower();
                         const auto r = interval.upper();
                         // We want memory to be laid out s.t. when we expand it at run time,
                         // we're guaranteed that we won't overlap another buffer and ideally
@@ -120,17 +120,15 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
         return GC_Intervals;
     }
 
-    BufferLayoutOptimizerWorker(const IntervalGraph & I, const IntervalGraph & C, const std::vector<unsigned> & weight,
+    BufferLayoutOptimizerWorker(const IntervalGraph & I, const std::vector<unsigned> & weight,
                                 const unsigned candidateLength, pipeline_random_engine & rng)
-    : I(I), C(C), weight(weight), GC_Intervals(candidateLength) {
+    : I(I), weight(weight), GC_Intervals(candidateLength) {
         assert (num_vertices(I) == candidateLength);
-        assert (num_vertices(C) == candidateLength);
         assert (weight.size() >= candidateLength);
     }
 
 private:
     const IntervalGraph & I;
-    const IntervalGraph & C;
     const std::vector<unsigned> & weight;
 
     IntervalSet GC_IntervalSet;
@@ -148,14 +146,14 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
     }
 
     std::unique_ptr<PermutationBasedEvolutionaryAlgorithmWorker> makeWorker(pipeline_random_engine & rng) final {
-        return std::make_unique<BufferLayoutOptimizerWorker>(I, C, weight, candidateLength, rng);
+        return std::make_unique<BufferLayoutOptimizerWorker>(I, weight, candidateLength, rng);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief constructor
      ** ------------------------------------------------------------------------------------------------------------- */
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
-                         , IntervalGraph && I, IntervalGraph && C
+                         , IntervalGraph && I
                          , std::vector<unsigned> && weight
                          , pipeline_random_engine & srcRng)
     : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
@@ -167,7 +165,6 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
                                              std::max(codegen::SegmentThreads, codegen::TaskThreads),
                                              srcRng)
     , I(std::move(I))
-    , C(std::move(C))
     , weight(weight) {
 
     }
@@ -176,12 +173,9 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 private:
 
     const IntervalGraph I;
-    const IntervalGraph C;
     const std::vector<unsigned> weight;
 
 };
-
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineInitialThreadLocalBufferLayout
@@ -225,8 +219,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
     auto optimizeThreadLocalBufferLayout = [&](const unsigned firstKernel, const unsigned lastKernel) {
 
-         // errs() << "OPT: " << firstKernel << " -> " << lastKernel << "\n";
-
         unsigned count = 0;
 
         #ifndef NDEBUG
@@ -242,8 +234,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
         // NOTE: the repetition value of a root may differ from that of the other kernels
 
-//        size_t denomLCM = 1;
-
         const size_t pageSize = b->getPageSize();
 
         Rational minVal{pageSize};
@@ -258,8 +248,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             // each "chunk" will be blockwidth items in length.
 
             const Rational weightScale{strideLength * StrideRepetitionVector[kernel], blockWidth * baseRV };
-
-             // errs() << "weightScale_" << kernel << ": " << weightScale.numerator() << "/" << weightScale.denominator() << "\n";
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
@@ -279,17 +267,11 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     assert (rate.isFixed());
                     const auto S = (typeSize * weightScale) * rate.getLowerBound();
 
-                     // errs() << "S_" << streamSet << ": " << S.numerator() << "/" << S.denominator() << "\n";
-
                     if (S < minVal) {
                         minVal = S;
                     }
 
                     assert (bn.UnderflowCapacity == 0);
-
-//                     // errs() << "STREAMSET: " << streamSet << " -> " << S.numerator() << "/" << S.denominator() << "\n";
-
-//                    denomLCM = boost::lcm(denomLCM, S.denominator());
 
                     if (bn.OverflowCapacity) {
 
@@ -415,55 +397,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
         #endif
 
-        IntervalGraph C(count); // co-used interval graph
-
-        #if 0
-
-        flat_set<unsigned> coused;
-
-        for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
-
-            assert (coused.empty());
-
-            for (const auto output : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                const auto streamSet = source(output, mBufferGraph);
-                const auto i = streamSet - FirstStreamSet;
-                const auto j = mapping[i];
-                if (j != -1U) {
-                    assert (j < count);
-                    coused.insert(j);
-                }
-            }
-
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                const auto i = streamSet - FirstStreamSet;
-                const auto j = mapping[i];
-                if (j != -1U) {
-                    assert (j < count);
-                    coused.insert(j);
-                }
-            }
-
-            const auto n = coused.size();
-            if (n > 1) {
-                auto begin = coused.begin();
-                const auto end = coused.end();
-                for (auto i = begin; ++i != end; ) {
-                    const auto a = *i;
-                    assert (a < count);
-                    for (auto j = begin; j != i; ++j) {
-                        const auto b = *j;
-                        assert (b < a);
-                        add_edge(b, a, C);
-                    }
-                }
-            }
-            coused.clear();
-        }
-        #endif
-
-        BufferLayoutOptimizer BA(count, std::move(I), std::move(C), std::move(weight), rng);
+        BufferLayoutOptimizer BA(count, std::move(I), std::move(weight), rng);
         BA.runGA();
 
         const auto requiredMemory = BA.getBestFitnessValue();
@@ -502,20 +436,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             }
         }
 
-
-//        partId 5: 8192
-//        maxStrides: 64
-//        P: 128/1
-//        X: 4096/1
-//        K: 4096
-
-
-
         assert (maxEnd == requiredMemory);
 
         const auto partId = KernelPartitionId[firstKernel];
-
-         // errs() << "partId " << partId << ": " << requiredMemory << "\n";
 
         PartitionRootStridesPerThreadLocalPage[partId] = M;
         PartitionOverflowStrides[partId] = requiredOverflowStrides;
@@ -535,8 +458,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
         #endif
 
         assert (MaximumNumOfStrides[firstKernel] > 0);
-
-         // errs() << "RequiredThreadLocalStreamSetMemory: " << RequiredThreadLocalStreamSetMemory << "\n";
 
         assert (K >= requiredMemory);
 

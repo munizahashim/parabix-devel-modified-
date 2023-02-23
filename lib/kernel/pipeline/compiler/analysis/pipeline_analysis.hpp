@@ -47,7 +47,15 @@ public:
 
         auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
 
-        P.schedulePartitionedProgram(partitionGraph, rng);
+        switch (codegen::PipelineCompilationMode) {
+            case codegen::PipelineCompilationModeOptions::DefaultFast:
+                P.simpleSchedulePartitionedProgram(partitionGraph, rng);
+                break;
+            case codegen::PipelineCompilationModeOptions::Expensive:
+                P.schedulePartitionedProgram(partitionGraph, rng);
+                break;
+        }
+
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(partitionGraph);
 
@@ -166,6 +174,10 @@ private:
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     void identifyPartitionGuidedSynchronizationVariables();
     #endif
+
+    // simple scheduling analysis
+
+    void simpleSchedulePartitionedProgram(PartitionGraph & P, pipeline_random_engine & rng);
 
     // scheduling analysis
 

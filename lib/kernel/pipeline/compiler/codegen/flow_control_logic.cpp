@@ -20,7 +20,9 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
 #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-    mTarget->addInternalScalar(b->getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
+    if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId]) {
+        mTarget->addInternalScalar(b->getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
+    }
 #endif
 }
 
@@ -32,8 +34,10 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b
     for (unsigned i = 1U; i < (PartitionCount - 1U); ++i) {
         const auto f = FirstKernelInPartition[i];
         const auto numOfStrides = MaximumNumOfStrides[f];
-        Value * const init = b->CreateMul(segmentLengthScalingFactor, b->getSize(numOfStrides));
-        b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
+        if (MinimumNumOfStrides[f] != numOfStrides) {
+            Value * const init = b->CreateMul(segmentLengthScalingFactor, b->getSize(numOfStrides));
+            b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
+        }
     }
 #endif
 }
@@ -194,16 +198,18 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides) {
     #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-    ConstantInt * const TWO = b->getSize(2);
-    Value * const A = b->CreateMul(maxNumOfStrides, TWO);
-    Value * const B = b->CreateAdd(maxNumOfStrides, actualNumOfStrides);
-    assert (StrideStepLength[mKernelId] > 0);
-    ConstantInt * const stepLength = b->getSize(StrideStepLength[mKernelId] * 2U);
-    Value * const C = b->CreateRoundUp(B, stepLength);
-    Value * const D = b->CreateUDiv(C, TWO);
-    Value * const higher = b->CreateICmpUGT(actualNumOfStrides, maxNumOfStrides);
-    Value * const nextMaxNumOfStrides = b->CreateSelect(higher, A, D);
-    b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId), nextMaxNumOfStrides);
+    if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId]) {
+        ConstantInt * const TWO = b->getSize(2);
+        Value * const A = b->CreateMul(maxNumOfStrides, TWO);
+        Value * const B = b->CreateAdd(maxNumOfStrides, actualNumOfStrides);
+        assert (StrideStepLength[mKernelId] > 0);
+        ConstantInt * const stepLength = b->getSize(StrideStepLength[mKernelId] * 2U);
+        Value * const C = b->CreateRoundUp(B, stepLength);
+        Value * const D = b->CreateUDiv(C, TWO);
+        Value * const higher = b->CreateICmpUGT(actualNumOfStrides, maxNumOfStrides);
+        Value * const nextMaxNumOfStrides = b->CreateSelect(higher, A, D);
+        b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId), nextMaxNumOfStrides);
+    }
     #endif
 }
 

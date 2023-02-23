@@ -167,6 +167,9 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     assert (is_valid_topological_sorting(ordering, T));
     #endif
 
+
+    // iterate through the graph in topological order to determine what portions of
+    // the program are not strictly fixed rate
     for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
         for (const auto e : make_iterator_range(in_edges(partId, T))) {
             if (T[e]) {
@@ -178,8 +181,6 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
             }
         }
     }
-
-
 
     if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
         report_fatal_error("Z3 failed to find a solution to the maximum permitted dataflow problem");
@@ -210,12 +211,6 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         assert (N.Repetitions[0].denominator() > 0);
 
         N.ExpectedStridesPerSegment = Rational{num, denom} / N.Repetitions[0];
-
-//        errs() << "EXS_" << partId << ": "
-//               << N.ExpectedStridesPerSegment.numerator()
-//               << "/"
-//               << N.ExpectedStridesPerSegment.denominator()
-//               << "\n";
 
         const auto m = N.ExpectedStridesPerSegment.denominator();
         if (m > 1) {
