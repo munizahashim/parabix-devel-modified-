@@ -948,8 +948,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
         #endif
     };
 
-    Type * const intPtrTy = DL.getIntPtrType(mThreadLocalScalingFactor->getType());
-
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
     Value * mult = nullptr;
@@ -968,6 +966,8 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
 
             #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
             if (mult == nullptr) {
+
+                assert (mThreadLocalScalingFactor);
 
                 // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
 
