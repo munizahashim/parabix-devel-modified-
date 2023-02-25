@@ -129,7 +129,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
                 // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
 
-                const auto & BC = PartitionOverflowStrides[mCurrentPartitionId];
+                const auto & BC = NumOfPartitionOverflowVectors[mCurrentPartitionId];
                 const auto & XY = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
 
                 Value * V = mMaximumNumOfStrides;

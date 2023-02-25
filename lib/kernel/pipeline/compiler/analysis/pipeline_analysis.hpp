@@ -309,7 +309,7 @@ public:
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
     std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
-    std::vector<Rational>           PartitionOverflowStrides;
+    std::vector<Rational>           NumOfPartialOverflowStridesPerPartitionRootStride;
 
     BufferGraph                     mBufferGraph;
 

@@ -624,7 +624,7 @@ protected:
     const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
     const std::vector<Rational>                 PartitionRootStridesPerThreadLocalPage;
-    const std::vector<Rational>                 PartitionOverflowStrides;
+    const std::vector<Rational>                 NumOfPartitionOverflowVectors;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -939,7 +939,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
 , PartitionRootStridesPerThreadLocalPage(std::move(P.PartitionRootStridesPerThreadLocalPage))
-, PartitionOverflowStrides(std::move(P.PartitionOverflowStrides))
+, NumOfPartitionOverflowVectors(std::move(P.NumOfPartialOverflowStridesPerPartitionRootStride))
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
