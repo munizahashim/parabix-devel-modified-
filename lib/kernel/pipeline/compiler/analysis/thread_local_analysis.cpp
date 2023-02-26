@@ -219,6 +219,10 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
         }
     }
 
+    if (LLVM_UNLIKELY(numOfThreadLocalStreamSets == 0)) {
+        return;
+    }
+
     DataLayout DL(b->getModule());
 
     const auto blockWidth = b->getBitBlockWidth();
@@ -233,13 +237,13 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
     auto partitionId = KernelPartitionId[FirstKernel];
     auto firstInPartition = FirstKernel;
-    for (auto firstInNextPartition = FirstKernel; firstInNextPartition <= LastKernel; ++firstInNextPartition) {
+    for (auto firstInNextPartition = FirstKernel; firstInNextPartition <= PipelineOutput; ++firstInNextPartition) {
         const auto nextPartitionId = KernelPartitionId[firstInNextPartition];
         if (nextPartitionId != partitionId) {
 
             Rational minVal{std::numeric_limits<size_t>::max()};
 
-            Rational maxOverflow{0};
+            size_t maxOverflow{0};
 
             const auto firstStrideLength = getKernel(firstInPartition)->getStride();
 
@@ -274,6 +278,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                         assert (rate.isFixed() || rate.isPopCount());
                         const auto S = typeSize * W * rate.getUpperBound();
 
+                        assert (S.numerator() > 0);
+
                         if (S < minVal) {
                             minVal = S;
                         }
@@ -284,13 +290,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
                         assert (bn.UnderflowCapacity == 0);
 
-                        if (bn.OverflowCapacity) {
-                            const size_t overflowBytes = bn.OverflowCapacity * typeSize;
-                            const auto partial = Rational{overflowBytes} / BW;
-                            if (maxOverflow < partial) {
-                                maxOverflow = partial;
-                            }
-                        }
+                        const size_t overflowBytes = bn.OverflowCapacity * typeSize;
+                        maxOverflow = std::max(maxOverflow, overflowBytes);
 
                         hasThreadLocal = true;
                     }
@@ -303,7 +304,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
                 PartitionRootStridesPerThreadLocalPage[partitionId] = M;
 
-                NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = maxOverflow;
+                NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = Rational{maxOverflow} / BW;;
 
                 for (auto kernel = firstInPartition; kernel < firstInNextPartition; ++kernel) {
                     for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
@@ -314,8 +315,10 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                             assert (j != -1U);
                             const auto S = streamSetFactor[j] * M;
                             assert (S.denominator() == 1);
-                            weight[j] = S.numerator();
-                            bn.RequiredCapacity = S.numerator();
+                            const auto size = S.numerator();
+                            assert (size > 0);
+                            weight[j] = size;
+                            bn.RequiredCapacity = size;
                             // record how many consumers exist before the streamset memory can be reused
                             // (NOTE: the +1 is to indicate this kernel requires each output streamset
                             // to be distinct even if one or more of the outputs is not used later.)
@@ -370,6 +373,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             partitionId = nextPartitionId;
         }
     }
+
+
 
 
     BufferLayoutOptimizer BA(numOfThreadLocalStreamSets, std::move(I), std::move(weight), rng);
