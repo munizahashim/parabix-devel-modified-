@@ -150,7 +150,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                     // We isolate the source kernels so that the simulator will be able to
                     // infer the actual outputs of the source and correctly judge how to
                     // scale the segment length of the source kernels.
-                    demarcateOutputs = true;
+                    // demarcateOutputs = true;
                 } else {
                     assert (node.Kernel == mPipelineKernel);
                 }

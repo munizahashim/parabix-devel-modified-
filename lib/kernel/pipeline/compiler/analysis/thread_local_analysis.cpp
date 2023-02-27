@@ -235,159 +235,147 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
     std::vector<int> remaining(numOfThreadLocalStreamSets, 0); // NOTE: signed int type is necessary here
     std::vector<Rational> streamSetFactor(numOfThreadLocalStreamSets);
 
-    auto partitionId = KernelPartitionId[FirstKernel];
-    auto firstInPartition = FirstKernel;
-    for (auto firstInNextPartition = FirstKernel; firstInNextPartition <= PipelineOutput; ++firstInNextPartition) {
-        const auto nextPartitionId = KernelPartitionId[firstInNextPartition];
-        if (nextPartitionId != partitionId) {
+    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
+        const auto firstKernel = FirstKernelInPartition[partitionId];
+        const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
 
-            Rational minVal{std::numeric_limits<size_t>::max()};
 
-            size_t maxOverflow{0};
+        Rational minVal{std::numeric_limits<size_t>::max()};
 
-            const auto firstStrideLength = getKernel(firstInPartition)->getStride();
+        size_t maxOverflow{0};
 
-            const auto BW = firstStrideLength * StrideRepetitionVector[firstInPartition];
+        const auto firstStrideLength = getKernel(firstKernel)->getStride();
 
-            bool hasThreadLocal = false;
+        const auto BW = firstStrideLength * StrideRepetitionVector[firstKernel];
 
-            for (auto kernel = firstInPartition; kernel < firstInNextPartition; ++kernel) {
+        bool hasThreadLocal = false;
 
-                const auto strideLength = getKernel(kernel)->getStride();
+        for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
 
-                // Because data is layed out in a "strip mined" format within streamsets, the type of
-                // each "chunk" will be blockwidth items in length.
+            const auto strideLength = getKernel(kernel)->getStride();
 
-                const Rational W{strideLength * StrideRepetitionVector[kernel], BW };
+            // Because data is layed out in a "strip mined" format within streamsets, the type of
+            // each "chunk" will be blockwidth items in length.
+
+            const Rational W{strideLength * StrideRepetitionVector[kernel], BW };
+
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+
+                if (bn.isThreadLocal()) {
+                    // determine the number of bytes this streamset requires per *root kernel* stride
+                    const BufferPort & producerRate = mBufferGraph[output];
+                    const Binding & outputRate = producerRate.Binding;
+                    Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
+                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+                    const auto typeSize = DL.getTypeAllocSize(type);
+                    #else
+                    const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
+                    #endif
+                    const ProcessingRate & rate = outputRate.getRate();
+                    assert (rate.isFixed() || rate.isPopCount());
+                    const auto S = typeSize * W * rate.getUpperBound();
+
+                    assert (S.numerator() > 0);
+
+                    if (S < minVal) {
+                        minVal = S;
+                    }
+
+                    const auto j = mapping[streamSet - FirstStreamSet];
+                    assert (j != -1U);
+                    streamSetFactor[j] = S;
+
+                    assert (bn.UnderflowCapacity == 0);
+
+                    const size_t overflowBytes = bn.OverflowCapacity * typeSize;
+                    maxOverflow = std::max(maxOverflow, overflowBytes);
+
+                    hasThreadLocal = true;
+                }
+            }
+        }
+
+        if (hasThreadLocal) {
+
+            const auto M = Rational{pageSize} / minVal;
+
+            PartitionRootStridesPerThreadLocalPage[partitionId] = M;
+
+            NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = Rational{maxOverflow} / BW;
+
+            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
+                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                    const auto streamSet = target(output, mBufferGraph);
+                    BufferNode & bn = mBufferGraph[streamSet];
+                    if (bn.isThreadLocal()) {
+                        const auto j = mapping[streamSet - FirstStreamSet];
+                        assert (j != -1U);
+                        const auto S = streamSetFactor[j] * M;
+                        assert (S.denominator() == 1);
+                        const auto size = S.numerator();
+                        assert (size > 0);
+                        weight[j] = size;
+                        bn.RequiredCapacity = size;
+                        // record how many consumers exist before the streamset memory can be reused
+                        // (NOTE: the +1 is to indicate this kernel requires each output streamset
+                        // to be distinct even if one or more of the outputs is not used later.)
+                        remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
+                    }
+                }
+            }
+
+            // Mark any overlapping allocations in our interval graph.
+            for (unsigned i = 0; i != numOfThreadLocalStreamSets; ++i) {
+                if (remaining[i] > 0) {
+                    for (unsigned j = 0; j != i; ++j) {
+                        if (remaining[j] > 0) {
+                            add_edge(j, i, I);
+                        }
+                    }
+                }
+            }
+
+
+            // Determine which streamsets are no longer alive
+
+            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
 
                 for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                     const auto streamSet = target(output, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
-
                     if (bn.isThreadLocal()) {
-                        // determine the number of bytes this streamset requires per *root kernel* stride
-                        const BufferPort & producerRate = mBufferGraph[output];
-                        const Binding & outputRate = producerRate.Binding;
-                        Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                        const auto typeSize = DL.getTypeAllocSize(type);
-                        #else
-                        const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
-                        #endif
-                        const ProcessingRate & rate = outputRate.getRate();
-                        assert (rate.isFixed() || rate.isPopCount());
-                        const auto S = typeSize * W * rate.getUpperBound();
-
-                        assert (S.numerator() > 0);
-
-                        if (S < minVal) {
-                            minVal = S;
-                        }
-
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j != -1U);
-                        streamSetFactor[j] = S;
-
-                        assert (bn.UnderflowCapacity == 0);
-
-                        const size_t overflowBytes = bn.OverflowCapacity * typeSize;
-                        maxOverflow = std::max(maxOverflow, overflowBytes);
-
-                        hasThreadLocal = true;
+                        assert (remaining[j] > 0);
+                        remaining[j]--;
                     }
                 }
-            }
-
-            if (hasThreadLocal) {
-
-                const auto M = Rational{pageSize} / minVal;
-
-                PartitionRootStridesPerThreadLocalPage[partitionId] = M;
-
-                NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = Rational{maxOverflow} / BW;;
-
-                for (auto kernel = firstInPartition; kernel < firstInNextPartition; ++kernel) {
-                    for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                        const auto streamSet = target(output, mBufferGraph);
-                        BufferNode & bn = mBufferGraph[streamSet];
-                        if (bn.isThreadLocal()) {
-                            const auto j = mapping[streamSet - FirstStreamSet];
-                            assert (j != -1U);
-                            const auto S = streamSetFactor[j] * M;
-                            assert (S.denominator() == 1);
-                            const auto size = S.numerator();
-                            assert (size > 0);
-                            weight[j] = size;
-                            bn.RequiredCapacity = size;
-                            // record how many consumers exist before the streamset memory can be reused
-                            // (NOTE: the +1 is to indicate this kernel requires each output streamset
-                            // to be distinct even if one or more of the outputs is not used later.)
-                            remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
-                        }
+                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    const auto streamSet = source(input, mBufferGraph);
+                    const BufferNode & bn = mBufferGraph[streamSet];
+                    if (bn.isThreadLocal()) {
+                        const auto j = mapping[streamSet - FirstStreamSet];
+                        assert (j != -1U);
+                        assert (remaining[j] > 0);
+                        remaining[j]--;
                     }
-                }
-
-                // Mark any overlapping allocations in our interval graph.
-                for (unsigned i = 0; i != numOfThreadLocalStreamSets; ++i) {
-                    if (remaining[i] > 0) {
-                        for (unsigned j = 0; j != i; ++j) {
-                            if (remaining[j] > 0) {
-                                add_edge(j, i, I);
-                            }
-                        }
-                    }
-                }
-
-
-                // Determine which streamsets are no longer alive
-
-                for (auto kernel = firstInPartition; kernel < firstInNextPartition; ++kernel) {
-
-                    for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                        const auto streamSet = target(output, mBufferGraph);
-                        const BufferNode & bn = mBufferGraph[streamSet];
-                        if (bn.isThreadLocal()) {
-                            const auto j = mapping[streamSet - FirstStreamSet];
-                            assert (j != -1U);
-                            assert (remaining[j] > 0);
-                            remaining[j]--;
-                        }
-                    }
-                    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                        const auto streamSet = source(input, mBufferGraph);
-                        const BufferNode & bn = mBufferGraph[streamSet];
-                        if (bn.isThreadLocal()) {
-                            const auto j = mapping[streamSet - FirstStreamSet];
-                            assert (j != -1U);
-                            assert (remaining[j] > 0);
-                            remaining[j]--;
-                        }
-                    }
-
                 }
 
             }
 
-            // set the first kernel for the next partition
-            firstInPartition = firstInNextPartition;
-            partitionId = nextPartitionId;
         }
     }
-
-
-
 
     BufferLayoutOptimizer BA(numOfThreadLocalStreamSets, std::move(I), std::move(weight), rng);
     BA.runGA();
 
-    const auto requiredMemory = BA.getBestFitnessValue();
-
+    auto requiredMemory = BA.getBestFitnessValue();
+    assert (requiredMemory > 0);
     auto O = BA.getResult();
 
-    // If we know memory was laid out in such a way that we can trust the scaling of
-    // buffers to not overlap, how do we transform the
-
-
+//    errs() << "requiredMemory=" << requiredMemory << "\n";
 
     // TODO: apart from total memory, when would one layout be better than another?
     // Can we quantify it based on the buffer graph order? Currently, we just take
@@ -402,9 +390,33 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             bn.BufferStart = interval.lower();
             bn.BufferEnd = interval.upper();
             assert (bn.BufferEnd <= requiredMemory);
+
+            const auto producer = parent(streamSet, mBufferGraph);
+            const auto partitionId = KernelPartitionId[producer];
+            const auto root = FirstKernelInPartition[partitionId];
+            const auto K = (MaximumNumOfStrides[root] / PartitionRootStridesPerThreadLocalPage[partitionId]);
+            const auto L = K * bn.BufferEnd;
+            assert (L.denominator() == 1);
+
+            requiredMemory = std::max(requiredMemory, L.numerator());
         }
     }
 
+//    Rational S{1};
+//    for (auto partId = KernelPartitionId[FirstKernel]; partId < PartitionCount; ++partId ) {
+//        const auto firstKernel = FirstKernelInPartition[partId];
+//        if (in_degree(firstKernel, mBufferGraph) == 0) {
+//            const size_t K = StrideRepetitionVector[partId];
+//            const size_t L = MaximumNumOfStrides[firstKernel];
+//            S = std::max(S, Rational{L, K});
+//        }
+//    }
+
+//    const auto M = requiredMemory * ceiling(S);
+
+//    errs() << "requiredMemory'=" << requiredMemory << "\n";
+
+//    assert (M >= requiredMemory);
     RequiredThreadLocalStreamSetMemory = requiredMemory;
 
 }

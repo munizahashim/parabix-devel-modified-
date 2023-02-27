@@ -88,6 +88,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                 const auto streamSet = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (bn.isThreadLocal()) {
+                    assert (bn.BufferEnd > 0);
                     maxMemory = std::max<size_t>(maxMemory, bn.BufferEnd);
                     assert (RequiredThreadLocalStreamSetMemory >= maxMemory);
                 }
@@ -147,6 +148,11 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                     V = b->CreateCeilUDiv(V, b->getSize(cx));
                 }
                 Value * memoryForSegment = b->CreateMul(V, b->getSize(maxMemory));
+
+                #ifdef PRINT_DEBUG_MESSAGES
+                debugPrint(b, "%s.memoryForSegment=%" PRIu64, mCurrentKernelName, memoryForSegment);
+                #endif
+
                 BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
                 BasicBlock * const afterExpansion = b->CreateBasicBlock();
                 Value * const currentMem = b->CreateLoad(mThreadLocalMemorySizePtr);
