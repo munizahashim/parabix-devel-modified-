@@ -362,7 +362,8 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         // thread local buffer memory placement. Since we won't actually know how many strides
         // have been executed until after the root kernel has finished processing, we assume the
         // maximum was used.
-        mThreadLocalScalingFactor = mMaximumNumOfStridesAtExitPhi;
+        mThreadLocalScalingFactor =
+            b->CreateCeilUDivRational(mMaximumNumOfStridesAtExitPhi, MaximumNumOfStrides[mKernelId]);
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {        

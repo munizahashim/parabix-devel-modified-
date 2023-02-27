@@ -205,9 +205,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
     RequiredThreadLocalStreamSetMemory = 0;
 
-    PartitionRootStridesPerThreadLocalPage.resize(PartitionCount);
+//    PartitionRootStridesPerThreadLocalPage.resize(PartitionCount);
 
-    NumOfPartialOverflowStridesPerPartitionRootStride.resize(PartitionCount);
+//    NumOfPartialOverflowStridesPerPartitionRootStride.resize(PartitionCount);
 
     unsigned numOfThreadLocalStreamSets = 0U;
 
@@ -246,7 +246,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
         const auto firstStrideLength = getKernel(firstKernel)->getStride();
 
-        const auto BW = firstStrideLength * StrideRepetitionVector[firstKernel];
+        const auto BW = blockWidth * StrideRepetitionVector[firstKernel];
 
         bool hasThreadLocal = false;
 
@@ -275,22 +275,32 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     #endif
                     const ProcessingRate & rate = outputRate.getRate();
                     assert (rate.isFixed() || rate.isPopCount());
-                    const auto S = typeSize * W * rate.getUpperBound();
+                    const auto T = typeSize * rate.getUpperBound();
 
-                    assert (S.numerator() > 0);
+//                    const auto S = W * T;
 
-                    if (S < minVal) {
-                        minVal = S;
-                    }
+//                    assert (S.numerator() > 0);
+
+//                    if (S < minVal) {
+//                        minVal = S;
+//                    }
 
                     const auto j = mapping[streamSet - FirstStreamSet];
                     assert (j != -1U);
-                    streamSetFactor[j] = S;
+//                    streamSetFactor[j] = S;
 
-                    assert (bn.UnderflowCapacity == 0);
-
+                    const auto size = MaximumNumOfStrides[kernel] * T;
+                    assert (size.denominator() == 1);
                     const size_t overflowBytes = bn.OverflowCapacity * typeSize;
+                    weight[j] = round_up_to(size.numerator() + overflowBytes, pageSize);
+                    assert ((weight[j] % pageSize) == 0);
+                    assert (bn.UnderflowCapacity == 0);
                     maxOverflow = std::max(maxOverflow, overflowBytes);
+
+                    // record how many consumers exist before the streamset memory can be reused
+                    // (NOTE: the +1 is to indicate this kernel requires each output streamset
+                    // to be distinct even if one or more of the outputs is not used later.)
+                    remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
 
                     hasThreadLocal = true;
                 }
@@ -299,32 +309,32 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
         if (hasThreadLocal) {
 
-            const auto M = Rational{pageSize} / minVal;
+//            const auto M = Rational{pageSize} / minVal;
 
-            PartitionRootStridesPerThreadLocalPage[partitionId] = M;
+//            PartitionRootStridesPerThreadLocalPage[partitionId] = M;
 
-            NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = Rational{maxOverflow} / BW;
+//            NumOfPartialOverflowStridesPerPartitionRootStride[partitionId] = Rational{maxOverflow} / BW;
 
-            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        const auto S = streamSetFactor[j] * M;
-                        assert (S.denominator() == 1);
-                        const auto size = S.numerator();
-                        assert (size > 0);
-                        weight[j] = size;
-                        bn.RequiredCapacity = size;
-                        // record how many consumers exist before the streamset memory can be reused
-                        // (NOTE: the +1 is to indicate this kernel requires each output streamset
-                        // to be distinct even if one or more of the outputs is not used later.)
-                        remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
-                    }
-                }
-            }
+//            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
+//                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//                    const auto streamSet = target(output, mBufferGraph);
+//                    BufferNode & bn = mBufferGraph[streamSet];
+//                    if (bn.isThreadLocal()) {
+//                        const auto j = mapping[streamSet - FirstStreamSet];
+//                        assert (j != -1U);
+//                        const auto S = streamSetFactor[j] * M;
+//                        assert (S.denominator() == 1);
+//                        const auto size = S.numerator();
+//                        assert (size > 0);
+//                        // weight[j] = size;
+//                        bn.RequiredCapacity = size;
+//                        // record how many consumers exist before the streamset memory can be reused
+//                        // (NOTE: the +1 is to indicate this kernel requires each output streamset
+//                        // to be distinct even if one or more of the outputs is not used later.)
+//                        remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
+//                    }
+//                }
+//            }
 
             // Mark any overlapping allocations in our interval graph.
             for (unsigned i = 0; i != numOfThreadLocalStreamSets; ++i) {
@@ -373,6 +383,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
 
     auto requiredMemory = BA.getBestFitnessValue();
     assert (requiredMemory > 0);
+    assert ((requiredMemory % pageSize) == 0);
     auto O = BA.getResult();
 
 //    errs() << "requiredMemory=" << requiredMemory << "\n";
@@ -388,17 +399,19 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
             const auto j = mapping[i];
             const auto & interval = intervals[j];
             bn.BufferStart = interval.lower();
+            assert ((bn.BufferStart % pageSize) == 0);
             bn.BufferEnd = interval.upper();
+            assert ((bn.BufferEnd % pageSize) == 0);
             assert (bn.BufferEnd <= requiredMemory);
 
-            const auto producer = parent(streamSet, mBufferGraph);
-            const auto partitionId = KernelPartitionId[producer];
-            const auto root = FirstKernelInPartition[partitionId];
-            const auto K = (MaximumNumOfStrides[root] / PartitionRootStridesPerThreadLocalPage[partitionId]);
-            const auto L = K * bn.BufferEnd;
-            assert (L.denominator() == 1);
+//            const auto producer = parent(streamSet, mBufferGraph);
+//            const auto partitionId = KernelPartitionId[producer];
+//            const auto root = FirstKernelInPartition[partitionId];
+//            const auto K = (MaximumNumOfStrides[root] / PartitionRootStridesPerThreadLocalPage[partitionId]);
+//            const auto L = K * bn.BufferEnd;
+//            assert (L.denominator() == 1);
 
-            requiredMemory = std::max(requiredMemory, L.numerator());
+//            requiredMemory = std::max(requiredMemory, L.numerator());
         }
     }
 

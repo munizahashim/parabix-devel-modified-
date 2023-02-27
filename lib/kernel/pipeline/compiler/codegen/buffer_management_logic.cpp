@@ -877,8 +877,6 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     b->SetInsertPoint(copyExit);
 }
 
-#warning MAKE CUSTOM THREADLOCAL STREAMSET BUFFER
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief prepareLinearBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -950,8 +948,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
 
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
-    Value * mult = nullptr;
-
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -966,38 +962,8 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             #endif
 
             #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-            if (mult == nullptr) {
-
-                assert (mThreadLocalScalingFactor);
-
-                // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
-
-                const auto & BC = NumOfPartitionOverflowVectors[mCurrentPartitionId];
-                const auto & XY = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
-
-                Value * V = mThreadLocalScalingFactor;
-                if (BC.denominator() > 1) {
-                    V = b->CreateMul(V, b->getSize(BC.denominator()));
-                }
-                if (BC.numerator() > 0) {
-                    V = b->CreateAdd(V, b->getSize(BC.numerator()));
-                }
-                if (XY.denominator() > 1) {
-                    V = b->CreateMul(V, b->getSize(XY.denominator()));
-                }
-                const auto cx = BC.denominator() * XY.numerator(); assert (cx > 0);
-                if (cx > 1) {
-                    V = b->CreateCeilUDiv(V, b->getSize(cx));
-                }
-                mult = V;
-
-//                b->CallPrintInt("mThreadLocalScalingFactor", mThreadLocalScalingFactor);
-//                const auto S = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
-//                assert (S.numerator() > 0);
-//                mult = b->CreateCeilUDivRational(mThreadLocalScalingFactor, S);
-//                b->CallPrintInt("mult", mult);
-            }
-            Value * const startOffset = b->CreateMul(b->getSize(start), mult);
+            assert (mThreadLocalScalingFactor);
+            Value * const startOffset = b->CreateMul(mThreadLocalScalingFactor, b->getSize(start));
             #else
             Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
             #endif
@@ -1012,6 +978,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             Value * ba = b->CreateGEP(mThreadLocalStreamSetBaseAddress, offset);
             ba = b->CreatePointerCast(ba, ptrTy);
             buffer->setBaseAddress(b, ba);
+
         }
     }
 }

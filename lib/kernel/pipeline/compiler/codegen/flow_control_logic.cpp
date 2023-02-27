@@ -9,10 +9,6 @@
 // partition root to promote this. By doing so, they may have to malloc a larger thread local
 // memory pool or increase the repetition length of repeating streamsets.
 
-#define INCREASE_WEIGHT_FACTOR (5)
-
-#define DECREASE_WEIGHT_FACTOR (3)
-
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -128,31 +124,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
             if (maxMemory > 0) {
 
-                // CEIL (  (a + (b/c)) / (x/y) ) = CEIL ( y * (ac + b) / cx )
-
-                const auto & BC = NumOfPartitionOverflowVectors[mCurrentPartitionId];
-                const auto & XY = PartitionRootStridesPerThreadLocalPage[mCurrentPartitionId];
-
-                Value * V = mMaximumNumOfStrides;
-                if (BC.denominator() > 1) {
-                    V = b->CreateMul(V, b->getSize(BC.denominator()));
-                }
-                if (BC.numerator() > 0) {
-                    V = b->CreateAdd(V, b->getSize(BC.numerator()));
-                }
-                if (XY.denominator() > 1) {
-                    V = b->CreateMul(V, b->getSize(XY.denominator()));
-                }
-                const auto cx = BC.denominator() * XY.numerator(); assert (cx > 0);
-                if (cx > 1) {
-                    V = b->CreateCeilUDiv(V, b->getSize(cx));
-                }
-                Value * memoryForSegment = b->CreateMul(V, b->getSize(maxMemory));
-
-                #ifdef PRINT_DEBUG_MESSAGES
-                debugPrint(b, "%s.memoryForSegment=%" PRIu64, mCurrentKernelName, memoryForSegment);
-                #endif
-
+                mThreadLocalScalingFactor =
+                    b->CreateCeilUDivRational(mMaximumNumOfStrides, MaximumNumOfStrides[mKernelId]);
+                Value * memoryForSegment = b->CreateMul(mThreadLocalScalingFactor, b->getSize(maxMemory));
                 BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
                 BasicBlock * const afterExpansion = b->CreateBasicBlock();
                 Value * const currentMem = b->CreateLoad(mThreadLocalMemorySizePtr);
@@ -173,24 +147,25 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                 b->CreateBr(afterExpansion);
 
                 b->SetInsertPoint(afterExpansion);
+            } else {
+                mThreadLocalScalingFactor = nullptr;
             }
 
         } else {
             const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
             mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
+            mThreadLocalScalingFactor = mExpectedNumOfStridesMultiplier;
         }
-
         if (maxMemory > 0) {
             mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalPtr);
         } else {
             mThreadLocalStreamSetBaseAddress = nullptr;
+            mThreadLocalScalingFactor = nullptr;
         }
-
         #else
         const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
         mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
         #endif
-        mThreadLocalScalingFactor = mMaximumNumOfStrides;
     } else {
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
