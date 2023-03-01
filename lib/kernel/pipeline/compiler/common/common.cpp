@@ -1,5 +1,5 @@
 #include "common.hpp"
-
+#include "../config.h"
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -205,6 +205,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
 #ifdef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     return false;
 #else
+
     const Kernel * const kernelObj = getKernel(kernel);
 
     bool isExplicitlyMarkedAsStateFree = false;
@@ -246,7 +247,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
                 return false;
         }
 
-        if (p.IsDeferred) {
+        if (p.isDeferred()) {
             return false;
         }
     }
@@ -269,7 +270,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
                 return false;
         }
 
-        if (p.IsDeferred || p.LookBehind) {
+        if (p.isDeferred() || p.LookBehind) {
             return false;
         }
     }

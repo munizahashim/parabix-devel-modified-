@@ -66,15 +66,15 @@ StreamExpandKernel::StreamExpandKernel(BuilderRef b,
 {Binding{"base", base}},
 {}, {})
 , mFieldWidth(FieldWidth)
-, mSelectedStreamCount(expanded->getNumElements()),
-    mOptimization(opt) {
-        setStride(StreamExpandStrideSize * b->getBitBlockWidth());
-        if (zeroExtend) {
-            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth())));
-        } else {
-            mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth())));
-        }
+, mSelectedStreamCount(expanded->getNumElements())
+, mOptimization(opt) {
+    setStride(StreamExpandStrideSize * b->getBitBlockWidth());
+    if (zeroExtend) {
+        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b->getBitBlockWidth())));
+    } else {
+        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b->getBitBlockWidth())));
     }
+}
 
 void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
     Type * fieldWidthTy = b->getIntNTy(mFieldWidth);

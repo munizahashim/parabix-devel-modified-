@@ -43,7 +43,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
-        if (bn.isOwned() && isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+        if (bn.isOwned() && isa<DynamicBuffer>(buffer) && isMultithreaded()) {
             assert (bn.Locality != BufferLocality::ThreadLocal);
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
@@ -245,7 +245,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
  * @brief freePendingFreeableDynamicBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
-    if (LLVM_LIKELY(mNumOfThreads != 1 || mIsNestedPipeline)) {
+    if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
             if (bn.isNonThreadLocal() && bn.isOwned()) {
@@ -280,7 +280,7 @@ void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
             const auto k = bp.Port.Number;
 
             Value * itemCount = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 itemCount = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             } else {
                 itemCount = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
@@ -368,7 +368,7 @@ void PipelineCompiler::readAvailableItemCounts(BuilderRef b) {
                     writeTransitoryConsumedItemCount(b, streamSet, produced);
                 } else {
                     const auto prefix = makeBufferName(producer, outputPort.Port);
-                    if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                    if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                         produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                     } else {
                         produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
@@ -393,14 +393,14 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
 
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree && bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         Value * const processedPtr = b->getScalarFieldPtr(prefix + suffix);
         mProcessedItemCountPtr[inputPort] = processedPtr;
         Value * itemCount = b->CreateLoad(processedPtr);
         mInitiallyProcessedItemCount[inputPort] = itemCount;
-        if (br.IsDeferred) {
+        if (br.isDeferred()) {
             Value * const deferred = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             mProcessedDeferredItemCountPtr[inputPort] = deferred;
             itemCount = b->CreateLoad(deferred);
@@ -421,14 +421,14 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
 
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree && bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         Value * const produced = b->getScalarFieldPtr(prefix + suffix);
         mProducedItemCountPtr[outputPort] = produced;
         Value * const itemCount = b->CreateLoad(produced);
         mInitiallyProducedItemCount[streamSet] = itemCount;
-        if (br.IsDeferred) {
+        if (br.isDeferred()) {
             Value * const deferred = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             mProducedDeferredItemCountPtr[outputPort] = deferred;
             Value * const itemCount = b->CreateLoad(deferred);
@@ -459,7 +459,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree && bn.isInternal()) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {
@@ -470,7 +470,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, inputPort);
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, mUpdatedProcessedPhi[inputPort]);
         #endif
-        if (br.IsDeferred) {
+        if (br.isDeferred()) {
             assert (!mCurrentKernelIsStateFree);
             b->CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
@@ -496,7 +496,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree && bn.isInternal()) {
+        if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
             ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
         } else {
@@ -507,7 +507,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
         const auto prefix = makeBufferName(mKernelId, outputPort);
         debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, mUpdatedProducedPhi[outputPort]);
         #endif
-        if (br.IsDeferred) {
+        if (br.isDeferred()) {
             assert (!mCurrentKernelIsStateFree);
             b->CreateStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort]);
             #ifdef PRINT_DEBUG_MESSAGES
@@ -565,7 +565,7 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) cons
         const BufferPort & rd = mBufferGraph[e];
         assert (rd.Port.Type == PortType::Output);
         const StreamSetPort port(PortType::Output, rd.Port.Number);
-        if (rd.IsManaged) {
+        if (rd.isManaged()) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             assert (bn.Locality != BufferLocality::ThreadLocal);

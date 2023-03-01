@@ -489,17 +489,17 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
 
         out << " {" << port.SymbolicRateId << '}';
 
-        if (port.IsPrincipal) {
+        if (port.isPrincipal()) {
             out << " [P]";
         }
-        if (port.IsShared) {
+        if (port.isShared()) {
             out << " [S]";
         }
         if (port.TransitiveAdd) {
             out << " +" << port.TransitiveAdd;
         }
         if (binding.hasAttribute(AttrId::ZeroExtended)) {
-            if (port.IsZeroExtended) {
+            if (port.isZeroExtended()) {
                 out << " [Z]";
             } else {
                 out << " [z&#x336;]";
@@ -545,7 +545,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         out << "\\n" << name << "\"";
         if (isLocal) {
             out << " style=dashed";
-        } else if (port.CanModifySegmentLength) {
+        } else if (port.canModifySegmentLength()) {
             out << " style=bold";
         }
         out << "];\n";

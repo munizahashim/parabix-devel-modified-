@@ -111,7 +111,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
-        if (port.CanModifySegmentLength) {
+        if (port.canModifySegmentLength()) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
             maxSegmentLength = reduceMaximumNumOfStridesForRepeatingStreamSets(b, streamSet, maxSegmentLength);
@@ -122,7 +122,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
-        if (port.CanModifySegmentLength) {
+        if (port.canModifySegmentLength()) {
             const auto streamSet = target(output, mBufferGraph);
             checkForSufficientOutputSpace(b, port, streamSet);
         }
@@ -149,7 +149,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
-            if (port.CanModifySegmentLength) {
+            if (port.canModifySegmentLength()) {
                 Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
                 numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
             }
@@ -182,7 +182,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     Value * numOfLinearOutputStrides = numOfLinearStrides;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
-        if (port.CanModifySegmentLength) {
+        if (port.canModifySegmentLength()) {
             Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
             numOfLinearOutputStrides = b->CreateUMin(numOfLinearOutputStrides, strides);
         }
@@ -191,7 +191,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         Value * const cond = b->CreateIsNull(numOfLinearOutputStrides);
         numOfLinearStrides = b->CreateSelect(cond, numOfLinearStrides, numOfLinearOutputStrides);
     }
-
 
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
@@ -210,7 +209,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
-        if (!port.CanModifySegmentLength) {
+        if (!port.canModifySegmentLength()) {
             const auto streamSet = target(e, mBufferGraph);
             ensureSufficientOutputSpace(b, port, streamSet);
         }
@@ -335,7 +334,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             if (!mIsPartitionRoot) {
                 for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
                     const BufferPort & port = mBufferGraph[input];
-                    if (!port.CanModifySegmentLength) {
+                    if (!port.canModifySegmentLength()) {
                         Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
                         numOfFinalLinearStrides = b->CreateUMin(numOfFinalLinearStrides, strides);
                     }
@@ -471,7 +470,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     #endif
 
     Value * hasEnough = b->CreateICmpUGE(accessible, required);
-    if (LLVM_LIKELY(mIsPartitionRoot && !port.IsZeroExtended)) {
+    if (LLVM_LIKELY(mIsPartitionRoot && !port.isZeroExtended())) {
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
         } else {
@@ -578,7 +577,7 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
             const BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_UNLIKELY(bn.isConstant())) continue;
             const BufferPort & br =  mBufferGraph[e];
-            if (LLVM_UNLIKELY(br.IsZeroExtended)) {
+            if (LLVM_UNLIKELY(br.isZeroExtended())) {
                 continue;
             }
             Value * const closed = isClosed(b, br.Port); assert (closed);
@@ -608,7 +607,6 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasMoreInput
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -622,79 +620,66 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
     if (mIsPartitionRoot) {
 
-        ConstantInt * const i1_TRUE = b->getTrue();
+        ConstantInt * const i1_FALSE = b->getFalse();
+        Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
 
-        BasicBlock * const insertBefore = mKernelCompletionCheck->getNextNode();
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
 
-        BasicBlock * const lastTestExit = b->CreateBasicBlock("", insertBefore);
+        BasicBlock * const lastTestExit = b->CreateBasicBlock("", nextNode);
         PHINode * const enoughInputPhi = PHINode::Create(b->getInt1Ty(), 4, "", lastTestExit);
 
-        bool firstTest = true;
-
-        graph_traits<BufferGraph>::in_edge_iterator ei, ei_end;
-        std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
+        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
+        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
 
         Value * enoughInput = b->CreateAnd(notAtSegmentLimit, nonFinal);
 
         ConstantInt * const amount = b->getSize(StrideStepLength[mKernelId]);
         Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
 
-        while (ei != ei_end) {
-            const auto e = *ei++;
-            const auto streamSet = source(e, mBufferGraph);
+        for (auto ei = ei_begin; ei != ei_end; ++ei) {
+
+            const auto streamSet = source(*ei, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_UNLIKELY(bn.isConstant())) continue;
-            const BufferPort & port =  mBufferGraph[e];
-            if (LLVM_UNLIKELY(port.IsZeroExtended)) {
-                continue;
+            const BufferPort & port =  mBufferGraph[*ei];
+            const Binding & binding = port.Binding;
+            const ProcessingRate & rate = binding.getRate();
+
+            // If the next rate we check is a PartialSum, always check it; otherwise we expect that
+            // if this test passes the first check, it will pass the remaining ones so don't bother
+            // creating a branch for the remaining checks.
+
+            if (rate.isPartialSum() || ei == ei_begin) {
+                BasicBlock * const nextTest = b->CreateBasicBlock("", lastTestExit);
+                enoughInputPhi->addIncoming(i1_FALSE, b->GetInsertBlock());
+
+                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
+                b->SetInsertPoint(nextTest);
+                enoughInput = nullptr;
             }
 
-            Value * const processed = mProcessedItemCount[port.Port]; // mAlreadyProcessedPhi[port.Port];
-
-            Value * avail = mLocallyAvailableItems[streamSet];
-
+            Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
+            Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
             Value * const closed = isClosed(b, port.Port);
 
-            if (port.Add) {
-                Constant * const ZERO = b->getSize(0);
-                Constant * const ADD = b->getSize(port.Add);
-                Value * const added = b->CreateSelect(closed, ADD, ZERO);
+            if (LLVM_UNLIKELY(port.isZeroExtended())) {
+                avail = b->CreateSelect(closed, MAX_INT, avail);
+            } else if (port.Add) {
+                Value * const added = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
                 avail = b->CreateAdd(avail, added);
             }
 
             Value * const remaining = b->CreateSub(avail, processed, "remaining");
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+            Value * const hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
 
-            Value * hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
-
-            // If the next rate we check is a PartialSum, always check it; otherwise we expect that
-            // if this test passes the first check, it will pass the remaining ones so don't bother
-            // creating a branch for the remaining checks.
-            bool useBranch = firstTest;
-            for (auto ej = ei; ej != ei_end; ++ej) {
-                const BufferPort & next =  mBufferGraph[*ej];
-                if (LLVM_UNLIKELY(next.IsZeroExtended)) {
-                    continue;
-                }
-                const Binding & binding = next.Binding;
-                const ProcessingRate & rate = binding.getRate();
-                useBranch = rate.isPartialSum();
-                break;
-            }
-
-            if (useBranch) {
-                BasicBlock * const nextTest = b->CreateBasicBlock("", insertBefore);
-                BasicBlock * const exitBlock = b->GetInsertBlock();
-                enoughInputPhi->addIncoming(b->getFalse(), exitBlock);
+            if (enoughInput) {
                 enoughInput = b->CreateAnd(enoughInput, hasEnough);
-
-                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
-                b->SetInsertPoint(nextTest);
-                enoughInput = i1_TRUE;
             } else {
-                enoughInput = b->CreateAnd(enoughInput, hasEnough);
+                enoughInput = hasEnough;
             }
+
         }
         enoughInputPhi->addIncoming(enoughInput, b->GetInsertBlock());
         b->CreateBr(lastTestExit);
@@ -708,7 +693,6 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -718,6 +702,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     assert (inputPort.Type == PortType::Input);
 
     auto & A = mAccessibleInputItems[inputPort.Number];
+
     Value * const alreadyComputed = A[useOverflow ? WITH_OVERFLOW : WITHOUT_OVERFLOW];
     if (alreadyComputed) {
         return alreadyComputed;
@@ -734,7 +719,6 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
-
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);
@@ -763,7 +747,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     Value * accessible = buffer->getLinearlyAccessibleItems(b, processed, available, overflow);
     #ifndef DISABLE_ZERO_EXTEND
-    if (LLVM_UNLIKELY(port.IsZeroExtended)) {
+    if (LLVM_UNLIKELY(port.isZeroExtended())) {
         // To zero-extend an input stream, we must first exhaust all input for this stream before
         // switching to a "zeroed buffer". The size of the buffer will be determined by the final
         // number of non-zero-extended strides.
@@ -772,7 +756,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
         // that can be read by a single iteration of any consuming kernel.
 
         Value * const deferred = mCurrentProcessedDeferredItemCountPhi[inputPort];
-        Value * const itemCount = port.IsDeferred ? deferred : processed;
+        Value * const itemCount = port.isDeferred() ? deferred : processed;
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
         Value * const closed = isClosed(b, inputPort);
         Value * const exhausted = b->CreateICmpUGE(itemCount, available);
@@ -803,7 +787,6 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
                         b->GetString(inputBinding.getName()),
                         processed, available);
     }
-
     // cache the values for later use
     if (useOverflow) {
         A[WITH_OVERFLOW] = accessible;
@@ -859,7 +842,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     Value * priorBufferPtr = nullptr;
-    if (isa<DynamicBuffer>(buffer) && (mNumOfThreads != 1 || mIsNestedPipeline)) {
+    if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
         priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
         Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
@@ -915,7 +898,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, bn, port, buffer);
         }
-        if (mNumOfThreads != 1 || mIsNestedPipeline) {
+        if (isMultithreaded()) {
             b->CreateStore(priorBuffer, priorBufferPtr);
         } else {
             b->CreateFree(priorBuffer);
@@ -1654,30 +1637,21 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         const auto output = in_edge(streamSet, mBufferGraph);
         const BufferPort & outputPort = mBufferGraph[output];
         Value * const produced = mProducedAtTermination[outputPort.Port];
-
         const BufferNode & bn = mBufferGraph[streamSet];
 
         const auto bw = b->getBitBlockWidth();
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
-        const auto maxStepFactor = mPartialSumStepFactorGraph[e];
         const auto spanLength = bn.OverflowCapacity;
         assert (spanLength > 0);
-
-        // const auto prefix = makeBufferName(mKernelId, outputPort.Port);
 
         ConstantInt * const sz_stepsPerBlock = b->getSize(stepsPerBlock);
         ConstantInt * const sz_ONE = b->getSize(1);
         Value * const index = b->CreateSaturatingSub(produced, sz_ONE);
-
-        ConstantInt * const sz_maxStepFactor = b->getSize(maxStepFactor);
-
-        Value * const start = b->CreateRoundDown(index, sz_maxStepFactor);
+        Value * const start = b->CreateRoundDown(index, sz_stepsPerBlock);
         StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
-
         VectorType * const vecTy = b->fwVectorType(fw);
-
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 
         ConstantInt * const sz_ZERO = b->getSize(0);
@@ -1689,7 +1663,6 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const baseValue = b->CreateBlockAlignedLoad(vecAddr);
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
         Value * const total = b->CreateExtractElement(baseValue, offset);
-
         Value * const splat = b->simd_fill(fw, total);
         Value * const mask = b->mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b->CreateAnd(splat, mask);
@@ -1701,6 +1674,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
             b->CreateBlockAlignedStore(splat, ptr);
         }
 
+        ConstantInt * const sz_maxStepFactor = b->getSize(spanLength * stepsPerBlock);
         mProducedAtTermination[outputPort.Port] = b->CreateRoundUp(produced, sz_maxStepFactor);
     }
 

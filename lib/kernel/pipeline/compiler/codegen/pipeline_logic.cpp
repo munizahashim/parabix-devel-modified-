@@ -194,11 +194,9 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         if (LLVM_UNLIKELY(isStateless)) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_LIKELY(bn.isInternal())) {
-                mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
-            }
+            mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
+        if (LLVM_UNLIKELY(br.isDeferred())) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
@@ -209,12 +207,9 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
             const auto streamSet = target(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_LIKELY(bn.isInternal())) {
-                mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
-            }
+            mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
-        if (LLVM_UNLIKELY(br.IsDeferred)) {
+        if (LLVM_UNLIKELY(br.isDeferred())) {
             mTarget->addInternalScalar(sizeTy, prefix + DEFERRED_ITEM_COUNT_SUFFIX, groupId);
         }
     }
@@ -830,6 +825,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->CreateStore(mSegNo, ptr);
         concludeStridesPerSegmentRecording(b);
     }
+
+   // b->getModule()->dump();
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

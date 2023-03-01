@@ -121,7 +121,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         if (LLVM_UNLIKELY(produced == nullptr)) {
             const auto producer = source(e, mBufferGraph);
             const auto prefix = makeBufferName(producer, port.Port);
-            if (LLVM_UNLIKELY(port.IsDeferred)) {
+            if (LLVM_UNLIKELY(port.isDeferred())) {
                 produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             } else {
                 produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);

@@ -139,7 +139,9 @@ Value * CBuilder::CreateCeilUDiv(Value * const number, Value * const divisor, co
 Value * CBuilder::CreateRoundDown(Value * const number, Value * const divisor, const Twine Name) {
     if (isa<ConstantInt>(divisor)) {
         const auto d = cast<ConstantInt>(divisor)->getZExtValue();
-        if (is_power_2(d)) {
+        if (LLVM_UNLIKELY(d == 1)) {
+            return number;
+        } else if (is_power_2(d)) {
             return CreateAnd(number, ConstantExpr::getNeg(cast<ConstantInt>(divisor)));
         }
     }
@@ -149,7 +151,9 @@ Value * CBuilder::CreateRoundDown(Value * const number, Value * const divisor, c
 Value * CBuilder::CreateRoundUp(Value * const number, Value * const divisor, const Twine Name) {
     if (isa<ConstantInt>(divisor)) {
         const auto d = cast<ConstantInt>(divisor)->getZExtValue();
-        if (is_power_2(d)) {
+        if (LLVM_UNLIKELY(d == 1)) {
+            return number;
+        } else if (is_power_2(d)) {
             Constant * const ONE = ConstantInt::get(divisor->getType(), 1);
             Constant * const toAdd = ConstantExpr::getSub(cast<ConstantInt>(divisor), ONE);
             return CreateAnd(CreateAdd(number, toAdd), ConstantExpr::getNeg(cast<ConstantInt>(divisor)));

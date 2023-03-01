@@ -21,7 +21,7 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
                 k += br.Add;
                 k -= br.Truncate;
                 minAddK = std::min(minAddK, k);
-                if (LLVM_UNLIKELY(br.IsPrincipal)) {
+                if (LLVM_UNLIKELY(br.isPrincipal())) {
                     minAddK = k;
                     noPrincipal = false;
                     break;

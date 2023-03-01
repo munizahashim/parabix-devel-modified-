@@ -133,7 +133,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     readPAPIMeasurement(b, FirstKernel, PAPIReadInitialMeasurementArray);
     #endif
     mKernelStartTime = startCycleCounter(b);
-    if (mNumOfThreads != 1 || mIsNestedPipeline) {
+    if (isMultithreaded()) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
         updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
@@ -240,7 +240,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
         // the prior produced count.
 
 
-        const unsigned k = streamSet - FirstStreamSet;
+        const auto k = streamSet - FirstStreamSet;
 
         const BufferPort & br = mBufferGraph[e];
         // Select/load the appropriate produced item count
@@ -250,8 +250,9 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             if (kernel < mKernelId) {
                 produced = mLocallyAvailableItems[streamSet];
             } else if (kernel == mKernelId && !mAllowDataParallelExecution) {
+                assert (!mCurrentKernelIsStateFree);
                 if (fromKernelEntryBlock) {
-                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mInitiallyProducedDeferredItemCount[streamSet];
                     } else {
                         produced = mInitiallyProducedItemCount[streamSet];
@@ -259,7 +260,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 } else if (mProducedAtJumpPhi[br.Port]) {
                     produced = mProducedAtJumpPhi[br.Port];
                 } else {
-                    if (LLVM_UNLIKELY(br.IsDeferred)) {
+                    if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mAlreadyProducedDeferredPhi[br.Port];
                     } else {
                         produced = mAlreadyProducedPhi[br.Port];
@@ -267,11 +268,13 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 }
             } else { // if (kernel > mKernelId) {
                 const auto prefix = makeBufferName(kernel, br.Port);
-                if (LLVM_UNLIKELY(br.IsDeferred)) {
-                    produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                Value * ptr = nullptr;
+                if (LLVM_UNLIKELY(br.isDeferred() && !fromKernelEntryBlock)) {
+                    ptr = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 } else {
-                    produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                    ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
                 }
+                produced = b->CreateLoad(ptr);
             }
 
             assert (isFromCurrentFunction(b, produced, false));
@@ -368,13 +371,16 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     assert (firstKernelInTargetPartition <= PipelineOutput);
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    const auto targetLock = firstKernelInTargetPartition;
-    #else
-    const auto targetLock = (firstKernelInTargetPartition == PipelineOutput) ? LastKernel : firstKernelInTargetPartition;
+    assert (firstKernelInTargetPartition != PipelineOutput);
     #endif
-    const auto type = isDataParallel(targetLock) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
 
-    acquireSynchronizationLock(b, targetLock, type, segNo);
+    if (firstKernelInTargetPartition == PipelineOutput) {
+        const auto type = isDataParallel(LastKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLock(b, LastKernel, type, segNo);
+    } else {
+        const auto type = isDataParallel(firstKernelInTargetPartition) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
+    }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         const auto partId = KernelPartitionId[firstKernelInTargetPartition];
@@ -469,7 +475,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & br = mBufferGraph[e];
             Value * produced = nullptr;
-            if (LLVM_UNLIKELY(br.IsDeferred)) {
+            if (LLVM_UNLIKELY(br.isDeferred())) {
                 produced = mInitiallyProducedDeferredItemCount[streamSet];
             } else {
                 produced = mInitiallyProducedItemCount[streamSet];
@@ -513,6 +519,7 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     assert (mCurrentPartitionId < jumpPartitionId);
     const auto targetKernelId = FirstKernelInPartition[jumpPartitionId];
     assert (targetKernelId > (mKernelId + 1U));
+
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
@@ -655,6 +662,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
  * @brief ensureAnyExternalProcessedAndProducedCountsAreUpdated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry) {
+#if 0
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isExternal())) {
@@ -675,13 +683,13 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                         Value * itemCount = nullptr;
                         if (producer == mKernelId) {
                             if (mMayLoopToEntry && fromKernelEntry) {
-                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                     itemCount = mAlreadyProducedDeferredPhi[outputPort.Port]; assert (itemCount);
                                 } else {
                                     itemCount = mAlreadyProducedPhi[outputPort.Port]; assert (itemCount);
                                 }
                             } else {
-                                if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                     itemCount = mInitiallyProducedDeferredItemCount[streamSet]; assert (itemCount);
                                 } else {
                                     itemCount = mInitiallyProducedItemCount[streamSet]; assert (itemCount);
@@ -689,7 +697,7 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                             }
                         } else {
                             const auto prefix = makeBufferName(producer, outputPort.Port);
-                            if (LLVM_UNLIKELY(outputPort.IsDeferred)) {
+                            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
                                 itemCount = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                             } else {
                                 itemCount = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
@@ -722,6 +730,7 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
             }
         }
     }
+#endif
 }
 
 } // end of namespace kernel
