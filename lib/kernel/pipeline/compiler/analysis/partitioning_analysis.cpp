@@ -142,7 +142,6 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
         if (node.Type == RelationshipNode::IsKernel) {
 
             bool hasInputRateChange = false;
-            bool demarcateOutputs = false;
 
             if (in_degree(i, G) == 0) {
                 if (out_degree(i, G) != 0) {
@@ -174,7 +173,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                         }
                     } else {
                         hasInputRateChange = true;
-                        V.reset();
+                        break;
                     }
                 }
             }
@@ -183,15 +182,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 V.set(nextRateId++);
             }
 
-            unsigned demarcationId = 0;
-            if (LLVM_UNLIKELY(demarcateOutputs)) {
-                assert (nextRateId > 0);
-                demarcationId = nextRateId++;
-            }
-
-            const Kernel * const kernelObj = node.Kernel;
-
-            assert (V.any() || kernelObj == mPipelineKernel);
+            assert (V.any() || node.Kernel == mPipelineKernel);
 
             // Now iterate through the outputs
             for (const auto e : make_iterator_range(out_edges(i, G))) {
@@ -202,10 +193,6 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 const ProcessingRate & rate = b.getRate();
                 BitSet & O = G[target(e, G)];
                 O |= V;
-                assert (demarcateOutputs ^ (demarcationId == 0));
-                if (LLVM_UNLIKELY(demarcationId != 0)) {
-                    O.set(demarcationId);
-                }
                 if (rate.isFixed()) {
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
@@ -952,32 +939,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     PartitionCount = partitionCount;
 
-    #ifdef PRINT_GRAPH_BITSETS
-    BEGIN_SCOPED_REGION
-    auto & out = errs();
-
-    out << "digraph \"H2\" {\n";
-    for (auto v : make_iterator_range(vertices(P))) {
-        const PartitionData & D = P[v];
-        out << "v" << v << " [label=\"";
-        for (const auto k : D.Kernels) {
-            const RelationshipNode & node = Relationships[k];
-            assert (node.Type == RelationshipNode::IsKernel);
-            out << k << ". " << node.Kernel->getName() << "\\n";
-        }
-        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
-    }
-    for (auto e : make_iterator_range(edges(P))) {
-        const auto s = source(e, P);
-        const auto t = target(e, P);
-        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
-    END_SCOPED_REGION
-    #endif
-
     // Convert the dataflow expectations to the new partitioning graph.
 
     // TODO: there is almost certainly a more efficient way to do this
@@ -1024,6 +985,39 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         N.StridesPerSegmentCoV /= m;
     }
     assert (update.empty());
+
+
+    #ifdef PRINT_GRAPH_BITSETS
+    BEGIN_SCOPED_REGION
+    auto & out = errs();
+
+    out << "digraph \"H2\" {\n";
+    for (auto v : make_iterator_range(vertices(P))) {
+        const PartitionData & D = P[v];
+        const auto n = D.Kernels.size();
+
+        out << "v" << v << " [label=\"";
+        for (unsigned i = 0; i < n; ++i) {
+            const auto k = D.Kernels[i];
+            const RelationshipNode & node = Relationships[k];
+            assert (node.Type == RelationshipNode::IsKernel);
+            const auto & V = D.Repetitions[i];
+            out << k << ". " << node.Kernel->getName()
+                << " (" << V.numerator() << "/" << V.denominator() << ")\\n";
+        }
+        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
+    }
+    for (auto e : make_iterator_range(edges(P))) {
+        const auto s = source(e, P);
+        const auto t = target(e, P);
+        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    END_SCOPED_REGION
+    #endif
+
     return P;
 }
 

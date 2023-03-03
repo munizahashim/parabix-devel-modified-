@@ -38,36 +38,56 @@ void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isNonThreadLocal() && !bn.isConstant()) {
 
-            const auto output = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(output, mBufferGraph);
-            if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                continue;
-            }
+        if (LLVM_UNLIKELY(bn.isConstant())) {
+            continue;
+        }
 
-            const BufferPort & outputPort = mBufferGraph[output];
-            const auto prefix = makeBufferName(producer, outputPort.Port);
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(output, mBufferGraph);
+        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            continue;
+        }
 
-            const auto k = streamSet - FirstStreamSet;
+        // TODO: make new buffer type to automatically state this is a cross partition
+        // thread local buffer.
 
-            auto lastReader = producer;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                // TODO: does the graph need a connection to pipeline output?
-                if (consumer < PipelineOutput) {
-                    lastReader = std::max(lastReader, consumer);
+        if (bn.isThreadLocal()) {
+            const auto prodPartId = KernelPartitionId[producer];
+            bool noCrossPartitionConsumer = true;
+            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consPartId = KernelPartitionId[target(e, mBufferGraph)];
+                if (prodPartId != consPartId) {
+                    noCrossPartitionConsumer = false;
+                    break;
                 }
             }
-            const auto readsPartId = KernelPartitionId[lastReader];
-            assert (readsPartId != KernelPartitionId[PipelineOutput]);
-            const auto prodPrefix = prefix + "_produced@partition";
-            const auto prodPartId = KernelPartitionId[producer];
-            for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
-                auto entryPoint = mPartitionEntryPoint[partitionId];
-                PHINode * const phi = PHINode::Create(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId), entryPoint);
-                mPartitionProducedItemCountPhi[partitionId][k] = phi;
+            if (noCrossPartitionConsumer) {
+                continue;
             }
+        }
+
+        const BufferPort & outputPort = mBufferGraph[output];
+        const auto prefix = makeBufferName(producer, outputPort.Port);
+
+        const auto k = streamSet - FirstStreamSet;
+
+        auto lastReader = producer;
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            // TODO: does the graph need a connection to pipeline output?
+            if (consumer < PipelineOutput) {
+                lastReader = std::max(lastReader, consumer);
+            }
+        }
+        const auto readsPartId = KernelPartitionId[lastReader];
+        assert (readsPartId != KernelPartitionId[PipelineOutput]);
+        const auto prodPrefix = prefix + "_produced@partition";
+        const auto prodPartId = KernelPartitionId[producer];
+        for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
+            auto entryPoint = mPartitionEntryPoint[partitionId];
+            PHINode * const phi = PHINode::Create(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId), entryPoint);
+            mPartitionProducedItemCountPhi[partitionId][k] = phi;
         }
     }
 

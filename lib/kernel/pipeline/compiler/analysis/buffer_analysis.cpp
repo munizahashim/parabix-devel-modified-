@@ -94,16 +94,16 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bp.Add = std::max(bp.Add, attr.amount());
                         break;
                     case AttrId::Delayed:
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         bp.Delay = std::max(bp.Delay, attr.amount());
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookAhead:
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         bp.LookAhead = std::max(bp.LookAhead, attr.amount());
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookBehind:
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         bp.LookBehind = std::max(bp.LookBehind, attr.amount());
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::Truncate:
                         bp.Truncate = std::max(bp.Truncate, attr.amount());
@@ -112,19 +112,20 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bp.Flags |= BufferPortType::IsPrincipal;
                         break;
                     case AttrId::Deferred:
-                        bn.Locality = BufferLocality::PartitionLocal;
                         bp.Flags |= BufferPortType::IsDeferred;
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::SharedManagedBuffer:
-                        bn.Locality = BufferLocality::PartitionLocal;
                         bp.Flags |= BufferPortType::IsShared;
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;                        
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
                         bn.Type |= BufferType::Returned;
-                        bn.Locality = BufferLocality::PartitionLocal;
+                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyWriteOverflow:
                         bn.OverflowCapacity = std::max(bn.OverflowCapacity, 1U);
@@ -132,16 +133,14 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     default: break;
                 }
             }
-            if (cannotBePlacedIntoThreadLocalMemory) {
-                bn.Locality = BufferLocality::PartitionLocal;
-            }
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
                 bn.Locality = BufferLocality::ConstantShared;
                 bn.IsLinear = true;
+            } else if (cannotBePlacedIntoThreadLocalMemory) {
+                mNonThreadLocalStreamSets.insert(streamSet);
             }
             return bp;
         };
-
 
         // TODO: replace this with abstracted function
 
@@ -298,52 +297,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                    " to have an explicit termination condition.";
             report_fatal_error(out.str());
         }
-
     }
-
-}
-
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief markInterPartitionStreamSetsAsGloballyShared
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::markInterPartitionStreamSetsAsGloballyShared() {
-
-    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const auto streamSet = target(input, mBufferGraph);
-        BufferNode & bn = mBufferGraph[streamSet];
-        bn.Locality = BufferLocality::GloballyShared;
-    }
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isConstant())) continue;
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto partitionId = KernelPartitionId[producer];
-        assert (partitionId < PartitionCount);
-
-        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(input, mBufferGraph);
-            const auto consumerPartitionId = KernelPartitionId[consumer];
-            assert (consumerPartitionId >= partitionId);
-            assert (consumerPartitionId < PartitionCount);
-
-            if (partitionId != consumerPartitionId) {
-                bn.Locality = BufferLocality::GloballyShared;
-                break;
-            }
-        }
-    }
-
-    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const auto streamSet = source(output, mBufferGraph);
-        BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isConstant())) continue;
-        bn.Locality = BufferLocality::GloballyShared;
-    }
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -874,9 +828,6 @@ void PipelineAnalysis::numberDynamicRepeatingStreamSets() {
             }
         }
     }
-
-
 }
-
 
 }

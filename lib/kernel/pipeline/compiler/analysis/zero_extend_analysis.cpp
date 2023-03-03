@@ -99,15 +99,11 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
         // TODO: once we can determine what inter-partition channels can bound the number of strides for
         // a partition, we can filter the ones that will never be zero-extended.
 
-        const auto partitionId = KernelPartitionId[kernel];
         for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             BufferPort & inputData = mBufferGraph[input];
             const auto streamSet = source(input, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.isConstant())) continue;
-            const auto producer = parent(streamSet, mBufferGraph);
-            const auto prodPartitionId = KernelPartitionId[producer];
-            if (partitionId != prodPartitionId) {
+            if (bn.isNonThreadLocal() && !bn.isConstant()) {
                 const Binding & binding = inputData.Binding;
                 if (LLVM_UNLIKELY(binding.hasAttribute(AttrId::ZeroExtended))) {
                     inputData.Flags |= BufferPortType::IsZeroExtended;

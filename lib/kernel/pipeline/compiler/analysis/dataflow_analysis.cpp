@@ -1,4 +1,5 @@
 #include "pipeline_analysis.hpp"
+#include "lexographic_ordering.hpp"
 #include <toolchain/toolchain.h>
 #include <z3.h>
 
@@ -8,9 +9,18 @@
     typedef long long int        Z3_int64;
 #endif
 
+// #define PRINT_INTRA_PARTITION_VECTOR_GRAPH
+
 namespace kernel {
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief computeIntraPartitionRepetitionVectors
+ ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P) {
+
+    #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
+    using Graph = adjacency_list<vecS, vecS, bidirectionalS, no_property, Rational>;
+    #endif
 
     const auto numOfPartitions = num_vertices(P);
 
@@ -44,6 +54,27 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     const auto m = num_vertices(Relationships);
     std::vector<Z3_ast> VarList(m);
 
+    #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
+    unsigned totalNumOfKernels = 0;
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        PartitionData & N = P[producerPartitionId];
+        const auto & K = N.Kernels;
+        totalNumOfKernels += K.size();
+    }
+
+    Graph G(totalNumOfKernels);
+    flat_map<unsigned, unsigned> M;
+    M.reserve(totalNumOfKernels);
+
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        PartitionData & N = P[producerPartitionId];
+        const auto & K = N.Kernels;
+        for (const auto u : K) {
+            M.emplace(u, M.size());
+        }
+    }
+    #endif
+
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];
         const auto & K = N.Kernels;
@@ -53,6 +84,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
             hard_assert(Z3_mk_ge(ctx, repVar, ONE));
             VarList[u] = repVar; // multiply(rootVar, repVar);
         }
+
 
         for (const auto producer : K) {
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
@@ -108,6 +140,15 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                                             const auto expectedInput = inputRate.getRate() * consumerNode.Kernel->getStride();
                                             const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
 
+                                            #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
+                                            const RelationshipNode & producerNode = Relationships[producer];
+                                            assert (producerNode.Type == RelationshipNode::IsKernel);
+                                            const auto expectedOutput = outputRate.getRate() * producerNode.Kernel->getStride();
+                                            const auto a = M.find(producer)->second;
+                                            const auto b = M.find(consumer)->second;
+                                            add_edge(a, b, expectedOutput / expectedInput, G);
+                                            #endif
+
                                             hard_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                                         }
 
@@ -119,6 +160,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                 }
             }
         }
+
     }
 
 
@@ -156,6 +198,41 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
     Z3_solver_dec_ref(ctx, solver);
     Z3_del_context(ctx);
+
+    #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
+    auto & out = errs();
+
+
+
+    out << "digraph \"V\" {\n";
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        PartitionData & N = P[producerPartitionId];
+        const auto & K = N.Kernels;
+        const auto n = K.size();
+        for (unsigned i = 0; i < n; ++i) {
+            const auto k = K[i];
+            const RelationshipNode & node = Relationships[k];
+            assert (node.Type == RelationshipNode::IsKernel);
+            const auto id = M.find(k)->second;
+            const auto & V = N.Repetitions[i];
+            out << "v" << id << " [label=\""
+                << k << ". " << node.Kernel->getName()
+                << "  (" << V.numerator() << "/" << V.denominator()
+                << ")\"];\n";
+        }
+    }
+
+    for (const auto e : make_iterator_range(edges(G))) {
+        const auto s = source(e, G);
+        const auto t = target(e, G);
+        const auto & V = G[e];
+        out << "v" << s << " -> v" << t <<
+               " [label=\"" << V.numerator() << "/" << V.denominator() << "\"];\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    #endif
 
 }
 
@@ -292,7 +369,7 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
 
     PartialSumStepFactorGraph G(LastStreamSet + 1);
 
-    for (auto kernel = LastKernel; kernel >= FirstKernel; --kernel) {
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
 
         auto checkForPopCountRef = [&](const BufferGraph::edge_descriptor io) {
             const BufferPort & port = mBufferGraph[io];
@@ -319,16 +396,24 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
             checkForPopCountRef(output);
         }
 
+    }
+
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+
         const auto bw = b->getBitBlockWidth();
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
+
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             if (out_degree(streamSet, G) != 0) {
-                unsigned maxStepFactor = 1U;
+                auto maxStepFactor = StrideRepetitionVector[kernel];
                 for (const auto e : make_iterator_range(out_edges(streamSet, G))) {
-                    maxStepFactor = std::max(maxStepFactor, G[e]);
+                    const auto consumer = target(e, G);
+                    assert (consumer > kernel && consumer <= LastKernel);
+                    const auto k = G[e] * StrideRepetitionVector[consumer];
+                    maxStepFactor = std::max(maxStepFactor, k);
                 }
                 maxStepFactor = round_up_to(maxStepFactor, stepsPerBlock);
                 add_edge(kernel, streamSet, maxStepFactor, G);
@@ -343,5 +428,14 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
 
     mPartialSumStepFactorGraph = G;
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyDominatingPartitionsForSlidingWindows
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyDominatingPartitionsForSlidingWindows() {
+
+}
+
+
 
 } // end of kernel namespace
