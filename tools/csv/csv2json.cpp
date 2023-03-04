@@ -61,7 +61,6 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 
 static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(false), cl::cat(CSV_Options));
 
-
 typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
 class Invert : public PabloKernel {

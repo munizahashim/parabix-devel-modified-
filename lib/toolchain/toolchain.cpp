@@ -210,14 +210,6 @@ bool TimeKernelsIsEnabled;
 static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKernelsIsEnabled),
                                         cl::desc("Times each kernel, printing elapsed time for each on exit"), cl::init(false));
 
-
-unsigned StreamExpandStrideSize; // temp debugging setting
-static cl::opt<unsigned, true> StreamExpandStrideSizeOption("stream-expand-mult", cl::location(StreamExpandStrideSize), cl::init(4),
-                                cl::desc("StreamExpand stride length multiplier"), cl::value_desc("positive integer"), cl::cat(CodeGenOptions));
-
-
-
-
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;
 
