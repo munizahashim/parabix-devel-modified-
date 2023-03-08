@@ -78,6 +78,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                             break;
                         case KindId::__Count: llvm_unreachable("");
                     }
+                    binding.getAttributes().print(out);
                 }
                 break;
             case RelationshipNode::IsCallee:

@@ -448,9 +448,9 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     Value * const closed = isClosed(b, inputPort);
     Value * stepLength = nullptr;
 
-    if (StrideStepLength[mKernelId] > 1) {
+    if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
         stepLength = b->getSize(StrideStepLength[mKernelId]);
-        stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
+        // stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
     }
 
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], stepLength);
@@ -468,14 +468,14 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     #endif
 
     Value * hasEnough = b->CreateICmpUGE(accessible, required);
-    if (LLVM_LIKELY(mIsPartitionRoot && !port.isZeroExtended())) {
+    if (LLVM_LIKELY(mIsPartitionRoot)) { // && !port.isZeroExtended()
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
         } else {
             mAnyClosed = closed;
         }
     }
-    Value * const sufficientInput = b->CreateOr(hasEnough, closed);
+    Value * const sufficientInput = b->CreateOr(hasEnough, mIsPartitionRoot ? mAnyClosed : closed);
     BasicBlock * const hasInputData = b->CreateBasicBlock(prefix + "_hasInputData", mKernelCheckOutputSpace);
 
     BasicBlock * recordBlockedIO = nullptr;
@@ -634,8 +634,11 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         ConstantInt * const ONE = b->getSize(1);
 
         Value * amount = ONE;
-        if (StrideStepLength[mKernelId] > 1) {
-            amount = b->CreateSelect(mAnyClosed, ONE, b->getSize(StrideStepLength[mKernelId]));
+        if (StrideStepLength[mKernelId] > 1) { //  && mIsPartitionRoot
+            amount = b->getSize(StrideStepLength[mKernelId]);
+            if (mAnyClosed) {
+                amount = b->CreateSelect(mAnyClosed, ONE, amount);
+            }
         }
 
         Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
@@ -1115,7 +1118,7 @@ Value * PipelineCompiler::getNumOfAccessibleStrides(BuilderRef b,
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "< " + prefix + "_numOfStrides = %" PRIu64, numOfStrides);
     #endif
-    if (mIsPartitionRoot && StrideStepLength[mKernelId] > 1) {
+    if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
         Value * const stepLength = b->getSize(StrideStepLength[mKernelId]);
         Value * const closed = isClosed(b, inputPort);
         Value * const synchronousNumOfStrides = b->CreateRoundDown(numOfStrides, stepLength);
@@ -1398,11 +1401,12 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
 
             const auto streamSet = getInputBufferVertex(mKernelId, ref);
             Value * const total = mLocallyAvailableItems[streamSet];
-
             const Binding & binding = partialSumPort.Binding;
             Constant * bindingName = b->GetString(binding.getName());
 
-            b->CreateAssert(b->CreateICmpULE(position, total),
+
+
+            b->CreateAssert(b->CreateOr(isClosed(b, ref), b->CreateICmpULE(position, total)),
                             "%s.%s: attempting to read a partial sum reference position that "
                             "exceeds its available items (%" PRIu64 " vs. %" PRIu64 ")",
                             mCurrentKernelName,
@@ -1634,6 +1638,8 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
     // "final" value but since the PopCountKernel is unaware of the step factor, the pipeline becomes
     // responsible for splat-ing this value to the appropriate slots.
 
+
+
     for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
 
         const auto streamSet = target(e, mPartialSumStepFactorGraph);
@@ -1641,6 +1647,11 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         const BufferPort & outputPort = mBufferGraph[output];
         Value * const produced = mProducedAtTermination[outputPort.Port];
         const BufferNode & bn = mBufferGraph[streamSet];
+
+        // TODO: if all of the consumers of this streamset belong to the same partition as
+        // the producer, we probably don't need to splat it to increase it.
+
+        //if (bn.isNonThreadLocal()) {
 
         const auto bw = b->getBitBlockWidth();
         const auto fw = b->getSizeTy()->getIntegerBitWidth();

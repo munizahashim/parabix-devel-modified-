@@ -612,8 +612,9 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         }
     }
 
-
     auto nextRateId = l;
+
+    flat_map<unsigned, unsigned> zeroExtendMap;
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -654,6 +655,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                         default: break;
                     }
                 }
+
             }
 
             if (useNewRateId) {
@@ -681,10 +683,66 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
             assert (in_degree(i, G) == 1);
 
+            assert (node.Type == RelationshipNode::IsRelationship);
+
+            assert (V.any());
+
+            // If a streamset has consumers that zero-extend it but also some
+            // that do not, we may end up kernels who view the streamset as
+            // having different lengths. However, if the producer and consumers
+            // belong to the same partition, we do not need to worry about
+            // zero-extension.
+
+            bool isZeroExtendedInput = false;
+
             for (const auto e : make_iterator_range(out_edges(i, G))) {
-                BitSet & R = G[target(e, G)];
+                const auto w = target(e, G);
+                assert (Relationships[sequence[w]].Type == RelationshipNode::IsKernel);
+                BitSet & R = G[w];
                 R |= V;
+                const auto r = G[e];
+                const RelationshipNode & rn = Relationships[r];
+                assert (rn.Type == RelationshipNode::IsBinding);
+                const Binding & bn = rn.Binding;
+                isZeroExtendedInput |= bn.hasAttribute(AttrId::ZeroExtended);
             }
+
+            if (isZeroExtendedInput) {
+
+                assert (zeroExtendMap.empty());
+
+                auto findPartionId = [&](const size_t vertex) {
+                    const auto v = sequence[vertex];
+                    assert (Relationships[v].Type == RelationshipNode::IsKernel);
+                    const auto f = PartitionIds.find(v);
+                    assert (f != PartitionIds.end());
+                    return f->second;
+                };
+
+                const auto prodPartId = findPartionId(parent(i, G));
+
+                for (const auto e : make_iterator_range(out_edges(i, G))) {
+                    const auto w = target(e, G);
+                    assert (Relationships[sequence[w]].Type == RelationshipNode::IsKernel);
+                    BitSet & R = G[w];
+
+                    const auto conPartId = findPartionId(w);
+                    if (prodPartId != conPartId) {
+                        const auto g = zeroExtendMap.find(conPartId);
+                        unsigned rateId = 0U;
+                        if (g == zeroExtendMap.end()) {
+                            rateId = nextRateId++;
+                            zeroExtendMap.emplace(conPartId, rateId);
+                        } else {
+                            rateId = g->second;
+                        }
+                        R.set(rateId);
+                    }
+                }
+                zeroExtendMap.clear();
+
+            }
+
 
         }
     }
