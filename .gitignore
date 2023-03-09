@@ -31,3 +31,5 @@ UCD-scripts/generated*
 *.aux
 *.bcf
 
+# Don't track test outputs
+TestOutput*
