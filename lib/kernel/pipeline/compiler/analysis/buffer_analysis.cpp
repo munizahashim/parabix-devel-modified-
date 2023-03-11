@@ -135,7 +135,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             }
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
                 bn.Locality = BufferLocality::ConstantShared;
-                bn.IsLinear = true;
+                bn.IsLinear = false;
             } else if (cannotBePlacedIntoThreadLocalMemory) {
                 mNonThreadLocalStreamSets.insert(streamSet);
             }

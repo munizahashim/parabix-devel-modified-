@@ -633,15 +633,17 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
         ConstantInt * const ONE = b->getSize(1);
 
-        Value * amount = ONE;
-        if (StrideStepLength[mKernelId] > 1) { //  && mIsPartitionRoot
-            amount = b->getSize(StrideStepLength[mKernelId]);
-            if (mAnyClosed) {
-                amount = b->CreateSelect(mAnyClosed, ONE, amount);
-            }
+        Value * nextStrideIndex = nullptr;
+        if (StrideStepLength[mKernelId] == 1 || mAnyClosed == nullptr) {
+            nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, ONE);
+        } else {
+            ConstantInt * const STEP = b->getSize(StrideStepLength[mKernelId]);
+            Value * const amount = b->CreateSelect(mAnyClosed, ONE, STEP);
+            nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
         }
 
-        Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, amount);
+        bool isFirstCheck = true;
+
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
 
             const auto streamSet = source(*ei, mBufferGraph);
@@ -655,13 +657,13 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
             // if this test passes the first check, it will pass the remaining ones so don't bother
             // creating a branch for the remaining checks.
 
-            if (rate.isPartialSum() || ei == ei_begin) {
+            if (rate.isPartialSum() || isFirstCheck) {
                 BasicBlock * const nextTest = b->CreateBasicBlock("", lastTestExit);
                 enoughInputPhi->addIncoming(i1_FALSE, b->GetInsertBlock());
-
                 b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
                 b->SetInsertPoint(nextTest);
                 enoughInput = nullptr;
+                isFirstCheck = false;
             }
 
             Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
@@ -671,9 +673,12 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
             if (LLVM_UNLIKELY(port.isZeroExtended())) {
                 avail = b->CreateSelect(closed, MAX_INT, avail);
             } else if (port.Add) {
-                Value * const added = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
+                ConstantInt * const ADD = b->getSize(port.Add);
+                ConstantInt * const ZERO = b->getSize(0);
+                Value * const added = b->CreateSelect(closed, ADD, ZERO);
                 avail = b->CreateAdd(avail, added);
             }
+
             Value * const remaining = b->CreateSub(avail, processed, "remaining");
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
@@ -1682,16 +1687,14 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const maskedSplat = b->CreateAnd(splat, mask);
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
-        for (unsigned index = 1; index <= spanLength; ++index) {
-            Value * const ptr = b->CreateGEP(vecAddr, b->getSize(index));
+        for (unsigned k = 1; k <= spanLength; ++k) {
+            Value * const ptr = b->CreateGEP(vecAddr, b->getSize(k));
             b->CreateBlockAlignedStore(splat, ptr);
         }
 
         ConstantInt * const sz_maxStepFactor = b->getSize(spanLength * stepsPerBlock);
         Value * prod = b->CreateRoundUp(produced, sz_maxStepFactor);
-//        if (outputPort.Add) {
-//            prod = b->CreateAdd(prod, b->getSize(outputPort.Add));
-//        }
+
         mProducedAtTermination[outputPort.Port] = prod;
     }
 
