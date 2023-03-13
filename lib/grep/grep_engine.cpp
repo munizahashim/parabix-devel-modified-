@@ -648,6 +648,10 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
         P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
         if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedMatches", TruncatedMatches);
         MatchedLineEnds = TruncatedMatches;
+        StreamSet * TruncatedLines =
+            streamutils::Merge(P, {{TruncatedMatches, {0}}, {mLineBreakStream, {0}}});
+        if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedLines", TruncatedLines);
+        mLineBreakStream = TruncatedLines;
     }
     if (mIllustrator) mIllustrator->captureBitstream(P, "MatchedLineEnds", MatchedLineEnds);
     return MatchedLineEnds;
@@ -795,8 +799,8 @@ public:
                          , {}
                          // stream inputs
                          , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, FixedRate(8), Deferred()),
-                            Bind("Basis", Basis, BoundedRate(0, 1))}
+                            Bind("MatchSpans", MatchSpans, FixedRate(), Principal()),
+                            Bind("Basis", Basis)}
                          // stream outputs
                          , {}
                          // input scalars
@@ -897,20 +901,16 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
         E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-   //     E->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-   //     E->CreateKernelCall<DebugDisplayKernel>("SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
-  //      E->CreateKernelCall<DebugDisplayKernel>("InsertIndex", InsertIndex);
-        // Baais bit streams expanded with 0 bits for each string to be inserted.
+        // Basis bit streams expanded with 0 bits for each string to be inserted.
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
-   //     E->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
@@ -918,7 +918,6 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
-   //     E->CreateKernelCall<DebugDisplayKernel>("ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
