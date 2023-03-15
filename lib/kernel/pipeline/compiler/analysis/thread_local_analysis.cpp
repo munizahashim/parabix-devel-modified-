@@ -236,25 +236,16 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
         const auto firstKernel = FirstKernelInPartition[partitionId];
         const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
 
-
-        Rational minVal{std::numeric_limits<size_t>::max()};
-
-        size_t maxOverflow{0};
-
-        const auto firstStrideLength = getKernel(firstKernel)->getStride();
-
-        const auto BW = blockWidth * StrideRepetitionVector[firstKernel];
-
         bool hasThreadLocal = false;
 
         for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
 
             const auto strideLength = getKernel(kernel)->getStride();
 
+            const Rational rateFactor{strideLength * MaximumNumOfStrides[kernel], blockWidth};
+
             // Because data is layed out in a "strip mined" format within streamsets, the type of
             // each "chunk" will be blockwidth items in length.
-
-            const Rational W{strideLength * StrideRepetitionVector[kernel], BW };
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
@@ -272,16 +263,16 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     #endif
                     const ProcessingRate & rate = outputRate.getRate();
                     assert (rate.isFixed());
-                    const auto T = typeSize * rate.getUpperBound();
                     const auto j = mapping[streamSet - FirstStreamSet];
                     assert (j != -1U);
-                    const auto size = MaximumNumOfStrides[kernel] * T;
+                    const auto base = rate.getUpperBound() * rateFactor;
+                    const auto withOverflow = base + bn.OverflowCapacity;
+                    const auto size = typeSize * withOverflow;
+
                     assert (size.denominator() == 1);
-                    const size_t overflowBytes = bn.OverflowCapacity * typeSize;
-                    weight[j] = round_up_to(size.numerator() + overflowBytes, pageSize);
+                    weight[j] = round_up_to(size.numerator(), pageSize);
                     assert ((weight[j] % pageSize) == 0);
                     assert (bn.UnderflowCapacity == 0);
-                    maxOverflow = std::max(maxOverflow, overflowBytes);
 
                     // record how many consumers exist before the streamset memory can be reused
                     // (NOTE: the +1 is to indicate this kernel requires each output streamset

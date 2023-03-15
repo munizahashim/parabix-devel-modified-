@@ -40,11 +40,15 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
                                 for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                                     const auto consumer = target(e, mBufferGraph);
                                     assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-                                    const auto m = MaximumNumOfStrides[consumer];
                                     const BufferPort & bp = mBufferGraph[e];
+                                    const auto m = MaximumNumOfStrides[consumer];
                                     ub = std::max(ub, bp.Maximum * m);
                                 }
-                                // ub *= Rational{1U, b->getBitBlockWidth()};
+                                assert (ub.denominator() == 1);
+//                                const BufferNode & bn = mBufferGraph[streamSet];
+//                                if (bn.OverflowCapacity) {
+//                                    ub += (bn.OverflowCapacity * b->getBitBlockWidth());
+//                                }
                                 break;
                             }
                         }
@@ -65,25 +69,31 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief reduceMaximumNumOfStridesForRepeatingStreamSets
+ * @brief getMaximumNumOfStridesForRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::reduceMaximumNumOfStridesForRepeatingStreamSets(BuilderRef b, const unsigned streamSet, Value * maxNumOfStrides) const {
-    const BufferNode & bn = mBufferGraph[streamSet];
-    if (LLVM_UNLIKELY(isa<RepeatingBuffer>(bn.Buffer))) {
-        assert ("using dynamic scaling segment size requires that repeating buffers can loop to entry" && mMayLoopToEntry);
-        Rational ub{0U};
-        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(e, mBufferGraph);
-            assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-            const auto m = MaximumNumOfStrides[consumer];
-            const BufferPort & bp = mBufferGraph[e];
-            ub = std::max(ub, bp.Maximum * m);
-        }
-        assert (ub.denominator() == 1);
-        ConstantInt * const safeLimit = b->getSize(ub.numerator());
-        maxNumOfStrides = b->CreateUMin(maxNumOfStrides, safeLimit);
+Constant * PipelineCompiler::getMaximumNumOfStridesForRepeatingStreamSet(BuilderRef b, const unsigned streamSet) const {
+    Rational ub{0U};
+    for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+        const auto consumer = target(e, mBufferGraph);
+        assert (consumer >= FirstKernel && consumer <= PipelineOutput);
+        const auto m = MaximumNumOfStrides[consumer] ;
+        const BufferPort & bp = mBufferGraph[e];
+        ub = std::max(ub, bp.Maximum * m);
     }
-    return maxNumOfStrides;
+    assert (ub.denominator() == 1);
+    return b->getSize(ub.numerator());
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readsRepeatingStreamSet
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::readsRepeatingStreamSet() const {
+    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = source(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isConstant()) return true;
+    }
+    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -143,16 +153,14 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     if (ss->isDynamic()) {
         assert (isFromCurrentFunction(b, buffer->getBaseAddress(b)));
     } else {
-        const auto blockWidth = b->getBitBlockWidth();
         Rational ub{1U};
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(e, mBufferGraph);
             assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-            const auto m = MaximumNumOfStrides[consumer];
+            const auto m = MaximumNumOfStrides[consumer] + 1;
             const BufferPort & bp = mBufferGraph[e];
             ub = std::max(ub, bp.Maximum * m);
         }
-
         assert (ub.denominator() == 1);
         const auto maxStrideLength = ub.numerator();
         auto info = cast<PipelineKernel>(mTarget)->createRepeatingStreamSet(b, ss, maxStrideLength);

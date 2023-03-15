@@ -568,11 +568,6 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) cons
         if (rd.isManaged()) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isThreadLocal()) {
-
-                errs() << " --- " << streamSet << "\n";
-            }
-
             assert (bn.isNonThreadLocal());
             Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
             Value * vba = b->CreateLoad(ptr);

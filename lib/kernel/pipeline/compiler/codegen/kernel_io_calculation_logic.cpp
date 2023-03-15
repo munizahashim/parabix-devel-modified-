@@ -114,7 +114,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         if (port.canModifySegmentLength()) {
             const auto streamSet = source(input, mBufferGraph);
             checkForSufficientInputData(b, port, streamSet);
-            maxSegmentLength = reduceMaximumNumOfStridesForRepeatingStreamSets(b, streamSet, maxSegmentLength);
         } else { // make sure we have read/initialized the accessible item count
             getAccessibleInputItems(b, port);
         }
@@ -450,7 +449,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
         stepLength = b->getSize(StrideStepLength[mKernelId]);
-        // stepLength = b->CreateSelect(closed, b->getSize(1), stepLength);
     }
 
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], stepLength);
@@ -723,7 +721,8 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
-        return ConstantInt::getAllOnesValue(b->getSizeTy());
+        assert (mMayLoopToEntry);
+        return getMaximumNumOfStridesForRepeatingStreamSet(b, streamSet);
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
@@ -878,7 +877,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     Value * mustExpand = nullptr;
 
-    if (isa<DynamicBuffer>(buffer) && buffer->isLinear()) {
+    if (buffer->isLinear()) {
 
         mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
 
@@ -904,7 +903,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     if (isa<DynamicBuffer>(buffer)) {
         Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);
-        assert (buffer->isDynamic());
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, bn, port, buffer);
         }
@@ -917,7 +915,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     b->CreateBr(afterCopyBackOrExpand);
 
     b->SetInsertPoint(afterCopyBackOrExpand);
-
     if (mustExpand) {
         updateCycleCounter(b, mKernelId, cycleCounterStart, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
     } else {
@@ -935,6 +932,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     if (LLVM_UNLIKELY(beforeExpansion[WITHOUT_OVERFLOW] && (beforeExpansion[WITH_OVERFLOW] != beforeExpansion[WITHOUT_OVERFLOW]))) {
         getWritableOutputItems(b, port, false);
     }
+
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & output = getOutputBinding(outputPort);

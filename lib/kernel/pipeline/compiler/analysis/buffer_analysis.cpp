@@ -135,7 +135,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             }
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
                 bn.Locality = BufferLocality::ConstantShared;
-                bn.IsLinear = false;
+                bn.IsLinear = true;
             } else if (cannotBePlacedIntoThreadLocalMemory) {
                 mNonThreadLocalStreamSets.insert(streamSet);
             }
@@ -582,14 +582,13 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
         #endif
 //        assert (fixedPartitionInputs.empty());
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & N = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(N.isConstant())) continue;
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             #else
-            if (isPartitionRoot || !N.IsLinear) {
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & N = mBufferGraph[streamSet];
+            if (isPartitionRoot || !N.IsLinear || N.isConstant()) {
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             }
             #endif
@@ -617,22 +616,38 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         BufferNode & bn = mBufferGraph[streamSet];
 
-        if (bn.isThreadLocal() || bn.isUnowned() || bn.isConstant()) {
+        if (bn.isThreadLocal() || bn.isUnowned()) {
             continue;
         }
 
-        const auto producerOutput = in_edge(streamSet, mBufferGraph);
-        const BufferPort & producerRate = mBufferGraph[producerOutput];
+        auto calculateCopyLength = [&](const BufferPort & rate, const unsigned kernel) {
+            const auto r = rate.Maximum - rate.Minimum;
+            return ceiling(r);
+        };
 
-        auto maxDelay = producerRate.Delay;
-        auto maxLookAhead = producerRate.LookAhead;
-        auto maxLookBehind = producerRate.LookBehind;
+        unsigned maxDelay = 0;
+        unsigned maxLookAhead = 0;
+        unsigned maxLookBehind = 0;
+        unsigned copyBack = 0;
 
-        const auto producer = source(producerOutput, mBufferGraph);
+        Rational bMin{0};
+        Rational bMax{0};
+        size_t producer = 0;
+        if (bn.isConstant()) {
+            bMin = std::numeric_limits<size_t>::max();
+        } else {
+            const auto producerOutput = in_edge(streamSet, mBufferGraph);
+            const BufferPort & producerRate = mBufferGraph[producerOutput];
+            maxDelay = producerRate.Delay;
+            maxLookAhead = producerRate.LookAhead;
+            maxLookBehind = producerRate.LookBehind;
+            producer = source(producerOutput, mBufferGraph);
+            copyBack = calculateCopyLength(producerRate, producer);
+            bMin = producerRate.Minimum * MinimumNumOfStrides[producer];
+            const auto max = std::max(MaximumNumOfStrides[producer], 1U);
+            bMax = producerRate.Maximum * max;
+        }
 
-        auto bMin = floor(producerRate.Minimum * MinimumNumOfStrides[producer]);
-        const auto max = std::max(MaximumNumOfStrides[producer], 1U);
-        auto bMax = ceiling(producerRate.Maximum * max);
 
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
 
@@ -641,10 +656,9 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
             const auto consumer = target(e, mBufferGraph);
 
             const auto min = std::max(MinimumNumOfStrides[consumer], 1U);
-
-            const auto cMin = floor(consumerRate.Minimum * min);
+            const auto cMin = consumerRate.Minimum * min;
             const auto max = std::max(MaximumNumOfStrides[consumer], 1U);
-            const auto cMax = ceiling(consumerRate.Maximum * max);
+            const auto cMax = consumerRate.Maximum * max;
 
             assert (cMax >= cMin);
 
@@ -670,18 +684,10 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
         // streamset is consumed at a variable rate, it also requires an overflow but the
         // first block of the buffer must be
 
-        if (bn.IsLinear) {
+        if (bn.IsLinear || bn.isConstant()) {
             bn.CopyBack = 0;
             bn.CopyForwards = 0;
         } else {
-
-            auto calculateCopyLength = [&](const BufferPort & rate, const unsigned kernel) {
-                const auto r = rate.Maximum - rate.Minimum;
-                return ceiling(r);
-            };
-
-            const auto copyBack = calculateCopyLength(producerRate, producer);
-
             unsigned copyForwards = 0;
             for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const BufferPort & consumerRate = mBufferGraph[e];
@@ -702,11 +708,13 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         const auto overflow1 = std::max(bn.CopyBack, bn.CopyForwards);
         const auto overflow2 = std::max(overflow0, overflow1);
+
+
         const auto overflowSize = round_up_to(overflow2, blockWidth) / blockWidth;
 
         const auto underflowSize = round_up_to(underflow0, blockWidth) / blockWidth;
-
-        const auto reqSize1 = round_up_to((bMax * 2) - bMin, blockWidth) / blockWidth;
+        const auto rs = 2 * ceiling(bMax) - floor(bMin);
+        const auto reqSize1 = round_up_to(rs, blockWidth) / blockWidth;
         const auto reqSize2 = 2 * (overflowSize + underflowSize);
         auto reqSize3 = std::max(reqSize1, reqSize2);
 //        if (maxLookAhead || maxDelay) {

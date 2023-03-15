@@ -255,58 +255,6 @@ void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitA
     }
 }
 
-#if 0
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief recursivelyConstructRepeatingStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
-    if (LLVM_UNLIKELY(generatesRepeatingStreamSets())) {
-        Module * const M = b->getModule();
-        NamedMDNode * const msl = M->getNamedMetadata("rsl");
-        ConstantAsMetadata * const c = cast<ConstantAsMetadata>(msl->getOperand(0)->getOperand(0));
-        Constant * ar = c->getValue();
-        const auto m = mKernels.size();
-        assert (cast<ArrayType>(ar->getType())->getArrayNumElements() == m);
-        Type * const sizeTy = b->getSizeTy();
-        assert (cast<ArrayType>(ar->getType())->getArrayElementType() == sizeTy);
-
-        FixedArray<unsigned, 1> off;
-        for (unsigned i = 0; i != m; ++i) {
-            off[0] = i;
-            ConstantInt * v = cast<ConstantInt>(ConstantExpr::getExtractValue(ar, off));
-            const unsigned strideLength = (v->getLimitedValue() * scale);
-
-            const Kernel * const kernel = mKernels[i];
-            if (LLVM_UNLIKELY(kernel->generatesRepeatingStreamSets())) {
-                kernel->recursivelyConstructRepeatingStreamSets(b, args, params, strideLength);
-            }
-            const auto n = kernel->getNumOfStreamInputs();
-            PointerType * const voidPtrTy = b->getVoidPtrTy();
-            for (unsigned i = 0; i != n; ++i) {
-                const StreamSet * const input = kernel->getInputStreamSet(i);
-                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
-                    const RepeatingStreamSet * const streamSet = cast<RepeatingStreamSet>(input);
-                    if (streamSet->isDynamic()) {
-                        if (params.count(streamSet) == 0) {
-                            const Binding & br = kernel->getInputStreamSetBinding(i);
-                            const auto ub = br.getRate().getUpperBound() * strideLength;
-                            assert (ub.denominator() == 1);
-                            Value * v = createRepeatingStreamSet(b, streamSet, ub.numerator());
-                            v = b->CreatePointerCast(v, voidPtrTy);
-                            params.insert(std::make_pair(streamSet, v));
-                            args.push_back(v);
-                        }
-                    }
-                }
-            }
-        }
-
-    }
-}
-
-#endif
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief createRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -325,7 +273,9 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
         if (LLVM_UNLIKELY(L == 0)) {
             report_fatal_error("Zero-length repeating streamset elements are not permitted");
         }
+
         patternLength = boost::lcm<size_t>(patternLength, L);
+
         #ifndef NDEBUG
         for (auto v : vec) {
             if (LLVM_UNLIKELY(v > maxVal)) {
@@ -346,9 +296,17 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
     // sequentially in memory. Strip-mining promotes better cache utilization but means that we'd end
     // up having many tiny memcpys to reassemble the minimal set of data.
 
+    assert ((patternLength % blockWidth) == 0);
+
     const auto runLength = (patternLength / blockWidth);
 
-    const auto additionalStrides = (maxStrideLength / blockWidth);
+    assert ((maxStrideLength % blockWidth) == 0);
+
+    const auto overflow = (maxStrideLength / blockWidth);
+
+    const auto totalStrides = ((runLength + overflow - 1U) / overflow) * overflow;
+
+    const auto additionalStrides =  totalStrides - runLength;
 
     std::vector<Constant *> dataVectorArray(runLength + additionalStrides);
 
