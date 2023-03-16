@@ -331,7 +331,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     auto currentPartitionId = KernelPartitionId[FirstKernel];
     assert (currentPartitionId == 1);
     auto firstKernelInPartition = FirstKernel;
-    FirstKernelInPartition[currentPartitionId] = FirstKernel;
+    FirstKernelInPartition[currentPartitionId] = firstKernelInPartition;
     for (auto kernel = (FirstKernel + 1U); kernel <= LastKernel; ++kernel) {
         const auto partitionId = KernelPartitionId[kernel];
         if (partitionId != currentPartitionId) {
@@ -345,7 +345,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     FirstKernelInPartition[PartitionCount - 1] = newPipelineOutput;
     FirstKernelInPartition[PartitionCount] = newPipelineOutput;
-
+#ifndef NDEBUG
     if (LLVM_UNLIKELY(IsNestedPipeline && (MinimumNumOfStrides[PipelineInput] != 1))) {
         auto checkIO = [](const Bindings & bindings) -> bool {
             for (const Binding & binding : bindings) {
@@ -355,7 +355,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
             }
             return false;
         };
-
         if (checkIO(mPipelineKernel->getInputStreamSetBindings()) || checkIO(mPipelineKernel->getOutputStreamSetBindings())) {
             errs() << "WARNING! nested pipeline "
                    << mPipelineKernel->getName() <<
@@ -365,6 +364,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
                       "Check -PrintPipelineGraph for details.\n";
         }
     }
+#endif
 
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
