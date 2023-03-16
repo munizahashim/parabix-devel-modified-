@@ -54,7 +54,8 @@ void addConsumerRelationships(const PortType portType, const unsigned consumer, 
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    if (isa<StreamSet>(array[0].getRelationship()) || isa<RepeatingStreamSet>(array[0].getRelationship())) {
+    const auto r = array[0].getRelationship();
+    if (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r)) {
         for (unsigned i = 0; i < n; ++i) {
             const Binding & item = array[i];
             const auto binding = G.add(&item);
@@ -177,7 +178,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief transcribeRelationshipGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partitionGraph) {
+void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph) {
 
     using Vertices = Vec<unsigned, 64>;
 
@@ -248,7 +249,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
 
     MinimumNumOfStrides.resize(numOfKernels);
     MaximumNumOfStrides.resize(numOfKernels);
-    StrideStepLength.resize(numOfKernels);
+    StrideRepetitionVector.resize(numOfKernels);
 
     KernelPartitionId[PipelineInput] = 0;
 
@@ -266,15 +267,17 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         const auto k = std::find(K.begin(), K.end(), kernelId);
         assert (k != K.end());
         const auto j = std::distance(K.begin(), k);
-        const Rational stepLength = P.Repetitions[j];
-        assert (stepLength.denominator() == 1);
-        const auto sl = stepLength.numerator();
-        StrideStepLength[newKernelId] = sl;
+        const Rational & rep = P.Repetitions[j];
+        assert (rep.denominator() == 1);
+        const auto sl = rep.numerator();
+        StrideRepetitionVector[newKernelId] = sl;
         const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
         Rational ONE{1};
         const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
         const auto max = ceiling(ONE + cov3);
         assert (min <= max);
+
+
         MinimumNumOfStrides[newKernelId] = sl * min;
         MaximumNumOfStrides[newKernelId] = sl * max;
     };
@@ -325,17 +328,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     FirstKernelInPartition.resize(PartitionCount + 1U);
     FirstKernelInPartition[0] = PipelineInput;
 
-    auto fixStrideStepLength = [&](const unsigned first, const unsigned last) {
-        auto gcd = MaximumNumOfStrides[first];
-        for (auto i = first + 1; i <= last; ++i) {
-            gcd = boost::gcd(gcd, MaximumNumOfStrides[i]);
-        }
-        for (auto i = first; i <= last; ++i) {
-            assert ((MaximumNumOfStrides[i] % gcd) == 0); // sanity test
-            StrideStepLength[i] = (MaximumNumOfStrides[i] / gcd);
-        }
-    };
-
     auto currentPartitionId = KernelPartitionId[FirstKernel];
     assert (currentPartitionId == 1);
     auto firstKernelInPartition = FirstKernel;
@@ -344,16 +336,13 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         const auto partitionId = KernelPartitionId[kernel];
         if (partitionId != currentPartitionId) {
             assert (partitionId == currentPartitionId + 1);
-            fixStrideStepLength(firstKernelInPartition, kernel - 1U);
             // set the first kernel for the next partition
             firstKernelInPartition = kernel;
             currentPartitionId = partitionId;
             FirstKernelInPartition[partitionId] = kernel;
         }
     }
-    if (firstKernelInPartition <= LastKernel) {
-        fixStrideStepLength(firstKernelInPartition, LastKernel);
-    }
+
     FirstKernelInPartition[PartitionCount - 1] = newPipelineOutput;
     FirstKernelInPartition[PartitionCount] = newPipelineOutput;
 
@@ -415,6 +404,15 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
     for (unsigned i = 0; i < numOfScalars; ++i) {
         assert (subsitution[scalars[i]] == -1U);
         subsitution[scalars[i]] = FirstScalar + i;
+    }
+    // When constructing the initial partition graph, we identified which streamsets were
+    // thread-local before we considered termination properties.
+    mNonThreadLocalStreamSets.reserve(num_edges(initialGraph));
+    for (auto e : make_iterator_range(edges(initialGraph))) {
+        const auto streamSet = initialGraph[e];
+        if (streamSet) {
+            mNonThreadLocalStreamSets.insert(subsitution[streamSet]);
+        }
     }
 
     SmallVector<std::pair<RelationshipType, unsigned>, 64> temp;

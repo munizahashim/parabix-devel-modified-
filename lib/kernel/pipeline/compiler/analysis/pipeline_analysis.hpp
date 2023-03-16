@@ -34,25 +34,46 @@ public:
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
         auto initialGraph = P.initialPartitioningPass();
+
         P.computeIntraPartitionRepetitionVectors(initialGraph);
-        P.estimateInterPartitionDataflow(initialGraph, rng);
+
+        switch (codegen::PipelineCompilationMode) {
+            case codegen::PipelineCompilationModeOptions::DefaultFast:
+                P.simpleEstimateInterPartitionDataflow(initialGraph, rng);
+                break;
+            case codegen::PipelineCompilationModeOptions::Expensive:
+                P.estimateInterPartitionDataflow(initialGraph, rng);
+                break;
+        }
+
         auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
 
-        P.schedulePartitionedProgram(partitionGraph, rng);
+        switch (codegen::PipelineCompilationMode) {
+            case codegen::PipelineCompilationModeOptions::DefaultFast:
+                P.simpleSchedulePartitionedProgram(partitionGraph, rng);
+                break;
+            case codegen::PipelineCompilationModeOptions::Expensive:
+                P.schedulePartitionedProgram(partitionGraph, rng);
+                break;
+        }
+
         // Construct the Stream and Scalar graphs
-        P.transcribeRelationshipGraph(partitionGraph);
+        P.transcribeRelationshipGraph(initialGraph, partitionGraph);
 
         P.generateInitialBufferGraph();
+
+        P.updateInterPartitionThreadLocalBuffers();
 
         P.identifyOutputNodeIds();
 
         P.identifyInterPartitionSymbolicRates();
 
-        P.markInterPartitionStreamSetsAsGloballyShared();
 
         P.identifyTerminationChecks();
 
         P.determinePartitionJumpIndices();
+
+        P.identifyDominatingPartitionsForSlidingWindows();
 
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         P.identifyPartitionGuidedSynchronizationVariables();
@@ -62,8 +83,8 @@ public:
 
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
-        P.identifyLinearBuffers();
         P.identifyZeroExtendedStreamSets();
+        P.identifyLinearBuffers();
 
         P.determineBufferSize(b);
 
@@ -77,8 +98,10 @@ public:
 
         P.determineNumOfThreads();
 
+        P.numberDynamicRepeatingStreamSets();
+
         // Finish the buffer graph
-        P.determineBufferLayout(b, rng);
+        P.determineInitialThreadLocalBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
 
         P.gatherInfo();
@@ -129,7 +152,7 @@ private:
 
     void identifyPipelineInputs();
 
-    void transcribeRelationshipGraph(const PartitionGraph & partitionGraph);
+    void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
 
     void gatherInfo() {        
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
@@ -155,6 +178,10 @@ private:
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     void identifyPartitionGuidedSynchronizationVariables();
     #endif
+
+    // simple scheduling analysis
+
+    void simpleSchedulePartitionedProgram(PartitionGraph & P, pipeline_random_engine & rng);
 
     // scheduling analysis
 
@@ -183,18 +210,19 @@ private:
 
     void determineBufferSize(BuilderRef b);
 
-    void determineBufferLayout(BuilderRef b, pipeline_random_engine & rng);
-
     void identifyOwnedBuffers();
 
     void identifyLinearBuffers();
-    void markInterPartitionStreamSetsAsGloballyShared();
 
     void identifyOutputNodeIds();
 
     void identifyPortsThatModifySegmentLength();
 
-    // void identifyDirectUpdatesToStateObjects();
+    // thread local analysis
+
+    void determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng);
+
+    void updateInterPartitionThreadLocalBuffers();
 
     // consumer analysis functions
 
@@ -210,7 +238,13 @@ private:
 
     void calculatePartialSumStepFactors(BuilderRef b);
 
+    void numberDynamicRepeatingStreamSets();
+
     void determineNumOfThreads();
+
+    void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
+
+    void identifyDominatingPartitionsForSlidingWindows();
 
     // zero extension analysis function
 
@@ -280,19 +314,26 @@ public:
     KernelIdVector                  FirstKernelInPartition;
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
-    std::vector<unsigned>           StrideStepLength;
+    std::vector<unsigned>           StrideRepetitionVector;
+    std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
+    std::vector<Rational>           NumOfPartialOverflowStridesPerPartitionRootStride;
 
     BufferGraph                     mBufferGraph;
 
     std::vector<unsigned>           PartitionJumpTargetId;
 
     ConsumerGraph                   mConsumerGraph;
+
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
+
+    flat_set<unsigned>              mNonThreadLocalStreamSets;
 
     TerminationChecks               mTerminationCheck;
 
     TerminationPropagationGraph     mTerminationPropagationGraph;
     BitVector                       HasTerminationSignal;
+
+    std::vector<unsigned>           mDynamicRepeatingStreamSetId;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;

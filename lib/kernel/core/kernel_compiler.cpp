@@ -10,9 +10,6 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
 #include <llvm/IR/Dominators.h>
-#ifndef NDEBUG
-#include <llvm/IR/Verifier.h>
-#endif
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_set.hpp>
 #include <kernel/core/streamsetptr.h>
@@ -66,6 +63,7 @@ void KernelCompiler::generateKernel(BuilderRef b) {
         assert ("output buffer not set by constructStreamSetBuffers" && buffer.get());
     }
     #endif
+
     addBaseInternalProperties(b);
     mTarget->addInternalProperties(b);
     mTarget->constructStateTypes(b);
@@ -90,6 +88,7 @@ void KernelCompiler::generateKernel(BuilderRef b) {
     runInternalOptimizationPasses(b->getModule());
     mTarget->runOptimizationPasses(b);
     b->setCompiler(oc);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -183,7 +182,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
     for (const auto & binding : mInputScalars) {
         b->setScalarField(binding.getName(), nextArg());
     }
-    bindFamilyInitializationArguments(b, arg, arg_end);
+    bindAdditionalInitializationArguments(b, arg, arg_end);
     assert (arg == arg_end);    
     // TODO: we could permit shared managed buffers here if we passed in the buffer
     // into the init method. However, since there are no uses of this in any written
@@ -203,7 +202,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::bindFamilyInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) const {
+void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) const {
 
 }
 
@@ -1518,16 +1517,6 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
  * @brief runInternalOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
-
-    #ifndef NDEBUG
-    SmallVector<char, 256> tmp;
-    raw_svector_ostream msg(tmp);
-    bool BrokenDebugInfo = false;
-    if (LLVM_UNLIKELY(verifyModule(*m, &msg, &BrokenDebugInfo))) {
-        m->print(errs(), nullptr);
-        report_fatal_error(msg.str());
-    }
-    #endif
 
     // Attempt to promote all of the allocas in the entry block into PHI nodes
     // and delete any unnecessary Alloca and GEP instructions.

@@ -381,6 +381,8 @@ struct AttributeSet : public std::vector<Attribute> {
         return __findAttribute(id) != nullptr;
     }
 
+    void print(llvm::raw_ostream & out) const noexcept;
+
     AttributeSet() = default;
 
     AttributeSet(const AttributeSet &) = default;
@@ -388,10 +390,6 @@ struct AttributeSet : public std::vector<Attribute> {
     AttributeSet(Attribute && attr) { emplace_back(std::move(attr)); }
 
     AttributeSet(std::initializer_list<Attribute> attrs) : std::vector<Attribute>(attrs) { }
-
-protected:
-
-    void print(llvm::raw_ostream & out) const noexcept;
 
 private:
 

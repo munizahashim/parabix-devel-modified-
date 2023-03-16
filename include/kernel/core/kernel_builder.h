@@ -221,6 +221,8 @@ public:
 
     // rational math functions
 
+    llvm::Value * CreateCeilAddRational(llvm::Value * const number, const Rational divisor, const llvm::Twine & Name = "");
+
     llvm::Value * CreateUDivRational(llvm::Value * const number, const Rational divisor, const llvm::Twine & Name = "");
 
     llvm::Value * CreateCeilUDivRational(llvm::Value * const number, const Rational divisor, const llvm::Twine & Name = "");

@@ -112,6 +112,9 @@ void PipelineCompiler::signalAbnormalTermination(BuilderRef b) {
     mTerminatedSignalPhi->addIncoming(aborted, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     if (mIsPartitionRoot) {
+        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+        mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
+        #endif
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
     }
 }
@@ -188,7 +191,11 @@ void PipelineCompiler::checkPropagatedTerminationSignals(BuilderRef b) {
         mTerminatedSignalPhi->addIncoming(getTerminationSignal(b, TerminationSignal::Completed), entryPoint);
         mCurrentNumOfStridesAtTerminationPhi->addIncoming(mCurrentNumOfStridesAtLoopEntryPhi, entryPoint);
         if (mIsPartitionRoot) {
-            mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(b->getSize(0), entryPoint);
+            Constant * const ZERO = b->getSize(0);
+            #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+            mPotentialSegmentLengthAtTerminationPhi->addIncoming(ZERO, entryPoint);
+            #endif
+            mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(ZERO, entryPoint);
         }
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -280,7 +287,8 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
             if (LLVM_UNLIKELY(br.isZeroExtended())) {
                 fullyConsumed = closed;
             } else {
-                Value * const avail = getLocallyAvailableItemCount(b, br.Port);
+                const auto streamSet = source(e, mBufferGraph);
+                Value * const avail = mLocallyAvailableItems[streamSet];
                 Value * const processed = mProcessedItemCountAtTerminationPhi[br.Port]; assert (processed);
                 fullyConsumed = b->CreateAnd(closed, b->CreateICmpULE(avail, processed));
             }

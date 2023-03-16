@@ -128,7 +128,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
  * @brief addAdditionalFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::addAdditionalFunctions(BuilderRef b) {
-    if (hasAttribute(AttrId::InternallySynchronized) || externallyInitialized()) {
+    if (hasAttribute(AttrId::InternallySynchronized) || externallyInitialized() || generatesDynamicRepeatingStreamSets()) {
         return;
     }
     addOrDeclareMainFunction(b, Kernel::AddExternal);
@@ -152,7 +152,7 @@ bool PipelineKernel::externallyInitialized() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const {
+void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const {
     unsigned n = 0;
     for (const Kernel * kernel : mKernels) {
         if (kernel->externallyInitialized()) {
@@ -171,18 +171,201 @@ void PipelineKernel::addFamilyInitializationArgTypes(BuilderRef b, InitArgTypes 
     if (LLVM_LIKELY(n > 0)) {
         argTypes.append(n, b->getVoidPtrTy());
     }
+    if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
+        flat_set<const RepeatingStreamSet *> observed;
+        unsigned n = 0;
+        for (const Kernel * kernel : mKernels) {
+            const auto m = kernel->getNumOfStreamInputs();
+            for (unsigned i = 0; i != m; ++i) {
+                const StreamSet * const input = kernel->getInputStreamSet(i);
+                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
+                    const RepeatingStreamSet * const streamSet = cast<RepeatingStreamSet>(input);
+                    if (streamSet->isDynamic() && observed.insert(streamSet).second) {
+                        ++n;
+                    }
+                }
+            }
+        }
+        argTypes.reserve(n * 2);
+        for (unsigned i = 0; i < n; ++i) {
+            argTypes.push_back(b->getVoidPtrTy());
+            argTypes.push_back(b->getSizeTy());
+        }
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, const ParamMap & params, NestedStateObjs & toFree) const {
+void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
     for (const Kernel * const kernel : mKernels) {
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
             kernel->constructFamilyKernels(b, args, params, toFree);
         }
     }
+}
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recursivelyConstructRepeatingStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
+    if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
+
+        Module * const M = getModule();
+        NamedMDNode * const msl = M->getNamedMetadata("rsl");
+        assert (msl);
+        assert (msl->getNumOperands() > 0);
+        assert (msl->getOperand(0)->getNumOperands() > 0);
+        ConstantAsMetadata * const c = cast<ConstantAsMetadata>(msl->getOperand(0)->getOperand(0));
+        Constant * ar = c->getValue();
+        const auto m = mKernels.size();
+
+        auto getJthOffset = [&](unsigned j) {
+            FixedArray<unsigned, 1> off;
+            off[0] = j;
+            const ConstantInt * const v = cast<ConstantInt>(ConstantExpr::getExtractValue(ar, off));
+            return (v->getLimitedValue() * scale);
+        };
+
+        flat_set<const RepeatingStreamSet *> observed;
+
+        for (unsigned i = 0, j = 0; i != m; ++i) {
+            const Kernel * const kernel = mKernels[i];
+            if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
+                kernel->recursivelyConstructRepeatingStreamSets(b, args, params, getJthOffset(j++));
+            }
+            const auto n = kernel->getNumOfStreamInputs();
+            PointerType * const voidPtrTy = b->getVoidPtrTy();
+            for (unsigned i = 0; i != n; ++i) {
+                const StreamSet * const input = kernel->getInputStreamSet(i);
+                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
+                    const RepeatingStreamSet * const streamSet = cast<RepeatingStreamSet>(input);
+                    if (streamSet->isDynamic() && observed.insert(streamSet).second) {
+                        const auto k = getJthOffset(j++);
+                        auto info = createRepeatingStreamSet(b, streamSet, k);
+                        params.insert(std::make_pair(streamSet, info.StreamSet));
+                        args.push_back(b->CreatePointerCast(info.StreamSet, voidPtrTy));
+                        args.push_back(info.RunLength);
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief createRepeatingStreamSet
+ ** ------------------------------------------------------------------------------------------------------------- */
+PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * ss, const unsigned maxStrideLength) const {
+
+    const auto fieldWidth = ss->getFieldWidth();
+    const auto numElements = ss->getNumElements();
+    const auto blockWidth = b->getBitBlockWidth();
+
+    const auto maxVal = (1ULL << static_cast<size_t>(fieldWidth)) - 1ULL;
+
+    size_t patternLength = blockWidth;
+    for (unsigned i = 0; i < numElements; ++i) {
+        const auto & vec = ss->getPattern(i);
+        const auto L = vec.size();
+        if (LLVM_UNLIKELY(L == 0)) {
+            report_fatal_error("Zero-length repeating streamset elements are not permitted");
+        }
+
+        patternLength = boost::lcm<size_t>(patternLength, L);
+
+        #ifndef NDEBUG
+        for (auto v : vec) {
+            if (LLVM_UNLIKELY(v > maxVal)) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream msg(tmp);
+                msg << "Repeating streamset value " << v << " exceeds a " << fieldWidth << "-bit value";
+                report_fatal_error(msg.str());
+            }
+        }
+        #endif
+    }
+
+    // If this repeating streamset has a single stream element, we only need to ensure we generate a
+    // byte-aligned variable since the pipeline can easily use K "memcpys" to splat the value out to
+    // the desired length, where K is log2(lcm(L,blockwidth)/lcm(L,8)) and L is the pattern length.
+    // However, if we have multiple stream elements, this becomes much harder because streamsets have
+    // a "strip-mined" layout. I.e., for each element, BlockWidth number of values are laid out
+    // sequentially in memory. Strip-mining promotes better cache utilization but means that we'd end
+    // up having many tiny memcpys to reassemble the minimal set of data.
+
+    assert ((patternLength % blockWidth) == 0);
+
+    const auto runLength = (patternLength / blockWidth);
+
+    assert ((maxStrideLength % blockWidth) == 0);
+
+    const auto overflow = (maxStrideLength / blockWidth);
+
+    const auto totalStrides = ((runLength + overflow - 1U) / overflow) * overflow;
+
+    const auto additionalStrides =  totalStrides - runLength;
+
+    std::vector<Constant *> dataVectorArray(runLength + additionalStrides);
+
+    FixedVectorType * const vecTy = b->getBitBlockType();
+    IntegerType * const intTy = cast<IntegerType>(vecTy->getScalarType());
+    const auto laneWidth = intTy->getIntegerBitWidth();
+    const auto numLanes = blockWidth / laneWidth;
+    ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
+    ArrayType * const streamSetTy = ArrayType::get(elementTy, numElements);
+
+
+    SmallVector<Constant *, 16> laneVal(numLanes);
+    SmallVector<Constant *, 16> packVal(fieldWidth);
+    SmallVector<Constant *, 16> elemVal(numElements);
+
+    SmallVector<uint64_t, 16> elementPos(numElements, 0);
+
+    uint64_t hashNum = 0;
+
+    for (unsigned r = 0; r < runLength; ++r) {
+        for (unsigned p = 0; p < numElements; ++p) {
+            const auto & vec = ss->getPattern(p);
+            const auto L = vec.size();
+            for (uint64_t i = 0; i < fieldWidth; ++i) {
+                for (uint64_t j = 0; j < numLanes; ++j) {
+                    uint64_t V = 0;
+                    for (uint64_t k = 0; k != laneWidth; k += fieldWidth) {
+                        auto & pos = elementPos[p];
+                        const auto v = vec[pos % L];
+                        V |= (v << k);
+                        ++pos;
+                    }
+                    hashNum += V;
+                    laneVal[j] = ConstantInt::get(intTy, V, false);
+                }
+                packVal[i] = ConstantVector::get(laneVal);
+            }
+            elemVal[p] = ConstantArray::get(cast<ArrayType>(elementTy), packVal);
+        }
+        dataVectorArray[r] = ConstantArray::get(streamSetTy, elemVal);
+    }
+
+    for (unsigned r = 0; r < additionalStrides; ++r) {
+        assert (dataVectorArray[r] == dataVectorArray[r % runLength]);
+        assert (dataVectorArray[r]);
+        dataVectorArray[r + runLength] = dataVectorArray[r];
+    }
+
+    ArrayType * const arrTy = ArrayType::get(streamSetTy, dataVectorArray.size());
+
+    Constant * const patternVec = ConstantArray::get(arrTy, dataVectorArray);
+
+    Module & mod = *b->getModule();
+    GlobalVariable * const patternData =
+        new GlobalVariable(mod, patternVec->getType(), true, GlobalValue::ExternalLinkage, patternVec);
+    const auto align = blockWidth / 8;
+    patternData->setAlignment(MaybeAlign{align});
+
+    return RepeatingStreamSetInfo{patternData, b->getSize(runLength)};
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -378,9 +561,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
         assert (argCount == doSegment->arg_size());
     }
-
     Value * sharedHandle = nullptr;
     NestedStateObjs toFree;
+    ConstantInt * const sz_ONE = b->getSize(1);
     BEGIN_SCOPED_REGION
     ParamMap paramMap;
     for (const auto & input : getInputScalarBindings()) {
@@ -414,8 +597,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         report_fatal_error(doSegment->getName() + " cannot be externally synchronized");
     }
 
-    ConstantInt * const sz_ONE = b->getSize(1);
-
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
@@ -438,7 +619,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
-
     PHINode * successPhi = nullptr;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) ||
                       codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
@@ -496,6 +676,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 PipelineKernel::PipelineKernel(BuilderRef b,
                                std::string && signature,
                                const unsigned numOfThreads,
+                               const bool hasRepeatingStreamSet,
                                Kernels && kernels, CallBindings && callBindings,
                                Bindings && stream_inputs, Bindings && stream_outputs,
                                Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -514,6 +695,7 @@ PipelineKernel::PipelineKernel(BuilderRef b,
          std::move(scalar_inputs), std::move(scalar_outputs),
          {} /* Internal scalars are generated by the PipelineCompiler */)
 , mNumOfThreads(numOfThreads)
+, mHasRepeatingStreamSet(hasRepeatingStreamSet)
 , mSignature(std::move(signature))
 , mKernels(std::move(kernels))
 , mCallBindings(std::move(callBindings))

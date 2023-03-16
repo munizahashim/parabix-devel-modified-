@@ -52,12 +52,12 @@ public:
 
     using pattern_t = std::vector<uint64_t>;
 
-    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, pattern_t string) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)});
+    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, pattern_t string, const bool isDynamic = true) {
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
     }
 
-    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string));
+    RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string, const bool isDynamic = true) {
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string), isDynamic);
     }
 
     template<unsigned FieldWidth, unsigned NumOfElements>
@@ -118,6 +118,10 @@ public:
         mExternallySynchronized = value;
     }
 
+    void setUniqueName(std::string name) {
+        mUniqueName.swap(name);
+    }
+
 protected:
 
 
@@ -147,6 +151,7 @@ protected:
     CallBindings        mCallBindings;
     NestedBuilders      mNestedBuilders;
     LengthAssertions    mLengthAssertions;
+    std::string         mUniqueName;
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *

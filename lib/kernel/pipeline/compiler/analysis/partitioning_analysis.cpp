@@ -142,7 +142,6 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
         if (node.Type == RelationshipNode::IsKernel) {
 
             bool hasInputRateChange = false;
-            bool demarcateOutputs = false;
 
             if (in_degree(i, G) == 0) {
                 if (out_degree(i, G) != 0) {
@@ -150,7 +149,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                     // We isolate the source kernels so that the simulator will be able to
                     // infer the actual outputs of the source and correctly judge how to
                     // scale the segment length of the source kernels.
-                    demarcateOutputs = true;
+                    // demarcateOutputs = true;
                 } else {
                     assert (node.Kernel == mPipelineKernel);
                 }
@@ -174,7 +173,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                         }
                     } else {
                         hasInputRateChange = true;
-                        V.reset();
+                        break;
                     }
                 }
             }
@@ -183,15 +182,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 V.set(nextRateId++);
             }
 
-            unsigned demarcationId = 0;
-            if (LLVM_UNLIKELY(demarcateOutputs)) {
-                assert (nextRateId > 0);
-                demarcationId = nextRateId++;
-            }
-
-            const Kernel * const kernelObj = node.Kernel;
-
-            assert (V.any() || kernelObj == mPipelineKernel);
+            assert (V.any() || node.Kernel == mPipelineKernel);
 
             // Now iterate through the outputs
             for (const auto e : make_iterator_range(out_edges(i, G))) {
@@ -202,10 +193,6 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 const ProcessingRate & rate = b.getRate();
                 BitSet & O = G[target(e, G)];
                 O |= V;
-                assert (demarcateOutputs ^ (demarcationId == 0));
-                if (LLVM_UNLIKELY(demarcationId != 0)) {
-                    O.set(demarcationId);
-                }
                 if (rate.isFixed()) {
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
@@ -625,8 +612,9 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         }
     }
 
-
     auto nextRateId = l;
+
+    flat_map<unsigned, unsigned> zeroExtendMap;
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -667,6 +655,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                         default: break;
                     }
                 }
+
             }
 
             if (useNewRateId) {
@@ -694,10 +683,66 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
             assert (in_degree(i, G) == 1);
 
+            assert (node.Type == RelationshipNode::IsRelationship);
+
+            assert (V.any());
+
+            // If a streamset has consumers that zero-extend it but also some
+            // that do not, we may end up kernels who view the streamset as
+            // having different lengths. However, if the producer and consumers
+            // belong to the same partition, we do not need to worry about
+            // zero-extension.
+
+            bool isZeroExtendedInput = false;
+
             for (const auto e : make_iterator_range(out_edges(i, G))) {
-                BitSet & R = G[target(e, G)];
+                const auto w = target(e, G);
+                assert (Relationships[sequence[w]].Type == RelationshipNode::IsKernel);
+                BitSet & R = G[w];
                 R |= V;
+                const auto r = G[e];
+                const RelationshipNode & rn = Relationships[r];
+                assert (rn.Type == RelationshipNode::IsBinding);
+                const Binding & bn = rn.Binding;
+                isZeroExtendedInput |= bn.hasAttribute(AttrId::ZeroExtended);
             }
+
+            if (isZeroExtendedInput) {
+
+                assert (zeroExtendMap.empty());
+
+                auto findPartionId = [&](const size_t vertex) {
+                    const auto v = sequence[vertex];
+                    assert (Relationships[v].Type == RelationshipNode::IsKernel);
+                    const auto f = PartitionIds.find(v);
+                    assert (f != PartitionIds.end());
+                    return f->second;
+                };
+
+                const auto prodPartId = findPartionId(parent(i, G));
+
+                for (const auto e : make_iterator_range(out_edges(i, G))) {
+                    const auto w = target(e, G);
+                    assert (Relationships[sequence[w]].Type == RelationshipNode::IsKernel);
+                    BitSet & R = G[w];
+
+                    const auto conPartId = findPartionId(w);
+                    if (prodPartId != conPartId) {
+                        const auto g = zeroExtendMap.find(conPartId);
+                        unsigned rateId = 0U;
+                        if (g == zeroExtendMap.end()) {
+                            rateId = nextRateId++;
+                            zeroExtendMap.emplace(conPartId, rateId);
+                        } else {
+                            rateId = g->second;
+                        }
+                        R.set(rateId);
+                    }
+                }
+                zeroExtendMap.clear();
+
+            }
+
 
         }
     }
@@ -952,32 +997,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     PartitionCount = partitionCount;
 
-    #ifdef PRINT_GRAPH_BITSETS
-    BEGIN_SCOPED_REGION
-    auto & out = errs();
-
-    out << "digraph \"H2\" {\n";
-    for (auto v : make_iterator_range(vertices(P))) {
-        const PartitionData & D = P[v];
-        out << "v" << v << " [label=\"";
-        for (const auto k : D.Kernels) {
-            const RelationshipNode & node = Relationships[k];
-            assert (node.Type == RelationshipNode::IsKernel);
-            out << k << ". " << node.Kernel->getName() << "\\n";
-        }
-        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
-    }
-    for (auto e : make_iterator_range(edges(P))) {
-        const auto s = source(e, P);
-        const auto t = target(e, P);
-        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
-    END_SCOPED_REGION
-    #endif
-
     // Convert the dataflow expectations to the new partitioning graph.
 
     // TODO: there is almost certainly a more efficient way to do this
@@ -1024,6 +1043,39 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         N.StridesPerSegmentCoV /= m;
     }
     assert (update.empty());
+
+
+    #ifdef PRINT_GRAPH_BITSETS
+    BEGIN_SCOPED_REGION
+    auto & out = errs();
+
+    out << "digraph \"H2\" {\n";
+    for (auto v : make_iterator_range(vertices(P))) {
+        const PartitionData & D = P[v];
+        const auto n = D.Kernels.size();
+
+        out << "v" << v << " [label=\"";
+        for (unsigned i = 0; i < n; ++i) {
+            const auto k = D.Kernels[i];
+            const RelationshipNode & node = Relationships[k];
+            assert (node.Type == RelationshipNode::IsKernel);
+            const auto & V = D.Repetitions[i];
+            out << k << ". " << node.Kernel->getName()
+                << " (" << V.numerator() << "/" << V.denominator() << ")\\n";
+        }
+        out << " -- linkId=" << D.LinkedGroupId << "\",shape=rect];\n";
+    }
+    for (auto e : make_iterator_range(edges(P))) {
+        const auto s = source(e, P);
+        const auto t = target(e, P);
+        out << "v" << s << " -> v" << t << " [label=\"" << P[e] << "\"];\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
+    END_SCOPED_REGION
+    #endif
+
     return P;
 }
 

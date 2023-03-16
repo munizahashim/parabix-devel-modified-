@@ -64,6 +64,11 @@ enum DebugFlags {
     DebugFlagSentinel
 };
 
+enum PipelineCompilationModeOptions {
+    DefaultFast
+    , Expensive
+};
+
 extern bool PabloTransposition;
 extern bool SplitTransposition;
 
@@ -77,6 +82,7 @@ extern std::string ShowUnoptimizedIROption;
 extern std::string ShowIROption;
 extern std::string TraceOption;
 extern std::string CCCOption;
+extern PipelineCompilationModeOptions PipelineCompilationMode;
 #ifdef ENABLE_PAPI
 extern std::string PapiCounterOptions;
 #endif

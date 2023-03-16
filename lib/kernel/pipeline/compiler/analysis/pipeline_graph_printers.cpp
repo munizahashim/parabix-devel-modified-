@@ -78,6 +78,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                             break;
                         case KindId::__Count: llvm_unreachable("");
                     }
+                    binding.getAttributes().print(out);
                 }
                 break;
             case RelationshipNode::IsCallee:
@@ -373,8 +374,8 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 print_rational(MinimumNumOfStrides[kernel]) << ",?";
             }
             out << "]";
-            if (StrideStepLength.size() > 0) {
-                out << " (x" << StrideStepLength[kernel] << ")";
+            if (StrideRepetitionVector.size() > 0) {
+                out << " (x" << StrideRepetitionVector[kernel] << ")";
             }
             out << "\\n";
         }

@@ -1,4 +1,4 @@
-#include "../pipeline_compiler.hpp"
+﻿#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -50,6 +50,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         // output data that wouldn't be observed in a single-threaded run.
 
         Value * waitToRelease = b->CreateIsNotNull(mIsFinalInvocation);
+
         if (mMayLoopToEntry) {
             mHasMoreInput = hasMoreInput(b);
             waitToRelease = b->CreateOr(waitToRelease, mHasMoreInput);
@@ -58,6 +59,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         const auto prefix = makeKernelName(mKernelId);
 
         #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
         debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
         #endif
 
@@ -70,9 +72,8 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->SetInsertPoint(releaseSyncLock);
 
         if (mCurrentKernelIsStateFree) {
-            writeInternalProcessedAndProducedItemCounts(b);
+            writeInternalProcessedAndProducedItemCounts(b, false);
         }
-
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
 
         b->CreateBr(resumeKernelExecution);
@@ -233,6 +234,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
     Value * const beforeKernelCall = startCycleCounter(b);
+
 
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
@@ -646,7 +648,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                 const auto port = getOutput(mKernelId, outputPort);
                 const auto streamSet = target(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_LIKELY(bn.isInternal() && bn.isOwned())) {
+                if (LLVM_LIKELY(bn.isInternal() && bn.isOwned() && bn.isNonThreadLocal())) {
                     Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
                     Value * const delta = b->CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
                     Value * const withinCapacity = b->CreateICmpULE(delta, writable);
@@ -668,20 +670,24 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeInternalProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b) {
+void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b, const bool atTermination) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
 
     // calculate or read the item counts (assuming this kernel did not terminate)
+
+
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const auto inputPort = StreamSetPort{PortType::Input, i};
-        b->CreateStore(mProcessedItemCount[inputPort], mProcessedItemCountPtr[inputPort]);
+        Value * const ic = atTermination ? mProcessedItemCountAtTerminationPhi[inputPort] : mProcessedItemCount[inputPort];
+        b->CreateStore(ic, mProcessedItemCountPtr[inputPort]);
     }
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto outputPort = StreamSetPort{PortType::Output, i};
-        b->CreateStore(mProducedItemCount[outputPort], mProducedItemCountPtr[outputPort]);
+        Value * const ic = atTermination ? mProducedAtTermination[outputPort] : mProducedItemCount[outputPort];
+        b->CreateStore(ic, mProducedItemCountPtr[outputPort]);
     }
 
 }

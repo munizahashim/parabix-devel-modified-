@@ -254,7 +254,7 @@ void CPUDriver::generateUncachedKernels() {
     llvm::PrintStatistics();
 }
 
-void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
+void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     using ModuleSet = llvm::SmallVector<Module *, 32>;
 
@@ -303,9 +303,10 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pipeline) {
     mainModule->setTargetTriple(mMainModule->getTargetTriple());
     mainModule->setDataLayout(mMainModule->getDataLayout());
     mBuilder->setModule(mainModule.get());
-    pipeline->addKernelDeclarations(mBuilder);
-    const auto method = pipeline->externallyInitialized() ? Kernel::AddInternal : Kernel::DeclareExternal;
-    Function * const main = pipeline->addOrDeclareMainFunction(mBuilder, method);
+    pk->addKernelDeclarations(mBuilder);
+    const auto e = pk->externallyInitialized() || pk->generatesDynamicRepeatingStreamSets();
+    const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;
+    Function * const main = pk->addOrDeclareMainFunction(mBuilder, method);
     mBuilder->setModule(mMainModule);
 
     // NOTE: the pipeline kernel is destructed after calling clear unless this driver preserves kernels!

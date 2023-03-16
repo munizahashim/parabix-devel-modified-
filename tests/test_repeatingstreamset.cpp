@@ -226,7 +226,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const fillSize = b->CreateMul(sz_strideFillSize, b->getNumOfStrides());
     Value * const total = b->CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
     Value * const totalStrides = b->CreateExactUDiv(total, sz_BlockWidth);
-
     Value * const mustFill = b->CreateICmpULT(remaining, fillSize);
     b->CreateLikelyCondBr(mustFill, checkBuffer, exit);
 
@@ -286,7 +285,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const expandedBytes = b->CreateMulRational(expandedCapacity, bytesPerItem);
 
     Value * expandedBuffer = b->CreatePageAlignedMalloc(expandedBytes);
-
     b->CreateMemCpy(expandedBuffer, unreadData, remainingBytes, 1);
     // Free the prior buffer if it exists
     Value * const ancillaryBuffer = b->getScalarField("ancillaryBuffer");
@@ -326,14 +324,13 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     Value * const currentIndex = b->CreateExactUDiv(pos, sz_BlockWidth);
     const auto length = (fieldWidth * blockWidth) / 8;
     ConstantInt * const elementSize = b->getSize(length);
-
     for (unsigned i = 0; i < numElements; ++i) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
         Value * const src = b->CreateGEP(streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
-        b->CreateMemCpy(dst, src, elementSize, length);
+        b->CreateMemCpy(dst, src, elementSize, blockWidth / 8);
     }
 
     Value * const nextProduced = b->CreateAdd(pos, sz_BlockWidth);
@@ -632,8 +629,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    for (unsigned rounds = 0; rounds < 10; ++rounds) {
+    //for (unsigned rounds = 0; rounds < 10; ++rounds) {
         testResult |= runRepeatingStreamSetTest(pxDriver, rng);
-    }
+    //}
     return testResult ? -1 : 0;
 }

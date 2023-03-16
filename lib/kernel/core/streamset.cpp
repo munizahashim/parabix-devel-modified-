@@ -903,7 +903,7 @@ Value * DynamicBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const prod
         Value * const actualCapacity = b->CreateUMin(reclaimed, maxCapacity);
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
             Value * const valid = b->CreateICmpULE(producedItems, actualCapacity);
-            b->CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
+            b->CreateAssert(valid, "DynamicBuffer produced item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
                             producedItems, actualCapacity);
         }
         return b->CreateSub(actualCapacity, producedItems);
@@ -1061,12 +1061,9 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
-            // b->CallPrintInt("lc:effectiveCapacity", effectiveCapacity);
             indices[1] = b->getInt32(InitialConsumedCount);
             Value * const initialConsumedField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(consumedChunks, initialConsumedField, sizeTyWidth);
-            // b->CallPrintInt("lc:initialConsumedCount", consumedChunks);
-
             b->CreateRetVoid();
 
             b->restoreIP(ip);
@@ -1163,7 +1160,7 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
         Value * const producedChunks = b->CreateCeilUDiv(produced, BLOCK_WIDTH);
         Value * const requiredCapacity = b->CreateAdd(produced, required);
         Value * const requiredChunks = b->CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
-
+\
         Value * const unconsumedChunks = b->CreateSub(producedChunks, consumedChunks);
         Value * const bytesToCopy = b->CreateMul(unconsumedChunks, CHUNK_SIZE);
 
@@ -1184,12 +1181,14 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             indices[1] = b->getInt32(InternalCapacity);
             Value * const intCapacityField = b->CreateInBoundsGEP(handle, indices);
             Value * const internalCapacity = b->CreateAlignedLoad(intCapacityField, sizeTyWidth);
+
             Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
 
             // newInternalCapacity tends to be 2x internalCapacity
             Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
             Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
+
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * const mallocSize = b->CreateMul(mallocCapacity, CHUNK_SIZE);
             Value * expandedBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(mallocSize), mType->getPointerTo());
@@ -1211,15 +1210,12 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
-            // b->CallPrintInt("ex:effectiveCapacity", effectiveCapacity);
-
             Value * const newVirtualAddress = b->CreateGEP(expandedBuffer, b->CreateNeg(consumedChunks));
             b->CreateAlignedStore(newVirtualAddress, virtualBaseField, sizeTyWidth);
 
             indices[1] = b->getInt32(InitialConsumedCount);
             Value * const initConsumedField = b->CreateInBoundsGEP(handle, indices);
             b->CreateAlignedStore(consumedChunks, initConsumedField, sizeTyWidth);
-            // b->CallPrintInt("ex:initialConsumedCount", consumedChunks);
 
             retVal = mallocedAddress;
 
@@ -1546,11 +1542,11 @@ Value * RepeatingBuffer::modByCapacity(BuilderPtr b, Value * const offset) const
 }
 
 Value * RepeatingBuffer::getCapacity(BuilderPtr b) const {
-    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
 }
 
 Value * RepeatingBuffer::getInternalCapacity(BuilderPtr b) const {
-    return ConstantExpr::getMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
 }
 
 void RepeatingBuffer::setCapacity(BuilderPtr b, Value * capacity) const {

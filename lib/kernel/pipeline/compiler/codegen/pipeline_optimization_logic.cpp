@@ -4,6 +4,10 @@
 #include <llvm/Transforms/IPO.h>
 // #include <llvm/Transforms/Scalar/DCE.h>
 #include <llvm/IR/LegacyPassManager.h>
+#ifndef NDEBUG
+#include <llvm/IR/Verifier.h>
+// #include <llvm/Analysis/CFGPrinter.h>
+#endif
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #endif
@@ -63,10 +67,21 @@ void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
     // detect any possible errors prior to optimizing it.
 
     Module * const m = b->getModule();
+    auto pm = std::make_unique<legacy::PassManager>();
 
+    #ifndef NDEBUG
+    SmallVector<char, 256> tmp;
+    raw_svector_ostream msg(tmp);
+    bool BrokenDebugInfo = false;
+    if (LLVM_UNLIKELY(verifyModule(*m, &msg, &BrokenDebugInfo))) {
+        m->print(errs(), nullptr);
+//        pm->add(createCFGOnlyPrinterLegacyPassPass());
+//        pm->run(*m);
+        report_fatal_error(msg.str());
+    }
+    #endif
     simplifyPhiNodes(m);
 
-    auto pm = std::make_unique<legacy::PassManager>();
     pm->add(createDeadCodeEliminationPass());        // Eliminate any trivially dead code
     pm->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
     pm->add(createEarlyCSEPass());

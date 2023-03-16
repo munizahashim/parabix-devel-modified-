@@ -476,6 +476,16 @@ add_test(
   WORKING_DIRECTORY ${QA_DIR}/json
   COMMAND ./run_all "${BIN_DIR}/json")
 
+add_test(
+  NAME csv2json_nocache_test
+  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
+  COMMAND ./run_csv2json "${BIN_DIR}/csv2json -enable-object-cache=0")
+
+add_test(
+  NAME csv2json_test
+  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
+  COMMAND ./run_csv2json "${BIN_DIR}/csv2json")
+
 
 SET_PROPERTY(TEST proptest PROPERTY TIMEOUT 1500)
 SET_PROPERTY(TEST abc_test PROPERTY TIMEOUT 100)
@@ -550,3 +560,11 @@ add_custom_target (json_test
 add_custom_target (json_perf
     WORKING_DIRECTORY ${QA_DIR}/json_perf
     COMMAND ./run_all "${BIN_DIR}/json")
+
+add_custom_target(csv2json_nocache_test
+  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
+  COMMAND ./run_csv2json "${BIN_DIR}/csv2json -enable-object-cache=0")
+
+add_custom_target (csv2json_test
+  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
+  COMMAND ./run_csv2json "${BIN_DIR}/csv2json")

@@ -454,6 +454,22 @@ Scalar * KernelBuilder::getOutputScalar(const StringRef name) noexcept {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateCeilAddRational
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * KernelBuilder::CreateCeilAddRational(Value * number, const Rational divisor, const Twine & Name) {
+    if (LLVM_UNLIKELY(divisor.numerator() == 1 && divisor.denominator() == 1)) {
+        return number;
+    }
+    Constant * const n = ConstantInt::get(number->getType(), divisor.numerator());
+    if (LLVM_UNLIKELY(divisor.denominator() == 1)) {
+        return CreateAdd(number, n, Name);
+    }
+    Constant * const d = ConstantInt::get(number->getType(), divisor.denominator());
+    return CreateCeilUDiv(CreateAdd(CreateMul(number, d), n), d, Name);
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateUDivRational
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelBuilder::CreateUDivRational(Value * const number, const Rational divisor, const Twine & Name) {
@@ -529,6 +545,7 @@ Value * KernelBuilder::CreateURemRational(Value * const number, const Rational f
 Value * KernelBuilder::CreateRoundDownRational(Value * const number, const Rational divisor, const Twine & Name) {
     Constant * const n = ConstantInt::get(number->getType(), divisor.numerator());
     if (divisor.denominator() == 1) {
+        if (LLVM_UNLIKELY(divisor.numerator() == 1)) return number;
         return CBuilder::CreateRoundDown(number, n, Name);
     }
     Constant * const d = ConstantInt::get(number->getType(), divisor.denominator());
@@ -541,6 +558,7 @@ Value * KernelBuilder::CreateRoundDownRational(Value * const number, const Ratio
 Value * KernelBuilder::CreateRoundUpRational(Value * const number, const Rational divisor, const Twine & Name) {
     Constant * const n = ConstantInt::get(number->getType(), divisor.numerator());
     if (divisor.denominator() == 1) {
+        if (LLVM_UNLIKELY(divisor.numerator() == 1)) return number;
         return CBuilder::CreateRoundUp(number, n, Name);
     }
     Constant * const d = ConstantInt::get(number->getType(), divisor.denominator());

@@ -110,14 +110,20 @@ public:
         return _StringSet[elementIndex];
     }
 
-    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet) noexcept
+    bool isDynamic() const {
+        return _isDynamic;
+    }
+
+    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet, bool isDynamic = false) noexcept
     : StreamSet(C, ClassTypeId::RepeatingStreamSet, stringSet.size(), FieldWidth)
+    , _isDynamic(isDynamic)
     , _StringSet(std::move(stringSet)) {
 
     }
 
 private:
 
+    const bool _isDynamic;
     std::vector<std::vector<uint64_t>> _StringSet;
 
 };

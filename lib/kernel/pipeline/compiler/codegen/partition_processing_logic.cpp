@@ -38,36 +38,56 @@ void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isNonThreadLocal() && !bn.isConstant()) {
 
-            const auto output = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(output, mBufferGraph);
-            if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                continue;
-            }
+        if (LLVM_UNLIKELY(bn.isConstant())) {
+            continue;
+        }
 
-            const BufferPort & outputPort = mBufferGraph[output];
-            const auto prefix = makeBufferName(producer, outputPort.Port);
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(output, mBufferGraph);
+        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            continue;
+        }
 
-            const auto k = streamSet - FirstStreamSet;
+        // TODO: make new buffer type to automatically state this is a cross partition
+        // thread local buffer.
 
-            auto lastReader = producer;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                // TODO: does the graph need a connection to pipeline output?
-                if (consumer < PipelineOutput) {
-                    lastReader = std::max(lastReader, consumer);
+        if (bn.isThreadLocal()) {
+            const auto prodPartId = KernelPartitionId[producer];
+            bool noCrossPartitionConsumer = true;
+            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consPartId = KernelPartitionId[target(e, mBufferGraph)];
+                if (prodPartId != consPartId) {
+                    noCrossPartitionConsumer = false;
+                    break;
                 }
             }
-            const auto readsPartId = KernelPartitionId[lastReader];
-            assert (readsPartId != KernelPartitionId[PipelineOutput]);
-            const auto prodPrefix = prefix + "_produced@partition";
-            const auto prodPartId = KernelPartitionId[producer];
-            for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
-                auto entryPoint = mPartitionEntryPoint[partitionId];
-                PHINode * const phi = PHINode::Create(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId), entryPoint);
-                mPartitionProducedItemCountPhi[partitionId][k] = phi;
+            if (noCrossPartitionConsumer) {
+                continue;
             }
+        }
+
+        const BufferPort & outputPort = mBufferGraph[output];
+        const auto prefix = makeBufferName(producer, outputPort.Port);
+
+        const auto k = streamSet - FirstStreamSet;
+
+        auto lastReader = producer;
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            // TODO: does the graph need a connection to pipeline output?
+            if (consumer < PipelineOutput) {
+                lastReader = std::max(lastReader, consumer);
+            }
+        }
+        const auto readsPartId = KernelPartitionId[lastReader];
+        assert (readsPartId != KernelPartitionId[PipelineOutput]);
+        const auto prodPrefix = prefix + "_produced@partition";
+        const auto prodPartId = KernelPartitionId[producer];
+        for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
+            auto entryPoint = mPartitionEntryPoint[partitionId];
+            PHINode * const phi = PHINode::Create(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId), entryPoint);
+            mPartitionProducedItemCountPhi[partitionId][k] = phi;
         }
     }
 
@@ -240,7 +260,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
         // the prior produced count.
 
 
-        const unsigned k = streamSet - FirstStreamSet;
+        const auto k = streamSet - FirstStreamSet;
 
         const BufferPort & br = mBufferGraph[e];
         // Select/load the appropriate produced item count
@@ -250,6 +270,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
             if (kernel < mKernelId) {
                 produced = mLocallyAvailableItems[streamSet];
             } else if (kernel == mKernelId && !mAllowDataParallelExecution) {
+                assert (!mCurrentKernelIsStateFree);
                 if (fromKernelEntryBlock) {
                     if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mInitiallyProducedDeferredItemCount[streamSet];
@@ -267,11 +288,13 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 }
             } else { // if (kernel > mKernelId) {
                 const auto prefix = makeBufferName(kernel, br.Port);
-                if (LLVM_UNLIKELY(br.isDeferred())) {
-                    produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                Value * ptr = nullptr;
+                if (LLVM_UNLIKELY(br.isDeferred() && !fromKernelEntryBlock)) {
+                    ptr = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 } else {
-                    produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                    ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
                 }
+                produced = b->CreateLoad(ptr);
             }
 
             assert (isFromCurrentFunction(b, produced, false));
@@ -392,16 +415,13 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief releaseAllSynchronizationLocksUntil
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel, const bool acquirePostInvocationLock) {
+void PipelineCompiler::releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel) {
 
     if (KernelPartitionId[kernel - 1] != KernelPartitionId[kernel]) {
         recordStridesPerSegment(b, kernel, b->getSize(0));
     }
     if (isDataParallel(kernel)) {
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-        if (LLVM_UNLIKELY(acquirePostInvocationLock)) {
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
-        }
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_POST_INVOCATION, mSegNo);
     } else {
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_FULL, mSegNo);
@@ -484,6 +504,9 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
             assert (isFromCurrentFunction(b, produced, false));
             mProducedAtJumpPhi[port]->addIncoming(produced, mKernelInitiallyTerminatedExit);
         }
+
+        mMaximumNumOfStridesAtJumpPhi->addIncoming(b->getSize(0), mKernelInitiallyTerminatedExit);
+
         b->CreateBr(mKernelJumpToNextUsefulPartition);
     } else {
 
@@ -509,6 +532,8 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 
+    assert (mIsPartitionRoot);
+
     b->SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto jumpPartitionId = PartitionJumpTargetId[mCurrentPartitionId];
     assert (mCurrentPartitionId < jumpPartitionId);
@@ -519,6 +544,8 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
     #endif
+
+    updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b->getSize(0));
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     if (LLVM_LIKELY(targetKernelId != PipelineOutput)) {
@@ -608,6 +635,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         PHINode * const progressPhi = mPartitionPipelineProgressPhi[nextPartitionId];
         progressPhi->addIncoming(mPipelineProgress, exitBlock);
         mPipelineProgress = progressPhi;
+
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
             mPartitionExitSegNoPhi->addIncoming(nextSegNo, exitBlock);
