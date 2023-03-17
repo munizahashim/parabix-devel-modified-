@@ -81,7 +81,9 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
             auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory;
 
-            if (LLVM_UNLIKELY(rate.getKind() == RateId::Unknown)) {
+            if (rate.isFixed()) {
+                bp.Flags |= BufferPortType::IsFixed;
+            } else if (LLVM_UNLIKELY(rate.isUnknown())) {
                 bp.Flags |= BufferPortType::IsManaged;
                 cannotBePlacedIntoThreadLocalMemory = true;
             }
@@ -159,6 +161,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         #ifndef NDEBUG
         RelationshipType prior_in{};
         #endif
+
+        size_t principalInputPort = 0;
+        bool hasPrincipalInput = false;
+
         for (auto e : make_iterator_range(in_edges(kernel, mStreamGraph))) {
             const RelationshipType & port = mStreamGraph[e];
             #ifndef NDEBUG
@@ -168,6 +174,11 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             const auto binding = source(e, mStreamGraph);
             const RelationshipNode & rn = mStreamGraph[binding];
             assert (rn.Type == RelationshipNode::IsBinding);
+            const Binding & bn = rn.Binding;
+            if (bn.hasAttribute(AttrId::Principal)) {
+                principalInputPort = port.Number;
+                hasPrincipalInput = true;
+            }
             E[port.Number] = e;
             if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {
                 for (const auto f : make_iterator_range(in_edges(binding, mStreamGraph))) {
@@ -252,6 +263,15 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             }
             add_edge(s, t, E);
         };
+
+        // Order the graph so a principal input is reasoned about as early as possible
+        if (hasPrincipalInput) {
+            for (unsigned j = 0; j < numOfInputs; ++j) {
+                if (principalInputPort != j) {
+                    add_edge(principalInputPort, j, E);
+                }
+            }
+        }
 
         for (unsigned j = 1; j < numOfPorts; ++j) {
             add_edge_if_no_induced_cycle(j - 1, j);

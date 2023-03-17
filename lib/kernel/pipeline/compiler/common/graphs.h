@@ -323,10 +323,11 @@ struct BufferNode {
 
 enum BufferPortType : unsigned {
     IsPrincipal = 1,
-    IsZeroExtended = 2,
-    IsDeferred = 4,
-    IsShared = 8,
-    IsManaged = 16,
+    IsFixed = 2,
+    IsZeroExtended = 4,
+    IsDeferred = 8,
+    IsShared = 16,
+    IsManaged = 32,
     CanModifySegmentLength = 64
 };
 
@@ -354,6 +355,10 @@ struct BufferPort {
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
+    }
+
+    bool isFixed() const {
+        return (Flags & BufferPortType::IsFixed) != 0;
     }
 
     bool isZeroExtended() const {

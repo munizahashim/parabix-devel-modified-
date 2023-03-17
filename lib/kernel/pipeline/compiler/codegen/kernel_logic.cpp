@@ -310,6 +310,40 @@ bool PipelineCompiler::isDataParallel(const size_t kernel) const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasPrincipalInputRate
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::hasPrincipalInputRate() const {
+    unsigned numOfPrincipalInputs = 0;
+    unsigned totalNumOfFixedRateInputs = 0;
+    bool nonFixedPrincipalAttribute = false;
+    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[e];
+        assert (port.Port.Type == PortType::Input);
+        if (LLVM_UNLIKELY(port.isPrincipal())) {
+            nonFixedPrincipalAttribute |= !port.isFixed();
+            ++numOfPrincipalInputs;
+            assert (totalNumOfFixedRateInputs == 0);
+        }
+        if (port.isFixed()) {
+            ++totalNumOfFixedRateInputs;
+        }
+    }
+    if (LLVM_UNLIKELY(numOfPrincipalInputs > 1 || nonFixedPrincipalAttribute)) {
+        SmallVector<char, 512> tmp;
+        raw_svector_ostream msg(tmp);
+        msg << "Error: " << mKernel->getName();
+        if (nonFixedPrincipalAttribute) {
+            msg << " has a Principal attribute assigned to a non-Fixed rate input";
+        } else {
+            msg << " has more than one input with a Principal attribute";
+        }
+        report_fatal_error(msg.str());
+    }
+    assert (totalNumOfFixedRateInputs >= numOfPrincipalInputs);
+    return (numOfPrincipalInputs == 1 && numOfPrincipalInputs < totalNumOfFixedRateInputs);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief isCurrentKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::isCurrentKernelStateFree() const {
@@ -398,7 +432,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mHasZeroExtendedInput = nullptr;
 
     mAnyClosed = nullptr;
-
+    mPrincipalFixedRateFactor = nullptr;
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;
     mKernelInitiallyTerminated = nullptr;

@@ -574,6 +574,7 @@ public:
     bool hasAnyGreedyInput(const unsigned kernelId) const;
     bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
+    bool hasPrincipalInputRate() const;
 
     static unsigned selectNumOfThreadsBasedOnPipelineGraph(const unsigned maxThreads, const bool nested, const BufferGraph & G);
 
@@ -754,6 +755,7 @@ protected:
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
     Value *                                     mAnyClosed = nullptr;
+    Value *                                     mPrincipalFixedRateFactor = nullptr;
     BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
@@ -772,6 +774,7 @@ protected:
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
+    bool                                        mHasPrincipalInputRate = false;
 
     unsigned                                    mNumOfTruncatedInputBuffers = 0;
 

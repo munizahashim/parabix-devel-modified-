@@ -451,6 +451,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         stepLength = b->getSize(StrideStepLength[mKernelId]);
     }
 
+
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], stepLength);
 
     // Value * strideLength = getInputStrideLength(b, port, stepLength);
@@ -465,7 +466,16 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
 
-    Value * hasEnough = b->CreateICmpUGE(accessible, required);
+    Value * minimum = required;
+    if (mPrincipalFixedRateFactor && port.isFixed()) {
+        assert (!port.isPrincipal());
+        const Binding & input = port.Binding;
+        const ProcessingRate & rate = input.getRate();
+        const auto factor = rate.getRate() / mFixedRateLCM;
+        minimum = b->CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
+    }
+
+    Value * hasEnough = b->CreateICmpUGE(accessible, minimum);
     if (LLVM_LIKELY(mIsPartitionRoot)) { // && !port.isZeroExtended()
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
@@ -473,7 +483,8 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
             mAnyClosed = closed;
         }
     }
-    Value * const sufficientInput = b->CreateOr(hasEnough, mIsPartitionRoot ? mAnyClosed : closed);
+
+    Value * const sufficientInput = b->CreateOr(hasEnough, closed);
     BasicBlock * const hasInputData = b->CreateBasicBlock(prefix + "_hasInputData", mKernelCheckOutputSpace);
 
     BasicBlock * recordBlockedIO = nullptr;
@@ -522,6 +533,15 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     }
 
     b->SetInsertPoint(hasInputData);
+    if (mHasPrincipalInputRate && port.isPrincipal()) {
+        const Binding & binding = port.Binding;
+        const ProcessingRate & rate = binding.getRate();
+        const auto factor = mFixedRateLCM / rate.getRate();
+        assert (mFixedRateLCM.denominator() == 1);
+        Value * principalFixedRateFactor = b->CreateMulRational(accessible, factor);
+        ConstantInt * const maxFactor = b->getSize(mFixedRateLCM.numerator());
+        mPrincipalFixedRateFactor = b->CreateSelect(hasEnough, maxFactor, principalFixedRateFactor);
+    }
 
 }
 
@@ -1151,23 +1171,29 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
             } else  {
                 selected = b->CreateSaturatingSub(accessible, b->getSize(-k));
             }
+            if (LLVM_UNLIKELY(port.isPrincipal())) {
+                mPrincipalFixedRateFactor = nullptr;
+            }
             accessible = b->CreateSelect(isClosedNormally(b, port.Port), selected, accessible, "accessible");
         }
         accessibleItems[port.Port.Number] = accessible;
     }
 
-    Value * principalFixedRateFactor = nullptr;
-    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & port = mBufferGraph[e];
-        assert (port.Port.Type == PortType::Input);
-        const Binding & input = port.Binding;
-        const ProcessingRate & rate = input.getRate();
-        if (rate.isFixed() && LLVM_UNLIKELY(input.isPrincipal())) {
-            Value * const accessible = accessibleItems[port.Port.Number];
-            const auto factor = mFixedRateLCM / rate.getRate();
-            principalFixedRateFactor = b->CreateMulRational(accessible, factor);
-            break;
+    if (mHasPrincipalInputRate && mPrincipalFixedRateFactor == nullptr) {
+        for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & port = mBufferGraph[e];
+            assert (port.Port.Type == PortType::Input);
+            if (LLVM_UNLIKELY(port.isPrincipal())) {
+                const Binding & input = port.Binding;
+                const ProcessingRate & rate = input.getRate();
+                assert (rate.isFixed());
+                Value * const accessible = accessibleItems[port.Port.Number];
+                const auto factor = mFixedRateLCM / rate.getRate();
+                mPrincipalFixedRateFactor = b->CreateMulRational(accessible, factor);
+                break;
+            }
         }
+        assert (mPrincipalFixedRateFactor);
     }
 
     for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -1178,11 +1204,12 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
         if (LLVM_UNLIKELY(mIsInputZeroExtended[inputPort] != nullptr)) {
             // If this input stream is zero extended, the current input items will be MAX_INT.
             // However, since we're now in the final stride, so we can bound the stream to:
-            const Binding & input = getInputBinding(inputPort);
-            const ProcessingRate & rate = input.getRate();
-            if (principalFixedRateFactor && rate.isFixed()) {
+            if (mHasPrincipalInputRate && port.isFixed()) {
+                const Binding & input = port.Binding;
+                const ProcessingRate & rate = input.getRate();
                 const auto factor = rate.getRate() / mFixedRateLCM;
-                accessible = b->CreateCeilUMulRational(principalFixedRateFactor, factor);
+                assert (mPrincipalFixedRateFactor);
+                accessible = b->CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
             } else {
                 Value * maxItems = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], getInputStrideLength(b, port));
                 // But since we may not necessarily be in our zero extension region, we must first
@@ -1193,15 +1220,16 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
         accessibleItems[inputPort.Number] = accessible;
     }
 
-    minFixedRateFactor = principalFixedRateFactor;
-
-    if (principalFixedRateFactor == nullptr) {
+    if (mHasPrincipalInputRate) {
+        assert (mPrincipalFixedRateFactor);
+        minFixedRateFactor = mPrincipalFixedRateFactor;
+    } else {
         for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[e];
             assert (port.Port.Type == PortType::Input);
-            const Binding & input = port.Binding;
-            const ProcessingRate & rate = input.getRate();
-            if (rate.isFixed()) {
+            if (port.isFixed()) {
+                const Binding & input = port.Binding;
+                const ProcessingRate & rate = input.getRate();
                 Value * const fixedRateFactor =
                     b->CreateMulRational(accessibleItems[port.Port.Number], mFixedRateLCM / rate.getRate());
                 minFixedRateFactor =
@@ -1210,18 +1238,16 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
         }
     }
 
-//    Value * maxFixedRateFactor = minFixedRateFactor;
-
     if (minFixedRateFactor) {
         // truncate any fixed rate input down to the length of the shortest stream
         for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[e];
-            const auto inputPort = port.Port;
-            assert (inputPort.Type == PortType::Input);
-            const Binding & input = port.Binding;
-            const ProcessingRate & rate = input.getRate();
-
-            if (rate.isFixed()) {
+            if (port.isFixed()) {
+                const auto inputPort = port.Port;
+                assert (inputPort.Type == PortType::Input);
+                const Binding & input = port.Binding;
+                const ProcessingRate & rate = input.getRate();
+                assert (rate.isFixed());
                 const auto factor = rate.getRate() / mFixedRateLCM;
                 Value * calculated = b->CreateCeilUMulRational(minFixedRateFactor, factor);
                 const auto k = port.TransitiveAdd;
@@ -1249,11 +1275,11 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
                 }
 
                 accessibleItems[inputPort.Number] = calculated;
+                #ifdef PRINT_DEBUG_MESSAGES
+                const auto prefix = makeBufferName(mKernelId, inputPort);
+                debugPrint(b, prefix + ".accessible' = %" PRIu64, accessibleItems[inputPort.Number]);
+                #endif
             }
-            #ifdef PRINT_DEBUG_MESSAGES
-            const auto prefix = makeBufferName(mKernelId, inputPort);
-            debugPrint(b, prefix + ".accessible' = %" PRIu64, accessibleItems[inputPort.Number]);
-            #endif
         }
     }
 
@@ -1274,10 +1300,10 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
         const auto outputPort = port.Port;
         assert (outputPort.Type == PortType::Output);
         const Binding & output = port.Binding;
-        const ProcessingRate & rate = output.getRate();
 
         Value * writable = nullptr;
-        if (rate.isFixed() && minFixedRateFactor) {
+        if (port.isFixed() && minFixedRateFactor) {
+            const ProcessingRate & rate = output.getRate();
             const auto factor = rate.getRate() / mFixedRateLCM;
             writable = b->CreateCeilUMulRational(minFixedRateFactor, factor);
         } else {
