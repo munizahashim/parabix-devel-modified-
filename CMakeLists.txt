@@ -13,16 +13,16 @@
 #   DON'T:
 #       target_link_libraries(<mylib> ${REQ_LLVM_LIBRARIES})
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.12)
 
 project(parabix)
-enable_testing()
 
 ###   Build Options   ###
 
 option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
+option(ENABLE_ROOT "Enable CERN ROOT support if available" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
 option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
@@ -126,11 +126,13 @@ endif()
 
 ### Import dependenct: CERN ROOT   ###
 
+if (ENABLE_ROOT)
 find_package(ROOT COMPONENTS Spectrum)
 if (ROOT_FOUND)
 message(STATUS "Found CERN ROOT in: ${ROOT_INCLUDE_DIRS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT")
 include_directories(${ROOT_INCLUDE_DIRS})
+endif()
 endif()
 
 ###   Project Configuration   ###
@@ -462,24 +464,14 @@ add_test(
     COMMAND python3 base64test.py ${BIN_DIR}/base64)
 
 add_test(
-  NAME gb18030_single_threaded_test
+  NAME gb18030_test
   WORKING_DIRECTORY ${QA_DIR}/gb18030
-  COMMAND ./run_all "${BIN_DIR}/gb18030 -thread-num=1")
-
-add_test(
-  NAME gb18030_multithreaded_test
-  WORKING_DIRECTORY ${QA_DIR}/gb18030
-  COMMAND ./run_all "${BIN_DIR}/gb18030 -thread-num=2")
+  COMMAND ./run_all "${BIN_DIR}/gb18030")
 
 add_test(
   NAME json_test
   WORKING_DIRECTORY ${QA_DIR}/json
   COMMAND ./run_all "${BIN_DIR}/json")
-
-add_test(
-  NAME csv2json_nocache_test
-  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
-  COMMAND ./run_csv2json "${BIN_DIR}/csv2json -enable-object-cache=0")
 
 add_test(
   NAME csv2json_test
@@ -516,13 +508,9 @@ add_custom_target (base64_test
     WORKING_DIRECTORY ${QA_DIR}/base64
     COMMAND python3 base64test.py "${BIN_DIR}/base64")
 
-add_custom_target(gb18030_single_threaded_test
+add_custom_target(gb18030_test
   WORKING_DIRECTORY ${QA_DIR}/gb18030
-  COMMAND ./run_all "${BIN_DIR}/gb18030 -thread-num=1")
-
-add_custom_target(gb18030_multithreaded_test
-  WORKING_DIRECTORY ${QA_DIR}/gb18030
-  COMMAND ./run_all "${BIN_DIR}/gb18030 -thread-num=2")
+  COMMAND ./run_all "${BIN_DIR}/gb18030")
 
 add_custom_target (abc_gen
     WORKING_DIRECTORY ${QA_DIR}
@@ -534,7 +522,7 @@ add_custom_target (abc_test
 
 add_custom_target (check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS icgrep u8u16 u32u8 base64 editd gb18030 idisa_test kernel-test-suite)
+    DEPENDS icgrep u8u16 u32u8 base64 editd gb18030 idisa_test csv2json kernel-test-suite)
 
 add_custom_target (perf_icgrep
     COMMAND python3 perf.py icgrep
@@ -560,10 +548,6 @@ add_custom_target (json_test
 add_custom_target (json_perf
     WORKING_DIRECTORY ${QA_DIR}/json_perf
     COMMAND ./run_all "${BIN_DIR}/json")
-
-add_custom_target(csv2json_nocache_test
-  WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
-  COMMAND ./run_csv2json "${BIN_DIR}/csv2json -enable-object-cache=0")
 
 add_custom_target (csv2json_test
   WORKING_DIRECTORY ${QA_DIR}/csv/csv2json
