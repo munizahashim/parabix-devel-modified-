@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 #include <toolchain/toolchain.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Casting.h>
@@ -78,6 +79,8 @@ using namespace cc;
 using namespace kernel;
 
 namespace grep {
+
+static cl::opt<bool> MaxLimitTerminationMode("maxlimit-termination-mode", cl::desc("force pipeline termination when maxlimit reached."), cl::init(true));
 
 const auto ENCODING_BITS = 8;
 
@@ -643,13 +646,14 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
-        StreamSet * const TruncatedMatches = P->CreateStreamSet();
+        StreamSet * const MaxCountLines = P->CreateStreamSet();
         Scalar * const maxCount = P->getInputScalar("maxCount");
-        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedMatches", TruncatedMatches);
-        MatchedLineEnds = TruncatedMatches;
+        UntilNkernel::Mode m = MaxLimitTerminationMode ? UntilNkernel::Mode::TerminateAtN : UntilNkernel::Mode::ZeroAfterN;
+        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "MaxCountLines", MaxCountLines);
+        MatchedLineEnds = MaxCountLines;
         StreamSet * TruncatedLines =
-            streamutils::Merge(P, {{TruncatedMatches, {0}}, {mLineBreakStream, {0}}});
+            streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
         if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedLines", TruncatedLines);
         mLineBreakStream = TruncatedLines;
     }
