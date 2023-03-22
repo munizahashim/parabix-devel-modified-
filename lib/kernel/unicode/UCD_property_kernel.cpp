@@ -19,13 +19,30 @@ using namespace kernel;
 using namespace pablo;
 using namespace cc;
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
-: PabloKernel(iBuilder,
-"UCD:" + std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + getStringHash(property_value_name->getFullName()),
-{Binding{"source", Source}},
-{Binding{"property_stream", property}}),
-  mName(property_value_name) {
 
+
+
+
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
+: UnicodePropertyKernelBuilder(iBuilder, property_value_name, Source, property, [&]() -> std::string {
+    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName();
+}()) {
+
+}
+
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
+: PabloKernel(iBuilder,
+"UCD:" + getStringHash(propValueName),
+{Binding{"source", Source}},
+{Binding{"property_stream", property}})
+, mPropNameValue(propValueName)
+, mName(property_value_name) {
+
+}
+
+llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
+    llvm::errs() << mPropNameValue << "\n";
+    return llvm::StringRef{mPropNameValue};
 }
 
 void UnicodePropertyKernelBuilder::generatePabloMethod() {
