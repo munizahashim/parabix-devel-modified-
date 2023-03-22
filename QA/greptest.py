@@ -160,7 +160,7 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
     else:
         if options.verbose:
             msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
-            print(msg.encode('utf-8'))
+            print(msg)
 
 flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             'counting_choices' : ["-c", "-l", "-L"],
