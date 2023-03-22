@@ -3,6 +3,7 @@
 
 namespace kernel {
 
+#if 0
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyTerminationChecks
@@ -73,6 +74,296 @@ void PipelineAnalysis::identifyTerminationChecks() {
     mTerminationCheck[terminal] = 0;
 
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeTerminationPropagationGraph
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::makeTerminationPropagationGraph() {
+
+    // When a partition terminates, we want to inform any kernels that supply information to it that
+    // one of their consumers has finished processing data. In a pipeline with a single output, this
+    // isn't necessary but if a pipeline has multiple outputs, we could end up needlessly producing
+    // data that will never be consumed.
+
+    mTerminationPropagationGraph = TerminationPropagationGraph(LastKernel + 1U);
+
+    HasTerminationSignal.resize(LastKernel + 1U);
+
+    using TerminationGraph = adjacency_list<hash_setS, vecS, bidirectionalS, boost::dynamic_bitset<>>;
+
+    using PropagationGraph = adjacency_list<hash_setS, vecS, bidirectionalS, bool>;
+
+    unsigned newMark = 0;
+
+    TerminationGraph T(PipelineOutput + 1);
+
+    PropagationGraph G(PartitionCount);
+
+    // reverse topological search
+
+    for (auto kernel = LastKernel;  kernel >= FirstKernel; --kernel) {
+
+        auto & marks = T[kernel];
+        marks.resize(PipelineOutput + 1);
+        assert (marks.none());
+
+        const auto partId = KernelPartitionId[kernel];
+        const auto root = FirstKernelInPartition[partId];
+
+        bool addMark = false;
+        bool mayTerminate = (kernel == root);
+
+        const Kernel * const kernelObj = getKernel(kernel);
+        for (const auto & attr : kernelObj->getAttributes()) {
+            switch (attr.getKind()) {
+                case AttrId::CanTerminateEarly:
+                case AttrId::MustExplicitlyTerminate:
+                    addMark = true;
+                case AttrId::MayFatallyTerminate:
+                    mayTerminate = true;
+                default: break;
+            }
+        }
+
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const auto streamSet = target(e, mBufferGraph);
+            for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(f, mBufferGraph);
+                const auto cid = KernelPartitionId[consumer];
+                if (cid != partId) {
+                    add_edge(cid, partId, G);
+                }
+                marks |= T[consumer];
+            }
+        }
+
+        if (addMark) {
+            add_edge(kernel, root, T);
+            marks.set(newMark++);
+        }
+        if (mayTerminate) {
+            HasTerminationSignal.set(kernel);
+        }
+    }
+
+    printGraph(T, errs(), "T1");
+
+    printGraph(G, errs(), "G1");
+
+    const forward_traversal ordering(PartitionCount);
+    assert (is_valid_topological_sorting(ordering, G));
+    transitive_closure_dag(ordering, G);
+    transitive_reduction_dag(ordering, G);
+
+    printGraph(G, errs(), "G2");
+
+    std::queue<PropagationGraph::vertex_descriptor> Q;
+    flat_set<PropagationGraph::vertex_descriptor> V;
+    for (auto pid = KernelPartitionId[FirstKernel]; pid < PartitionCount; ++pid) {
+        const auto s = FirstKernelInPartition[pid];
+        if (in_degree(s, T) != 0) {
+            Q.push(pid);
+            const auto & base = T[s];
+            for (;;) {
+                const auto u = Q.front();
+                Q.pop();
+                for (const auto e : make_iterator_range(out_edges(u, G))) {
+                    const auto v = target(e, G);
+                    const auto t = FirstKernelInPartition[v];
+                    if (base.is_proper_subset_of(T[t])) {
+                        add_edge(t, s, T);
+                    } else if (V.emplace(v).second) {
+                        assert (base.is_subset_of(T[t]));
+                        Q.push(v);
+                    }
+
+
+
+                }
+
+
+
+
+            }
+
+
+
+
+        }
+    }
+
+    printGraph(T, errs(), "T2");
+
+    if (newMark > 0) {
+        exit(-1);
+    }
+
+//    for (auto kernel = FirstKernel;  kernel <= LastKernel; ++kernel) {
+
+//        auto & marks = T[kernel];
+//        marks.resize(PipelineOutput + 1);
+//        assert (marks.empty());
+
+//        bool addMark = false;
+//        bool mayTerminate = false;
+
+//        const Kernel * const kernelObj = getKernel(kernel);
+//        for (const auto & attr : kernelObj->getAttributes()) {
+//            switch (attr.getKind()) {
+//                case AttrId::CanTerminateEarly:
+//                case AttrId::MustExplicitlyTerminate:
+//                    addMark = true;
+//                case AttrId::MayFatallyTerminate:
+//                    mayTerminate = true;
+//                default: break;
+//            }
+//        }
+
+//        if (LLVM_UNLIKELY(in_degree(kernel, mBufferGraph) == 0)) {
+//            addMark = true;
+//        } else {
+//            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+//                const auto streamSet = source(e, mBufferGraph);
+//                if (in_degree(streamSet, mBufferGraph) != 0) {
+//                    const auto producer = parent(streamSet, mBufferGraph);
+//                    marks |= T[producer];
+//                    add_edge(kernel, producer, T);
+//                #ifndef NDEBUG
+//                } else {
+//                    assert (mBufferGraph[streamSet].isConstant());
+//                #endif
+//                }
+//            }
+//        }
+
+//        if (addMark) {
+//            marks.set(newMark++);
+//        }
+//        if (mayTerminate) {
+//            HasTerminationSignal.set(kernel);
+//        }
+//    }
+
+//    const reverse_traversal ordering(LastKernel + 1U);
+//    assert (is_valid_topological_sorting(ordering, T));
+//    transitive_closure_dag(ordering, T);
+//    transitive_reduction_dag(ordering, T);
+
+//    PropagationGraph G(PipelineOutput + 1);
+
+//    for (auto kernel = LastKernel;  kernel >= FirstKernel; --kernel) {
+//        for (const auto e : make_iterator_range(in_edges(kernel, T))) {
+//            const auto prod = source(e, T);
+//            const auto & P = T[kernel];
+//            if (!P.is_subset_of(T[prod])) {
+//                const auto partId = KernelPartitionId[kernel];
+//                const auto first = FirstKernelInPartition[partId];
+//                if (prod != first) {
+//                    add_edge(kernel, first, G);
+//                    T[first] |= P;
+//                }
+//            }
+//        }
+//    }
+
+
+
+
+
+
+
+
+
+//    for (auto pid = KernelPartitionId[FirstKernel]; pid < PartitionCount; ++pid) {
+//        const auto start = FirstKernelInPartition[pid];
+//        const auto end = FirstKernelInPartition[pid + 1U];
+//        assert (start <= end);
+//        assert (end <= PipelineOutput);
+
+//        for (const auto e : make_iterator_range(in_edges(start, mBufferGraph))) {
+//            const auto streamSet = source(e, mBufferGraph);
+//            const BufferNode & bn = mBufferGraph[streamSet];
+//            if (LLVM_UNLIKELY(bn.isConstant())) continue;
+//            const auto producer = parent(streamSet, mBufferGraph);
+//            marks.set(KernelPartitionId[producer]);
+//        }
+
+//        const auto term = getKernel(start)->canSetTerminateSignal();
+//        for (const auto j : marks.set_bits()) {
+//            const auto k = FirstKernelInPartition[j];
+//            assert (k < start);
+//            add_edge(start, k, term, mTerminationPropagationGraph);
+//        }
+//        marks.reset();
+
+//        // regardless of whether a partition root can terminate, every root has
+//        // a terminated flag stored in the state that any kernel that cannot
+//        // explicitly terminate shares.
+//        HasTerminationSignal.set(start);
+//        for (auto i = start + 1U; i < end; ++i) {
+//            const Kernel * const kernelObj = getKernel(i); assert (kernelObj);
+//            if (kernelObj->canSetTerminateSignal()) {
+//                add_edge(i, start, true, mTerminationPropagationGraph);
+//                HasTerminationSignal.set(i);
+//            }
+//        }
+//    }
+
+//    ReverseTopologicalOrdering ordering;
+//    ordering.reserve(num_vertices(mTerminationPropagationGraph));
+//    topological_sort(mTerminationPropagationGraph, std::back_inserter(ordering));
+
+//    auto first = ordering.begin();
+//    const auto end = ordering.end();
+
+//    for (auto i = first; i != end; ++i) {
+//        TerminationPropagationGraph::in_edge_iterator ei_begin, ei_end;
+//        std::tie(ei_begin, ei_end) = in_edges(*i, mTerminationPropagationGraph);
+//        bool anyPropagate = false;
+//        bool allPropagate = true;
+//        for (auto ei = ei_begin; ei != ei_end; ++ei) {
+//            const auto p = mTerminationPropagationGraph[*ei];
+//            anyPropagate |= p;
+//            allPropagate &= p;
+//        }
+//        if (anyPropagate) {
+//            const Kernel * const kernelObj = getKernel(*i); assert (kernelObj);
+//            for (const auto & attr : kernelObj->getAttributes()) {
+//                switch (attr.getKind()) {
+//                    case AttrId::MustExplicitlyTerminate:
+//                    case AttrId::SideEffecting:
+//                        goto disable_propagated_signals;
+//                    default:
+//                        break;
+//                }
+//            }
+//            if (allPropagate) {
+//                for (auto e : make_iterator_range(out_edges(*i, mTerminationPropagationGraph))) {
+//                    mTerminationPropagationGraph[e] = true;
+//                }
+//            } else {
+//disable_propagated_signals:
+//                for (auto ei = ei_begin; ei != ei_end; ++ei) {
+//                    mTerminationPropagationGraph[*ei] = false;
+//                }
+//            }
+//        }
+//    }
+
+//    remove_edge_if([&](const TerminationPropagationGraph::edge_descriptor e) {
+//        return !mTerminationPropagationGraph[e];
+//    }, mTerminationPropagationGraph);
+
+//    transitive_closure_dag(ordering, mTerminationPropagationGraph);
+//    transitive_reduction_dag(ordering, mTerminationPropagationGraph);
+
+//    printGraph(mTerminationPropagationGraph, errs(), "T");
+
+}
+
+#endif
+
+#if 1
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeTerminationPropagationGraph
@@ -175,8 +466,6 @@ disable_propagated_signals:
 
 }
 
-#if 0
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyTerminationChecks
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -263,6 +552,10 @@ void PipelineAnalysis::identifyTerminationChecks() {
     mTerminationCheck[terminal] = 0;
 
 }
+
+#endif
+
+#if 0
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeTerminationPropagationGraph

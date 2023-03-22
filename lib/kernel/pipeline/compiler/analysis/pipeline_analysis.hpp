@@ -68,12 +68,13 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
-
         P.identifyTerminationChecks();
 
-        P.determinePartitionJumpIndices();
+        P.makeTerminationPropagationGraph();
 
-        P.identifyDominatingPartitionsForSlidingWindows();
+        P.analyzePrincipalRateIO();
+
+        P.determinePartitionJumpIndices();
 
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         P.identifyPartitionGuidedSynchronizationVariables();
@@ -94,7 +95,7 @@ public:
 
         P.calculatePartialSumStepFactors(b);
 
-        P.makeTerminationPropagationGraph();
+       // P.makeTerminationPropagationGraph();
 
         P.determineNumOfThreads();
 
@@ -244,7 +245,9 @@ private:
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
-    void identifyDominatingPartitionsForSlidingWindows();
+    // princpal rate analysis functions
+
+    void analyzePrincipalRateIO();
 
     // zero extension analysis function
 

@@ -422,10 +422,13 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
     }
 
     bool hidePipelineOutput = in_degree(PipelineOutput, mBufferGraph) == 0;
-    for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
-        if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
-            hidePipelineOutput = false;
-            break;
+
+    if (!PartitionJumpTargetId.empty()) {
+        for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
+            if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
+                hidePipelineOutput = false;
+                break;
+            }
         }
     }
 
@@ -552,6 +555,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         out << "];\n";
     }
 
+    if (!PartitionJumpTargetId.empty()) {
     for (unsigned i = 0; i < PartitionCount; ++i) {
         const auto a = i;
         const auto b = PartitionJumpTargetId[i];
@@ -564,6 +568,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                       "color=\"red\""
                    "];\n";
         }
+    }
     }
 
     #ifndef USE_SIMPLE_BUFFER_GRAPH

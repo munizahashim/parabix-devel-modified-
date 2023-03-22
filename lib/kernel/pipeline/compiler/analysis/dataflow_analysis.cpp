@@ -429,13 +429,4 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
     mPartialSumStepFactorGraph = G;
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyDominatingPartitionsForSlidingWindows
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::identifyDominatingPartitionsForSlidingWindows() {
-
-}
-
-
-
 } // end of kernel namespace

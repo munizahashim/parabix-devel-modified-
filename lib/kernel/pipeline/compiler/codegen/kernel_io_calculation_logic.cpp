@@ -1224,16 +1224,19 @@ void PipelineCompiler::calculateFinalItemCounts(BuilderRef b,
         assert (mPrincipalFixedRateFactor);
         minFixedRateFactor = mPrincipalFixedRateFactor;
     } else {
+        flat_set<unsigned> encountered;
         for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[e];
             assert (port.Port.Type == PortType::Input);
             if (port.isFixed()) {
-                const Binding & input = port.Binding;
-                const ProcessingRate & rate = input.getRate();
-                Value * const fixedRateFactor =
-                    b->CreateMulRational(accessibleItems[port.Port.Number], mFixedRateLCM / rate.getRate());
-                minFixedRateFactor =
-                    b->CreateUMin(minFixedRateFactor, fixedRateFactor);
+                if (encountered.insert(port.SymbolicRateId).second) {
+                    const Binding & input = port.Binding;
+                    const ProcessingRate & rate = input.getRate();
+                    Value * const fixedRateFactor =
+                        b->CreateMulRational(accessibleItems[port.Port.Number], mFixedRateLCM / rate.getRate());
+                    minFixedRateFactor =
+                        b->CreateUMin(minFixedRateFactor, fixedRateFactor);
+                }
             }
         }
     }
