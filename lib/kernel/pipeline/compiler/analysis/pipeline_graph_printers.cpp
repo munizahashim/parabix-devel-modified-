@@ -379,14 +379,17 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
             }
             out << "\\n";
         }
-        if (isKernelStateFree(kernel)) {
-            out << "<StateFree>\\n";
-        }
         if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
             out << "<InternallySynchronized>\\n";
         }
         if (kernelObj->canSetTerminateSignal()) {
             out << "<CanTerminateEarly>\\n";
+        }
+        if (isKernelStateFree(kernel)) {
+            out << "<StateFree>\\n";
+        }
+        if (kernelObj->hasFamilyName()) {
+            out << "<Family>\\n";
         }
 
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
