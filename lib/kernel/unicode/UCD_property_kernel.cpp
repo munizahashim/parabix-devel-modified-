@@ -41,7 +41,6 @@ UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, 
 }
 
 llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
-    llvm::errs() << mPropNameValue << "\n";
     return llvm::StringRef{mPropNameValue};
 }
 
