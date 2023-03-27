@@ -167,12 +167,58 @@ void RunLengthSelector::generatePabloMethod() {
     pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(0)), groupStream);
 }
 
+const unsigned hash_bits = 8;
+const unsigned hash_entries = 1 << hash_bits;
+
+class HashTable6 {
+public:
+    HashTable6() {
+        for (unsigned i = 0; i < hash_entries; i++) {
+            mTable[i] = {};
+        }
+    }
+    
+    void insert(uint8_t hash_code, const char * key_ptr) {
+        uint64_t word_val = *(reinterpret_cast<const uint32_t *>(key_ptr));
+        uint64_t word_val2 = *(reinterpret_cast<const uint16_t *>(key_ptr + 4));
+        word_val = word_val + (word_val2 << 32);
+        bool found = false;
+        for (unsigned i = 0; i < mTable[hash_code].size(); i++) {
+            if (mTable[hash_code][i] == word_val) {
+                mCount[hash_code][i]++;
+            }
+            found = true;
+        }
+        if (not found) {
+            mTable[hash_code].push_back(word_val);
+            mCount[hash_code].push_back(1);
+        }
+    }
+        
+    void print() {
+        for (unsigned h = 0; h < hash_entries; h++) {
+            for (unsigned i = 0; i < mTable[h].size(); i++) {
+                uint64_t val = mTable[h][i];
+                char * key_ptr = reinterpret_cast<char *>(&val);
+                unsigned key_count = mCount[h][i];
+                std::cout << std::string(key_ptr, 6) << ": " << std::to_string(key_count) << " occurrences\n";
+            }
+        }
+    }
+private:
+    std::vector<uint64_t> mTable[hash_entries];
+    std::vector<unsigned> mCount[hash_entries];
+};
+
+HashTable6 T6;
+
 typedef void (*HashDemoFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
 
 extern "C" void callback(const char * L6end_ptr, uint8_t hashval) {
     const char * L6_start_ptr = L6end_ptr - 5;
-    std::cout << std::string(L6_start_ptr, 6) << " " << std::to_string(hashval) << "\n";
+    //std::cout << std::string(L6_start_ptr, 6) << " " << std::to_string(hashval) << "\n";
+    T6.insert(hashval, L6_start_ptr);
 }
 
 HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illustrator) {
@@ -209,7 +255,6 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illu
     SHOW_BIXNUM(runIndex);
     SHOW_STREAM(overflow);
     
-    const unsigned hash_bits = 8;
     
     StreamSet * const BixHashes = P->CreateStreamSet(hash_bits);
     P->CreateKernelCall<BixHash>(u8basis, SymbolRuns, BixHashes, 3);
@@ -252,5 +297,6 @@ int main(int argc, char *argv[]) {
             illustrator.displayAllCapturedData();
         }
     }
+    T6.print();
     return 0;
 }
