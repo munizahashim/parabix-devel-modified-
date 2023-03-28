@@ -113,13 +113,19 @@ void ParseSymbols::generatePabloMethod() {
     PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
     PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4));
     PabloAST * wc1 = pb.createAnd(ASCII, wordChar);
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix2, pb.createLookahead(wordChar, 1)));
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix3, pb.createLookahead(wordChar, 2)));
-    wc1 = pb.createOr(wc1, pb.createAnd(prefix4, pb.createLookahead(wordChar, 3)));
+    // Prefixes of word characters
+    PabloAST * wprefix2 = pb.createAnd(prefix2, pb.createLookahead(wordChar, 1));
+    PabloAST * wprefix3 = pb.createAnd(prefix3, pb.createLookahead(wordChar, 2));
+    PabloAST * wprefix4 = pb.createAnd(prefix4, pb.createLookahead(wordChar, 3));
+    wc1 = pb.createOr3(wc1, wprefix2, pb.createOr(wprefix3, wprefix4));
     //
     PabloAST * wordStart = pb.createAnd(pb.createNot(pb.createAdvance(wordChar, 1)), wc1, "wordStart");
+    PabloAST * wordByte = pb.createOr(wc1, wordChar);
+    // Interior bytes of 3 and 4 byte sequences.
+    wordByte = pb.createOr(wordByte, pb.createAdvance(pb.createOr(wprefix3, wprefix4), 1));
+    wordByte = pb.createOr(wordByte, pb.createAdvance(wprefix4, 2));
     // runs are the bytes after a start symbol until the next symStart byte.
-    pablo::PabloAST * runs = pb.createInFile(pb.createAnd(pb.createNot(wordStart), wc1));
+    pablo::PabloAST * runs = pb.createInFile(pb.createAnd(pb.createNot(wordStart), wordByte));
     pb.createAssign(pb.createExtract(getOutputStreamVar("symbolRuns"), pb.getInteger(0)), runs);
 }
 
@@ -240,6 +246,8 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illu
 
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
+    SHOW_BYTES(codeUnitStream);
+    SHOW_BIXNUM(u8basis);
 
     StreamSet * WordChars = P->CreateStreamSet(1);
     P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
