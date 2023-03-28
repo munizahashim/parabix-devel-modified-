@@ -473,7 +473,8 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
             mAnyClosed = closed;
         }
     }
-    Value * const sufficientInput = b->CreateOr(hasEnough, mIsPartitionRoot ? mAnyClosed : closed);
+    // mIsPartitionRoot ? mAnyClosed : closed
+    Value * const sufficientInput = b->CreateOr(hasEnough, closed);
     BasicBlock * const hasInputData = b->CreateBasicBlock(prefix + "_hasInputData", mKernelCheckOutputSpace);
 
     BasicBlock * recordBlockedIO = nullptr;

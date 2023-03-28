@@ -803,8 +803,8 @@ public:
                          , {}
                          // stream inputs
                          , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, FixedRate(), Principal()),
-                            Bind("Basis", Basis)}
+                            Bind("MatchSpans", MatchSpans, FixedRate(8), Deferred()),
+                            Bind("Basis", Basis, BoundedRate(0, 1))}
                          // stream outputs
                          , {}
                          // input scalars

@@ -16,7 +16,7 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
 #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-    if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId]) {
+    if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || mIsNestedPipeline) {
         mTarget->addInternalScalar(b->getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
     }
 #endif
@@ -30,7 +30,7 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b
     for (unsigned i = 1U; i < (PartitionCount - 1U); ++i) {
         const auto f = FirstKernelInPartition[i];
         const auto numOfStrides = MaximumNumOfStrides[f];
-        if (MinimumNumOfStrides[f] != numOfStrides) {
+        if (MinimumNumOfStrides[f] != numOfStrides || mIsNestedPipeline) {
             Value * const init = b->CreateMul(segmentLengthScalingFactor, b->getSize(numOfStrides));
             b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
         }
@@ -44,9 +44,7 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b
 void PipelineCompiler::initializeFlowControl(BuilderRef b) {
     #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     if (RequiredThreadLocalStreamSetMemory > 0) {
-        mThreadLocalMemorySizePtr = b->CreateAllocaAtEntryPoint(b->getSizeTy());
-        Value * const reqMem = b->getSize(RequiredThreadLocalStreamSetMemory);
-        b->CreateStore(reqMem, mThreadLocalMemorySizePtr);
+        mThreadLocalMemorySizePtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES);
     }
     #endif
 }
@@ -79,12 +77,15 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
         const auto firstKernelOfNextPartition = FirstKernelInPartition[mCurrentPartitionId + 1];
         size_t maxMemory = 0;
+
         for (auto kernel = mKernelId; kernel < firstKernelOfNextPartition; ++kernel) {
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (bn.isThreadLocal()) {
                     assert (bn.BufferEnd > 0);
+                    assert ((bn.BufferStart % b->getPageSize()) == 0);
+                    assert ((bn.BufferEnd % b->getPageSize()) == 0);
                     maxMemory = std::max<size_t>(maxMemory, bn.BufferEnd);
                     assert (RequiredThreadLocalStreamSetMemory >= maxMemory);
                 }
@@ -98,8 +99,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
 
         #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
-        // rate input into this partition.
-        if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId]) {
+        // rate input into this partition. However if this a nested pipeline, we cannot assume
+        // that the outer pipeline will feed data to this at a fixed rate.
+        if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
 
             mMaximumNumOfStrides = b->getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
 
@@ -110,23 +112,12 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             // calculate how much memory is required by this partition relative to max num of strides
             // and determine if the current thread local buffer can fit it.
 
-            // TODO: suppose the start and end position of every threadlocal streamset is page
-            // aligned. Thus the total thread local memory alloced here would be page aligned.
-            // We want to expand the buffer such that we scale all the buffer start/end offset
-            // by a fixed integer to maintain the alignment but want the smallest such integer
-            // that will fit our new memory requirement (that at least doubles the prior one).
-
-            // We then store the capacity modifier and simply rescale it for the new one.
-
-            // TODO: should the start/end positions reflect the minumum amount of work? if they
-            // we increased to reflect to a page alignment, this wouldn't be meaningful. So what
-            // value ought I be considering here?
-
             if (maxMemory > 0) {
 
                 mThreadLocalScalingFactor =
                     b->CreateCeilUDivRational(mMaximumNumOfStrides, MaximumNumOfStrides[mKernelId]);
-                Value * memoryForSegment = b->CreateMul(mThreadLocalScalingFactor, b->getSize(maxMemory));
+
+                Value * const memoryForSegment = b->CreateMul(mThreadLocalScalingFactor, b->getSize(maxMemory));
                 BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
                 BasicBlock * const afterExpansion = b->CreateBasicBlock();
                 Value * const currentMem = b->CreateLoad(mThreadLocalMemorySizePtr);
@@ -179,7 +170,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides) {
     #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-    if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId]) {
+    if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
         ConstantInt * const TWO = b->getSize(2);
         Value * const A = b->CreateMul(maxNumOfStrides, TWO);
         Value * const B = b->CreateAdd(maxNumOfStrides, actualNumOfStrides);
