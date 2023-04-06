@@ -127,6 +127,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
             mMayLoopToEntry = true;
         }
     }
+
     assert (mNextPartitionEntryPoint);
 
     assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);

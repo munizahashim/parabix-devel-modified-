@@ -539,7 +539,7 @@ add_custom_target (text_viewer
 
 add_custom_target (xml_test
     WORKING_DIRECTORY ${QA_DIR}/xml
-    COMMAND python33 run_test_suite.py "${BIN_DIR}/xml")
+    COMMAND python3 run_test_suite.py "${BIN_DIR}/xml")
 
 add_custom_target (json_test
     WORKING_DIRECTORY ${QA_DIR}/json

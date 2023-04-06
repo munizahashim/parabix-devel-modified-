@@ -753,7 +753,9 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
+    Value *                                     mStrideStepSize = nullptr;
     Value *                                     mAnyClosed = nullptr;
+    Value *                                     mHasExhaustedClosedInput = nullptr;
     BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
