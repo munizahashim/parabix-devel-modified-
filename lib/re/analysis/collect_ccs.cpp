@@ -41,8 +41,8 @@ CC_Set collectCCs(RE * const re, const cc::Alphabet & a, re::NameProcessingMode 
 
 struct AlphabetCollector final : public RE_Inspector {
 
-    AlphabetCollector(Alphabet_Set & alphabets)
-    : RE_Inspector()
+    AlphabetCollector(Alphabet_Set & alphabets, re::NameProcessingMode m)
+    : RE_Inspector(m)
     , mAlphabets(alphabets) {
 
     }
@@ -55,11 +55,10 @@ private:
     Alphabet_Set & mAlphabets;
 };
 
-Alphabet_Set collectAlphabets(RE * const re) {
-    Alphabet_Set alphabets;
-    AlphabetCollector collector(alphabets);
+void collectAlphabets(RE * const re, Alphabet_Set & alphabets,
+                      re::NameProcessingMode m) {
+    AlphabetCollector collector(alphabets, m);
     collector.inspectRE(re);
-    return alphabets;
 }
 
 

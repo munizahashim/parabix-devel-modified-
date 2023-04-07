@@ -364,7 +364,6 @@ public:
     using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
     GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
     void setIndexing(StreamSet * indexStream);
-    void setSource(StreamSet * s);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
     void addExternal(std::string name,
@@ -384,7 +383,6 @@ protected:
 private:
 
     const cc::Alphabet *        mCodeUnitAlphabet;
-    StreamSet *                 mSource = nullptr;
     StreamSet *                 mIndexStream = nullptr;
     GrepCombiningType           mCombiningType = GrepCombiningType::None;
     StreamSet *                 mCombiningStream = nullptr;
