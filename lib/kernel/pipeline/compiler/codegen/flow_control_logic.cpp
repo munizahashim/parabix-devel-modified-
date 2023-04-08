@@ -15,18 +15,15 @@ namespace kernel {
  * @brief addSegmentLengthSlidingWindowKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
-#ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || mIsNestedPipeline) {
         mTarget->addInternalScalar(b->getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
     }
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeInitialSlidingWindowSegmentLengths
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b, Value * const segmentLengthScalingFactor) {
-#ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     for (unsigned i = 1U; i < (PartitionCount - 1U); ++i) {
         const auto f = FirstKernelInPartition[i];
         const auto numOfStrides = MaximumNumOfStrides[f];
@@ -35,18 +32,15 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b
             b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
         }
     }
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeFlowControl
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeFlowControl(BuilderRef b) {
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     if (RequiredThreadLocalStreamSetMemory > 0) {
         mThreadLocalMemorySizePtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES);
     }
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -97,7 +91,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             threadLocalPtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
         }
 
-        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
         // rate input into this partition. However if this a nested pipeline, we cannot assume
         // that the outer pipeline will feed data to this at a fixed rate.
@@ -153,10 +146,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             mThreadLocalStreamSetBaseAddress = nullptr;
             mThreadLocalScalingFactor = nullptr;
         }
-        #else
-        const auto numOfStrides = MaximumNumOfStrides[mCurrentPartitionRoot];
-        mMaximumNumOfStrides = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(numOfStrides));
-        #endif
+
     } else {
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
@@ -169,7 +159,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
  * @brief updateNextSlidingWindowSize
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides) {
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
     if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
         ConstantInt * const TWO = b->getSize(2);
         Value * const A = b->CreateMul(maxNumOfStrides, TWO);
@@ -182,33 +171,6 @@ void PipelineCompiler::updateNextSlidingWindowSize(BuilderRef b, Value * const m
         Value * const nextMaxNumOfStrides = b->CreateSelect(higher, A, D);
         b->setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId), nextMaxNumOfStrides);
     }
-    #endif
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateThreadLocalBuffersForSlidingWindow
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateThreadLocalBuffersForSlidingWindow(BuilderRef b) {
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-//    if (RequiredThreadLocalStreamSetMemory > 0) {
-//        BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
-//        BasicBlock * const afterExpansion = b->CreateBasicBlock();
-//        Value * const nextMemReq = b->CreateLoad(mThreadLocalMemorySizePtr);
-//        Value * const needsExpansion = b->CreateICmpULT(mCurrentThreadLocalMemorySize, nextMemReq);
-//        b->CreateCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
-
-//        b->SetInsertPoint(expandThreadLocalMemory);
-//        Value * const threadLocalPtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
-//        b->CreateFree(b->CreateLoad(threadLocalPtr));
-//        // we want to double the required space to minimize
-//        Value * const expanded = b->CreateRoundUp(nextMemReq, mCurrentThreadLocalMemorySize);
-//        Value * const base = b->CreatePageAlignedMalloc(expanded);
-//        b->CreateStore(expanded, threadLocalPtr);
-//        b->CreateBr(afterExpansion);
-
-//        b->SetInsertPoint(afterExpansion);
-//    }
-    #endif
 }
 
 } // end of namespace

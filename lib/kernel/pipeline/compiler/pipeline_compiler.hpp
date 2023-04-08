@@ -247,7 +247,6 @@ public:
     void loadCurrentThreadLocalMemoryAddress(BuilderRef b);
     void detemineMaximumNumberOfStrides(BuilderRef b);
     void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
-    void updateThreadLocalBuffersForSlidingWindow(BuilderRef b);
 
 // inter-kernel codegen functions
 
@@ -769,7 +768,6 @@ protected:
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
     bool                                        mIsOptimizationBranch = false;
-    bool                                        mMayLoopToEntry = false;
     bool                                        mMayHaveInsufficientIO = false;
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mCurrentKernelIsStateFree = false;

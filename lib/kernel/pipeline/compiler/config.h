@@ -63,6 +63,4 @@
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
 
-#define USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-
 #endif // PIPELINE_KERNEL_COMPILER_CONFIG_H

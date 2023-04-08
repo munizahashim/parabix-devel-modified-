@@ -49,12 +49,8 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         // inputs to a kernel have differing lengths, this could mean we might produce
         // output data that wouldn't be observed in a single-threaded run.
 
-        Value * waitToRelease = b->CreateIsNotNull(mIsFinalInvocation);
-
-        if (mMayLoopToEntry) {
-            mHasMoreInput = hasMoreInput(b);
-            waitToRelease = b->CreateOr(waitToRelease, mHasMoreInput);
-        }
+        mHasMoreInput = hasMoreInput(b);
+        Value * waitToRelease = b->CreateOr(mHasMoreInput, b->CreateIsNotNull(mIsFinalInvocation));
 
         const auto prefix = makeKernelName(mKernelId);
 

@@ -112,9 +112,7 @@ void PipelineCompiler::signalAbnormalTermination(BuilderRef b) {
     mTerminatedSignalPhi->addIncoming(aborted, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     if (mIsPartitionRoot) {
-        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
-        #endif
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
     }
 }
@@ -192,9 +190,7 @@ void PipelineCompiler::checkPropagatedTerminationSignals(BuilderRef b) {
         mCurrentNumOfStridesAtTerminationPhi->addIncoming(mCurrentNumOfStridesAtLoopEntryPhi, entryPoint);
         if (mIsPartitionRoot) {
             Constant * const ZERO = b->getSize(0);
-            #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
             mPotentialSegmentLengthAtTerminationPhi->addIncoming(ZERO, entryPoint);
-            #endif
             mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(ZERO, entryPoint);
         }
 

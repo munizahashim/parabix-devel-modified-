@@ -100,47 +100,6 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 const auto handleName = makeBufferName(producer, rd.Port);
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
-#if 0
-                #ifndef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-                if (bn.isThreadLocal()) {
-                    assert (mThreadLocalStreamSetBaseAddress);
-                    assert (RequiredThreadLocalStreamSetMemory > 0);
-                    assert (isa<ExternalBuffer>(buffer));
-                    assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
-                    auto start = bn.BufferStart;
-                    #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                    start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                    #endif
-                    Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
-                    Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
-                    if (LLVM_UNLIKELY(CheckAssertions)) {
-                        DataLayout DL(b->getModule());
-                        Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
-                        Value * const intPtrVal = b->CreatePtrToInt(baseAddress, intPtrTy);
-
-                        Constant * const bindingName = b->GetString(rd.Binding.get().getName());
-    //                    b->CreateAssert(intPtrVal, "%s.%s: thread-local base addresss cannot be null",
-    //                                    mCurrentKernelName, bindingName);
-
-                        Value * const align = b->getSize(b->getCacheAlignment());
-                        Value * const offset = b->CreateURem(intPtrVal, align);
-                        Value * const valid = b->CreateIsNull(offset);
-
-                        b->CreateAssert(valid, "%s.%s: thread local buffer 0x%" PRIx64 " "
-                                               "is not cache aligned (%" PRIu64 ")",
-                                        mCurrentKernelName, bindingName, intPtrVal, align);
-                    }
-
-                    const auto baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
-                    assert (baseCapacity > 0);
-                    Value * const capacity = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(baseCapacity));
-                    buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
-                    buffer->setCapacity(b, capacity);
-                }
-                #endif
-
-
-#endif
             }
         }
     }
@@ -961,12 +920,8 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
             #endif
 
-            #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
             assert (mThreadLocalScalingFactor);
             Value * const startOffset = b->CreateMul(mThreadLocalScalingFactor, b->getSize(start));
-            #else
-            Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
-            #endif
 
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];

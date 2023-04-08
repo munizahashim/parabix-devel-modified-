@@ -123,6 +123,8 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         }
     }
 
+    // if we've exhausted a closed input source, reduce the stride step size to 1 to ensure
+    // we correctly creep up on the final partial stride
     ConstantInt * const sz_ONE = b->getSize(1);
     if (mHasExhaustedClosedInput) { assert (mStrideStepSize);
         mStrideStepSize = b->CreateSelect(mHasExhaustedClosedInput, sz_ONE, mStrideStepSize);
@@ -140,20 +142,10 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-    const auto hasDynamicSlidingWindow = true;
-    #else
-    const auto hasDynamicSlidingWindow = false;
-    #endif
-
     Value * numOfLinearStrides = nullptr;
     assert (mMaximumNumOfStrides);
-    if (!mIsPartitionRoot || !hasDynamicSlidingWindow) {
-        if (mMayLoopToEntry) {
-            numOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
-        } else {
-            numOfLinearStrides = maxSegmentLength;
-        }
+    if (!mIsPartitionRoot) {
+        numOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
     }
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
@@ -170,22 +162,16 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     } else {
         numOfLinearStrides = maxSegmentLength;
     }
-    #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
+
     mPotentialSegmentLength = numOfLinearStrides;
-    if (mIsPartitionRoot && hasDynamicSlidingWindow) {
+    if (mIsPartitionRoot) {
         assert (numOfLinearStrides);
-        Value * maxNumOfLinearStrides = nullptr;
-        if (mMayLoopToEntry) {
-            maxNumOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
-            // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
-            // of some buffer each
-            mPotentialSegmentLength = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mPotentialSegmentLength);
-        } else {
-            maxNumOfLinearStrides = maxSegmentLength;
-        }
+        Value * maxNumOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
+        // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
+        // of some buffer each
+        mPotentialSegmentLength = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mPotentialSegmentLength);
         numOfLinearStrides = b->CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
     }
-    #endif
 
     assert (numOfLinearStrides);
 
@@ -210,12 +196,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     mNumOfLinearStrides = numOfLinearStrides;
     mCurrentNumOfLinearStrides = numOfLinearStrides;
-
-    if (mMayLoopToEntry) {
-        mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-    } else {
-        mUpdatedNumOfStrides = numOfLinearStrides;
-    }
+    mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
@@ -298,8 +279,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            Value * const check = mAnyClosed; // mKernelIsInternallySynchronized ? mAnyClosed : mHasExhaustedClosedInput;
-            isFinalSegment = check ? check : b->getFalse();
+            isFinalSegment = mAnyClosed ? mAnyClosed : b->getFalse();
         } else {
             isFinalSegment = mFinalPartitionSegment;
         }
@@ -338,37 +318,25 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         /// KERNEL ENTERING FINAL STRIDE
         /// -------------------------------------------------------------------------------------
 
-        Value * numOfFinalLinearStrides = numOfLinearStrides;
 
-        Value * penultimateNumOfStrides = numOfLinearStrides;
 
-        BasicBlock * penultimateSegmentExit = nullptr;
-        if (LLVM_LIKELY(mMayLoopToEntry)) {
+        Value * const isFinal = b->CreateICmpEQ(numOfLinearStrides, sz_ZERO);
 
-            if (!mIsPartitionRoot) {
-                for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-                    const BufferPort & port = mBufferGraph[input];
-                    if (!port.canModifySegmentLength()) {
-                        Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
-                        numOfFinalLinearStrides = b->CreateUMin(numOfFinalLinearStrides, strides);
-                    }
-                }
-            }
+        Value * penultimateNumOfStrides = nullptr;
 
-            Value * const isFinal = b->CreateICmpEQ(numOfFinalLinearStrides, sz_ZERO);
-
-            if (mHasExhaustedClosedInput) {
-                penultimateNumOfStrides =
-                    b->CreateSelect(mHasExhaustedClosedInput, numOfFinalLinearStrides, nonFinalNumOfLinearStrides);
-            }
-
-            BasicBlock * const enteringFinalStride = b->CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
-            penultimateSegmentExit = b->GetInsertBlock();
-
-            b->CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringNonFinalSegment);
-
-            b->SetInsertPoint(enteringFinalStride);
+        if (LLVM_LIKELY(mHasExhaustedClosedInput != nullptr)) {
+            penultimateNumOfStrides =
+                b->CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
+        } else {
+            penultimateNumOfStrides = numOfLinearStrides;
         }
+
+        BasicBlock * const enteringFinalStride = b->CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
+        BasicBlock * const penultimateSegmentExit = b->GetInsertBlock();
+
+        b->CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringNonFinalSegment);
+
+        b->SetInsertPoint(enteringFinalStride);
 
         Value * fixedItemFactor = nullptr;
         Value * partialPartitionStride = nullptr;
@@ -384,40 +352,38 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         /// -------------------------------------------------------------------------------------
 
         b->SetInsertPoint(enteringNonFinalSegment);
-        if (afterNonFinalZeroExtendExit || penultimateSegmentExit) {
 
-            if (penultimateSegmentExit && (numOfLinearStrides != nonFinalNumOfLinearStrides)) {
-                PHINode * const nonFinalNumOfLinearStridesPhi = b->CreatePHI(numOfLinearStrides->getType(), 3);
-                nonFinalNumOfLinearStridesPhi->addIncoming(nonFinalNumOfLinearStrides, nonZeroExtendExit);
+        if (numOfLinearStrides != nonFinalNumOfLinearStrides) {
+            PHINode * const nonFinalNumOfLinearStridesPhi = b->CreatePHI(numOfLinearStrides->getType(), 3);
+            nonFinalNumOfLinearStridesPhi->addIncoming(nonFinalNumOfLinearStrides, nonZeroExtendExit);
+            if (afterNonFinalZeroExtendExit) {
+                nonFinalNumOfLinearStridesPhi->addIncoming(nonFinalNumOfLinearStrides, afterNonFinalZeroExtendExit);
+            }
+            nonFinalNumOfLinearStridesPhi->addIncoming(penultimateNumOfStrides, penultimateSegmentExit);
+            nonFinalNumOfLinearStrides = nonFinalNumOfLinearStridesPhi;
+        }
+
+        for (unsigned i = 0; i != numOfInputs; ++i) {
+            Value * const ze = zeroExtendedInputVirtualBaseAddress[i];
+            if (ze) {
+                PHINode * const phi = b->CreatePHI(ze->getType(), 3);
+                phi->addIncoming(inputVirtualBaseAddress[i], nonZeroExtendExit);
                 if (afterNonFinalZeroExtendExit) {
-                    nonFinalNumOfLinearStridesPhi->addIncoming(nonFinalNumOfLinearStrides, afterNonFinalZeroExtendExit);
+                    phi->addIncoming(ze, afterNonFinalZeroExtendExit);
                 }
-                nonFinalNumOfLinearStridesPhi->addIncoming(penultimateNumOfStrides, penultimateSegmentExit);
-                nonFinalNumOfLinearStrides = nonFinalNumOfLinearStridesPhi;
-            }
-
-            for (unsigned i = 0; i != numOfInputs; ++i) {
-                Value * const ze = zeroExtendedInputVirtualBaseAddress[i];
-                if (ze) {
-                    PHINode * const phi = b->CreatePHI(ze->getType(), 3);
-                    phi->addIncoming(inputVirtualBaseAddress[i], nonZeroExtendExit);
-                    if (afterNonFinalZeroExtendExit) {
-                        phi->addIncoming(ze, afterNonFinalZeroExtendExit);
-                    }
-                    if (penultimateSegmentExit) {
-                        phi->addIncoming(ze, penultimateSegmentExit);
-                    }
-                    inputVirtualBaseAddress[i] = phi;
+                if (penultimateSegmentExit) {
+                    phi->addIncoming(ze, penultimateSegmentExit);
                 }
+                inputVirtualBaseAddress[i] = phi;
             }
+        }
 
-            for (unsigned i = 0; i != numOfInputs; ++i) {
-                #ifdef PRINT_DEBUG_MESSAGES
-                const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Input, i});
-                debugPrint(b, prefix + "_inputVirtualBaseAddress = %" PRIx64, inputVirtualBaseAddress[i]);
-                #endif
+        for (unsigned i = 0; i != numOfInputs; ++i) {
+            #ifdef PRINT_DEBUG_MESSAGES
+            const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Input, i});
+            debugPrint(b, prefix + "_inputVirtualBaseAddress = %" PRIx64, inputVirtualBaseAddress[i]);
+            #endif
 
-            }
         }
     }
 
@@ -500,7 +466,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         }
     }
 
-    // mIsPartitionRoot ? mAnyClosed : closed
     Value * const sufficientInput = b->CreateOr(hasEnough, closed);
     BasicBlock * const hasInputData = b->CreateBasicBlock(prefix + "_hasInputData", mKernelCheckOutputSpace);
 
@@ -635,7 +600,6 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
  * @brief hasMoreInput
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
-    assert (mMayLoopToEntry);
 
     Value * const nonFinal = b->CreateIsNull(mIsFinalInvocation);
     assert (mMaximumNumOfStrides);
@@ -746,7 +710,6 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
-        assert (mMayLoopToEntry);
         return getMaximumNumOfStridesForRepeatingStreamSet(b, streamSet);
     }
 

@@ -94,9 +94,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
-        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         mTarget->addThreadLocalScalar(sizeTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, 0);
-        #endif
     }
     // NOTE: both the shared and thread local objects are parameters to the kernel.
     // They get automatically set by reading in the appropriate params.
@@ -413,9 +411,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
         Value * const base = b->CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
-        #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
-        #endif
     }
     allocateOwnedBuffers(b, expectedNumOfStrides, false);
     resetInternalBufferHandles();
