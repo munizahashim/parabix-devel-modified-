@@ -1007,7 +1007,7 @@ void __report_failure_v(const char * name, const char * fmt, const uintptr_t * t
         out.changeColor(raw_fd_ostream::WHITE, true);
     }
     char buffer[1024] = {0};
-    const auto m = std::vsprintf(buffer, fmt, args);
+    const auto m = std::vsnprintf(buffer, 1024, fmt, args);
     out.write(buffer, m);
     if (trace == nullptr) {
         if (colourize) {
