@@ -481,7 +481,6 @@ void GrepKernelOptions::setIndexing(StreamSet * idx) {
 }
 
 void GrepKernelOptions::setRE(RE * e) {mRE = e;}
-void GrepKernelOptions::setSource(StreamSet * s) {mSource = s;}
 void GrepKernelOptions::setCombiningStream(GrepCombiningType t, StreamSet * toCombine){
     mCombiningType = t;
     mCombiningStream = toCombine;
@@ -499,19 +498,10 @@ unsigned round_up_to_blocksize(unsigned offset) {
 
 void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, std::pair<int, int> lengthRange) {
     if (offset == 0) {
-        if (mSource) {
-            mExternalBindings.emplace_back(name, strm, FixedRate(), ZeroExtended());
-        } else {
-            mExternalBindings.emplace_back(name, strm);
-        }
+        mExternalBindings.emplace_back(name, strm);
     } else {
         unsigned ahead = round_up_to_blocksize(offset);
-        if (mSource) {
-            std::initializer_list<Attribute> attrs{ZeroExtended(), LookAhead(ahead)};
-            mExternalBindings.emplace_back(name, strm, FixedRate(), attrs);
-        } else {
-            mExternalBindings.emplace_back(name, strm, FixedRate(), LookAhead(ahead));
-        }
+        mExternalBindings.emplace_back(name, strm, FixedRate(), LookAhead(ahead));
     }
     mExternalOffsets.push_back(offset);
     mExternalLengths.push_back(lengthRange);
@@ -519,9 +509,6 @@ void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned
 
 Bindings GrepKernelOptions::streamSetInputBindings() {
     Bindings inputs;
-    if (mSource) {
-        inputs.emplace_back(mCodeUnitAlphabet->getName() + "_basis", mSource);
-    }
     for (const auto & a : mAlphabets) {
         inputs.emplace_back(a.first->getName() + "_basis", a.second);
     }
@@ -557,16 +544,13 @@ GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
 std::string GrepKernelOptions::makeSignature() {
     std::string tmp;
     raw_string_ostream sig(tmp);
-    if (mSource) {
-        sig << mSource->getNumElements() << 'x' << mSource->getFieldWidth();
-        sig << '/' << mCodeUnitAlphabet->getName();
+    for (const auto & a: mAlphabets) {
+        sig << a.first->getName() << "_";
+        sig << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
     }
     if (mIndexStream) sig << "+ix";
     for (const auto & e : mExternalBindings) {
         sig << '_' << e.getName();
-    }
-    for (const auto & a: mAlphabets) {
-        sig << '_' << a.first->getName();
     }
     if (mCombiningType == GrepCombiningType::Exclude) {
         sig << "&~";
@@ -601,10 +585,6 @@ StringRef ICGrepKernel::getSignature() const {
 void ICGrepKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     RE_Compiler re_compiler(getEntryScope(), mOptions->mCodeUnitAlphabet);
-    if (mOptions->mSource) {
-        std::vector<pablo::PabloAST *> basis_set = getInputStreamSet(mOptions->mCodeUnitAlphabet->getName() + "_basis");
-        re_compiler.addAlphabet(mOptions->mCodeUnitAlphabet, basis_set);
-    }
     for (unsigned i = 0; i < mOptions->mAlphabets.size(); i++) {
         auto & alpha = mOptions->mAlphabets[i].first;
         auto basis = getInputStreamSet(alpha->getName() + "_basis");
@@ -967,7 +947,6 @@ void kernel::GraphemeClusterLogic(ProgBuilderRef P,
     std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
     options->setIndexing(U8index);
     options->setRE(GCB);
-    options->setSource(GCB_Classes);
     options->addAlphabet(GCB_mpx, GCB_Classes);
     options->setResults(GCBstream);
     options->addExternal("UTF8_index", U8index);

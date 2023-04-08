@@ -316,11 +316,24 @@ void GrepEngine::initRE(re::RE * re) {
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
     mRE = regular_expression_passes(mRE);
+    UCD::PropertyExternalizer PE;
+    mRE = PE.transformRE(mRE);
+    for (auto m : PE.mNameMap) {
+        if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
+            if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
+                re::RE * propRE = pe->getResolvedRE();
+                if (getLengthRange(propRE, &cc::UTF8).second > 1) {
+                    mLengthAlphabet = &cc::Unicode;
+                    break;
+                }
+            }
+        }
+    }
     auto lgth_range = getLengthRange(mRE, mLengthAlphabet);
     // For length 0 regular expressions (e.g. a zero-width assertion like $)
     // there will be no match spans to color.
     if (lgth_range.second == 0) mColoring = false;
-    if ((mLengthAlphabet = &cc::Unicode) && mColoring) {
+    if ((mLengthAlphabet == &cc::Unicode) && mColoring) {
         mExternalTable.declareExternal(u8, "LineStarts", new LineStartsExternal());
         UnicodeIndexing = true;
     }
@@ -362,8 +375,6 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
         }
     }
-    UCD::PropertyExternalizer PE;
-    mRE = PE.transformRE(mRE);
     for (auto m : PE.mNameMap) {
         if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
             if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
@@ -520,16 +531,9 @@ void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStre
 }
 
 void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
-    auto alphabets = re::collectAlphabets(regexp);
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
-    for (auto & a : alphabets) {
-        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            std::string basisName = a->getName() + "_basis";
-            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
-            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
-            options->addAlphabet(mpx, alphabetBasis);
-        }
-    }
+    re::Alphabet_Set alphas;
+    re::collectAlphabets(regexp, alphas);
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
     // We may end up with multiple instances of a Name, but we should
@@ -544,6 +548,11 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
             const auto offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
+        } else {
+            // We have a name that has not been set up as an external.
+            // Its definition will need to be processed.
+            re::RE * defn = e->getDefinition();
+            if (defn) re::collectAlphabets(defn, alphas);
         }
     }
     if (anyStartAnchor(regexp)) {
@@ -553,6 +562,17 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
     if (anyEndAnchor(regexp)) {
         StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "$");
         options->addExternal("$", extStream, 1, std::make_pair(0,0));
+    }
+    for (auto & a : alphas) {
+        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
+            std::string basisName = a->getName() + "_basis";
+            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
+            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
+            options->addAlphabet(mpx, alphabetBasis);
+        } else {
+            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, "basis");
+            options->addAlphabet(a, alphabetBasis);
+        }
     }
 }
 
@@ -591,9 +611,6 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
 
 unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Source, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
-    options->setSource(Source);
-    //llvm::errs() << "mIndexAlphabet: " << mIndexAlphabet->getCode() << "\n";
-    //llvm::errs() << "mLengthAlphabet: " << mLengthAlphabet->getCode() << "\n";
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
         if (mLengthAlphabet == &cc::Unicode) {
@@ -1364,7 +1381,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     StreamSet * MatchResults = E->CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
     options->setRE(matchingRE);
-    options->setSource(BasisBits);
+    options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
     options->addExternal("UTF8_index", u8index);
     E->CreateKernelCall<ICGrepKernel>(std::move(options));
@@ -1453,7 +1470,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         r = toUTF8(r);
 
         options->setRE(r);
-        options->setSource(BasisBits);
+        options->addAlphabet(&cc::UTF8, BasisBits);
         options->setResults(MatchResults);
         const auto isExclude = patterns[i].first == re::PatternKind::Exclude;
         if (i != 0 || !isExclude) {
