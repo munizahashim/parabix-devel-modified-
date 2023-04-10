@@ -143,10 +143,13 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
     Value * numOfLinearStrides = nullptr;
-    assert (mMaximumNumOfStrides);
-    if (!mIsPartitionRoot) {
+    if (mIsPartitionRoot) {
+        numOfLinearStrides = maxSegmentLength;
+    } else {
         numOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
     }
+    assert (numOfLinearStrides);
+
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -159,8 +162,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     } else if (!isSourceKernel) {
         Value * const exhausted = checkIfInputIsExhausted(b, InputExhaustionReturnType::Conjunction);
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
-    } else {
-        numOfLinearStrides = maxSegmentLength;
     }
 
     mPotentialSegmentLength = numOfLinearStrides;
