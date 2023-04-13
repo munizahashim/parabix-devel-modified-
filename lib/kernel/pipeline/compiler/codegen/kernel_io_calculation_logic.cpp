@@ -9,82 +9,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief readPipelineIOItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readPipelineIOItemCounts(BuilderRef b) {
-
-#if 0
-
-    // TODO: this needs to be considered more: if we have multiple consumers of a pipeline input and
-    // they process the input data at differing rates, how do we ensure that we always resume processing
-    // at the correct position? We can store the actual item counts / delta of the consumed count
-    // internally but this would be problematic for optimization branches as we may have processed data
-    // using the alternate path and any internally stored counts/deltas are irrelevant.
-
-    // Would a simple "reset" be enough?
-
-    mKernelId = PipelineInput;
-
-//    // NOTE: all outputs of PipelineInput node are inputs to the PipelineKernel
-//    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-//        const StreamSetPort inputPort = mBufferGraph[e].Port;
-//        assert (inputPort.Type == PortType::Output);
-//        Value * const available = getAvailableInputItems(inputPort.Number);
-//        const auto streamSet = target(e, mBufferGraph);
-//        mLocallyAvailableItems[streamSet] = available;
-//        writeTransitoryConsumedItemCount(b, streamSet, available);
-//    }
-
-
-
-    // TODO: this code was originally added in to support an optimization branch
-    // concept but will cause issues a general nested pipeline as there may be many
-    // consumers of an input that process data at differing rates.
-
-    // Supporting an optimization branch requires some sort of distinct adjustment
-    // function to update the pipeline. This update function may also need to zero
-    // out kernel state to ensure we're starting from a clean slate.
-
-    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-
-        const auto buffer = target(e, mBufferGraph);
-        const StreamSetPort inputPort = mBufferGraph[e].Port;
-        assert (inputPort.Type == PortType::Output);
-
-        Value * const inPtr = getProcessedInputItemsPtr(inputPort.Number);
-        Value * const processed = b->CreateLoad(inPtr);
-        for (const auto e : make_iterator_range(out_edges(buffer, mBufferGraph))) {
-            const BufferPort & rd = mBufferGraph[e];
-            const auto kernelIndex = target(e, mBufferGraph);
-            const auto prefix = makeBufferName(kernelIndex, rd.Port);
-            Value * const ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
-            b->CreateStore(processed, ptr);
-        }
-    }
-
-    mKernelId = PipelineOutput;
-
-    // NOTE: all inputs of PipelineOutput node are outputs of the PipelineKernel
-    for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const auto buffer = source(e, mBufferGraph);
-        const StreamSetPort outputPort = mBufferGraph[e].Port;
-        assert (outputPort.Type == PortType::Input);
-        Value * outPtr = getProducedOutputItemsPtr(outputPort.Number);
-        Value * const produced = b->CreateLoad(outPtr);
-        for (const auto e : make_iterator_range(in_edges(buffer, mBufferGraph))) {
-            const BufferPort & rd = mBufferGraph[e];
-            const auto kernelId = source(e, mBufferGraph);
-            const auto prefix = makeBufferName(kernelId, rd.Port);
-            Value * const ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
-            b->CreateStore(produced, ptr);
-        }
-    }
-
-#endif
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineNumOfLinearStrides
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
@@ -125,6 +49,13 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     // if we've exhausted a closed input source, reduce the stride step size to 1 to ensure
     // we correctly creep up on the final partial stride
+
+    /// TODO: this logic doesn't correctly support circular buffers. To allow for them, we
+    /// need to calculate the number of strides we could process and if we can perform a
+    /// full stride step, allow it to single strides when necessary when the buffer does
+    /// not support a full step before wrapping around. We could size the buffer appropriately
+    /// for fixed-rate data but not otherwise.
+
     ConstantInt * const sz_ONE = b->getSize(1);
     if (mHasExhaustedClosedInput) { assert (mStrideStepSize);
         mStrideStepSize = b->CreateSelect(mHasExhaustedClosedInput, sz_ONE, mStrideStepSize);
@@ -136,6 +67,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         const BufferPort & port = mBufferGraph[output];
         if (port.canModifySegmentLength()) {
             const auto streamSet = target(output, mBufferGraph);
+            assert (isa<StaticBuffer>(mBufferGraph[streamSet].Buffer));
             checkForSufficientOutputSpace(b, port, streamSet);
         }
     }
@@ -176,19 +108,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     assert (numOfLinearStrides);
 
-    Value * numOfLinearOutputStrides = numOfLinearStrides;
-    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & port = mBufferGraph[output];
-        if (port.canModifySegmentLength()) {
-            Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
-            numOfLinearOutputStrides = b->CreateUMin(numOfLinearOutputStrides, strides);
-        }
-    }
-    if (numOfLinearOutputStrides != numOfLinearStrides) {
-        Value * const cond = b->CreateIsNull(numOfLinearOutputStrides);
-        numOfLinearStrides = b->CreateSelect(cond, numOfLinearStrides, numOfLinearOutputStrides);
-    }
-
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
@@ -196,8 +115,16 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     numOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
 
     mNumOfLinearStrides = numOfLinearStrides;
-    mCurrentNumOfLinearStrides = numOfLinearStrides;
     mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+
+    //    Value * numOfLinearOutputStrides = numOfLinearStrides;
+    //    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+    //        const BufferPort & port = mBufferGraph[output];
+    //        if (port.canModifySegmentLength()) {
+    //            Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
+    //            numOfLinearOutputStrides = b->CreateUMin(numOfLinearOutputStrides, strides);
+    //        }
+    //    }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
@@ -318,8 +245,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         /// -------------------------------------------------------------------------------------
         /// KERNEL ENTERING FINAL STRIDE
         /// -------------------------------------------------------------------------------------
-
-
 
         Value * const isFinal = b->CreateICmpEQ(numOfLinearStrides, sz_ZERO);
 
@@ -530,8 +455,9 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
     // of producing the output for any given input.) Just ignore them.
 
     const BufferNode & bn = mBufferGraph[streamSet];
-    if (LLVM_LIKELY(bn.isOwned() && bn.Locality != BufferLocality::ThreadLocal)) {
+    if (LLVM_LIKELY(bn.isOwned() && bn.isNonThreadLocal())) {
         Value * const writable = getWritableOutputItems(b, outputPort, true);
+      //  Value * const required = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], mStrideStepSize);
         Value * const required = getOutputStrideLength(b, outputPort);
         const auto prefix = makeBufferName(mKernelId, outputPort.Port);
         #ifdef PRINT_DEBUG_MESSAGES
@@ -868,21 +794,30 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     if (buffer->isLinear()) {
 
-        mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
+        BasicBlock * expand = nullptr;
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
-        #endif
+        if (isa<DynamicBuffer>(buffer)) {
 
-        BasicBlock * const expand = b->CreateBasicBlock(prefix + "_expandBuffer", afterCopyBackOrExpand);
-        BasicBlock * const copyBack = b->CreateBasicBlock(prefix + "_copyBack", afterCopyBackOrExpand);
-        b->CreateCondBr(mustExpand, expand, copyBack);
+            mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
 
-        b->SetInsertPoint(copyBack);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
+            #endif
+
+            expand = b->CreateBasicBlock(prefix + "_expandBuffer", afterCopyBackOrExpand);
+            BasicBlock * const copyBack = b->CreateBasicBlock(prefix + "_copyBack", afterCopyBackOrExpand);
+            b->CreateCondBr(mustExpand, expand, copyBack);
+
+            b->SetInsertPoint(copyBack);
+        }
+
         buffer->linearCopyBack(b, produced, consumed, required);
-        b->CreateBr(afterCopyBackOrExpand);
 
-        b->SetInsertPoint(expand);
+        if (isa<DynamicBuffer>(buffer)) {
+            b->CreateBr(afterCopyBackOrExpand);
+
+            b->SetInsertPoint(expand);
+        }
     }
 
     // TODO: we need to calculate the total amount required assuming we process all input. This currently

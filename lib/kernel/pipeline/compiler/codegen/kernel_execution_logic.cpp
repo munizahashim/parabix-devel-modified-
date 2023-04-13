@@ -36,6 +36,8 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         #endif
     }
 
+    mCurrentNumOfLinearStrides = mNumOfLinearStrides;
+
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         if (mCurrentKernelIsStateFree) {
