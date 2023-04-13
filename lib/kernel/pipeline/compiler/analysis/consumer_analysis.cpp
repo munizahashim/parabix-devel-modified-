@@ -24,7 +24,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         }
 
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.Locality != BufferLocality::GloballyShared || bn.isReturned()) {
+        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned()) {
             continue;
         }
 
@@ -39,53 +39,40 @@ void PipelineAnalysis::makeConsumerGraph() {
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
 
-        auto lastConsumer = PipelineInput;
+        size_t lastConsumer = PipelineInput;
 
         unsigned index = 0;
 
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
-
-            lastConsumer = std::max<unsigned>(lastConsumer, consumer);
-
-            const auto consumerPartId = KernelPartitionId[consumer];
-            if (consumerPartId != partitionId) {
-                const BufferPort & input = mBufferGraph[ce];
-                add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
-            }
+            lastConsumer = std::max<size_t>(lastConsumer, consumer);
+            const BufferPort & input = mBufferGraph[ce];
+            add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
 
         assert (lastConsumer != 0);
 
         const auto lastConsumerPartitionId = KernelPartitionId[lastConsumer];
 
-        unsigned flags = ConsumerEdge::WriteConsumedCount;
+        unsigned lastConsumerFlags = ConsumerEdge::WriteConsumedCount;
         for (const auto ce : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
             const auto consumer = target(ce, mConsumerGraph);
             const auto jumpId = PartitionJumpTargetId[KernelPartitionId[consumer]];
             if (jumpId <= lastConsumerPartitionId) {
-                flags |= ConsumerEdge::MayHaveJumpedConsumer;
-                goto found_potentially_jumped_consumer;
+                lastConsumerFlags |= ConsumerEdge::MayHaveJumpedConsumer;
+                break;
             }
         }
-
-found_potentially_jumped_consumer:
 
         // Although we may already know the final consumed item count prior
         // to executing the last consumer, we need to defer writing the final
         // consumed item count until the very last consumer reads the data.
 
-        if (lastConsumer) {
-            ConsumerGraph::edge_descriptor e;
-            bool exists;
-            std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph);
-            if (exists) {
-                ConsumerEdge & cn = mConsumerGraph[e];
-                cn.Flags |= flags;
-            } else {
-                add_edge(streamSet, lastConsumer, ConsumerEdge{output.Port, ++index, flags}, mConsumerGraph);
-            }
-        }
+        ConsumerGraph::edge_descriptor e;
+        bool exists;
+        std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph); assert (exists);
+        ConsumerEdge & cn = mConsumerGraph[e];
+        cn.Flags |= lastConsumerFlags;
     }
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
@@ -94,13 +81,12 @@ found_potentially_jumped_consumer:
         ConsumerGraph::edge_descriptor f;
         bool exists;
         std::tie(f, exists) = edge(streamSet, PipelineOutput, mConsumerGraph);
-        const auto flags = ConsumerEdge::UpdateExternalCount;
         if (exists) {
             ConsumerEdge & cn = mConsumerGraph[f];
-            cn.Flags |= flags;
+            cn.Flags |= ConsumerEdge::UpdateExternalCount;
         } else {
             const BufferPort & br = mBufferGraph[e];
-            add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, flags}, mConsumerGraph);
+            add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
         }
     }
 

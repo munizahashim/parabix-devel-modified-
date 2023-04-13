@@ -73,8 +73,6 @@ public:
 
         P.determinePartitionJumpIndices();
 
-        P.identifyDominatingPartitionsForSlidingWindows();
-
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         P.identifyPartitionGuidedSynchronizationVariables();
         #endif
@@ -88,7 +86,6 @@ public:
 
         P.determineBufferSize(b);
 
-        P.identifyPortsThatModifySegmentLength();
 
         P.makeConsumerGraph();
 
@@ -99,6 +96,8 @@ public:
         P.determineNumOfThreads();
 
         P.numberDynamicRepeatingStreamSets();
+
+        P.identifyPortsThatModifySegmentLength();
 
         // Finish the buffer graph
         P.determineInitialThreadLocalBufferLayout(b, rng);
@@ -243,8 +242,6 @@ private:
     void determineNumOfThreads();
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
-
-    void identifyDominatingPartitionsForSlidingWindows();
 
     // zero extension analysis function
 

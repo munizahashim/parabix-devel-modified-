@@ -202,8 +202,6 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
     auto & out = errs();
 
-
-
     out << "digraph \"V\" {\n";
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];
@@ -370,7 +368,6 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
     PartialSumStepFactorGraph G(LastStreamSet + 1);
 
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-
         auto checkForPopCountRef = [&](const BufferGraph::edge_descriptor io) {
             const BufferPort & port = mBufferGraph[io];
             const Binding & binding = port.Binding;
@@ -395,16 +392,14 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             checkForPopCountRef(output);
         }
-
     }
 
+    const auto bw = b->getBitBlockWidth();
+    const auto fw = b->getSizeTy()->getIntegerBitWidth();
+    assert ((bw % fw) == 0 && bw > fw);
+    const auto stepsPerBlock = bw / fw;
+
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-
-        const auto bw = b->getBitBlockWidth();
-        const auto fw = b->getSizeTy()->getIntegerBitWidth();
-        assert ((bw % fw) == 0 && bw > fw);
-        const auto stepsPerBlock = bw / fw;
-
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             if (out_degree(streamSet, G) != 0) {
@@ -428,14 +423,5 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
 
     mPartialSumStepFactorGraph = G;
 }
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyDominatingPartitionsForSlidingWindows
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::identifyDominatingPartitionsForSlidingWindows() {
-
-}
-
-
 
 } // end of kernel namespace
