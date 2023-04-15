@@ -22,7 +22,6 @@ public:
     using Kernels = PipelineKernel::Kernels;
     using CallBinding = PipelineKernel::CallBinding;
     using CallBindings = PipelineKernel::CallBindings;
-    using NestedBuilders = std::vector<std::shared_ptr<PipelineBuilder>>;
     using LengthAssertion = PipelineKernel::LengthAssertion;
     using LengthAssertions = PipelineKernel::LengthAssertions;
 
@@ -30,11 +29,20 @@ public:
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...));
+        Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::None);
+        assert (!k->externallyInitialized());
+        return k;
     }
 
-    Kernel * AddKernelCall(Kernel * kernel) {
-        return initializeKernel(kernel);
+    template<typename KernelType, typename... Args>
+    Kernel * CreateKernelFamilyCall(Args &&... args) {
+        Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+        assert (k->externallyInitialized());
+        return k;
+    }
+
+    Kernel * AddKernelCall(Kernel * kernel, const unsigned flags) {
+        return initializeKernel(kernel, flags);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -132,7 +140,7 @@ protected:
                     Bindings stream_inputs, Bindings stream_outputs,
                     Bindings scalar_inputs, Bindings scalar_outputs);
 
-    Kernel * initializeKernel(Kernel * const kernel);
+    Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
     PipelineKernel * initializePipeline(PipelineKernel * const kernel);
 
@@ -149,7 +157,6 @@ protected:
     Bindings            mInternalScalars;
     Kernels             mKernels;
     CallBindings        mCallBindings;
-    NestedBuilders      mNestedBuilders;
     LengthAssertions    mLengthAssertions;
     std::string         mUniqueName;
 };
@@ -216,7 +223,6 @@ inline std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimiz
         new OptimizationBranchBuilder(mDriver, condition,
             std::move(stream_inputs), std::move(stream_outputs),
             std::move(scalar_inputs), std::move(scalar_outputs)));
-    mNestedBuilders.emplace_back(std::static_pointer_cast<PipelineBuilder>(branch));
     return branch;
 }
 

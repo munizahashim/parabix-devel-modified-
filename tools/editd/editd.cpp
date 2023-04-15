@@ -292,7 +292,7 @@ editdFunctionType editdPipeline(CPUDriver & pxDriver, const std::vector<std::str
     StreamSet * const ChStream = pxDriver.CreateStreamSet(4);
     auto P = pxDriver.makePipelineWithIO({{"chStream", ChStream}});
     StreamSet * const MatchResults = P->CreateStreamSet(editDistance + 1);
-    P->CreateKernelCall<PatternKernel>(patterns, ChStream, MatchResults);
+    P->CreateKernelFamilyCall<PatternKernel>(patterns, ChStream, MatchResults);
     Kernel * const scan = P->CreateKernelCall<editdScanKernel>(MatchResults);
     scan->link("wrapped_report_pos", wrapped_report_pos);
     return reinterpret_cast<editdFunctionType>(P->compile());
@@ -323,7 +323,7 @@ multiEditdFunctionType multiEditdPipeline(CPUDriver & pxDriver) {
     std::vector<StreamSet *> MatchResults(n);
     for(unsigned i = 0; i < n; ++i){
         MatchResults[i] = P->CreateStreamSet(editDistance + 1);
-        P->CreateKernelCall<PatternKernel>(pattGroups[i], ChStream, MatchResults[i]);
+        P->CreateKernelFamilyCall<PatternKernel>(pattGroups[i], ChStream, MatchResults[i]);
     }
 
     StreamSet * finalResults = MatchResults[0];

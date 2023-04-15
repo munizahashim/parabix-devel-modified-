@@ -39,7 +39,24 @@ public:
 public:
 
     using Scalars = std::vector<Scalar *>;
-    using Kernels = std::vector<Kernel *>;
+
+    enum KernelBindingFlag {
+        None = 0
+        , Family = 1
+    };
+
+    struct KernelBinding {
+        Kernel * Object = nullptr;
+        unsigned Flags = KernelBindingFlag::None;
+
+        KernelBinding(Kernel * kernel, unsigned flags)
+        : Object(kernel)
+        , Flags(flags) {
+
+        }
+    };
+
+    using Kernels = std::vector<KernelBinding>;
 
     struct CallBinding {
         std::string Name;

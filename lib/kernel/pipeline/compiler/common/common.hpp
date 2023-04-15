@@ -306,11 +306,13 @@ public:
     LLVM_READNONE unsigned numOfStreamOutputs(const unsigned kernel) const;
 
     LLVM_READNONE const Binding & getBinding(const unsigned kernel, const StreamSetPort port) const;
-    LLVM_READNONE const Kernel * getKernel(const unsigned index) const;
+    LLVM_READNONE const Kernel * getKernel(const size_t index) const;
 
     LLVM_READNONE bool mayHaveNonLinearIO(const size_t kernel) const;
 
     LLVM_READNONE bool isKernelStateFree(const size_t kernel) const;
+
+    LLVM_READNONE bool isKernelFamily(const size_t kernel) const;
 
 private:
 
@@ -443,8 +445,15 @@ inline unsigned PipelineCommonGraphFunctions::numOfStreamOutputs(const unsigned 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-inline const Kernel * PipelineCommonGraphFunctions::getKernel(const unsigned index) const {
+inline const Kernel * PipelineCommonGraphFunctions::getKernel(const size_t index) const {
     return mStreamGraphRef[index].Kernel;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isKernelFamily
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline bool PipelineCommonGraphFunctions::isKernelFamily(const size_t index) const {
+    return (mStreamGraphRef[index].Flags & RelationshipNodeFlag::IndirectFamily) != 0;
 }
 
 }

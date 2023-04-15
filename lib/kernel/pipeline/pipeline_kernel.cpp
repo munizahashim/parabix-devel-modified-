@@ -70,7 +70,7 @@ void PipelineKernel::generateFinalizeThreadLocalMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::addKernelDeclarations(BuilderRef b) {
     for (const auto & k : mKernels) {
-        k->addKernelDeclarations(b);
+        k.Object->addKernelDeclarations(b);
     }
     Kernel::addKernelDeclarations(b);
 }
@@ -106,7 +106,7 @@ void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(Builder
 void PipelineKernel::linkExternalMethods(BuilderRef b) {
     PipelineCompiler::linkPThreadLibrary(b);
     for (const auto & k : mKernels) {
-        k->linkExternalMethods(b);
+        k.Object->linkExternalMethods(b);
     }
     for (const CallBinding & call : mCallBindings) {
         call.Callee = b->LinkFunction(call.Name, call.Type, call.FunctionPointer);
@@ -141,8 +141,8 @@ bool PipelineKernel::externallyInitialized() const {
     if (LLVM_UNLIKELY(hasFamilyName())) {
         return true;
     }
-    for (Kernel * k : mKernels) {
-        if (k->externallyInitialized()) {
+    for (const auto & k : mKernels) {
+        if (k.Object->externallyInitialized()) {
             return true;
         }
     }
@@ -154,7 +154,8 @@ bool PipelineKernel::externallyInitialized() const {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const {
     unsigned n = 0;
-    for (const Kernel * kernel : mKernels) {
+    for (const auto & k : mKernels) {
+        const Kernel * const kernel = k.Object;
         if (kernel->externallyInitialized()) {
             if (LLVM_LIKELY(kernel->isStateful())) {
                 n += 1;
@@ -174,7 +175,8 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
     if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
         flat_set<const RepeatingStreamSet *> observed;
         unsigned n = 0;
-        for (const Kernel * kernel : mKernels) {
+        for (const auto & k : mKernels) {
+            const Kernel * const kernel = k.Object;
             const auto m = kernel->getNumOfStreamInputs();
             for (unsigned i = 0; i != m; ++i) {
                 const StreamSet * const input = kernel->getInputStreamSet(i);
@@ -198,7 +200,8 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
-    for (const Kernel * const kernel : mKernels) {
+    for (const auto & k : mKernels) {
+        const Kernel * const kernel = k.Object;
         if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
             kernel->constructFamilyKernels(b, args, params, toFree);
         }
@@ -231,7 +234,7 @@ void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitA
         flat_set<const RepeatingStreamSet *> observed;
 
         for (unsigned i = 0, j = 0; i != m; ++i) {
-            const Kernel * const kernel = mKernels[i];
+            const Kernel * const kernel = mKernels[i].Object;
             if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
                 kernel->recursivelyConstructRepeatingStreamSets(b, args, params, getJthOffset(j++));
             }
@@ -381,11 +384,11 @@ void PipelineKernel::runOptimizationPasses(BuilderRef b) const {
 
 #define REPLACE_INTERNAL_KERNEL_BINDINGS(BindingType) \
     const auto * const from = JOIN3(m, BindingType, s)[i].getRelationship(); \
-    for (auto * K : mKernels) { \
-        const auto & B = K->JOIN3(get, BindingType, Bindings)(); \
+    for (const auto & P : mKernels) { \
+        const auto & B = P.Object->JOIN3(get, BindingType, Bindings)(); \
         for (unsigned j = 0; j < B.size(); ++j) { \
             if (LLVM_UNLIKELY(B[j].getRelationship() == from)) { \
-                K->JOIN3(set, BindingType, At)(j, value); } } } \
+                P.Object->JOIN3(set, BindingType, At)(j, value); } } } \
     JOIN3(m, BindingType, s)[i].setRelationship(value);
 
 /** ------------------------------------------------------------------------------------------------------------- *

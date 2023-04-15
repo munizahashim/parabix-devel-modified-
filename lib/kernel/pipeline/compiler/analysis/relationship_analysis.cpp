@@ -513,7 +513,8 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     const auto n = mKernels.size();
     KernelVertexVec vertex(n);
     for (unsigned i = 0; i < n; ++i) {
-        const Kernel * K = mKernels[i];
+        const auto & P = mKernels[i];
+        const Kernel * K = P.Object;
         if (LLVM_UNLIKELY(K == mPipelineKernel)) {
             std::string tmp;
             raw_string_ostream msg(tmp);
@@ -521,7 +522,11 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
                 << " contains itself in its pipeline";
             report_fatal_error(msg.str());
         }
-        vertex[i] = Relationships.add(K);
+
+        const auto flags = K->externallyInitialized() ? RelationshipNodeFlag::IndirectFamily : 0U;
+        assert ((P.Flags & PipelineKernel::KernelBindingFlag::Family) != 0 || !K->externallyInitialized());
+
+        vertex[i] = Relationships.add(K, flags);
     }
     const unsigned p_out = add_vertex(RelationshipNode(mPipelineKernel), Relationships);
     PipelineOutput = p_out;
@@ -535,17 +540,21 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     addConsumerRelationships(PortType::Input, p_out, mPipelineKernel->getOutputStreamSetBindings(), Relationships, true);
 
     for (unsigned i = 0; i < n; ++i) {
-        addProducerRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputStreamSetBindings(), Relationships);
+        const Kernel * const K = mKernels[i].Object;
+        addProducerRelationships(PortType::Output, vertex[i], K->getOutputStreamSetBindings(), Relationships);
     }
     for (unsigned i = 0; i < n; ++i) {
-        addConsumerRelationships(PortType::Input, vertex[i], mKernels[i]->getInputStreamSetBindings(), Relationships, false);
+        const Kernel * const K = mKernels[i].Object;
+        addConsumerRelationships(PortType::Input, vertex[i], K->getInputStreamSetBindings(), Relationships, false);
     }
 
     for (unsigned i = 0; i < n; ++i) {
-        addReferenceRelationships(PortType::Input, vertex[i], mKernels[i]->getInputStreamSetBindings(), Relationships);
+        const Kernel * const K = mKernels[i].Object;
+        addReferenceRelationships(PortType::Input, vertex[i], K->getInputStreamSetBindings(), Relationships);
     }
     for (unsigned i = 0; i < n; ++i) {
-        addReferenceRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputStreamSetBindings(), Relationships);
+        const Kernel * const K = mKernels[i].Object;
+        addReferenceRelationships(PortType::Output, vertex[i], K->getOutputStreamSetBindings(), Relationships);
     }
 
     addPopCountKernels(b, mKernels, vertex, Relationships);
@@ -554,11 +563,13 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     addProducerRelationships(PortType::Output, p_in, mPipelineKernel->getInputScalarBindings(), Relationships);
     addConsumerRelationships(PortType::Input, p_out, mPipelineKernel->getOutputScalarBindings(), Relationships, true);
     for (unsigned i = 0; i < n; ++i) {
-        addProducerRelationships(PortType::Output, vertex[i], mKernels[i]->getOutputScalarBindings(), Relationships);
+        const Kernel * const K = mKernels[i].Object;
+        addProducerRelationships(PortType::Output, vertex[i], K->getOutputScalarBindings(), Relationships);
     }
 
     for (unsigned i = 0; i < n; ++i) {
-        addConsumerRelationships(PortType::Input, vertex[i], mKernels[i]->getInputScalarBindings(), Relationships, true);
+        const Kernel * const K = mKernels[i].Object;
+        addConsumerRelationships(PortType::Input, vertex[i], K->getInputScalarBindings(), Relationships, true);
     }
 
     for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
@@ -611,7 +622,7 @@ void PipelineAnalysis::addRegionSelectorKernels(BuilderRef b, Kernels & kernels,
     flat_map<Condition, StreamSet *> alreadyCreated;
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        Kernel * const kernel = kernels[i];
+        Kernel * const kernel = kernels[i].Object;
         Condition cond{};
         bool hasRegions = false;
         const Bindings & inputs = kernel->getInputStreamSetBindings();
@@ -673,7 +684,7 @@ void PipelineAnalysis::addRegionSelectorKernels(BuilderRef b, Kernels & kernels,
                     continue;
                 }
                 // Add the kernel to the pipeline
-                kernels.push_back(selector);
+                kernels.emplace_back(selector, 0U);
                 mInternalKernels.emplace_back(selector);
                 // Mark the region selectors for this kernel
                 alreadyCreated.emplace(cond, regionSpans);
@@ -718,7 +729,7 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
 
-        const Kernel * const kernel = kernels[i];
+        const Kernel * const kernel = kernels[i].Object;
 
         auto addPopCountDependency = [&](const ProgramGraph::vertex_descriptor bindingVertex,
                                          const RelationshipType & port) {
@@ -793,10 +804,11 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
 
     IntegerType * const sizeTy = b->getSizeTy();
 
-    kernels.resize(n, nullptr);
+    assert (n > numOfKernels);
+
+    kernels.reserve(n - numOfKernels);
 
     for (auto i = numOfKernels; i < n; ++i) {
-
 
         size_t strideLength = 0;
         #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
@@ -840,11 +852,10 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
             default: llvm_unreachable("unknown counting type?");
         }
         // Add the popcount kernel to the pipeline
-        assert (i < kernels.size());
-        kernels[i] = popCountKernel;
+        kernels.emplace_back(popCountKernel, 0U);
         mInternalKernels.emplace_back(popCountKernel);
 
-        const auto k = G.add(popCountKernel);
+        const auto k = G.add(popCountKernel, RelationshipNodeFlag::ImplicitlyAdded);
         vertex.push_back(k);
         addConsumerRelationships(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), G, false);
         addProducerRelationships(PortType::Output, k, popCountKernel->getOutputStreamSetBindings(), G);
@@ -852,7 +863,7 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
         // subsitute the popcount relationships
         for (const auto e : make_iterator_range(out_edges(i, H))) {
             const Edge & ed = H[e];
-            const Kernel * const kernel = kernels[target(e, H)];
+            const Kernel * const kernel = kernels[target(e, H)].Object;
             const auto consumer = G.find(kernel);
             assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
             StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
@@ -862,7 +873,7 @@ void PipelineAnalysis::addPopCountKernels(BuilderRef b, Kernels & kernels, Kerne
             Rational stepRate{ed.StrideLength, strideLength * kernel->getStride()};
             Binding * const popCount = new Binding("#popcount" + std::to_string(ed.Port.Number), stream, FixedRate(stepRate));
             mInternalBindings.emplace_back(popCount);
-            const auto popCountBinding = G.add(popCount);
+            const auto popCountBinding = G.add(popCount, RelationshipNodeFlag::ImplicitlyAdded);
 
             const unsigned portNum = in_degree(consumer, G);
             add_edge(streamVertex, popCountBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
@@ -956,8 +967,8 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, ProgramGraph 
     };
 
     std::vector<unsigned> kernelList;
-    for (const Kernel * kernel : mKernels) {
-        kernelList.push_back(G.addOrFind(kernel));
+    for (const auto & K : mKernels) {
+        kernelList.push_back(G.addOrFind(K.Object));
     }
 
     std::map<KernelId, unsigned> Ids;
@@ -977,7 +988,7 @@ void PipelineAnalysis::combineDuplicateKernels(BuilderRef /* b */, ProgramGraph 
                 const Kernel * const kernel = bn.Kernel;
                 // We cannot reason about a family of kernels nor safely combine two
                 // side-effecting kernels.
-                if (kernel->externallyInitialized() || kernel->hasAttribute(AttrId::SideEffecting)) {
+                if ((bn.Flags & RelationshipNodeFlag::IndirectFamily) || kernel->hasAttribute(AttrId::SideEffecting)) {
                     continue;
                 }
 
@@ -1134,7 +1145,8 @@ inline void PipelineAnalysis::removeUnusedKernels(const unsigned p_in, const uns
         pending.push(c);
         visited.insert_unique(c);
     }
-    for (const Kernel * kernel : mKernels) {
+    for (const auto & K : mKernels) {
+        const Kernel * kernel = K.Object;
         if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
             const auto k = G.find(kernel);
             pending.push(k);

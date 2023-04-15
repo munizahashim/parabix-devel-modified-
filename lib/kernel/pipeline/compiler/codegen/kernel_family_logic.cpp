@@ -51,8 +51,21 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
     // are actually executed may be shuffled around in the pipeline itself. So to map the
     // original order to the pipeline order, we just search for a matching kernel object.
 
-    for (const Kernel * const kernel : cast<PipelineKernel>(mTarget)->getKernels()) {
-        if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    for (const auto & K : cast<PipelineKernel>(mTarget)->getKernels()) {
+
+        const Kernel * const kernel = K.Object;
+
+        if (kernel->externallyInitialized() ^ ((K.Flags & PipelineKernel::KernelBindingFlag::Family) != 0)) {
+            errs() << "Expected " << kernel->getName() << " to be ";
+            if (kernel->externallyInitialized()) {
+                errs() << "not ";
+            }
+            errs() << "externally initialized\n";
+        }
+
+        if (LLVM_UNLIKELY((K.Flags & PipelineKernel::KernelBindingFlag::Family) != 0)) {
+
+            assert (kernel->externallyInitialized());
 
             auto kernelId = PipelineInput;
 
@@ -167,14 +180,14 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     const auto prefix = makeKernelName(mKernelId);
     Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
 
-    if (mKernel->externallyInitialized()) {
+    if (isKernelFamily(mKernelId)) {
         PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
         args.push_back(ConstantPointerNull::getNullValue(ptrTy));
     } else {
         args.push_back(threadLocal);
     }
     Value * const retVal = b->CreateCall(init->getFunctionType(), func, args);
-    if (mKernel->externallyInitialized()) {
+    if (isKernelFamily(mKernelId)) {
         b->CreateStore(b->CreatePointerCast(retVal, b->getVoidPtrTy()), threadLocal);
     }
 }

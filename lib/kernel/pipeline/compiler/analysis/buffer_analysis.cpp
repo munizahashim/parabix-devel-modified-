@@ -814,7 +814,8 @@ void PipelineAnalysis::numberDynamicRepeatingStreamSets() {
     // whose consumers were all removed.
 
     flat_set<const StreamSet *> added;
-    for (const Kernel * kernel : mKernels) {
+    for (const auto & P : mKernels) {
+        Kernel * const kernel = P.Object;
         const auto m = kernel->getNumOfStreamInputs();
         for (unsigned i = 0; i != m; ++i) {
             const StreamSet * const input = kernel->getInputStreamSet(i);

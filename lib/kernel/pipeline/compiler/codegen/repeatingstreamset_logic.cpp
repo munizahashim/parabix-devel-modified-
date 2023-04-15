@@ -19,7 +19,7 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
     // pipeline kernel and what was actually compiled by the program.
 
     for (unsigned i = 0; i < m; ++i) {
-        const Kernel * const kernel = kernels[i];
+        const Kernel * const kernel = kernels[i].Object;
         const auto m = kernel->getNumOfStreamInputs();
         if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
             maxStrides.push_back(b->getSize(MaximumNumOfStrides[i]));
