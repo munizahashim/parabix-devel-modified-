@@ -75,7 +75,7 @@ PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) 
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();
-    const unsigned flags = pk->externallyInitialized() ? PipelineKernel::KernelBindingFlag::Family : 0U;
+    const unsigned flags = pk->containsKernelFamilyCalls() ? PipelineKernel::KernelBindingFlag::Family : 0U;
     initializeKernel(pk, flags);
     pk->mKernels.swap(nested.mKernels);
     pk->mCallBindings.swap(nested.mCallBindings);
@@ -245,6 +245,7 @@ Kernel * PipelineBuilder::makeKernel() {
     #endif
 
     bool hasRepeatingStreamSet = false;
+    bool containsKernelFamilyCalls = false;
 
     if (mUniqueName.empty()) {
 
@@ -386,9 +387,13 @@ Kernel * PipelineBuilder::makeKernel() {
             out << "_K";
             const auto & K = mKernels[i];
             if (K.Flags & PipelineKernel::KernelBindingFlag::Family) {
-                out << K.Object->getName();
-            } else {
                 out << K.Object->getFamilyName();
+                containsKernelFamilyCalls = true;
+            } else {
+                out << K.Object->getName();
+                if (K.Object->containsKernelFamilyCalls()) {
+                    containsKernelFamilyCalls = true;
+                }
             }
         }
         for (unsigned i = 0; i < numOfCalls; ++i) {
@@ -471,11 +476,17 @@ Kernel * PipelineBuilder::makeKernel() {
     } else { // the programmer provided a unique name
         out << mUniqueName;
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            Kernel * const k = mKernels[i].Object;
+            const auto & K = mKernels[i];
+            if (K.Flags & PipelineKernel::KernelBindingFlag::Family) {
+                containsKernelFamilyCalls = true;
+            }
+            Kernel * const k = K.Object;
             k->ensureLoaded();
             if (k->generatesDynamicRepeatingStreamSets()) {
                 hasRepeatingStreamSet = true;
-                break;
+            }
+            if (k->containsKernelFamilyCalls()) {
+                containsKernelFamilyCalls = true;
             }
             for (unsigned i = 0; i < k->getNumOfStreamInputs(); ++i) {
                 const StreamSet * const in = k->getInputStreamSet(i);
@@ -493,7 +504,8 @@ Kernel * PipelineBuilder::makeKernel() {
 
     PipelineKernel * const pipeline =
         new PipelineKernel(mDriver.getBuilder(), std::move(signature),
-                           mNumOfThreads, hasRepeatingStreamSet,
+                           mNumOfThreads,
+                           containsKernelFamilyCalls, hasRepeatingStreamSet,
                            std::move(mKernels), std::move(mCallBindings),
                            std::move(mInputStreamSets), std::move(mOutputStreamSets),
                            std::move(mInputScalars), std::move(mOutputScalars),

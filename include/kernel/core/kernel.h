@@ -199,8 +199,8 @@ public:
         return false;
     }
 
-    LLVM_READNONE virtual bool externallyInitialized() const {
-        return hasFamilyName();
+    LLVM_READNONE virtual bool containsKernelFamilyCalls() const {
+        return false;
     }
 
     LLVM_READNONE virtual bool generatesDynamicRepeatingStreamSets() const {

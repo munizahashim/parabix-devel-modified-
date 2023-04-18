@@ -312,7 +312,7 @@ public:
 
     LLVM_READNONE bool isKernelStateFree(const size_t kernel) const;
 
-    LLVM_READNONE bool isKernelFamily(const size_t kernel) const;
+    LLVM_READNONE bool isKernelFamilyCall(const size_t kernel) const;
 
 private:
 
@@ -452,7 +452,7 @@ inline const Kernel * PipelineCommonGraphFunctions::getKernel(const size_t index
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isKernelFamily
  ** ------------------------------------------------------------------------------------------------------------- */
-inline bool PipelineCommonGraphFunctions::isKernelFamily(const size_t index) const {
+inline bool PipelineCommonGraphFunctions::isKernelFamilyCall(const size_t index) const {
     return (mStreamGraphRef[index].Flags & RelationshipNodeFlag::IndirectFamily) != 0;
 }
 

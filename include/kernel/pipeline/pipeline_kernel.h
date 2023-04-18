@@ -87,7 +87,7 @@ public:
 
     bool isCachable() const override;
 
-    bool externallyInitialized() const override;
+    bool containsKernelFamilyCalls() const override;
 
     LLVM_READNONE bool generatesDynamicRepeatingStreamSets() const override {
         return mHasRepeatingStreamSet;
@@ -134,6 +134,7 @@ protected:
     PipelineKernel(BuilderRef b,
                    std::string && signature,
                    const unsigned numOfThreads,
+                   const bool containsKernelFamilyCalls,
                    const bool hasRepeatingStreamSet,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
@@ -181,6 +182,7 @@ protected:
 protected:
 
     const unsigned                            mNumOfThreads;
+    const bool                                mContainsKernelFamilies;
     const bool                                mHasRepeatingStreamSet;
     const std::string                         mSignature;
     Kernels                                   mKernels;

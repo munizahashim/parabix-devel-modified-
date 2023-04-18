@@ -523,9 +523,8 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
             report_fatal_error(msg.str());
         }
 
-        const auto flags = K->externallyInitialized() ? RelationshipNodeFlag::IndirectFamily : 0U;
-        assert ((P.Flags & PipelineKernel::KernelBindingFlag::Family) != 0 || !K->externallyInitialized());
-
+        const auto isFamilyCall = (P.Flags & PipelineKernel::KernelBindingFlag::Family);
+        const auto flags = isFamilyCall ? RelationshipNodeFlag::IndirectFamily : 0U;
         vertex[i] = Relationships.add(K, flags);
     }
     const unsigned p_out = add_vertex(RelationshipNode(mPipelineKernel), Relationships);

@@ -812,6 +812,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // contains kernel family calls
+                         , false
                          // has repeating streamset
                          , false
                          // kernel list

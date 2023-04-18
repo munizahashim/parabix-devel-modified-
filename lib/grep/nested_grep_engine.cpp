@@ -80,6 +80,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // contains kernel family calls
+                         , true
                          // has repeating streamset
                          , false
                          // make kernel list
@@ -130,7 +132,6 @@ public:
                                  }
                                  options->addExternal("UTF8_index", u8index);
                                  Kernel * const matcher = new ICGrepKernel(driver.getBuilder(), std::move(options));
-                                 assert (matcher->hasFamilyName());
                                  driver.addKernel(matcher);
                                  kernels.emplace_back(matcher, PipelineKernel::KernelBindingFlag::Family);
                                  resultSoFar = MatchResults;

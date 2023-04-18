@@ -30,14 +30,14 @@ public:
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
         Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::None);
-        assert (!k->externallyInitialized());
+    //    assert (!k->containsKernelFamilyCalls());
         return k;
     }
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelFamilyCall(Args &&... args) {
         Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
-        assert (k->externallyInitialized());
+    //    assert (k->containsKernelFamilyCalls());
         return k;
     }
 
