@@ -358,46 +358,57 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
 
-    for (const auto streamSet : mNonThreadLocalStreamSets) {
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto partId = KernelPartitionId[producer];
-        auto type = BufferLocality::PartitionLocal;
-        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(e, mBufferGraph);
-            if (KernelPartitionId[consumer] != partId) {
-                type = BufferLocality::GloballyShared;
-                break;
-            }
-        }
-        BufferNode & bn = mBufferGraph[streamSet];
-        bn.Locality = type;
-    }
+    for (;;) {
 
-    // If any inter-partition input to a kernel is not thread local, none of its
-    // inter-partition inputs can be safely made to be thread local.
-    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-        bool hasNonThreadLocalInput = false;
-        for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isNonThreadLocal()) {
-                hasNonThreadLocalInput = true;
-                break;
+        for (const auto streamSet : mNonThreadLocalStreamSets) {
+
+            const auto producer = parent(streamSet, mBufferGraph);
+            const auto partId = KernelPartitionId[producer];
+            auto type = BufferLocality::PartitionLocal;
+            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(e, mBufferGraph);
+                if (KernelPartitionId[consumer] != partId) {
+                    type = BufferLocality::GloballyShared;
+                    break;
+                }
             }
+            BufferNode & bn = mBufferGraph[streamSet];
+            bn.Locality = type;
         }
-        if (hasNonThreadLocalInput) {
-            const auto partId = KernelPartitionId[kernel];
+
+        mNonThreadLocalStreamSets.clear();
+
+        // If any inter-partition input to a kernel is not thread local, none of its
+        // inter-partition inputs can be safely made to be thread local.
+        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+            bool hasNonThreadLocalInput = false;
             for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                 const auto streamSet = source(e, mBufferGraph);
-                BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isThreadLocal()) {
-                    const auto producer = parent(streamSet, mBufferGraph);
-                    if (partId != KernelPartitionId[producer]) {
-                        bn.Locality = BufferLocality::GloballyShared;
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isNonThreadLocal()) {
+                    hasNonThreadLocalInput = true;
+                    break;
+                }
+            }
+            if (hasNonThreadLocalInput) {
+                const auto partId = KernelPartitionId[kernel];
+                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    const auto streamSet = source(e, mBufferGraph);
+                    BufferNode & bn = mBufferGraph[streamSet];
+                    if (bn.isThreadLocal()) {
+                        const auto producer = parent(streamSet, mBufferGraph);
+                        if (partId != KernelPartitionId[producer]) {
+                            mNonThreadLocalStreamSets.insert(streamSet);
+                        }
                     }
                 }
             }
         }
+
+        if (mNonThreadLocalStreamSets.empty()) {
+            break;
+        }
+
     }
 
 }

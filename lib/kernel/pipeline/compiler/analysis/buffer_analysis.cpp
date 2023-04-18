@@ -443,8 +443,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
 
-
-
         bool inputsMustBeLinear = false;
         if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::InternallySynchronized))) {
             // An internally synchronized kernel requires that all I/O is linear
@@ -593,14 +591,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
-        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            BufferPort & outputRate = mBufferGraph[e];
-            const auto streamSet = target(e, mBufferGraph);
-            const BufferNode & N = mBufferGraph[streamSet];
-            if (!N.IsLinear) {
-                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
-            }
-        }
+//        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//            BufferPort & outputRate = mBufferGraph[e];
+//            const auto streamSet = target(e, mBufferGraph);
+//            const BufferNode & N = mBufferGraph[streamSet];
+//            if (!N.IsLinear) {
+//                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+//            }
+//        }
     }
 }
 
@@ -767,11 +765,11 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
                 // analyze any consumption rates.
 
-                if (bn.Locality == BufferLocality::GloballyShared) {
+                //if (bn.Locality == BufferLocality::GloballyShared) {
                     // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                     // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                     // determine this.
-                    auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
+                    auto mult = mNumOfThreads + 1U;
                     auto bufferSize = bn.RequiredCapacity * mult;
                     assert (bufferSize > 0);
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -784,14 +782,14 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                     }
 
 
-                } else {
-                    auto bufferSize = bn.RequiredCapacity;
-                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
-                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                    #endif
-                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                }
+//                } else {
+//                    auto bufferSize = bn.RequiredCapacity;
+//                    bufferSize *= (mNumOfThreads + 1U);
+//                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+//                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+//                    #endif
+//                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+//                }
             }
         }
         assert ("missing buffer?" && buffer);

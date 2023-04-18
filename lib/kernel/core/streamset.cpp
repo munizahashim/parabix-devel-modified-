@@ -1181,14 +1181,11 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             indices[1] = b->getInt32(InternalCapacity);
             Value * const intCapacityField = b->CreateInBoundsGEP(handle, indices);
             Value * const internalCapacity = b->CreateAlignedLoad(intCapacityField, sizeTyWidth);
-
             Value * const chunksToReserve = b->CreateSub(requiredChunks, consumedChunks);
-
             // newInternalCapacity tends to be 2x internalCapacity
             Value * const reserveCapacity = b->CreateAdd(chunksToReserve, internalCapacity);
             Value * const newInternalCapacity = b->CreateRoundUp(reserveCapacity, internalCapacity);
             Value * const additionalCapacity = b->CreateAdd(underflow, overflow);
-
             Value * const mallocCapacity = b->CreateAdd(newInternalCapacity, additionalCapacity);
             Value * const mallocSize = b->CreateMul(mallocCapacity, CHUNK_SIZE);
             Value * expandedBuffer = b->CreatePointerCast(b->CreatePageAlignedMalloc(mallocSize), mType->getPointerTo());

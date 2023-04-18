@@ -936,7 +936,7 @@ void ContextSpan::generatePabloMethod() {
 
 void kernel::GraphemeClusterLogic(ProgBuilderRef P,
                                   StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
-    
+
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
     const auto GCB_Sets = re::collectCCs(GCB, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
     auto GCB_mpx = cc::makeMultiplexedAlphabet("GCB_mpx", GCB_Sets);
@@ -955,7 +955,7 @@ void kernel::GraphemeClusterLogic(ProgBuilderRef P,
 
 void kernel::WordBoundaryLogic(ProgBuilderRef P,
                                   StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
-    
+
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
     wordProp = UCD::linkAndResolve(wordProp);
     re::Name * word = re::makeName("word");

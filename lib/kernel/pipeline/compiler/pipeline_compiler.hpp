@@ -193,8 +193,6 @@ public:
     void executeKernel(BuilderRef b);
     void end(BuilderRef b);
 
-    void readPipelineIOItemCounts(BuilderRef b);
-
 // internal pipeline functions
 
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
@@ -387,8 +385,6 @@ public:
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
-
-    void prepareLinearThreadLocalOutputBuffers(BuilderRef b);
 
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
