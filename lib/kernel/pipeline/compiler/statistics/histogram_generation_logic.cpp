@@ -1,10 +1,28 @@
 #include "../pipeline_compiler.hpp"
-#include "cern-root/root_histogram_analysis.h"
 #include <llvm/Support/Format.h>
 
 namespace kernel {
 
-namespace {
+struct HistogramPortListEntry {
+    uint64_t ItemCount;
+    uint64_t Frequency;
+    HistogramPortListEntry * Next;
+};
+
+struct HistogramPortData {
+    uint32_t PortType;
+    uint32_t PortNum;
+    const char * BindingName;
+    uint64_t Size;
+    void * Data; // if Size = 0, this points to a HistogramPortListEntry; otherwise its an 64-bit array of length size.
+};
+
+struct HistogramKernelData {
+    uint32_t Id;
+    uint32_t NumOfPorts;
+    const char * KernelName;
+    HistogramPortData * PortData;
+};
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief __print_pipeline_histogram_report
@@ -140,8 +158,6 @@ void __print_pipeline_histogram_report(const HistogramKernelData * const data, c
 }
 
 } // end of extern "C"
-
-} // end of anonymous namespace
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordsAnyHistogramData
@@ -743,27 +759,9 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
 
     Module * const m = b->getModule();
 
-    #ifdef ENABLE_CERN_ROOT
-    const auto PrintCode = (type == HistogramReportType::TransferredItems) ?
-        codegen::GenerateTransferredItemCountHistogram : codegen::GenerateDeferredItemCountHistogram;
-    if (DebugOptionIsSet(PrintCode)) {
-    #endif
-        Function * const reportPrinter = m->getFunction("__print_pipeline_histogram_report");
-        assert (reportPrinter);
-        b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
-    #ifdef ENABLE_CERN_ROOT
-    }
-    #endif
-
-    #ifdef ENABLE_CERN_ROOT
-    const auto AnalyzeCode = (type == HistogramReportType::TransferredItems) ?
-        codegen::AnalyzeTransferredItemCounts : codegen::AnalyzeDeferredItemCounts;
-    if (DebugOptionIsSet(AnalyzeCode)) {
-        Function * const analyzeFunc = m->getFunction("cern_root_analyze_histogram_data");
-        assert (analyzeFunc);
-        b->CreateCall(analyzeFunc->getFunctionType(), analyzeFunc, args);
-    }
-    #endif
+    Function * const reportPrinter = m->getFunction("__print_pipeline_histogram_report");
+    assert (reportPrinter);
+    b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
     // memory cleanup
     for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
@@ -814,9 +812,6 @@ free_port_data:
 void PipelineCompiler::linkHistogramFunctions(BuilderRef b) {
     FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {b->getVoidPtrTy(), b->getInt64Ty(), b->getInt32Ty()}, false);
     b->LinkFunction("__print_pipeline_histogram_report", funcTy, (void*)__print_pipeline_histogram_report);
-    #ifdef ENABLE_CERN_ROOT
-    b->LinkFunction("cern_root_analyze_histogram_data", funcTy, (void*)cern_root_analyze_histogram_data);
-    #endif
 }
 
 }
