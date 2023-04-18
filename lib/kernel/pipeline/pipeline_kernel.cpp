@@ -148,7 +148,8 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
     unsigned n = 0;
     for (const auto & k : mKernels) {
         const Kernel * const kernel = k.Object;
-        if ((k.Flags & PipelineKernel::KernelBindingFlag::Family) != 0) {
+        const bool isFamilyCall = ((k.Flags & PipelineKernel::KernelBindingFlag::Family) != 0);
+        if (isFamilyCall || kernel->containsKernelFamilyCalls()) {
             if (LLVM_LIKELY(kernel->isStateful())) {
                 n += 1;
             }

@@ -84,25 +84,23 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
                 if (LLVM_LIKELY(kernel->isStateful())) {
                     nextArg();
                 }
-                assert (kernel->hasFamilyName());
-                if (LLVM_LIKELY(kernel->hasFamilyName())) {
-                    const auto tl = kernel->hasThreadLocal();
-                    const auto ai = kernel->allocatesInternalStreamSets();
+
+                const auto tl = kernel->hasThreadLocal();
+                const auto ai = kernel->allocatesInternalStreamSets();
+                if (ai) {
+                    nextArg();
+                }
+                if (tl) {
+                    nextArg();
                     if (ai) {
                         nextArg();
                     }
-                    if (tl) {
-                        nextArg();
-                        if (ai) {
-                            nextArg();
-                        }
-                    }
-                    nextArg();
-                    if (tl) {
-                        nextArg();
-                    }
+                }
+                nextArg();
+                if (tl) {
                     nextArg();
                 }
+                nextArg();
 
             } else {
 
@@ -121,25 +119,23 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
                 if (LLVM_LIKELY(kernel->isStateful())) {
                     readNextScalar(prefix);
                 }
-                assert (kernel->hasFamilyName());
-                if (LLVM_LIKELY(kernel->hasFamilyName())) {
-                    const auto tl = kernel->hasThreadLocal();
-                    const auto ai = kernel->allocatesInternalStreamSets();
-                    if (ai) {
-                        readNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                    }
-                    if (tl) {
-                        readNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                        if (ai) {
-                            readNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                        }
-                    }
-                    readNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
-                    if (tl) {
-                        readNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                    }
-                    readNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX);
+
+                const auto tl = kernel->hasThreadLocal();
+                const auto ai = kernel->allocatesInternalStreamSets();
+                if (ai) {
+                    readNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
                 }
+                if (tl) {
+                    readNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+                    if (ai) {
+                        readNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+                    }
+                }
+                readNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
+                if (tl) {
+                    readNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+                }
+                readNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX);
             }
         }
     }

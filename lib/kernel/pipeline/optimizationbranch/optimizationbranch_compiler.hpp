@@ -322,7 +322,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 
         if (LLVM_LIKELY(kernel->isStateful())) {
             Type * handlePtrType = nullptr;
-            if (LLVM_UNLIKELY(kernel->hasFamilyName())) {
+            if (LLVM_UNLIKELY(kernel->containsKernelFamilyCalls())) {
                 handlePtrType = b->getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getSharedStateType()->getPointerTo();
@@ -332,7 +332,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 
         if (kernel->hasThreadLocal()) {
             Type * handlePtrType = nullptr;
-            if (LLVM_UNLIKELY(kernel->hasFamilyName())) {
+            if (LLVM_UNLIKELY(kernel->containsKernelFamilyCalls())) {
                 handlePtrType = b->getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getThreadLocalStateType()->getPointerTo();
@@ -392,7 +392,7 @@ void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
         args.resize(firstArgIndex + in_degree(i, mScalarGraph));
         if (LLVM_LIKELY(hasSharedState)) {
             Value * handle = nullptr;
-            if (kernel->hasFamilyName()) {
+            if (kernel->containsKernelFamilyCalls()) {
                 handle = b->getScalarField(SHARED_PREFIX + std::to_string(i));
             } else {
                 handle = kernel->createInstance(b);
@@ -470,7 +470,7 @@ Value * OptimizationBranchCompiler::loadSharedHandle(BuilderRef b, const unsigne
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->isStateful())) {
         handle = b->getScalarField(SHARED_PREFIX + std::to_string(branchType));
-        if (kernel->hasFamilyName()) {
+        if (kernel->containsKernelFamilyCalls()) {
             handle = b->CreatePointerCast(handle, kernel->getSharedStateType()->getPointerTo());
         }
     }
@@ -485,7 +485,7 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->hasThreadLocal())) {
         handle = b->getScalarField(THREAD_LOCAL_PREFIX + std::to_string(branchType));
-        if (kernel->hasFamilyName()) {
+        if (kernel->containsKernelFamilyCalls()) {
             handle = b->CreatePointerCast(handle, kernel->getThreadLocalStateType()->getPointerTo());
         }
     }

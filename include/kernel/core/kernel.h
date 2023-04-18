@@ -195,10 +195,6 @@ public:
         return mKernelName;
     }
 
-    LLVM_READNONE virtual bool hasFamilyName() const {
-        return false;
-    }
-
     LLVM_READNONE virtual bool containsKernelFamilyCalls() const {
         return false;
     }
@@ -207,13 +203,7 @@ public:
         return false;
     }
 
-    LLVM_READNONE virtual const std::string getFamilyName() const {
-        if (hasFamilyName()) {
-            return getDefaultFamilyName();
-        } else {
-            return getName();
-        }
-    }
+    LLVM_READNONE virtual std::string getFamilyName() const;
 
     virtual bool isCachable() const { return true; }
 
@@ -463,8 +453,6 @@ protected:
 protected:
 
     static std::string getStringHash(const llvm::StringRef str);
-
-    LLVM_READNONE std::string getDefaultFamilyName() const;
 
     LLVM_READNONE bool hasFixedRateInput() const;
 

@@ -401,7 +401,6 @@ public:
                  std::unique_ptr<GrepKernelOptions> && options);
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
-    bool hasFamilyName() const override { return true; }
     unsigned getOffset() {return mOffset;}
 protected:
     void generatePabloMethod() override;
@@ -428,7 +427,6 @@ private:
 class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
     FixedMatchSpansKernel(BuilderRef builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
-    bool hasFamilyName() const override { return true; }
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;

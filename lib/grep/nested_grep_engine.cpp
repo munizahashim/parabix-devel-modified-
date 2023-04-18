@@ -39,9 +39,6 @@ public:
 
     }
 
-
-    bool hasFamilyName() const override { return true; }
-
 protected:
     void generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) override {
         PointerType * const int8PtrTy = b->getInt8PtrTy();
@@ -151,8 +148,6 @@ public:
                          , {}) {
         addAttribute(InternallySynchronized());
     }
-
-    bool hasFamilyName() const override { return true; }
 
 };
 
