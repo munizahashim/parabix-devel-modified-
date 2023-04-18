@@ -68,14 +68,13 @@ Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializePipeline
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) {
+PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk, const unsigned flags) {
     // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
     // this gives me a safe workaround for the problem.
     PipelineBuilder nested(Internal{}, mDriver, pk->mInputStreamSets, pk->mOutputStreamSets, pk->mInputScalars, pk->mOutputScalars);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();
-    const unsigned flags = pk->containsKernelFamilyCalls() ? PipelineKernel::KernelBindingFlag::Family : 0U;
     initializeKernel(pk, flags);
     pk->mKernels.swap(nested.mKernels);
     pk->mCallBindings.swap(nested.mCallBindings);

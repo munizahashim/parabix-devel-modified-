@@ -29,20 +29,26 @@ public:
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
-        Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::None);
-    //    assert (!k->containsKernelFamilyCalls());
-        return k;
+        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
     }
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelFamilyCall(Args &&... args) {
-        Kernel * const k = initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
-    //    assert (k->containsKernelFamilyCalls());
-        return k;
+        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     Kernel * AddKernelCall(Kernel * kernel, const unsigned flags) {
         return initializeKernel(kernel, flags);
+    }
+
+    template<typename KernelType, typename... Args>
+    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
+        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+    }
+
+    template<typename KernelType, typename... Args>
+    PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
+        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -113,11 +119,6 @@ public:
                     Bindings && scalar_inputs, Bindings && scalar_outputs,
                     const unsigned numOfThreads);
 
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...));
-    }
-
     virtual ~PipelineBuilder() {}
 
     virtual Kernel * makeKernel();
@@ -142,7 +143,7 @@ protected:
 
     Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
-    PipelineKernel * initializePipeline(PipelineKernel * const kernel);
+    PipelineKernel * initializePipeline(PipelineKernel * const kernel, const unsigned flags);
 
 protected:
 
