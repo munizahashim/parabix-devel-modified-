@@ -57,7 +57,7 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
 
         const Kernel * const kernel = K.Object;
 
-        if (LLVM_UNLIKELY((K.Flags & PipelineKernel::KernelBindingFlag::Family) != 0)) {
+        if (LLVM_UNLIKELY(K.isFamilyCall())) {
 
             hasKernelFamilyCalls = true;
 

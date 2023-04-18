@@ -49,6 +49,10 @@ public:
         Kernel * Object = nullptr;
         unsigned Flags = KernelBindingFlag::None;
 
+        bool isFamilyCall() const {
+            return (Flags & KernelBindingFlag::Family) != 0;
+        }
+
         KernelBinding(Kernel * kernel, unsigned flags)
         : Object(kernel)
         , Flags(flags) {

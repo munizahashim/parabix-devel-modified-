@@ -386,7 +386,7 @@ Kernel * PipelineBuilder::makeKernel() {
         for (unsigned i = 0; i < numOfKernels; ++i) {
             out << "_K";
             const auto & K = mKernels[i];
-            if (K.Flags & PipelineKernel::KernelBindingFlag::Family) {
+            if (K.isFamilyCall()) {
                 out << K.Object->getFamilyName();
                 containsKernelFamilyCalls = true;
             } else {
@@ -477,7 +477,7 @@ Kernel * PipelineBuilder::makeKernel() {
         out << mUniqueName;
         for (unsigned i = 0; i < numOfKernels; ++i) {
             const auto & K = mKernels[i];
-            if (K.Flags & PipelineKernel::KernelBindingFlag::Family) {
+            if (K.isFamilyCall()) {
                 containsKernelFamilyCalls = true;
             }
             Kernel * const k = K.Object;
