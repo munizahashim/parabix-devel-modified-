@@ -432,6 +432,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedItemCount.reset(numOfInputs);
     mProcessedDeferredItemCountPtr.reset(numOfInputs);
     mProcessedDeferredItemCount.reset(numOfInputs);
+    mExhaustedInputPort.reset(numOfInputs);
     mCurrentProcessedItemCountPhi.reset(numOfInputs);
     mCurrentProcessedDeferredItemCountPhi.reset(numOfInputs);
     mCurrentLinearInputItems.reset(numOfInputs);

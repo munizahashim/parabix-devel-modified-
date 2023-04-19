@@ -398,6 +398,14 @@ struct BufferPort {
         return static_cast<unsigned>(Port.Type) < static_cast<unsigned>(rn.Port.Type);
     }
 
+    const ProcessingRate & getRate() const {
+        return Binding.get().getRate();
+    }
+
+    const kernel::AttributeSet & getAttributes() const {
+        return Binding.get().getAttributes();
+    }
+
     BufferPort() = default;
 
     BufferPort(RelationshipType port, const struct Binding & binding,

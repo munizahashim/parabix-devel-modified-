@@ -789,6 +789,8 @@ protected:
     InputPortVector<Value *>                    mProcessedDeferredItemCountPtr;
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
 
+    InputPortVector<Value *>                    mExhaustedInputPort;
+
     InputPortVector<PHINode *>                  mCurrentProcessedItemCountPhi;
     InputPortVector<PHINode *>                  mCurrentProcessedDeferredItemCountPhi;
     InputPortVector<Value *>                    mCurrentLinearInputItems;
@@ -971,7 +973,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mProcessedItemCountAtTerminationPhi(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
-
+, mExhaustedInputPort(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedDeferredItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentLinearInputItems(P.MaxNumOfInputPorts, mAllocator)

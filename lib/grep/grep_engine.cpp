@@ -822,8 +822,8 @@ public:
                          , {}
                          // stream inputs
                          , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, FixedRate(8), Deferred()),
-                            Bind("Basis", Basis, BoundedRate(0, 1))}
+                            Bind("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
+                            Bind("Basis", Basis, GreedyRate(), Deferred())}
                          // stream outputs
                          , {}
                          // input scalars
@@ -841,6 +841,7 @@ public:
         // the pipeline compiler doesn't really understand how to treat the greedy input rate
         // as a "production" rate. The simulator inside needs more information to understand it
         // as a dataflow rate but current modelling system isn't very good for that.
+
     }
 
 protected:
