@@ -388,6 +388,7 @@ add_subdirectory(lib/unicode/utf)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)
+add_subdirectory(lib/kernel/bitwise)
 add_subdirectory(lib/kernel/io)
 add_subdirectory(lib/kernel/scan)
 add_subdirectory(lib/kernel/streamutils)

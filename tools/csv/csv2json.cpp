@@ -23,6 +23,7 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/util/debug_display.h>
@@ -191,9 +192,25 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
     SHOW_STREAM(filteredFieldSeparators);
 
-    //
-    // Insertion of suffixes for each field.
-    //
+    std::vector<uint64_t> insertionAmts;
+    unsigned maxInsertAmt = 0;
+    for (auto & s : templateStrs) {
+        unsigned insertAmt = s.size();
+        insertionAmts.push_back(insertAmt);
+        if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
+    }
+    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
+
+    StreamSet * PrefixLgths = CreateRepeatingBixNum(P, insertLengthBits, insertionAmts);
+
+    StreamSet * fieldStarts = P->CreateStreamSet(1);
+    P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
+    SHOW_STREAM(fieldStarts);
+
+    StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
+    SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
+    SHOW_BIXNUM(PrefixInsertBixNum);
+
     std::vector<uint64_t> fieldSuffixLgths;
     for (unsigned i = 0; i < templateStrs.size() - 1; i++) {
         // Insertion of a single quote to terminate each field.
@@ -209,57 +226,28 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * const SuffixSpreadMask = InsertionSpreadMask(P, SuffixInsertBixNum, InsertPosition::Before);
-    SHOW_STREAM(SuffixSpreadMask);
+    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
+    SHOW_BIXNUM(InsertBixNum);
 
-    // Baais bit streams expanded with 0 bits for each suffix to be inserted.
-    StreamSet * SuffixExpandedBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, SuffixSpreadMask, filteredBasis, SuffixExpandedBasis);
-    SHOW_BIXNUM(SuffixExpandedBasis);
-
-    StreamSet * BasisWithSuffix = P->CreateStreamSet(8);
-    P->CreateKernelCall<AddFieldSuffix>(SuffixSpreadMask, SuffixExpandedBasis, BasisWithSuffix);
-    SHOW_BIXNUM(BasisWithSuffix);
-
-    StreamSet * expandedFieldSeparators = P->CreateStreamSet(1);
-    SpreadByMask(P, SuffixSpreadMask, filteredFieldSeparators, expandedFieldSeparators);
-    SHOW_STREAM(expandedFieldSeparators);
-
-    //
-    // Insertion of field prefixes at the starts of each field.
-    //
-    StreamSet * fieldStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<LineStartsKernel>(expandedFieldSeparators, fieldStarts);
-    SHOW_STREAM(fieldStarts);
-
-    std::vector<uint64_t> insertionAmts;
-    unsigned maxInsertAmt = 0;
-    for (auto & s : templateStrs) {
-        unsigned insertAmt = s.size();
-        insertionAmts.push_back(insertAmt);
-        if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
-    }
-    const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
-
-    StreamSet * PrefixLgths = CreateRepeatingBixNum(P, insertLengthBits, insertionAmts);
-
-    StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
-    SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
-    SHOW_BIXNUM(PrefixInsertBixNum);
-
-    StreamSet * const PrefixSpreadMask = InsertionSpreadMask(P, PrefixInsertBixNum, InsertPosition::Before);
-    SHOW_STREAM(PrefixSpreadMask);
+    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
+    SHOW_STREAM(BasisSpreadMask);
     
-    std::vector<uint64_t> fieldPrefixBytes;
-    for (auto & tmpStr : templateStrs) {
-        for (auto ch : tmpStr) {
-            fieldPrefixBytes.push_back(static_cast<uint64_t>(ch));
+    std::vector<uint64_t> templateBytes;
+    for (unsigned i = 0; i < templateStrs.size(); i++) {
+        for (auto ch : templateStrs[i]) {
+            templateBytes.push_back(static_cast<uint64_t>(ch));
+        }
+        templateBytes.push_back(static_cast<uint64_t>('"'));
+        if (i == templateStrs.size() - 1) {
+            templateBytes.push_back(static_cast<uint64_t>('}'));
+            templateBytes.push_back(static_cast<uint64_t>(','));
         }
     }
-    StreamSet * PrefixBasis = CreateRepeatingBixNum(P, 8, fieldPrefixBytes);
+    StreamSet * TemplateBasis = CreateRepeatingBixNum(P, 8, templateBytes);
 
     StreamSet * FinalBasis = P->CreateStreamSet(8);
-    MergeByMask(P, PrefixSpreadMask, BasisWithSuffix, PrefixBasis, FinalBasis);
+    MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     SHOW_BIXNUM(FinalBasis);
 
     StreamSet * Instantiated = P->CreateStreamSet(1, 8);
