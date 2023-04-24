@@ -59,7 +59,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     ConstantInt * const sz_ONE = b->getSize(1);
     if (mHasExhaustedClosedInput) { assert (mStrideStepSize);
         mStrideStepSize = b->CreateSelect(mHasExhaustedClosedInput, sz_ONE, mStrideStepSize);
-    } else {
+    } else if (mStrideStepSize == nullptr) {
         mStrideStepSize = sz_ONE;
     }
 
@@ -75,8 +75,10 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
     Value * numOfLinearStrides = nullptr;
+
     if (mIsPartitionRoot) {
-        numOfLinearStrides = maxSegmentLength;
+        Constant * const sz_MAXINT = ConstantInt::getAllOnesValue(b->getSizeTy());
+        numOfLinearStrides = isSourceKernel ? maxSegmentLength : sz_MAXINT;
     } else {
         numOfLinearStrides = b->CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
     }
