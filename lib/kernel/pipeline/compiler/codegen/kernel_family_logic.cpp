@@ -8,7 +8,7 @@ namespace kernel {
 void PipelineCompiler::addFamilyKernelProperties(BuilderRef b,
                                                  const unsigned kernelId,
                                                  const unsigned groupId) const {
-    if (LLVM_UNLIKELY(mKernel->hasFamilyName())) {
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
 
         PointerType * const voidPtrTy = b->getVoidPtrTy();
         const auto prefix = makeKernelName(kernelId);
@@ -51,8 +51,15 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
     // are actually executed may be shuffled around in the pipeline itself. So to map the
     // original order to the pipeline order, we just search for a matching kernel object.
 
-    for (const Kernel * const kernel : cast<PipelineKernel>(mTarget)->getKernels()) {
-        if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    bool hasKernelFamilyCalls = false;
+
+    for (const auto & K : cast<PipelineKernel>(mTarget)->getKernels()) {
+
+        const Kernel * const kernel = K.Object;
+
+        if (LLVM_UNLIKELY(K.isFamilyCall())) {
+
+            hasKernelFamilyCalls = true;
 
             auto kernelId = PipelineInput;
 
@@ -77,24 +84,23 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
                 if (LLVM_LIKELY(kernel->isStateful())) {
                     nextArg();
                 }
-                if (LLVM_LIKELY(kernel->hasFamilyName())) {
-                    const auto tl = kernel->hasThreadLocal();
-                    const auto ai = kernel->allocatesInternalStreamSets();
+
+                const auto tl = kernel->hasThreadLocal();
+                const auto ai = kernel->allocatesInternalStreamSets();
+                if (ai) {
+                    nextArg();
+                }
+                if (tl) {
+                    nextArg();
                     if (ai) {
                         nextArg();
                     }
-                    if (tl) {
-                        nextArg();
-                        if (ai) {
-                            nextArg();
-                        }
-                    }
-                    nextArg();
-                    if (tl) {
-                        nextArg();
-                    }
+                }
+                nextArg();
+                if (tl) {
                     nextArg();
                 }
+                nextArg();
 
             } else {
 
@@ -113,29 +119,34 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
                 if (LLVM_LIKELY(kernel->isStateful())) {
                     readNextScalar(prefix);
                 }
-                if (LLVM_LIKELY(kernel->hasFamilyName())) {
-                    const auto tl = kernel->hasThreadLocal();
-                    const auto ai = kernel->allocatesInternalStreamSets();
-                    if (ai) {
-                        readNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                    }
-                    if (tl) {
-                        readNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                        if (ai) {
-                            readNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                        }
-                    }
-                    readNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
-                    if (tl) {
-                        readNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                    }
-                    readNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX);
+
+                const auto tl = kernel->hasThreadLocal();
+                const auto ai = kernel->allocatesInternalStreamSets();
+                if (ai) {
+                    readNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
                 }
+                if (tl) {
+                    readNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+                    if (ai) {
+                        readNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+                    }
+                }
+                readNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
+                if (tl) {
+                    readNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
+                }
+                readNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX);
             }
-
-
-
         }
+    }
+
+    if (hasKernelFamilyCalls && !mTarget->containsKernelFamilyCalls()) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << mTarget->getName()
+            << " contains calls to family kernels but containsKernelFamilyCalls()"
+               " returns false";
+        report_fatal_error(out.str());
     }
 
 }
@@ -146,7 +157,6 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const {
     Function * const init = mKernel->getInitializeFunction(b);
-    assert (!mKernel->hasFamilyName());
     assert (init->getFunctionType()->getNumParams() == args.size());
     return b->CreateCall(init->getFunctionType(), init, args);
 }
@@ -157,7 +167,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
  void PipelineCompiler::callKernelInitializeThreadLocalFunction(BuilderRef b) const {
     Function * const init = mKernel->getInitializeThreadLocalFunction(b);
     Value * func = init;
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         func = getFamilyFunctionFromKernelState(b, init->getType(), INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
     }
     SmallVector<Value *, 2> args;
@@ -167,14 +177,14 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
     const auto prefix = makeKernelName(mKernelId);
     Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
 
-    if (mKernel->externallyInitialized()) {
+    if (isKernelFamilyCall(mKernelId)) {
         PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
         args.push_back(ConstantPointerNull::getNullValue(ptrTy));
     } else {
         args.push_back(threadLocal);
     }
     Value * const retVal = b->CreateCall(init->getFunctionType(), func, args);
-    if (mKernel->externallyInitialized()) {
+    if (isKernelFamilyCall(mKernelId)) {
         b->CreateStore(b->CreatePointerCast(retVal, b->getVoidPtrTy()), threadLocal);
     }
 }
@@ -184,7 +194,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateSharedInternalStreamSetsFunction(b, false);
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
     return term;
@@ -195,7 +205,7 @@ Value * PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(Buil
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
     return term;
@@ -206,7 +216,7 @@ Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
     Function * const doSegment = mKernel->getDoSegmentFunction(b);
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         return getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
     }
     return doSegment;
@@ -218,7 +228,7 @@ Value * PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
 Value * PipelineCompiler::callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const {
     Function * const finalize = mKernel->getFinalizeThreadLocalFunction(b);
     Value * func = finalize;
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         func = getFamilyFunctionFromKernelState(b, finalize->getType(), FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
     }
     return b->CreateCall(finalize->getFunctionType(), func, args);
@@ -230,7 +240,7 @@ Value * PipelineCompiler::callKernelFinalizeThreadLocalFunction(BuilderRef b, co
 Value * PipelineCompiler::callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const {
     Function * const term = mKernel->getFinalizeFunction(b);
     Value * func = term;
-    if (mKernel->hasFamilyName()) {
+    if (isKernelFamilyCall(mKernelId)) {
         func = getFamilyFunctionFromKernelState(b, term->getType(), FINALIZE_FUNCTION_POINTER_SUFFIX);
     }
     return b->CreateCall(term->getFunctionType(), func, args);

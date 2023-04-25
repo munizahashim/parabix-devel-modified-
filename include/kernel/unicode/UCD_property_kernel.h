@@ -17,7 +17,6 @@ public:
 protected:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
-    bool hasFamilyName() const override { return true; }
     void generatePabloMethod() override;
 private:
     UnicodePropertyKernelBuilder(BuilderRef kb, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, std::string && propValueName);

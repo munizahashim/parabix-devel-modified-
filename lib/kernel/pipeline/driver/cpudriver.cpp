@@ -304,7 +304,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     mainModule->setDataLayout(mMainModule->getDataLayout());
     mBuilder->setModule(mainModule.get());
     pk->addKernelDeclarations(mBuilder);
-    const auto e = pk->externallyInitialized() || pk->generatesDynamicRepeatingStreamSets();
+    const auto e = pk->containsKernelFamilyCalls() || pk->generatesDynamicRepeatingStreamSets();
     const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;
     Function * const main = pk->addOrDeclareMainFunction(mBuilder, method);
     mBuilder->setModule(mMainModule);

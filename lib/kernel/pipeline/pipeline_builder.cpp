@@ -59,23 +59,23 @@ void * ProgramBuilder::compileKernel(Kernel * const kernel) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel) {
+Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned flags) {
     mDriver.addKernel(kernel);
-    mKernels.emplace_back(kernel);
+    mKernels.emplace_back(kernel, flags);
     return kernel;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializePipeline
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk) {
+PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk, const unsigned flags) {
     // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
     // this gives me a safe workaround for the problem.
     PipelineBuilder nested(Internal{}, mDriver, pk->mInputStreamSets, pk->mOutputStreamSets, pk->mInputScalars, pk->mOutputScalars);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();
-    initializeKernel(pk);
+    initializeKernel(pk, flags);
     pk->mKernels.swap(nested.mKernels);
     pk->mCallBindings.swap(nested.mCallBindings);
     pk->mLengthAssertions.swap(nested.mLengthAssertions);
@@ -109,13 +109,14 @@ inline typename graph_traits<Graph>::edge_descriptor out_edge(const typename gra
  *
  * Add any attributes from a set of kernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void addKernelProperties(const std::vector<Kernel *> & kernels, Kernel * const output) {
+void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     unsigned mustTerminate = 0;
     bool canTerminate = false;
     bool sideEffecting = false;
     bool fatalTermination = false;
     unsigned stride = 0;
-    for (const Kernel * kernel : kernels) {
+    for (const auto & K : kernels) {
+        Kernel * kernel = K.Object;
         for (const Attribute & attr : kernel->getAttributes()) {
             switch (attr.getKind()) {
                 case AttrId::MustExplicitlyTerminate:
@@ -160,13 +161,6 @@ void addKernelProperties(const std::vector<Kernel *> & kernels, Kernel * const o
  ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * PipelineBuilder::makeKernel() {
 
-    mDriver.generateUncachedKernels();
-    for (const auto & builder : mNestedBuilders) {
-        Kernel * const kernel = builder->makeKernel();
-        if (LLVM_UNLIKELY(kernel == nullptr)) continue;
-        mDriver.addKernel(kernel);
-        mKernels.push_back(kernel);
-    }
     mDriver.generateUncachedKernels();
 
     const auto numOfKernels = mKernels.size();
@@ -224,14 +218,6 @@ Kernel * PipelineBuilder::makeKernel() {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
             out << "+GDH";
         }
-        #ifdef ENABLE_CERN_ROOT
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::AnalyzeTransferredItemCounts))) {
-            out << "+ATH";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::AnalyzeDeferredItemCounts))) {
-            out << "+ADH";
-        }
-        #endif
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
             out << "-TL";
         }
@@ -250,6 +236,7 @@ Kernel * PipelineBuilder::makeKernel() {
     #endif
 
     bool hasRepeatingStreamSet = false;
+    bool containsKernelFamilyCalls = false;
 
     if (mUniqueName.empty()) {
 
@@ -274,13 +261,15 @@ Kernel * PipelineBuilder::makeKernel() {
                     if (LLVM_UNLIKELY(existingProducer == pipelineInput)) {
                         out << "an input to the pipeline";
                     } else {
-                        out << "produced by " << mKernels[existingProducer - firstKernel]->getName();
+                        const auto & K = mKernels[existingProducer - firstKernel];
+                        out << "produced by " << K.Object->getName();
                     }
                     out << " and ";
                     if (LLVM_UNLIKELY(producer == pipelineOutput)) {
                         out << "an output of the pipeline";
                     } else {
-                        out << "produced by " << mKernels[producer - firstKernel]->getName();
+                        const auto & K = mKernels[producer - firstKernel];
+                        out << "produced by " << K.Object->getName();
                     }
                     out << ".";
                     report_fatal_error(out.str());
@@ -294,7 +283,7 @@ Kernel * PipelineBuilder::makeKernel() {
         enumerateProducerBindings(pipelineInput, mInputScalars);
         enumerateProducerBindings(pipelineInput, mInputStreamSets);
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            Kernel * const k = mKernels[i];
+            const auto & k = mKernels[i].Object;
             k->ensureLoaded();
             enumerateProducerBindings(firstKernel + i, k->getOutputScalarBindings());
             enumerateProducerBindings(firstKernel + i, k->getOutputStreamSetBindings());
@@ -353,7 +342,8 @@ Kernel * PipelineBuilder::makeKernel() {
                         SmallVector<char, 256> tmp;
                         raw_svector_ostream out(tmp);
                         if (consumerVertex < firstCall) {
-                            const Kernel * const consumer = mKernels[consumerVertex - firstKernel];
+                            const auto & K = mKernels[consumerVertex - firstKernel];
+                            const Kernel * const consumer = K.Object;
                             const Binding & input = ((rel->getClassTypeId() == TypeId::Scalar)
                                                        ? consumer->getInputScalarBinding(i)
                                                        : consumer->getInputStreamSetBinding(i));
@@ -374,7 +364,7 @@ Kernel * PipelineBuilder::makeKernel() {
         };
 
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            Kernel * const k = mKernels[i];
+            Kernel * const k = mKernels[i].Object;
             enumerateConsumerBindings(firstKernel + i, k->getInputScalarBindings());
             enumerateConsumerBindings(firstKernel + i, k->getInputStreamSetBindings());
         }
@@ -385,7 +375,17 @@ Kernel * PipelineBuilder::makeKernel() {
         enumerateConsumerBindings(pipelineOutput, mOutputStreamSets);
 
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            out << "_K" << mKernels[i]->getFamilyName();
+            out << "_K";
+            const auto & K = mKernels[i];
+            if (K.isFamilyCall()) {
+                out << K.Object->getFamilyName();
+                containsKernelFamilyCalls = true;
+            } else {
+                out << K.Object->getName();
+                if (K.Object->containsKernelFamilyCalls()) {
+                    containsKernelFamilyCalls = true;
+                }
+            }
         }
         for (unsigned i = 0; i < numOfCalls; ++i) {
             out << "_C" << mCallBindings[i].Name;
@@ -467,11 +467,17 @@ Kernel * PipelineBuilder::makeKernel() {
     } else { // the programmer provided a unique name
         out << mUniqueName;
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            Kernel * const k = mKernels[i];
+            const auto & K = mKernels[i];
+            if (K.isFamilyCall()) {
+                containsKernelFamilyCalls = true;
+            }
+            Kernel * const k = K.Object;
             k->ensureLoaded();
             if (k->generatesDynamicRepeatingStreamSets()) {
                 hasRepeatingStreamSet = true;
-                break;
+            }
+            if (k->containsKernelFamilyCalls()) {
+                containsKernelFamilyCalls = true;
             }
             for (unsigned i = 0; i < k->getNumOfStreamInputs(); ++i) {
                 const StreamSet * const in = k->getInputStreamSet(i);
@@ -489,7 +495,8 @@ Kernel * PipelineBuilder::makeKernel() {
 
     PipelineKernel * const pipeline =
         new PipelineKernel(mDriver.getBuilder(), std::move(signature),
-                           mNumOfThreads, hasRepeatingStreamSet,
+                           mNumOfThreads,
+                           containsKernelFamilyCalls, hasRepeatingStreamSet,
                            std::move(mKernels), std::move(mCallBindings),
                            std::move(mInputStreamSets), std::move(mOutputStreamSets),
                            std::move(mInputScalars), std::move(mOutputScalars),
@@ -560,7 +567,7 @@ Kernel * OptimizationBranchBuilder::makeKernel() {
                                    mCondition, nonZero, allZero,
                                    std::move(mInputStreamSets), std::move(mOutputStreamSets),
                                    std::move(mInputScalars), std::move(mOutputScalars));
-    addKernelProperties({nonZero, allZero}, br);
+    addKernelProperties({{nonZero, PipelineKernel::Family}, {allZero, PipelineKernel::Family}}, br);
     br->addAttribute(InternallySynchronized());
     return br;
 }

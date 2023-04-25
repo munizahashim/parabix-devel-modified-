@@ -223,7 +223,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Type * sharedStateTy = nullptr;
-        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
+        if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
             sharedStateTy = b->getVoidPtrTy();
         } else {
             sharedStateTy = mKernel->getSharedStateType();
@@ -234,7 +234,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     if (mKernel->hasThreadLocal()) {
         // we cannot statically allocate a "family" thread local object.
         Type * localStateTy = nullptr;
-        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
+        if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
             localStateTy = b->getVoidPtrTy();
         } else {
             localStateTy = mKernel->getThreadLocalStateType();
@@ -329,7 +329,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
             initializeStridesPerSegment(b);
         }
 
-        if (LLVM_LIKELY(!mKernel->externallyInitialized())) {
+        if (LLVM_LIKELY(!isKernelFamilyCall(i))) {
             ArgVec args;
             if (LLVM_LIKELY(mKernel->isStateful())) {
                 args.push_back(mKernelSharedHandle);
@@ -1000,7 +1000,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
             args.push_back(getCommonThreadLocalHandlePtr(b, i));
             args.push_back(mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
-            if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
+            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
                 b->CreateFree(mKernelThreadLocalHandle);
             }
         }

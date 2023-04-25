@@ -604,7 +604,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
+        P->CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
         return spans;
     }
 }
@@ -623,7 +623,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
     options->setRE(re);
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
-    Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
+    Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
     if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
@@ -812,6 +812,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // contains kernel family calls
+                         , false
                          // has repeating streamset
                          , false
                          // kernel list
@@ -820,8 +822,8 @@ public:
                          , {}
                          // stream inputs
                          , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, FixedRate(8), Deferred()),
-                            Bind("Basis", Basis, BoundedRate(0, 1))}
+                            Bind("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
+                            Bind("Basis", Basis, GreedyRate(), Deferred())}
                          // stream outputs
                          , {}
                          // input scalars
@@ -839,6 +841,7 @@ public:
         // the pipeline compiler doesn't really understand how to treat the greedy input rate
         // as a "production" rate. The simulator inside needs more information to understand it
         // as a dataflow rate but current modelling system isn't very good for that.
+
     }
 
 protected:
@@ -1384,7 +1387,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
     options->addExternal("UTF8_index", u8index);
-    E->CreateKernelCall<ICGrepKernel>(std::move(options));
+    E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
     StreamSet * MatchingRecords = E->CreateStreamSet();
     E->CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
 
@@ -1477,7 +1480,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
             options->setCombiningStream(isExclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultsSoFar);
         }
         options->addExternal("UTF8_index", u8index);
-        E->CreateKernelCall<ICGrepKernel>(std::move(options));
+        E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
         resultsSoFar = MatchResults;
     }
 

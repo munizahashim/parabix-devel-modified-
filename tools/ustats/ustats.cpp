@@ -106,7 +106,7 @@ namespace ustats
             re::Name * word = re::makeName(property, re::Name::Type::UnicodeProperty);
             word->setDefinition(wordProp);
 
-            program->CreateKernelCall<kernel::UnicodePropertyKernelBuilder>(
+            program->CreateKernelFamilyCall<kernel::UnicodePropertyKernelBuilder>(
                 word,
                 BasisBits,
                 outputStream

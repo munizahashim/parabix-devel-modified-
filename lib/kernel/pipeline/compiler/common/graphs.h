@@ -55,6 +55,11 @@ using Vertex = unsigned;
 
 using StreamSetId = unsigned;
 
+enum RelationshipNodeFlag {
+    IndirectFamily = 1
+    , ImplicitlyAdded = 2
+};
+
 struct RelationshipNode {
 
     enum RelationshipNodeType : unsigned {
@@ -64,6 +69,8 @@ struct RelationshipNode {
         , IsCallee
         , IsBinding
     } Type;
+
+    unsigned Flags;
 
     union {
 
@@ -92,17 +99,25 @@ struct RelationshipNode {
     static_assert(sizeof(Kernel) == sizeof(Callee), "pointer size inequality?");
     static_assert(sizeof(Kernel) == sizeof(Binding), "pointer size inequality?");
 
-    explicit RelationshipNode() noexcept : Type(IsNil), Kernel(nullptr) { }
-    explicit RelationshipNode(std::nullptr_t) noexcept : Type(IsNil), Kernel(nullptr) { }
-    explicit RelationshipNode(not_null<const kernel::Kernel *> kernel) noexcept : Type(IsKernel), Kernel(kernel) { }
-    explicit RelationshipNode(not_null<kernel::Relationship *> relationship) noexcept : Type(IsRelationship), Relationship(relationship) { }
-    explicit RelationshipNode(not_null<const CallBinding *> callee) noexcept : Type(IsCallee), Callee(callee) { }
-    explicit RelationshipNode(not_null<const kernel::Binding *> ref) noexcept : Type(IsBinding), Binding(ref) { }
-    explicit RelationshipNode(const RelationshipNode & rn) noexcept : Type(rn.Type), Kernel(rn.Kernel) { }
+    explicit RelationshipNode() noexcept
+        : Type(IsNil), Flags(0U), Kernel(nullptr) { }
+    explicit RelationshipNode(std::nullptr_t) noexcept
+        : Type(IsNil), Flags(0U), Kernel(nullptr)  { }
+    explicit RelationshipNode(not_null<const kernel::Kernel *> kernel, const unsigned flags = 0U) noexcept
+        : Type(IsKernel), Flags(flags), Kernel(kernel) { }
+    explicit RelationshipNode(not_null<kernel::Relationship *> relationship, const unsigned flags = 0U) noexcept
+        : Type(IsRelationship), Flags(flags), Relationship(relationship) { }
+    explicit RelationshipNode(not_null<const CallBinding *> callee, const unsigned flags = 0U) noexcept
+        : Type(IsCallee), Flags(flags), Callee(callee) { }
+    explicit RelationshipNode(not_null<const kernel::Binding *> ref, const unsigned flags = 0U) noexcept
+        : Type(IsBinding), Flags(flags), Binding(ref) { }
+    explicit RelationshipNode(const RelationshipNode & rn) noexcept
+        : Type(rn.Type), Flags(rn.Flags), Kernel(rn.Kernel) { }
 
     RelationshipNode & operator = (const RelationshipNode & other) {
         Type = other.Type;
         Kernel = other.Kernel;
+        Flags = other.Flags;
         return *this;
     }
 
@@ -157,8 +172,8 @@ struct ProgramGraph : public RelationshipGraph {
     using Vertex = RelationshipGraph::vertex_descriptor;
 
     template <typename T>
-    inline Vertex add(T key) {
-        return __add(RelationshipNode{key});
+    inline Vertex add(T key, const unsigned flags = 0) {
+        return __add(RelationshipNode{key, flags});
     }
 
     template <typename T>
@@ -381,6 +396,14 @@ struct BufferPort {
             return Port.Number < rn.Port.Number;
         }
         return static_cast<unsigned>(Port.Type) < static_cast<unsigned>(rn.Port.Type);
+    }
+
+    const ProcessingRate & getRate() const {
+        return Binding.get().getRate();
+    }
+
+    const kernel::AttributeSet & getAttributes() const {
+        return Binding.get().getAttributes();
     }
 
     BufferPort() = default;

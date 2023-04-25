@@ -39,9 +39,6 @@ public:
 
     }
 
-
-    bool hasFamilyName() const override { return true; }
-
 protected:
     void generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) override {
         PointerType * const int8PtrTy = b->getInt8PtrTy();
@@ -80,6 +77,8 @@ public:
                          }()
                          // num of threads
                          , 1
+                         // contains kernel family calls
+                         , true
                          // has repeating streamset
                          , false
                          // make kernel list
@@ -101,7 +100,7 @@ public:
                                  // if we already constructed the outer kernel through nesting,
                                  // it may not be necessary to add it back to the execution engine.
                                  driver.addKernel(outerKernel);
-                                 kernels.push_back(outerKernel);
+                                 kernels.emplace_back(outerKernel, PipelineKernel::Family);
                              }
 
                              for (unsigned i = 0; i != n; i++) {
@@ -130,9 +129,8 @@ public:
                                  }
                                  options->addExternal("UTF8_index", u8index);
                                  Kernel * const matcher = new ICGrepKernel(driver.getBuilder(), std::move(options));
-                                 assert (matcher->hasFamilyName());
                                  driver.addKernel(matcher);
-                                 kernels.push_back(matcher);
+                                 kernels.emplace_back(matcher, PipelineKernel::KernelBindingFlag::Family);
                                  resultSoFar = MatchResults;
                              }
                              assert (resultSoFar == matches);
@@ -150,8 +148,6 @@ public:
                          , {}) {
         addAttribute(InternallySynchronized());
     }
-
-    bool hasFamilyName() const override { return true; }
 
 };
 
@@ -251,7 +247,7 @@ void NestedInternalSearchEngine::grepCodeGen() {
 
     assert (mNested.size() > 1 && mNested.back());
     Kernel * const outer = mNested.back();
-    E->AddKernelCall(outer);
+    E->AddKernelCall(outer, PipelineKernel::KernelBindingFlag::Family);
     if (MatchCoordinateBlocks > 0) {
         StreamSet * const MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
         E->CreateKernelCall<MatchCoordinatesKernel>(mMatches, mBreaks, MatchCoords, MatchCoordinateBlocks);

@@ -388,7 +388,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (isKernelStateFree(kernel)) {
             out << "<StateFree>\\n";
         }
-        if (kernelObj->hasFamilyName()) {
+        if (isKernelFamilyCall(kernel)) {
             out << "<Family>\\n";
         }
 

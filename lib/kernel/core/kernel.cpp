@@ -1086,7 +1086,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         }
         initArgs.push_back(f->second); assert (initArgs.back());
     }
-
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
     if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
         ParamMap repeatingStreamSets;
@@ -1098,24 +1097,23 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
 
     END_SCOPED_REGION
 
-    if (LLVM_LIKELY(hasFamilyName())) {
-        const auto tl = hasThreadLocal();
-        const auto ai = allocatesInternalStreamSets();
-        if (ai) {
-            addHostArg(getAllocateSharedInternalStreamSetsFunction(b));
-        }
-        if (tl) {
-            addHostArg(getInitializeThreadLocalFunction(b));
-            if (ai) {
-                addHostArg(getAllocateThreadLocalInternalStreamSetsFunction(b));
-            }
-        }
-        addHostArg(getDoSegmentFunction(b));
-        if (hasThreadLocal()) {
-            addHostArg(getFinalizeThreadLocalFunction(b));
-        }
-        addHostArg(getFinalizeFunction(b));
+    const auto tl = hasThreadLocal();
+    const auto ai = allocatesInternalStreamSets();
+    if (ai) {
+        addHostArg(getAllocateSharedInternalStreamSetsFunction(b));
     }
+    if (tl) {
+        addHostArg(getInitializeThreadLocalFunction(b));
+        if (ai) {
+            addHostArg(getAllocateThreadLocalInternalStreamSetsFunction(b));
+        }
+    }
+    addHostArg(getDoSegmentFunction(b));
+    if (hasThreadLocal()) {
+        addHostArg(getFinalizeThreadLocalFunction(b));
+    }
+    addHostArg(getFinalizeFunction(b));
+
     return handle;
 }
 
@@ -1199,9 +1197,9 @@ void SegmentOrientedKernel::generateKernelMethod(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getDefaultFamilyName
+ * @brief getFamilyName
  ** ------------------------------------------------------------------------------------------------------------- */
-std::string Kernel::getDefaultFamilyName() const {
+std::string Kernel::getFamilyName() const {
     std::string tmp;
     raw_string_ostream out(tmp);
     if (LLVM_LIKELY(isStateful())) {

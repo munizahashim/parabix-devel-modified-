@@ -415,36 +415,37 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
     PointerType * const voidPtrTy = b->getVoidPtrTy();
 
     for (unsigned i = 0; i < numOfInputs; ++i) {
-        const auto port = getInput(mKernelId, StreamSetPort(PortType::Input, i));
+        const StreamSetPort inputPort{PortType::Input, i};
+        const auto port = getInput(mKernelId, inputPort);
         const BufferPort & rt = mBufferGraph[port];
-
+        assert (rt.Port.Number == inputPort.Number);
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
             Value * processed = nullptr;
             if (rt.isDeferred()) {
-                processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
+                processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
             } else {
-                processed = mCurrentProcessedItemCountPhi[rt.Port];
+                processed = mCurrentProcessedItemCountPhi[inputPort];
             }
             assert (processed);
 
-            Value * const addr = mInputVirtualBaseAddressPhi[rt.Port]; assert (addr);
+            Value * const addr = mInputVirtualBaseAddressPhi[inputPort]; assert (addr);
             #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_addr = %" PRIx64, addr);
+            debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
             #endif
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-                addNextArg(isClosed(b, StreamSetPort(PortType::Input, i)));
+                Value * const isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
+                addNextArg(isExhausted);
             }
 
-            mReturnedProcessedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.isDeferred(), processed);
+            mReturnedProcessedItemCountPtr[inputPort] = addItemCountArg(rt, rt.isDeferred(), processed);
 
             if (LLVM_UNLIKELY(requiresItemCount(rt.Binding))) {
                 // calculate how many linear items are from the *deferred* position
-                Value * inputItems = mLinearInputItemsPhi[rt.Port]; assert (inputItems);
-
+                Value * inputItems = mLinearInputItemsPhi[inputPort]; assert (inputItems);
                 if (rt.isDeferred()) {
-                    const auto prefix = makeBufferName(mKernelId, rt.Port);
-                    Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[rt.Port], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
+                    const auto prefix = makeBufferName(mKernelId, inputPort);
+                    Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[inputPort], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
                     inputItems = b->CreateAdd(inputItems, diff);
                 }
                 addNextArg(inputItems);

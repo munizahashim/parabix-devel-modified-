@@ -376,7 +376,8 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
 
-    Value * hasEnough = b->CreateICmpUGE(accessible, required);
+
+
     if (LLVM_LIKELY(mIsPartitionRoot)) { // && !port.isZeroExtended()
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
@@ -385,8 +386,16 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         }
     }
 
+    Value * const hasEnough = b->CreateICmpUGE(accessible, required);
+    Value * const isExhausted = b->CreateNot(hasEnough);
+
+    if (LLVM_UNLIKELY(port.getRate().isGreedy())) {
+        mExhaustedInputPort[inputPort] = closed;
+    } else {
+        mExhaustedInputPort[inputPort] = isExhausted;
+    }
+
     if (mStrideStepSize) {
-        Value * const isExhausted = b->CreateNot(hasEnough);
         if (mHasExhaustedClosedInput) {
             mHasExhaustedClosedInput = b->CreateOr(mHasExhaustedClosedInput, isExhausted);
         } else {
@@ -799,9 +808,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         BasicBlock * expand = nullptr;
 
         if (isa<DynamicBuffer>(buffer)) {
-
             mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
-
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
             #endif

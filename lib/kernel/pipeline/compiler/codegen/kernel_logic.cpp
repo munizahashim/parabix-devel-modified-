@@ -12,7 +12,7 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId));
-        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
+        if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
             handle = b->CreateLoad(b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo()->getPointerTo()));
         }
         mKernelSharedHandle = handle;
@@ -143,7 +143,7 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
     Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-    if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
         handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
     }
@@ -159,7 +159,7 @@ Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsi
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
     Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-    if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
         handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
     }
@@ -432,6 +432,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedItemCount.reset(numOfInputs);
     mProcessedDeferredItemCountPtr.reset(numOfInputs);
     mProcessedDeferredItemCount.reset(numOfInputs);
+    mExhaustedInputPort.reset(numOfInputs);
     mCurrentProcessedItemCountPhi.reset(numOfInputs);
     mCurrentProcessedDeferredItemCountPhi.reset(numOfInputs);
     mCurrentLinearInputItems.reset(numOfInputs);

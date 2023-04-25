@@ -236,7 +236,7 @@ void U21_External::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> i
 
 void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * pStrm  = b->CreateStreamSet(1);
-    b->CreateKernelCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
+    b->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
     installStreamSet(pStrm);
 }
 
@@ -256,7 +256,7 @@ void PropertyBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<St
 void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * ccStrm = b->CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
-    b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
+    b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
     installStreamSet(ccStrm);
 }
 
@@ -291,7 +291,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
             std::vector<re::CC *> ccs;
             for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
             StreamSet * basis = b->CreateStreamSet(ccs.size());
-            b->CreateKernelCall<CharClassesKernel>(ccs, inputs[0], basis);
+            b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
             installStreamSet(basis);
         }
     }
@@ -300,7 +300,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
 void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     auto mpx_basis = mAlphabet->getMultiplexedCCs();
     StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
-    b->CreateKernelCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
+    b->CreateKernelFamilyCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
     installStreamSet(u8CharClasses);
 }
 
@@ -344,7 +344,7 @@ const std::vector<std::string> FixedSpanExternal::getParameters() {
 void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * matchMarks = inputs[0];
     StreamSet * spans = b->CreateStreamSet(1, 1);
-    b->CreateKernelCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
+    b->CreateKernelFamilyCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
     installStreamSet(spans);
 }
 
@@ -943,14 +943,14 @@ void kernel::GraphemeClusterLogic(ProgBuilderRef P,
     GCB = transformCCs(GCB_mpx, GCB, re::NameTransformationMode::TransformDefinition);
     auto GCB_basis = GCB_mpx->getMultiplexedCCs();
     StreamSet * const GCB_Classes = P->CreateStreamSet(GCB_basis.size());
-    P->CreateKernelCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
+    P->CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
     std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
     options->setIndexing(U8index);
     options->setRE(GCB);
     options->addAlphabet(GCB_mpx, GCB_Classes);
     options->setResults(GCBstream);
     options->addExternal("UTF8_index", U8index);
-    P->CreateKernelCall<ICGrepKernel>(std::move(options));
+    P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
 }
 
 void kernel::WordBoundaryLogic(ProgBuilderRef P,
@@ -961,7 +961,7 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     re::Name * word = re::makeName("word");
     word->setDefinition(wordProp);
     StreamSet * WordStream = P->CreateStreamSet(1);
-    P->CreateKernelCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
+    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 

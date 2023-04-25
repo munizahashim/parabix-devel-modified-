@@ -39,7 +39,28 @@ public:
 public:
 
     using Scalars = std::vector<Scalar *>;
-    using Kernels = std::vector<Kernel *>;
+
+    enum KernelBindingFlag {
+        None = 0
+        , Family = 1
+    };
+
+    struct KernelBinding {
+        Kernel * Object = nullptr;
+        unsigned Flags = KernelBindingFlag::None;
+
+        bool isFamilyCall() const {
+            return (Flags & KernelBindingFlag::Family) != 0;
+        }
+
+        KernelBinding(Kernel * kernel, unsigned flags)
+        : Object(kernel)
+        , Flags(flags) {
+
+        }
+    };
+
+    using Kernels = std::vector<KernelBinding>;
 
     struct CallBinding {
         std::string Name;
@@ -70,7 +91,7 @@ public:
 
     bool isCachable() const override;
 
-    bool externallyInitialized() const override;
+    bool containsKernelFamilyCalls() const override;
 
     LLVM_READNONE bool generatesDynamicRepeatingStreamSets() const override {
         return mHasRepeatingStreamSet;
@@ -117,6 +138,7 @@ protected:
     PipelineKernel(BuilderRef b,
                    std::string && signature,
                    const unsigned numOfThreads,
+                   const bool containsKernelFamilyCalls,
                    const bool hasRepeatingStreamSet,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
@@ -164,6 +186,7 @@ protected:
 protected:
 
     const unsigned                            mNumOfThreads;
+    const bool                                mContainsKernelFamilies;
     const bool                                mHasRepeatingStreamSet;
     const std::string                         mSignature;
     Kernels                                   mKernels;

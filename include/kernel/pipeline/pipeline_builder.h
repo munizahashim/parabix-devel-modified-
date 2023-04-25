@@ -22,7 +22,6 @@ public:
     using Kernels = PipelineKernel::Kernels;
     using CallBinding = PipelineKernel::CallBinding;
     using CallBindings = PipelineKernel::CallBindings;
-    using NestedBuilders = std::vector<std::shared_ptr<PipelineBuilder>>;
     using LengthAssertion = PipelineKernel::LengthAssertion;
     using LengthAssertions = PipelineKernel::LengthAssertions;
 
@@ -30,11 +29,26 @@ public:
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...));
+        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
     }
 
-    Kernel * AddKernelCall(Kernel * kernel) {
-        return initializeKernel(kernel);
+    template<typename KernelType, typename... Args>
+    Kernel * CreateKernelFamilyCall(Args &&... args) {
+        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+    }
+
+    Kernel * AddKernelCall(Kernel * kernel, const unsigned flags) {
+        return initializeKernel(kernel, flags);
+    }
+
+    template<typename KernelType, typename... Args>
+    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
+        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+    }
+
+    template<typename KernelType, typename... Args>
+    PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
+        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -105,11 +119,6 @@ public:
                     Bindings && scalar_inputs, Bindings && scalar_outputs,
                     const unsigned numOfThreads);
 
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...));
-    }
-
     virtual ~PipelineBuilder() {}
 
     virtual Kernel * makeKernel();
@@ -132,9 +141,9 @@ protected:
                     Bindings stream_inputs, Bindings stream_outputs,
                     Bindings scalar_inputs, Bindings scalar_outputs);
 
-    Kernel * initializeKernel(Kernel * const kernel);
+    Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
-    PipelineKernel * initializePipeline(PipelineKernel * const kernel);
+    PipelineKernel * initializePipeline(PipelineKernel * const kernel, const unsigned flags);
 
 protected:
 
@@ -149,7 +158,6 @@ protected:
     Bindings            mInternalScalars;
     Kernels             mKernels;
     CallBindings        mCallBindings;
-    NestedBuilders      mNestedBuilders;
     LengthAssertions    mLengthAssertions;
     std::string         mUniqueName;
 };
@@ -216,7 +224,6 @@ inline std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimiz
         new OptimizationBranchBuilder(mDriver, condition,
             std::move(stream_inputs), std::move(stream_outputs),
             std::move(scalar_inputs), std::move(scalar_outputs)));
-    mNestedBuilders.emplace_back(std::static_pointer_cast<PipelineBuilder>(branch));
     return branch;
 }
 
