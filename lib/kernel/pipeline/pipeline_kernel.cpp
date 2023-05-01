@@ -297,11 +297,9 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
 
     assert ((maxStrideLength % blockWidth) == 0);
 
-    const auto overflow = (maxStrideLength / blockWidth);
+    const auto additionalStrides = (maxStrideLength / blockWidth);
 
-    const auto totalStrides = ((runLength + overflow - 1U) / overflow) * overflow;
-
-    const auto additionalStrides =  totalStrides - runLength;
+    const auto totalStrides = runLength + additionalStrides;
 
     std::vector<Constant *> dataVectorArray(runLength + additionalStrides);
 

@@ -10,6 +10,7 @@ SRC
 DEPS
     pablo
     kernel.basis
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils

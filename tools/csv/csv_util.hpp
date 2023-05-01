@@ -237,10 +237,12 @@ void AddFieldSuffix::generatePabloMethod() {
     // The suffixSpreadMask marks position for suffix data with
     // either a single 0 (insertion position before comma) or a
     // run of three 0s (insertion position before newline).
-    PabloAST * quotePos = pb.createAnd(pb.createAdvance(mask, 1), pb.createNot(mask));
-    PabloAST * RbracePos = pb.createAnd(pb.createAdvance(quotePos, 1), pb.createNot(mask));
+    // A special case is a 0 at start of file.
+    PabloAST * mask1 = pb.createNot(mask);  // convert to 1-based mask
+    PabloAST * quotePos = pb.createAnd(pb.createNot(pb.createAdvance(mask1, 1)), mask1);
+    PabloAST * RbracePos = pb.createAnd(pb.createAdvance(quotePos, 1), mask1);
     PabloAST * afterRbrace = pb.createAdvance(RbracePos, 1);
-    PabloAST * commaPos = pb.createAnd(afterRbrace, pb.createNot(mask));
+    PabloAST * commaPos = pb.createAnd(afterRbrace, mask1);
 
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     // Quotes are ASCII 0x22 - only need to set bits 5 and 2.

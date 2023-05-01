@@ -1,0 +1,14 @@
+# Copyright (c) 2023 Parabix Group at Simon Fraser University.
+# This software is licensed to the public under the Open Software License 3.0.
+
+# module: kernel.bitwise
+
+parabix_add_module(
+NAME
+    kernel.bitwise
+SRC
+    bixnum_kernel.cpp
+DEPS
+    pablo
+    pablo.bixnum
+)
