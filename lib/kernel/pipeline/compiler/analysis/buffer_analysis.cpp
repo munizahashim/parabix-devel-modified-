@@ -737,7 +737,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
-    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+//    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
     const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
@@ -748,10 +748,12 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isConstant())) {
-            const auto consumerInput = first_out_edge(streamSet, mBufferGraph);
-            const BufferPort & consumerRate = mBufferGraph[consumerInput];
-            const Binding & input = consumerRate.Binding;
-            buffer = new RepeatingBuffer(streamSet, b, input.getType());
+            const RepeatingStreamSet * const ss =
+                cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
+//            const auto e = first_out_edge(streamSet, mBufferGraph);
+//            const BufferPort & consumerRate = mBufferGraph[e];
+//            const Binding & input = consumerRate.Binding;
+            buffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
         } else  {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];

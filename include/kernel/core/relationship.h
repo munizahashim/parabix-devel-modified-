@@ -114,9 +114,14 @@ public:
         return _isDynamic;
     }
 
-    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet, bool isDynamic = false) noexcept
+    bool isUnaligned() const {
+        return _isUnaligned;
+    }
+
+    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet, bool isDynamic, bool isUnaligned) noexcept
     : StreamSet(C, ClassTypeId::RepeatingStreamSet, stringSet.size(), FieldWidth)
     , _isDynamic(isDynamic)
+    , _isUnaligned(isUnaligned)
     , _StringSet(std::move(stringSet)) {
 
     }
@@ -124,6 +129,7 @@ public:
 private:
 
     const bool _isDynamic;
+    const bool _isUnaligned;
     std::vector<std::vector<uint64_t>> _StringSet;
 
 };

@@ -402,6 +402,9 @@ Kernel * PipelineBuilder::makeKernel() {
                 const auto numElements = rs->getNumElements();
                 const auto fieldWidth = rs->getNumElements();
                 out << 'R' << numElements << 'x' << fieldWidth;
+                if (rs->isUnaligned()) {
+                    out << 'U';
+                }
                 if (rs->isDynamic()) {
                     hasRepeatingStreamSet = true;
                 } else {

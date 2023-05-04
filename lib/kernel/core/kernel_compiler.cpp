@@ -794,10 +794,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
                 produced = b->CreateLoad(mProducedOutputItemPtr[i]);
             }
             assert (isFromCurrentFunction(b, produced, true));
-            Value * const blockIndex = b->CreateLShr(produced, LOG_2_BLOCK_WIDTH);
-            Value * vba = buffer->getStreamLogicalBasePtr(b.get(), baseAddress, ZERO, blockIndex);
-
-            assert (isFromCurrentFunction(b, vba, true));
+            Value * vba = buffer->getVirtualBasePtr(b.get(), baseAddress, produced);
             vba = b->CreatePointerCast(vba, b->getVoidPtrTy());
 
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));

@@ -911,15 +911,24 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
         return baseAddress;
     }
 
-    Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
-    Constant * const ZERO = b->getSize(0);
-    PointerType * const bufferType = buffer->getPointerType();
-    Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
-
-    Value * const address = buffer->getStreamLogicalBasePtr(b, baseAddress, ZERO, blockIndex);
-    Value * const addr = b->CreatePointerCast(address, bufferType);
+    Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+        Value * const V = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
+        Value * const S = buffer->getMallocAddress(b);
+        Value * const P = b->CreatePointerCast(V, S->getType());
+        Value * const E = buffer->getOverflowAddress(b);
+        Value * const valid = b->CreateAnd(b->CreateICmpULE(S, P), b->CreateICmpULE(P, E));
+        b->CreateAssert(valid, "%s.%s virtual base address %" PRIx64 " is not within expected range [%" PRIx64 ",%" PRIx64 "]",
+                        mCurrentKernelName, b->GetString(getBinding(rateData.Port).getName()), P, S, E);
+    }
     if (prefetch) {
-        Value * const prefetchAddr = buffer->getStreamBlockPtr(b, addr, ZERO, blockIndex);
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+        Value * const prefetchAddr = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
         prefetchAtLeastThreeCacheLinesFrom(b, prefetchAddr, write);
     }
     return addr;

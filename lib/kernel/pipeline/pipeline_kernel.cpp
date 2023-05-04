@@ -225,6 +225,8 @@ void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitA
 
         flat_set<const RepeatingStreamSet *> observed;
 
+
+
         for (unsigned i = 0, j = 0; i != m; ++i) {
             const Kernel * const kernel = mKernels[i].Object;
             if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
@@ -261,7 +263,18 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
 
     const auto maxVal = (1ULL << static_cast<size_t>(fieldWidth)) - 1ULL;
 
-    size_t patternLength = blockWidth;
+    size_t patternLength = 0;
+    if (numElements == 1 && ss->isUnaligned()) {
+        if (fieldWidth < 8) {
+            assert ((8 % fieldWidth) == 0);
+            patternLength = 8U / fieldWidth;
+        } else {
+            patternLength = 1U;
+        }
+    } else {
+        patternLength = blockWidth;
+    }
+
     for (unsigned i = 0; i < numElements; ++i) {
         const auto & vec = ss->getPattern(i);
         const auto L = vec.size();
@@ -291,17 +304,18 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
     // sequentially in memory. Strip-mining promotes better cache utilization but means that we'd end
     // up having many tiny memcpys to reassemble the minimal set of data.
 
-    assert ((patternLength % blockWidth) == 0);
+    unsigned runLength = 0;
+    unsigned copyableLength = 0;
+    if (numElements == 1 && ss->isUnaligned()) {
+        runLength = ((patternLength + maxStrideLength + blockWidth - 1UL) / blockWidth);
+    } else {
+        runLength = (patternLength / blockWidth);
+        copyableLength = (maxStrideLength / blockWidth);
+    }
 
-    const auto runLength = (patternLength / blockWidth);
+    const auto totalStrides = runLength + copyableLength;
 
-    assert ((maxStrideLength % blockWidth) == 0);
-
-    const auto additionalStrides = (maxStrideLength / blockWidth);
-
-    const auto totalStrides = runLength + additionalStrides;
-
-    std::vector<Constant *> dataVectorArray(runLength + additionalStrides);
+    std::vector<Constant *> dataVectorArray(totalStrides);
 
     FixedVectorType * const vecTy = b->getBitBlockType();
     IntegerType * const intTy = cast<IntegerType>(vecTy->getScalarType());
@@ -317,8 +331,6 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
 
     SmallVector<uint64_t, 16> elementPos(numElements, 0);
 
-    uint64_t hashNum = 0;
-
     for (unsigned r = 0; r < runLength; ++r) {
         for (unsigned p = 0; p < numElements; ++p) {
             const auto & vec = ss->getPattern(p);
@@ -328,27 +340,27 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
                     uint64_t V = 0;
                     for (uint64_t k = 0; k != laneWidth; k += fieldWidth) {
                         auto & pos = elementPos[p];
-                        const auto v = vec[pos % L];
+                        const auto v = vec[pos];
                         V |= (v << k);
-                        ++pos;
+                        pos = (pos + 1U) % L;
                     }
-                    hashNum += V;
                     laneVal[j] = ConstantInt::get(intTy, V, false);
                 }
                 packVal[i] = ConstantVector::get(laneVal);
             }
-            elemVal[p] = ConstantArray::get(cast<ArrayType>(elementTy), packVal);
+            elemVal[p] = ConstantArray::get(elementTy, packVal);
         }
         dataVectorArray[r] = ConstantArray::get(streamSetTy, elemVal);
     }
 
-    for (unsigned r = 0; r < additionalStrides; ++r) {
-        assert (dataVectorArray[r] == dataVectorArray[r % runLength]);
-        assert (dataVectorArray[r]);
-        dataVectorArray[r + runLength] = dataVectorArray[r];
+    for (unsigned r = 0; r < copyableLength; ++r) {
+        const auto & v = dataVectorArray[r]; assert (v);
+        assert (dataVectorArray[r % runLength] == v);
+        assert (dataVectorArray[r + runLength] == nullptr);
+        dataVectorArray[r + runLength] = v;
     }
 
-    ArrayType * const arrTy = ArrayType::get(streamSetTy, dataVectorArray.size());
+    ArrayType * const arrTy = ArrayType::get(streamSetTy, totalStrides);
 
     Constant * const patternVec = ConstantArray::get(arrTy, dataVectorArray);
 
@@ -357,8 +369,7 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
         new GlobalVariable(mod, patternVec->getType(), true, GlobalValue::ExternalLinkage, patternVec);
     const auto align = blockWidth / 8;
     patternData->setAlignment(MaybeAlign{align});
-
-    return RepeatingStreamSetInfo{patternData, b->getSize(runLength)};
+    return RepeatingStreamSetInfo{patternData, b->getSize(patternLength)};
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

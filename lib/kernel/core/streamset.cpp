@@ -29,8 +29,17 @@ using namespace IDISA;
 using IDISA::IDISA_Builder;
 
 using boost::intrusive::detail::is_pow2;
+using boost::intrusive::detail::floor_log2;
 
 #define ANON_MMAP_SIZE (2ULL * 1048576ULL)
+
+inline bool isConstantOne(const Value * const index) {
+    return isa<ConstantInt>(index) ? cast<ConstantInt>(index)->isOne() : false;
+}
+
+inline bool isCapacityGuaranteed(const Value * const index, const size_t capacity) {
+    return isa<ConstantInt>(index) ? cast<ConstantInt>(index)->getLimitedValue() < capacity : false;
+}
 
 namespace kernel {
 
@@ -156,29 +165,41 @@ Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Va
     const unsigned itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
     #endif
     IntegerType * const sizeTy = b->getSizeTy();
-    streamIndex = b->CreateZExt(streamIndex, sizeTy);
     absolutePosition = b->CreateZExt(absolutePosition, sizeTy);
+    streamIndex = b->CreateZExt(streamIndex, sizeTy);
 
-    const auto blockWidth = b->getBitBlockWidth();
-    Constant * const BLOCK_WIDTH = b->getSize(blockWidth);
-    Value * blockIndex = b->CreateUDiv(absolutePosition, BLOCK_WIDTH);
-    Value * positionInBlock = b->CreateURem(absolutePosition, BLOCK_WIDTH);
-    Value * blockPtr = getStreamBlockPtr(b, getBaseAddress(b), streamIndex, blockIndex);
+    Value * pos = nullptr;
+    Value * addr = nullptr;
+    Value * const streamCount = getStreamSetCount(b);
+    if (LLVM_LIKELY(isConstantOne(streamCount))) {
+        addr = getBaseAddress(b);
+        if (isLinear()) {
+            pos = absolutePosition;
+        } else {
+            pos = b->CreateURem(pos, getCapacity(b));
+        }
+    } else {
+        Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+        Value * blockIndex = b->CreateUDiv(absolutePosition, BLOCK_WIDTH);
+        addr = getStreamBlockPtr(b, getBaseAddress(b), streamIndex, blockIndex);
+        pos = b->CreateURem(absolutePosition, BLOCK_WIDTH);
+    }
+    PointerType * itemPtrTy = nullptr;
     if (LLVM_UNLIKELY(itemWidth < 8)) {
         const Rational itemsPerByte{8, itemWidth};
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
             b->CreateAssertZero(b->CreateURemRational(absolutePosition, itemsPerByte),
                                 "absolutePosition (%" PRIu64 " * %" PRIu64 "x%" PRIu64 ") must be byte aligned",
-                                absolutePosition, getStreamSetCount(b), b->getSize(itemWidth));
+                                absolutePosition, streamCount, b->getSize(itemWidth));
         }
-        positionInBlock = b->CreateUDivRational(positionInBlock, itemsPerByte);
-        PointerType * const itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
-        blockPtr = b->CreatePointerCast(blockPtr, itemPtrTy);
-        return b->CreateInBoundsGEP(blockPtr, positionInBlock);
+        pos = b->CreateUDivRational(pos, itemsPerByte);
+        itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
+    } else {
+        itemPtrTy = itemTy->getPointerTo(mAddressSpace);
     }
-    PointerType * const itemPtrTy = itemTy->getPointerTo(mAddressSpace);
-    blockPtr = b->CreatePointerCast(blockPtr, itemPtrTy);
-    return b->CreateInBoundsGEP(blockPtr, positionInBlock);
+    addr = b->CreatePointerCast(addr, itemPtrTy);
+    return b->CreateInBoundsGEP(addr, pos);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -302,8 +323,10 @@ Value * ExternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const fro
     return b->CreateSub(capacity, fromPosition);
 }
 
-Value * ExternalBuffer::getStreamLogicalBasePtr(BuilderPtr b, Value * baseAddress, Value * const streamIndex, Value * /* blockIndex */) const {
-    return StreamSetBuffer::getStreamBlockPtr(b, baseAddress, streamIndex, b->getSize(0));
+Value * ExternalBuffer::getVirtualBasePtr(BuilderPtr b, Value * baseAddress, Value * const /* transferredItems */) const {
+    Constant * const sz_ZERO = b->getSize(0);
+    Value * const addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, sz_ZERO);
+    return b->CreatePointerCast(addr, getPointerType());
 }
 
 inline void ExternalBuffer::assertValidBlockIndex(BuilderPtr b, Value * blockIndex) const {
@@ -353,26 +376,31 @@ Value * InternalBuffer::getStreamPackPtr(BuilderPtr b, Value * const baseAddress
     return StreamSetBuffer::getStreamPackPtr(b, baseAddress, streamIndex, offset, packIndex);
 }
 
-Value * InternalBuffer::getStreamLogicalBasePtr(BuilderPtr b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex) const {
+Value * InternalBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddress, Value * const transferredItems) const {
+    Constant * const sz_ZERO = b->getSize(0);
     Value * baseBlockIndex = nullptr;
     if (mLinear) {
         // NOTE: the base address of a linear buffer is always the virtual base ptr; just return it.
-        baseBlockIndex = b->getSize(0);
+        baseBlockIndex = sz_ZERO;
     } else {
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(transferredItems, LOG_2_BLOCK_WIDTH);
         baseBlockIndex = b->CreateSub(modByCapacity(b, blockIndex), blockIndex);
     }
-    return StreamSetBuffer::getStreamBlockPtr(b, baseAddress, streamIndex, baseBlockIndex);
+    Value * addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, baseBlockIndex);
+    return b->CreatePointerCast(addr, getPointerType());
 }
 
-Value * InternalBuffer::getRawItemPointer(BuilderPtr b, Value * const streamIndex, Value * absolutePosition) const {
-    Value * pos = nullptr;
-    if (mLinear) {
-        pos = absolutePosition;
-    } else {
-        pos = b->CreateURem(absolutePosition, getCapacity(b));
-    }
-    return StreamSetBuffer::getRawItemPointer(b, streamIndex, pos);
-}
+
+//Value * InternalBuffer::getRawItemPointer(BuilderPtr b, Value * const streamIndex, Value * absolutePosition) const {
+//    Value * pos = nullptr;
+//    if (mLinear) {
+//        pos = absolutePosition;
+//    } else {
+//        pos = b->CreateURem(absolutePosition, getCapacity(b));
+//    }
+//    return StreamSetBuffer::getRawItemPointer(b, streamIndex, pos);
+//}
 
 Value * InternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const processedItems, Value * const totalItems, Value * const overflowItems) const {
     if (mLinear) {
@@ -474,10 +502,6 @@ void StaticBuffer::releaseBuffer(BuilderPtr b) const {
     Value * buffer = b->CreateLoad(addressField);
     b->CreateFree(subtractUnderflow(b, buffer, mUnderflow));
     b->CreateStore(nullPointerFor(b, buffer, mUnderflow), addressField);
-}
-
-inline bool isCapacityGuaranteed(const Value * const index, const size_t capacity) {
-    return isa<ConstantInt>(index) ? cast<ConstantInt>(index)->getLimitedValue() < capacity : false;
 }
 
 Value * StaticBuffer::modByCapacity(BuilderPtr b, Value * const offset) const {
@@ -873,7 +897,6 @@ Value * DynamicBuffer::getInternalCapacity(BuilderPtr b) const {
 void DynamicBuffer::setCapacity(BuilderPtr /* b */, Value * /* capacity */) const {
     unsupported("setCapacity", "Dynamic");
 }
-
 
 Value * DynamicBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const producedItems, Value * const consumedItems, Value * const overflowItems) const {
     if (mLinear) {
@@ -1533,22 +1556,90 @@ void RepeatingBuffer::releaseBuffer(BuilderPtr b) const {
 }
 
 Value * RepeatingBuffer::modByCapacity(BuilderPtr b, Value * const offset) const {
-    assert (offset->getType()->isIntegerTy());
-    assert (mModulus);
-    return b->CreateURem(offset, mModulus);
+    Value * const capacity = b->CreateExactUDiv(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateURem(offset, capacity);
 }
 
 Value * RepeatingBuffer::getCapacity(BuilderPtr b) const {
-    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return mModulus;
 }
 
 Value * RepeatingBuffer::getInternalCapacity(BuilderPtr b) const {
-    return b->CreateMul(mModulus, b->getSize(b->getBitBlockWidth()));
+    return mModulus;
 }
 
 void RepeatingBuffer::setCapacity(BuilderPtr b, Value * capacity) const {
     unsupported("setCapacity", "Repeating");
 }
+
+
+Value * RepeatingBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddress, Value * const transferredItems) const {
+    Value * addr = nullptr;
+    Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+    if (mUnaligned) {
+        assert (isConstantOne(getStreamSetCount(b)));
+        Value * offset = b->CreateSub(transferredItems, b->CreateURem(transferredItems, mModulus));
+        Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
+        Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+        #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
+        const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
+        #else
+        const unsigned itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
+        #endif
+        PointerType * itemPtrTy = nullptr;
+        if (LLVM_UNLIKELY(itemWidth < 8)) {
+            const Rational itemsPerByte{8, itemWidth};
+            offset = b->CreateUDivRational(offset, itemsPerByte);
+            itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
+        } else {
+            itemPtrTy = itemTy->getPointerTo(mAddressSpace);
+        }
+        addr = b->CreatePointerCast(baseAddress, itemPtrTy);
+        addr = b->CreateInBoundsGEP(addr, b->CreateNeg(offset));
+    } else {
+        Value * const transferredBlocks = b->CreateLShr(transferredItems, LOG_2_BLOCK_WIDTH);
+        Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+        Value * const capacity = b->CreateExactUDiv(mModulus, BLOCK_WIDTH);
+        Value * offset = b->CreateURem(transferredBlocks, capacity);
+        offset = b->CreateSub(offset, transferredBlocks);
+        Constant * const sz_ZERO = b->getSize(0);
+        addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, offset);
+    }
+    return b->CreatePointerCast(addr, getPointerType());
+}
+
+#if 0
+Value * RepeatingBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddress, Value * const transferredItems) const {
+    Value * offset = b->CreateURem(transferredItems, mModulus);
+    offset = b->CreateSub(offset, transferredItems); // -(transferredItems - offset)
+    Value * addr = nullptr;
+    if (isConstantOne(getStreamSetCount(b))) {
+        Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
+        Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+        #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
+        const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
+        #else
+        const unsigned itemWidth = itemTy->getPrimitiveSizeInBits().getFixedSize();
+        #endif
+        PointerType * itemPtrTy = nullptr;
+        if (LLVM_UNLIKELY(itemWidth < 8)) {
+            const Rational itemsPerByte{8, itemWidth};
+            offset = b->CreateUDivRational(offset, itemsPerByte);
+            itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
+        } else {
+            itemPtrTy = itemTy->getPointerTo(mAddressSpace);
+        }
+        addr = b->CreatePointerCast(addr, itemPtrTy);
+        addr = b->CreateInBoundsGEP(addr, offset);
+    } else {
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(offset, LOG_2_BLOCK_WIDTH);
+        Constant * const sz_ZERO = b->getSize(0);
+        addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, blockIndex);
+    }
+    return b->CreatePointerCast(addr, getPointerType());
+}
+#endif
 
 Value * RepeatingBuffer::getBaseAddress(BuilderPtr b) const {
     FixedArray<Value *, 2> indices;
@@ -1572,10 +1663,8 @@ Value * RepeatingBuffer::getMallocAddress(BuilderPtr b) const {
 }
 
 Value * RepeatingBuffer::getOverflowAddress(BuilderPtr b) const {
-    FixedArray<Value *, 2> indices;
-    indices[0] = b->getInt32(0);
-    indices[1] = mModulus;
-    return b->CreateGEP(getBaseAddress(b), indices);
+    Value * const capacity = b->CreateExactUDiv(mModulus, b->getSize(b->getBitBlockWidth()));
+    return b->CreateGEP(getBaseAddress(b), capacity);
 }
 
 Value * RepeatingBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * consumed, Value * required) const {
@@ -1621,8 +1710,9 @@ MMapedBuffer::MMapedBuffer(const unsigned id, BuilderPtr b, Type * const type,
 
 }
 
-RepeatingBuffer::RepeatingBuffer(const unsigned id, BuilderPtr b, Type * const type)
-: InternalBuffer(id, BufferKind::RepeatingBuffer, b, type, 0, 0, false, 0) {
+RepeatingBuffer::RepeatingBuffer(const unsigned id, BuilderPtr b, Type * const type, const bool unaligned)
+: InternalBuffer(id, BufferKind::RepeatingBuffer, b, type, 0, 0, false, 0)
+, mUnaligned(unaligned) {
 
 }
 

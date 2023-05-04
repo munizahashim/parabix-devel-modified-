@@ -648,7 +648,12 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
-        return getMaximumNumOfStridesForRepeatingStreamSet(b, streamSet);
+        Constant * v = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+        #ifdef PRINT_DEBUG_MESSAGES
+        const auto prefix = makeBufferName(mKernelId, inputPort);
+        debugPrint(b, prefix + "_available(const) = %" PRIu64, v);
+        #endif
+        return v;
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
