@@ -621,6 +621,8 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
         re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
+    auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
+    options->setBarrier(mExternalTable.getStreamSet(P, indexing, "$"));
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
@@ -1383,6 +1385,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
 
     StreamSet * MatchResults = E->CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
+    //options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
@@ -1467,11 +1470,12 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         auto options = std::make_unique<GrepKernelOptions>();
 
         auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
-        r = re::exclude_CC(r, breakCC);
-        r = resolveAnchors(r, breakCC);
+        //r = re::exclude_CC(r, breakCC);
+        //r = resolveAnchors(r, breakCC);
         r = regular_expression_passes(r);
         r = toUTF8(r);
 
+        options->setBarrier(RecordBreakStream);
         options->setRE(r);
         options->addAlphabet(&cc::UTF8, BasisBits);
         options->setResults(MatchResults);

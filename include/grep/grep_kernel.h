@@ -363,6 +363,7 @@ class GrepKernelOptions {
 public:
     using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
     GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
+    void setBarrier(StreamSet * barrierStream);
     void setIndexing(StreamSet * indexStream);
     void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
     void setResults(StreamSet * r);
@@ -383,6 +384,7 @@ protected:
 private:
 
     const cc::Alphabet *        mCodeUnitAlphabet;
+    StreamSet *                 mBarrierStream = nullptr;
     StreamSet *                 mIndexStream = nullptr;
     GrepCombiningType           mCombiningType = GrepCombiningType::None;
     StreamSet *                 mCombiningStream = nullptr;

@@ -476,6 +476,10 @@ UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, S
     }
 }
 
+void GrepKernelOptions::setBarrier(StreamSet * b) {
+    mBarrierStream = b;
+}
+
 void GrepKernelOptions::setIndexing(StreamSet * idx) {
     mIndexStream = idx;
 }
@@ -509,6 +513,9 @@ void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned
 
 Bindings GrepKernelOptions::streamSetInputBindings() {
     Bindings inputs;
+    if (mBarrierStream) {
+        inputs.emplace_back("mBarrier", mBarrierStream);
+    }
     for (const auto & a : mAlphabets) {
         inputs.emplace_back(a.first->getName() + "_basis", a.second);
     }
@@ -548,6 +555,7 @@ std::string GrepKernelOptions::makeSignature() {
         sig << a.first->getName() << "_";
         sig << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
     }
+    if (mBarrierStream) sig << "+bx";
     if (mIndexStream) sig << "+ix";
     for (const auto & e : mExternalBindings) {
         sig << '_' << e.getName();
@@ -584,7 +592,11 @@ StringRef ICGrepKernel::getSignature() const {
 
 void ICGrepKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    RE_Compiler re_compiler(getEntryScope(), mOptions->mCodeUnitAlphabet);
+    PabloAST * barrier = nullptr;
+    if (mOptions->mBarrierStream) {
+        barrier = pb.createExtract(getInputStreamVar("mBarrier"), pb.getInteger(0));
+    }
+    RE_Compiler re_compiler(getEntryScope(), barrier, mOptions->mCodeUnitAlphabet);
     for (unsigned i = 0; i < mOptions->mAlphabets.size(); i++) {
         auto & alpha = mOptions->mAlphabets[i].first;
         auto basis = getInputStreamSet(alpha->getName() + "_basis");

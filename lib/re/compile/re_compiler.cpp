@@ -148,7 +148,7 @@ Marker RE_Block_Compiler::compileAny(Marker marker) {
     if (marker.offset() == 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
     }
-    return Marker(nextPos);
+    return Marker(mPB.createAnd(nextPos, mMain.mMatchable));
 }
 
 Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
@@ -172,13 +172,13 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     while (i < mMain.mAlphabets.size() && (a != mMain.mAlphabets[i])) i++;
     if (i < mMain.mAlphabets.size()) {
         //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
-        PabloAST * ccStrm = mMain.mAlphabetCompilers[i]->compileCC(cc);
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
     if (a == &cc::Byte) {
         //llvm::errs() << "Using alphabet 0: for Byte\n";
-        PabloAST * ccStrm = mMain.mAlphabetCompilers[0]->compileCC(cc);
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
@@ -778,8 +778,10 @@ void RE_Compiler::addAlphabet(const cc::Alphabet * a, std::vector<pablo::PabloAS
 }
 
 void RE_Compiler::setIndexing(const cc::Alphabet * indexingAlphabet, PabloAST * indexStream) {
+    PabloBuilder pb(mEntryScope);
     mIndexingAlphabet = indexingAlphabet;
     mIndexStream = indexStream;
+    //mMatchable = pb.createAnd(indexStream, mMatchable);
 }
     
 void RE_Compiler::addPrecompiled(std::string precompiledName, ExternalStream precompiled) {
@@ -816,15 +818,22 @@ LLVM_ATTRIBUTE_NORETURN void RE_Compiler::UnsupportedRE(std::string errmsg) {
 }
 
 RE_Compiler::RE_Compiler(PabloBlock * scope,
+                         PabloAST * barrierStream,
                          const cc::Alphabet * codeUnitAlphabet)
 : mEntryScope(scope)
 , mCodeUnitAlphabet(codeUnitAlphabet)
 , mIndexingAlphabet(nullptr)
 , mIndexStream(nullptr)
+, mMatchable(nullptr)
 , mWhileTest(nullptr)
 , mStarDepth(0) {
     PabloBuilder pb(mEntryScope);
     mIndexStream = pb.createOnes();
+    if (barrierStream != nullptr) {
+        mMatchable = pb.createNot(barrierStream);
+    } else {
+        mMatchable = pb.createOnes();
+    }
 }
 
 } // end of namespace re
