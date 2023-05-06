@@ -312,7 +312,7 @@ void GrepEngine::initRE(re::RE * re) {
     //
     // As grep should match within lines, but not across lines, we process
     // the RE to remove any line break characters.
-    mRE = re::exclude_CC(mRE, mBreakCC);
+    //mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
     mRE = regular_expression_passes(mRE);
@@ -349,18 +349,6 @@ void GrepEngine::initRE(re::RE * re) {
                 mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
             }
         }
-    }
-    if (anyStartAnchor(mRE)) {
-        if (UnicodeIndexing) {
-            auto U_Starts = new LineStartsExternal({"$"});
-            mExternalTable.declareExternal(Unicode, "^", U_Starts);
-        }
-        std::vector<std::string> lineStartParms = {"$"};
-        if (mLengthAlphabet == &cc::Unicode) {
-            lineStartParms.push_back("u8index");
-        }
-        auto u8_Starts = new LineStartsExternal(lineStartParms);
-        mExternalTable.declareExternal(u8, "^", u8_Starts);
     }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (hasGraphemeClusterBoundary(mRE)) {
@@ -459,9 +447,6 @@ void GrepEngine::initRE(re::RE * re) {
     } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-    //if (mExternalTable.hasReferenceTo(u8, "u8index")) {
-    //    mExternalTable.declareExternal(u8, "u8index", new U8Index_External());
-    //}
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
@@ -554,14 +539,6 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
             re::RE * defn = e->getDefinition();
             if (defn) re::collectAlphabets(defn, alphas);
         }
-    }
-    if (anyStartAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "^");
-        options->addExternal("^", extStream, 1, std::make_pair(0,0));
-    }
-    if (anyEndAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "$");
-        options->addExternal("$", extStream, 1, std::make_pair(0,0));
     }
     for (auto & a : alphas) {
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
@@ -1385,7 +1362,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
 
     StreamSet * MatchResults = E->CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
-    //options->setBarrier(RecordBreakStream);
+    options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);

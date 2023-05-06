@@ -691,32 +691,17 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 }
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
-    auto f = mMain.mExternalNameMap.find("^");
-    if (f == mMain.mExternalNameMap.end()) {
-        PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1), "SOT");
-        return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
-    }
-    return f->second.marker();
+    PabloAST * SOT = mPB.createNot(mPB.createAdvance(mMain.mMatchable, 1), "SOT");
+    return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
-    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {marker.stream()});
-
-    auto f = mMain.mExternalNameMap.find("$");
-    if (f == mMain.mExternalNameMap.end()) {
-        PabloAST * nextPos = marker.stream();
-        if (marker.offset() == 0) {
-            nextPos = mPB.createAdvance(nextPos, 1);
-        }
-        PabloAST * endOfText = mPB.createAtEOF(mPB.createAdvance(mPB.createOnes(), 1), "EOT");
-        PabloAST * const EOT_match = mPB.createAnd(endOfText, nextPos, "EOT_match");
-        return Marker(EOT_match, 1);
+    PabloAST * nextPos = marker.stream();
+    if (marker.offset() == 0) {
+        nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
     }
-    auto EOLmarker = f->second.marker();
-    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {EOLmarker.stream()});
-
-    AlignMarkers(EOLmarker, marker);
-    return Marker(mPB.createAnd(EOLmarker.stream(), marker.stream()), marker.offset());
+    PabloAST * const EOT_match = mPB.createAnd(mPB.createNot(mMain.mMatchable), nextPos, "EOT_match");
+    return Marker(EOT_match, 1);
 }
 
 inline Marker RE_Block_Compiler::AdvanceMarker(Marker marker, const unsigned offset) {
@@ -786,12 +771,19 @@ void RE_Compiler::setIndexing(const cc::Alphabet * indexingAlphabet, PabloAST * 
     
 void RE_Compiler::addPrecompiled(std::string precompiledName, ExternalStream precompiled) {
     PabloBuilder pb(mEntryScope);
-    mExternalNameMap.emplace(precompiledName, precompiled);
+    auto rg = precompiled.lengthRange();
+    auto strm = precompiled.marker().stream();
+    auto offs = precompiled.marker().offset();
+    if (offs > 0) {
+        mExternalNameMap.emplace(precompiledName, precompiled);
+    } else {
+        Marker a = Marker(pb.createAnd(strm, mMatchable), offs);
+        mExternalNameMap.emplace(precompiledName, ExternalStream(a, rg));
+    }
 }
 
 Marker RE_Compiler::compileRE(RE * const re) {
     pablo::PabloBuilder mPB(mEntryScope);
-    //return process(re, Marker(mIndexStream, 1), mPB);
     RE_Block_Compiler blockCompiler(*this, mPB);
     return blockCompiler.process(re, Marker(mIndexStream, 1));
 }
