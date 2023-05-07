@@ -586,7 +586,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Source, StreamSet * Results) {
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
@@ -603,7 +603,7 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
+    if (mIllustrator) mIllustrator->captureBitstream(P, "RunGrep", Results);
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
@@ -613,7 +613,7 @@ StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
     StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(P, mIndexAlphabet, mRE, SourceStream, Matches);
+    RunGrep(P, mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);

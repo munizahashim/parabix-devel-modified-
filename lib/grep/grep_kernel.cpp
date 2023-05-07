@@ -262,7 +262,7 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
+    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, reStrm);
     assert(offset == static_cast<unsigned>(mOffset));
     installStreamSet(reStrm);
 }
@@ -315,7 +315,7 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     GCB_RE = UCD::externalizeProperties(GCB_RE);
     //GCB_RE = toUTF8(GCB_RE);
     //StreamSet * idxStrm = (mIndexAlphabet == &cc::UTF8) ? mGrepEngine->mU8index : nullptr;
-    mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, nullptr, GCBstream);
+    mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, GCBstream);
     installStreamSet(GCBstream);
 }
 
