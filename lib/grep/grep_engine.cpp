@@ -560,6 +560,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         for (unsigned i = 0; i < mSpanNames.size(); i++) {
             allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
         }
+        if (allSpans.size() == 1) return allSpans[0];
         StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
