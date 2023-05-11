@@ -550,6 +550,7 @@ GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
 
 std::string GrepKernelOptions::makeSignature() {
     std::string tmp;
+    std::set<std::string> externalSet;
     raw_string_ostream sig(tmp);
     for (const auto & a: mAlphabets) {
         sig << a.first->getName() << "_";
@@ -559,13 +560,17 @@ std::string GrepKernelOptions::makeSignature() {
     if (mIndexStream) sig << "+ix";
     for (const auto & e : mExternalBindings) {
         sig << '_' << e.getName();
+        if (e.hasLookahead()) {
+            sig << '@' << std::to_string(round_up_to_blocksize(e.getLookahead()));
+        }
+        externalSet.insert(e.getName());
     }
     if (mCombiningType == GrepCombiningType::Exclude) {
         sig << "&~";
     } else if (mCombiningType == GrepCombiningType::Include) {
         sig << "|=";
     }
-    sig << ':' << Printer_RE::PrintRE(mRE);
+    sig << ':' << Printer_RE::PrintRE(mRE, externalSet);
     sig.flush();
     return tmp;
 }

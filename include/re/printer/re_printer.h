@@ -8,6 +8,7 @@
 #define PRINTER_RE_H
 
 #include <string>
+#include <set>
 
 namespace re {
     class RE;
@@ -16,7 +17,10 @@ namespace re {
 class Printer_RE
 {
 public:
+    static const std::string PrintRE(const re::RE *re, std::set<std::string> externals);
     static const std::string PrintRE(const re::RE *re);
+private:
+    std::set<std::string> mExternals;
 };
 
 #endif // PRINTER_RE_H
