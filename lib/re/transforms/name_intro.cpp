@@ -127,5 +127,36 @@ RE * UniquePrefixNamer::transform(RE * r) {
     return createName(rName, makeSeq({pfx, suffix}));
 }
 
+
+class Canonical_External_Names : public RE_Transformer {
+public:
+    Canonical_External_Names(std::vector<std::string> & external_names);
+protected:
+    RE * transformName (Name * n) override;
+private:
+    std::map<std::string, Name *>  mExternalMap;
+};
+
+Canonical_External_Names::Canonical_External_Names(std::vector<std::string> & external_names)
+: RE_Transformer("Canonical_External_Names") {
+    for (unsigned i = 0; i < external_names.size(); i++) {
+        mExternalMap.emplace(external_names[i], makeName("@" + std::to_string(i)));
+    }
+}
+
+RE * Canonical_External_Names::transformName(Name * name) {
+    auto f = mExternalMap.find(name->getFullName());
+    if (f == mExternalMap.end()) return name;
+    Name * canon_name = f->second;
+    if (canon_name->getDefinition() == nullptr) {
+        canon_name->setDefinition(name->getDefinition());
+    }
+    return canon_name;
+}
+
+RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names) {
+    return Canonical_External_Names(external_names).transformRE(r);
+}
+
 }
 

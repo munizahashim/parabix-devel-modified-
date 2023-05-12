@@ -50,4 +50,8 @@ public:
 protected:
     RE * transform (RE * r) override;
 };
+
+RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names);
+
 }
+

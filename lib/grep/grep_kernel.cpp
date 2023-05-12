@@ -550,27 +550,32 @@ GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
 
 std::string GrepKernelOptions::makeSignature() {
     std::string tmp;
-    std::set<std::string> externalSet;
+    std::vector<std::string> externals;
+    std::set<std::string> canon_externals;
     raw_string_ostream sig(tmp);
+    std::string alpha_prefix = "";
     for (const auto & a: mAlphabets) {
-        sig << a.first->getName() << "_";
-        sig << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        sig << alpha_prefix << a.second->getNumElements() << "xi" << a.second->getFieldWidth();
+        alpha_prefix = "!";
     }
-    if (mBarrierStream) sig << "+bx";
+    if (mBarrierStream == nullptr) sig << "-barrier";
     if (mIndexStream) sig << "+ix";
-    for (const auto & e : mExternalBindings) {
-        sig << '_' << e.getName();
+    for (unsigned i = 0; i < mExternalBindings.size(); i++) {
+        auto & e = mExternalBindings[i];
+        std::string canon = "@" + std::to_string(i);
         if (e.hasLookahead()) {
-            sig << '@' << std::to_string(round_up_to_blocksize(e.getLookahead()));
+            canon += std::to_string(round_up_to_blocksize(e.getLookahead()));
         }
-        externalSet.insert(e.getName());
+        externals.push_back(e.getName());
+        canon_externals.insert(canon);
     }
     if (mCombiningType == GrepCombiningType::Exclude) {
         sig << "&~";
     } else if (mCombiningType == GrepCombiningType::Include) {
         sig << "|=";
     }
-    sig << ':' << Printer_RE::PrintRE(mRE, externalSet);
+    RE * canonRE = canonicalizeExternals(mRE, externals);
+    sig << ':' << Printer_RE::PrintRE(canonRE, canon_externals);
     sig.flush();
     return tmp;
 }
