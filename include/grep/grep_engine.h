@@ -183,7 +183,6 @@ protected:
     GrepRecordBreakKind mGrepRecordBreak;
 
     re:: RE * mRE;
-    re::CC * mBreakCC;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;

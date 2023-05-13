@@ -191,8 +191,10 @@ void REStringBuilder::buildString(const RE * re) {
         out << ')';
     } else if (isa<const Start>(re)) {
         out << "Start";
-    } else if (isa<const Any>(re)) {
-        out << "Any";
+    } else if (const Any * a = dyn_cast<Any>(re)) {
+        out << "Any(";
+        out << a->getAlphabet()->getName();
+        out << ")";
     } else {
         out << "???";
     }

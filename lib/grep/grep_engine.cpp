@@ -271,15 +271,6 @@ void GrepEngine::initRE(re::RE * re) {
     StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
     StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
-    if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
-        setComponent(mExternalComponents, Component::UTF8index);
-    } else if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-        mBreakCC = re::makeCC(0, &cc::Unicode);  // Null
-    } else {
-        mBreakCC = re::makeCC(0x0A, &cc::Unicode); // LF
-    }
-
     mRefInfo = re::buildReferenceInfo(mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
@@ -309,10 +300,6 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
         }
     }
-    //
-    // As grep should match within lines, but not across lines, we process
-    // the RE to remove any line break characters.
-    //mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
     mRE = regular_expression_passes(mRE);
@@ -403,9 +390,8 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (hasComponent(mInternalComponents, Component::MoveMatchesToEOL)) {
-        re::RE * notBreak = re::makeDiff(re::makeByte(0x00, 0xFF), toUTF8(mBreakCC));
         if (!hasEndAnchor(mRE)) {
-            mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
+            mRE = re::makeSeq({mRE, re::makeRep(re::makeAny(mLengthAlphabet), 0, re::Rep::UNBOUNDED_REP), re::makeEnd()});
         }
     }
     if (mColoring) {
