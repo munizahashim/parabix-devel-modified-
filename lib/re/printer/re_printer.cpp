@@ -78,7 +78,9 @@ void REStringBuilder::buildString(const RE * re) {
             out << re_name->getName();
             out << '\"';
         } else {
+            out << "Internal[";
             buildString(re_name->getDefinition());
+            out << "]";
         }
     } else if (const Capture * c = dyn_cast<const Capture>(re)) {
         out << "Capture \"";
