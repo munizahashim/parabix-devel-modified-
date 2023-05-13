@@ -262,7 +262,7 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, inputs[0], reStrm);
+    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, reStrm);
     assert(offset == static_cast<unsigned>(mOffset));
     installStreamSet(reStrm);
 }
@@ -315,7 +315,7 @@ void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<Stream
     GCB_RE = UCD::externalizeProperties(GCB_RE);
     //GCB_RE = toUTF8(GCB_RE);
     //StreamSet * idxStrm = (mIndexAlphabet == &cc::UTF8) ? mGrepEngine->mU8index : nullptr;
-    mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, nullptr, GCBstream);
+    mGrepEngine->RunGrep(b, mIndexAlphabet, GCB_RE, GCBstream);
     installStreamSet(GCBstream);
 }
 
@@ -476,6 +476,10 @@ UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, S
     }
 }
 
+void GrepKernelOptions::setBarrier(StreamSet * b) {
+    mBarrierStream = b;
+}
+
 void GrepKernelOptions::setIndexing(StreamSet * idx) {
     mIndexStream = idx;
 }
@@ -509,6 +513,9 @@ void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned
 
 Bindings GrepKernelOptions::streamSetInputBindings() {
     Bindings inputs;
+    if (mBarrierStream) {
+        inputs.emplace_back("mBarrier", mBarrierStream);
+    }
     for (const auto & a : mAlphabets) {
         inputs.emplace_back(a.first->getName() + "_basis", a.second);
     }
@@ -543,21 +550,32 @@ GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
 
 std::string GrepKernelOptions::makeSignature() {
     std::string tmp;
+    std::vector<std::string> externals;
+    std::set<std::string> canon_externals;
     raw_string_ostream sig(tmp);
+    std::string alpha_prefix = "";
     for (const auto & a: mAlphabets) {
-        sig << a.first->getName() << "_";
-        sig << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        sig << alpha_prefix << a.second->getNumElements() << "xi" << a.second->getFieldWidth();
+        alpha_prefix = "!";
     }
+    if (mBarrierStream == nullptr) sig << "-barrier";
     if (mIndexStream) sig << "+ix";
-    for (const auto & e : mExternalBindings) {
-        sig << '_' << e.getName();
+    for (unsigned i = 0; i < mExternalBindings.size(); i++) {
+        auto & e = mExternalBindings[i];
+        std::string canon = "@" + std::to_string(i);
+        if (e.hasLookahead()) {
+            canon += std::to_string(round_up_to_blocksize(e.getLookahead()));
+        }
+        externals.push_back(e.getName());
+        canon_externals.insert(canon);
     }
     if (mCombiningType == GrepCombiningType::Exclude) {
         sig << "&~";
     } else if (mCombiningType == GrepCombiningType::Include) {
         sig << "|=";
     }
-    sig << ':' << Printer_RE::PrintRE(mRE);
+    RE * canonRE = canonicalizeExternals(mRE, externals);
+    sig << ':' << Printer_RE::PrintRE(canonRE, canon_externals);
     sig.flush();
     return tmp;
 }
@@ -584,7 +602,11 @@ StringRef ICGrepKernel::getSignature() const {
 
 void ICGrepKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    RE_Compiler re_compiler(getEntryScope(), mOptions->mCodeUnitAlphabet);
+    PabloAST * barrier = nullptr;
+    if (mOptions->mBarrierStream) {
+        barrier = pb.createExtract(getInputStreamVar("mBarrier"), pb.getInteger(0));
+    }
+    RE_Compiler re_compiler(getEntryScope(), barrier, mOptions->mCodeUnitAlphabet);
     for (unsigned i = 0; i < mOptions->mAlphabets.size(); i++) {
         auto & alpha = mOptions->mAlphabets[i].first;
         auto basis = getInputStreamSet(alpha->getName() + "_basis");

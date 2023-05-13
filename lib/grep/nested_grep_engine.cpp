@@ -120,6 +120,7 @@ public:
                                  r = toUTF8(r);
 
                                  options->setRE(r);
+                                 options->setBarrier(breaks);
                                  options->addAlphabet(&cc::UTF8, BasisBits);
                                  options->setResults(MatchResults);
                                  // check if we need to combine the current result with the new set of matches
