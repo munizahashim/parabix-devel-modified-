@@ -95,7 +95,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    if (isa<StreamSet>(Relationships[streamSet].Relationship)) {
+                    const auto r = Relationships[streamSet].Relationship;
+                    if (isa<RepeatingStreamSet>(r) || isa<StreamSet>(r) || isa<TruncatedStreamSet>(r)) {
                         const RelationshipNode & output = Relationships[binding];
                         assert (output.Type == RelationshipNode::IsBinding);
 

@@ -272,7 +272,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(mStreamGraph[streamSet].Relationship) || isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
+                #ifndef NDEBUG
+                const auto r = mStreamGraph[streamSet].Relationship;
+                assert (isa<RepeatingStreamSet>(r) || isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
+                #endif
                 add_edge(streamSet, kernel, makeBufferPort(port, rn, streamSet), mBufferGraph);
             } else {
                 const auto binding = target(e, mStreamGraph);
@@ -282,7 +285,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(mStreamGraph[streamSet].Relationship));
+                #ifndef NDEBUG
+                const auto r = mStreamGraph[streamSet].Relationship;
+                assert (isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
+                #endif
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, streamSet), mBufferGraph);
             }
         }

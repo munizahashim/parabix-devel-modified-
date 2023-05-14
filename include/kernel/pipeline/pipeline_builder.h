@@ -79,6 +79,10 @@ public:
         return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()});
     }
 
+    TruncatedStreamSet * CreateTruncatedStreamSet(const StreamSet * data) {
+        return mDriver.CreateTruncatedStreamSet(data);
+    }
+
     template <typename ExternalFunctionType>
     void CreateCall(std::string name, ExternalFunctionType & functionPtr, std::initializer_list<Scalar *> args) {
         llvm::FunctionType * const type = FunctionTypeBuilder<ExternalFunctionType>::get(mDriver.getContext());

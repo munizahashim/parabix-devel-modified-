@@ -436,6 +436,12 @@ Kernel * PipelineBuilder::makeKernel() {
                         }
                     }
                 }
+            } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
+                if (LLVM_UNLIKELY(f == M.end())) {
+                    report_fatal_error("Truncated streamset data has no producer");
+                }
+                out << 'T' << f->second;
             } else {
                 char typeCode;
                 switch (r->getClassTypeId()) {

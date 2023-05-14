@@ -932,10 +932,13 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = source(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                    #ifndef NDEBUG
+                    const auto r = Relationships[streamSet].Relationship;
+                    assert (isa<TruncatedStreamSet>(r) || isa<StreamSet>(r) || isa<RepeatingStreamSet>(r));
+                    #endif
                     if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(Relationships[streamSet].Relationship))) {
                         continue;
                     }
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
                     const auto g = first_in_edge(streamSet, Relationships);
                     assert (Relationships[g].Reason != ReasonType::Reference);
                     const auto output = source(g, Relationships);
@@ -963,21 +966,25 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                    #ifndef NDEBUG
+                    const auto r = Relationships[streamSet].Relationship;
+                    assert (isa<TruncatedStreamSet>(r) || isa<StreamSet>(r) || isa<RepeatingStreamSet>(r));
+                    #endif
                     for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
                         const auto input = target(e, Relationships);
                         const RelationshipNode & inputNode = Relationships[input];
-                        assert (inputNode.Type == RelationshipNode::IsBinding);
-                        const auto f = first_out_edge(input, Relationships);
-                        assert (Relationships[f].Reason != ReasonType::Reference);
-                        const auto consumer = target(f, Relationships);
-                        const auto c = PartitionIds.find(consumer);
-                        assert (c != PartitionIds.end());
-                        const auto consumerPartitionId = c->second;
-                        assert (partitionId <= consumerPartitionId);
-                        if (consumerPartitionId != partitionId) {
-                            add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
-                            break;
+                        if (LLVM_LIKELY(inputNode.Type == RelationshipNode::IsBinding)) {
+                            const auto f = first_out_edge(input, Relationships);
+                            assert (Relationships[f].Reason != ReasonType::Reference);
+                            const auto consumer = target(f, Relationships);
+                            const auto c = PartitionIds.find(consumer);
+                            assert (c != PartitionIds.end());
+                            const auto consumerPartitionId = c->second;
+                            assert (partitionId <= consumerPartitionId);
+                            if (consumerPartitionId != partitionId) {
+                                add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
+                                break;
+                            }
                         }
                     }
                 }

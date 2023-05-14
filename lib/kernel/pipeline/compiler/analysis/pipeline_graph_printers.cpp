@@ -91,6 +91,8 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                     out << "StreamSet: ";
                 } else if (isa<RepeatingStreamSet>(rn.Relationship)) {
                     out << "RepeatingStreamSet: ";
+                } else if (isa<TruncatedStreamSet>(rn.Relationship)) {
+                    out << "TruncatedStreamSet: ";
                 } else if (isa<ScalarConstant>(rn.Relationship)) {
                     out << "Constant: ";
                 } else if (isa<Scalar>(rn.Relationship)) {

@@ -7,8 +7,6 @@
 
 namespace kernel {
 
-namespace {
-
 using BitSet = dynamic_bitset<>;
 
 using BindingVertex = RelationshipGraph::vertex_descriptor;
@@ -16,9 +14,6 @@ using BindingVertex = RelationshipGraph::vertex_descriptor;
 using Graph = adjacency_list<vecS, vecS, bidirectionalS, BitSet, BindingVertex>;
 
 using PartitionMap = std::map<BitSet, unsigned>;
-
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initialPartitioningPass
@@ -50,7 +45,6 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
     // Hardcoding 0 here as a temporary workaround.
     mapping[0] = 0;
     sequence.push_back(0);
-
     for (unsigned u : ordering) {
         const RelationshipNode & node = Relationships[u];
         switch (node.Type) {
@@ -74,7 +68,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 const Relationship * const ss = Relationships[u].Relationship;
                 // NOTE: We explicitly ignore RepeatingStreamSets here; trying to reason
                 // about them will only complicate the analysis.
-                if (LLVM_LIKELY(isa<StreamSet>(ss))) {
+                if (LLVM_LIKELY(isa<StreamSet>(ss) || isa<TruncatedStreamSet>(ss))) {
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
                 }
@@ -98,7 +92,8 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
         if (node.Type == RelationshipNode::IsKernel) {
             addKernelRelationshipsInReferenceOrdering(u, Relationships,
                 [&](const PortType type, const unsigned binding, const unsigned streamSet) {
-                    if (LLVM_LIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                    const auto r = Relationships[streamSet].Relationship;
+                    if (LLVM_LIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                         const auto j = mapping[streamSet];
                         assert (j < m);
                         assert (sequence[j] == streamSet);
@@ -142,6 +137,8 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
         if (node.Type == RelationshipNode::IsKernel) {
 
             bool hasInputRateChange = false;
+
+            assert (node.Kernel);
 
             if (in_degree(i, G) == 0) {
                 if (out_degree(i, G) != 0) {
@@ -213,8 +210,6 @@ add_output_rate:    O.set(nextRateId++);
 
             }
         } else { // just propagate the bitsets
-
-            assert (in_degree(i, G) == 1);
 
             for (const auto e : make_iterator_range(out_edges(i, G))) {
                 BitSet & R = G[target(e, G)];
@@ -542,7 +537,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             case RelationshipNode::IsRelationship:
                 BEGIN_SCOPED_REGION
                 const Relationship * const ss = Relationships[u].Relationship;
-                if (LLVM_LIKELY(isa<StreamSet>(ss))) {
+                if (LLVM_LIKELY(isa<StreamSet>(ss) || isa<TruncatedStreamSet>(ss))) {
                     mapping[u] = sequence.size();
                     sequence.push_back(u);
                 }
@@ -566,7 +561,8 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         if (node.Type == RelationshipNode::IsKernel) {
             addKernelRelationshipsInReferenceOrdering(u, Relationships,
                 [&](const PortType type, const unsigned binding, const unsigned streamSet) {
-                    if (LLVM_LIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                    const auto r = Relationships[streamSet].Relationship;
+                    if (LLVM_LIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                         const auto j = mapping[streamSet];
                         assert (j < m);
                         assert (sequence[j] == streamSet);
@@ -681,11 +677,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
         } else { // just propagate the bitsets
 
-            assert (in_degree(i, G) == 1);
-
             assert (node.Type == RelationshipNode::IsRelationship);
-
-            assert (V.any());
 
             // If a streamset has consumers that zero-extend it but also some
             // that do not, we may end up kernels who view the streamset as
