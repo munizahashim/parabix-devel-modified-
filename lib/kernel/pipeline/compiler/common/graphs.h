@@ -65,7 +65,9 @@ struct RelationshipNode {
     enum RelationshipNodeType : unsigned {
         IsNil
         , IsKernel
-        , IsRelationship
+        //, IsRelationship
+        , IsStreamSet
+        , IsScalar
         , IsCallee
         , IsBinding
     } Type;
@@ -103,14 +105,14 @@ struct RelationshipNode {
         : Type(IsNil), Flags(0U), Kernel(nullptr) { }
     explicit RelationshipNode(std::nullptr_t) noexcept
         : Type(IsNil), Flags(0U), Kernel(nullptr)  { }
-    explicit RelationshipNode(not_null<const kernel::Kernel *> kernel, const unsigned flags = 0U) noexcept
-        : Type(IsKernel), Flags(flags), Kernel(kernel) { }
-    explicit RelationshipNode(not_null<kernel::Relationship *> relationship, const unsigned flags = 0U) noexcept
-        : Type(IsRelationship), Flags(flags), Relationship(relationship) { }
-    explicit RelationshipNode(not_null<const CallBinding *> callee, const unsigned flags = 0U) noexcept
-        : Type(IsCallee), Flags(flags), Callee(callee) { }
-    explicit RelationshipNode(not_null<const kernel::Binding *> ref, const unsigned flags = 0U) noexcept
-        : Type(IsBinding), Flags(flags), Binding(ref) { }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const kernel::Kernel *> kernel, const unsigned flags = 0U) noexcept
+        : Type(IsKernel), Flags(flags), Kernel(kernel) { assert (typeId == IsKernel); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<kernel::Relationship *> relationship, const unsigned flags = 0U) noexcept
+        : Type(typeId), Flags(flags), Relationship(relationship) { assert (typeId == IsStreamSet || typeId == IsScalar); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const CallBinding *> callee, const unsigned flags = 0U) noexcept
+        : Type(IsCallee), Flags(flags), Callee(callee) { assert (typeId == IsCallee); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const kernel::Binding *> ref, const unsigned flags = 0U) noexcept
+        : Type(IsBinding), Flags(flags), Binding(ref) { assert (typeId == IsBinding); }
     explicit RelationshipNode(const RelationshipNode & rn) noexcept
         : Type(rn.Type), Flags(rn.Flags), Kernel(rn.Kernel) { }
 
@@ -172,23 +174,23 @@ struct ProgramGraph : public RelationshipGraph {
     using Vertex = RelationshipGraph::vertex_descriptor;
 
     template <typename T>
-    inline Vertex add(T key, const unsigned flags = 0) {
-        return __add(RelationshipNode{key, flags});
+    inline Vertex add(RelationshipNode::RelationshipNodeType typeId, T key, const unsigned flags = 0) {
+        return __add(RelationshipNode{typeId, key, flags});
     }
 
     template <typename T>
-    inline Vertex set(T key, Vertex v) {
-        return __set(RelationshipNode{key}, v);
+    inline Vertex set(RelationshipNode::RelationshipNodeType typeId, T key, Vertex v) {
+        return __set(RelationshipNode{typeId, key}, v);
     }
 
     template <typename T>
-    inline Vertex find(T key) {
-        return __find(RelationshipNode{key});
+    inline Vertex find(RelationshipNode::RelationshipNodeType typeId, T key) {
+        return __find(RelationshipNode{typeId, key});
     }
 
     template <typename T>
-    inline Vertex addOrFind(T key, const bool permitAdd = true) {
-        return __addOrFind(RelationshipNode{key}, permitAdd);
+    inline Vertex addOrFind(RelationshipNode::RelationshipNodeType typeId, T key, const bool permitAdd = true) {
+        return __addOrFind(RelationshipNode{typeId, key}, permitAdd);
     }
 
     RelationshipGraph & Graph() {

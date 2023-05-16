@@ -259,7 +259,7 @@ public:
     void initializeKernelInsufficientIOExitPhis(BuilderRef b);
     void initializeKernelLoopExitPhis(BuilderRef b);
     void initializeKernelExitPhis(BuilderRef b);
-
+    void checkForSufficientIO(BuilderRef b);
     void determineNumOfLinearStrides(BuilderRef b);
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
@@ -748,6 +748,7 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
+    PHINode *                                   mStrideStepSizeAtLoopEntryPhi = nullptr;
     Value *                                     mStrideStepSize = nullptr;
     Value *                                     mAnyClosed = nullptr;
     Value *                                     mHasExhaustedClosedInput = nullptr;

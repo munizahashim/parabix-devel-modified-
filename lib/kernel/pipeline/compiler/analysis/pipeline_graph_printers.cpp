@@ -85,7 +85,17 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 assert (&rn.Callee);
                 out << "Callee:" << rn.Callee.get().Name;
                 break;
-            case RelationshipNode::IsRelationship:
+            case RelationshipNode::IsScalar:
+                if (LLVM_UNLIKELY(isa<ScalarConstant>(rn.Relationship))) {
+                    out << "Constant: ";
+                } else if (isa<Scalar>(rn.Relationship)) {
+                    out << "Scalar: ";
+                } else {
+                    out << "<Unknown Scalar>: ";
+                }
+                rn.Relationship->getType()->print(errs());
+                break;
+            case RelationshipNode::IsStreamSet:
                 assert (rn.Relationship);
                 if (isa<StreamSet>(rn.Relationship)) {
                     out << "StreamSet: ";
@@ -93,17 +103,11 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                     out << "RepeatingStreamSet: ";
                 } else if (isa<TruncatedStreamSet>(rn.Relationship)) {
                     out << "TruncatedStreamSet: ";
-                } else if (isa<ScalarConstant>(rn.Relationship)) {
-                    out << "Constant: ";
-                } else if (isa<Scalar>(rn.Relationship)) {
-                    out << "Scalar: ";
                 } else {
-                    out << "<Unknown Relationship>: ";
+                    out << "<Unknown StreamSet>: ";
                 }
                 rn.Relationship->getType()->print(errs());
-
-//                out << " ";
-//                out.write_hex(reinterpret_cast<uintptr_t>(rn.Relationship));
+                break;
         }
         out << "\"];\n";
         out.flush();

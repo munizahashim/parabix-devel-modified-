@@ -271,11 +271,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 const auto f = first_in_edge(binding, mStreamGraph);
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, mStreamGraph);
-                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                #ifndef NDEBUG
-                const auto r = mStreamGraph[streamSet].Relationship;
-                assert (isa<RepeatingStreamSet>(r) || isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
-                #endif
+                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(streamSet, kernel, makeBufferPort(port, rn, streamSet), mBufferGraph);
             } else {
                 const auto binding = target(e, mStreamGraph);
@@ -284,11 +280,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 const auto f = first_out_edge(binding, mStreamGraph);
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, mStreamGraph);
-                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                #ifndef NDEBUG
-                const auto r = mStreamGraph[streamSet].Relationship;
-                assert (isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
-                #endif
+                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, streamSet), mBufferGraph);
             }
         }
@@ -328,7 +320,7 @@ void PipelineAnalysis::identifyOutputNodeIds() {
         StreamSetToNodeIdMap.reserve(n);
 
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
             const StreamSet * const ss = cast<StreamSet>(mStreamGraph[streamSet].Relationship);
             StreamSetToNodeIdMap.emplace(ss, streamSet - FirstStreamSet);
         }
@@ -828,10 +820,8 @@ void PipelineAnalysis::numberDynamicRepeatingStreamSets() {
                     unsigned index = 0;
                     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
                         RelationshipNode & rn = mStreamGraph[streamSet];
-                        assert (rn.Type == RelationshipNode::IsRelationship);
-                        Relationship * r = rn.Relationship;
-                        assert (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r));
-                        if (LLVM_UNLIKELY(r == input)) {
+                        assert (rn.Type == RelationshipNode::IsStreamSet);
+                        if (LLVM_UNLIKELY(rn.Relationship == input)) {
                             index = streamSet;
                             break;
                         }

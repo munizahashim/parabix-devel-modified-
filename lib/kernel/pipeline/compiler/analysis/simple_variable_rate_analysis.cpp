@@ -94,11 +94,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                     const auto f = first_out_edge(binding, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
-                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    #ifndef NDEBUG
-                    const auto r = Relationships[streamSet].Relationship;
-                    assert (isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
-                    #endif
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                     const RelationshipNode & output = Relationships[binding];
                     assert (output.Type == RelationshipNode::IsBinding);
                     const Binding & outputBinding = output.Binding;

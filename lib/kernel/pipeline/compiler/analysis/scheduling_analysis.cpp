@@ -1225,7 +1225,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 const auto r = Relationships[streamSet].Relationship;
                 if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     streamSets.insert(streamSet);
@@ -1238,7 +1238,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_out_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 const auto r = Relationships[streamSet].Relationship;
                 if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     streamSets.insert(streamSet);
@@ -1293,7 +1293,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 const auto r = Relationships[streamSet].Relationship;
                 if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
@@ -1331,7 +1331,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_out_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 const auto r = Relationships[streamSet].Relationship;
                 if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
@@ -1412,7 +1412,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 const auto r = Relationships[streamSet].Relationship;
                 if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
@@ -2173,11 +2173,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
                 if (LLVM_UNLIKELY(streamSet == 0)) continue;
 
                 assert (streamSet < num_vertices(Relationships));
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                #ifndef NDEBUG
-                const auto r = Relationships[streamSet].Relationship;
-                assert(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
-                #endif
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
 
                 const auto f = first_in_edge(streamSet, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);

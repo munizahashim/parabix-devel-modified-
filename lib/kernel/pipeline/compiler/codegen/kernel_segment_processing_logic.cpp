@@ -175,6 +175,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);
+    checkForSufficientIO(b);
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
@@ -378,6 +379,9 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     assert (mHasMoreInput);
 
     BasicBlock * const exitBlockAfterLoopAgainTest = b->GetInsertBlock();
+    if (mStrideStepSizeAtLoopEntryPhi) {
+        mStrideStepSizeAtLoopEntryPhi->addIncoming(mStrideStepSize, exitBlockAfterLoopAgainTest);
+    }
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
@@ -492,6 +496,14 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
     assert ("kernel loop start must be created before initializing loop entry phi nodes" && mKernelLoopStart);
 
     b->SetInsertPoint(mKernelLoopEntry);
+
+    if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
+        ConstantInt * strideStep = b->getSize(StrideStepLength[mKernelId]);
+        mStrideStepSizeAtLoopEntryPhi =
+            b->CreatePHI(sizeTy, 2, makeKernelName(mKernelId) + "_strideStepSizePhi");
+        mStrideStepSizeAtLoopEntryPhi->addIncoming(strideStep, mKernelLoopStart);
+        mStrideStepSize = mStrideStepSizeAtLoopEntryPhi;
+    }
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
@@ -721,7 +733,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b->getSize(0), exitBlock);
     }
-
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         mUpdatedProcessedPhi[port]->addIncoming(mAlreadyProcessedPhi[port], exitBlock);

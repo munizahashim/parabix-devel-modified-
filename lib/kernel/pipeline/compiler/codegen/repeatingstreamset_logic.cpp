@@ -35,7 +35,7 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
                         Rational ub{0U};
                         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
                             const RelationshipNode & rn = mStreamGraph[streamSet];
-                            assert (rn.Type == RelationshipNode::IsRelationship);
+                            assert (rn.Type == RelationshipNode::IsStreamSet);
                             if (rn.Relationship == input) {
                                 for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                                     const auto consumer = target(e, mBufferGraph);
@@ -117,7 +117,7 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef 
             const BufferNode & bn = mBufferGraph[streamSet];
             #ifndef NDEBUG
             const RelationshipNode & rn = mStreamGraph[streamSet];
-            assert (rn.Type == RelationshipNode::IsRelationship);
+            assert (rn.Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(rn.Relationship));
             assert (cast<RepeatingStreamSet>(rn.Relationship)->isDynamic());
             #endif
@@ -147,7 +147,7 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     buffer->setHandle(handle);
 
     const RelationshipNode & rn = mStreamGraph[streamSet];
-    assert (rn.Type == RelationshipNode::IsRelationship);
+    assert (rn.Type == RelationshipNode::IsStreamSet);
     const RepeatingStreamSet * const ss = cast<RepeatingStreamSet>(rn.Relationship);
 
     if (ss->isDynamic()) {
@@ -225,7 +225,7 @@ void PipelineCompiler::addRepeatingStreamSetBufferProperties(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isConstant())) {
             auto & S = mStreamGraph[streamSet];
-            assert (S.Type == RelationshipNode::IsRelationship);
+            assert (S.Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(S.Relationship));
 
             Type * const handleTy = bn.Buffer->getHandleType(b);

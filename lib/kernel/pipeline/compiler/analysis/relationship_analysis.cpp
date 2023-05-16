@@ -31,11 +31,11 @@ void addProducerStreamSets(const PortType portType, const unsigned producer, con
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
         const Binding & item = array[i];
-        const auto binding = G.add(&item);
+        const auto binding = G.add(RelationshipNode::IsBinding, &item);
         add_edge(producer, binding, RelationshipType{portType, i}, G);
         const auto rel = item.getRelationship();
         assert (isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
-        const auto relationship = G.addOrFind(rel);
+        const auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel);
         add_edge(binding, relationship, RelationshipType{portType, i}, G);
         if (isa<TruncatedStreamSet>(rel)) {
             const StreamSet * const d = cast<TruncatedStreamSet>(rel)->getData();
@@ -51,7 +51,7 @@ void addProducerScalars(const PortType portType, const unsigned producer, const 
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
         assert (isa<Scalar>(array[i].getRelationship()));
-        const auto relationship = G.addOrFind(array[i].getRelationship());
+        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, array[i].getRelationship());
         add_edge(producer, relationship, RelationshipType{portType, i}, G);
     }
 }
@@ -63,11 +63,11 @@ void addConsumerStreamSets(const PortType portType, const unsigned consumer, con
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
         const Binding & item = array[i];
-        const auto binding = G.add(&item);
+        const auto binding = G.add(RelationshipNode::IsBinding, &item);
         add_edge(binding, consumer, RelationshipType{portType, i}, G);
         const auto rel = item.getRelationship();
         assert (isa<RepeatingStreamSet>(rel) || isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
-        auto relationship = G.addOrFind(rel, addRelationship || isa<RepeatingStreamSet>(rel));
+        auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel, addRelationship || isa<RepeatingStreamSet>(rel));
         add_edge(relationship, binding, RelationshipType{portType, i}, G);
     }
 }
@@ -80,7 +80,7 @@ void addConsumerScalars(const PortType portType, const unsigned consumer, const 
     for (unsigned i = 0; i < n; ++i) {
         assert (isa<Scalar>(array[i].getRelationship()));
         const auto rel = array[i].getRelationship();
-        const auto relationship = G.addOrFind(rel, addRelationship);
+        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, rel, addRelationship);
         add_edge(relationship, consumer, RelationshipType{portType, i}, G);
     }
 }
@@ -94,9 +94,9 @@ void addConsumerCalls(const PortType portType, const CallBinding & call) {
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    const auto consumer = G.addOrFind(&call);
+    const auto consumer = G.addOrFind(RelationshipNode::IsCallee, &call);
     for (unsigned i = 0; i < n; ++i) {
-        const auto relationship = G.addOrFind(array[i]);
+        const auto relationship = G.addOrFind(RelationshipNode::IsKernel, array[i]);
         add_edge(relationship, consumer, RelationshipType{portType, i}, G);
     }
 }
@@ -178,7 +178,8 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
             }
             // To preserve acyclicity, reference bindings always point to the binding that refers to it.
             // To simplify later I/O lookup, the edge stores the info of the reference port.
-            add_edge(G.find(&ref), G.find(&item), RelationshipType{refPort, ReasonType::Reference}, G);
+            add_edge(G.find(RelationshipNode::IsBinding, &ref),
+                     G.find(RelationshipNode::IsBinding, &item), RelationshipType{refPort, ReasonType::Reference}, G);
         }
     }
 }
@@ -189,7 +190,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
 void addTruncatedStreamSetContraints() {
     for (const auto & c : TruncatedStreamSets) {
         auto d = const_cast<StreamSet *>(c.first);
-        add_edge(G.find(d), c.second, RelationshipType{ReasonType::Reference}, G);
+        add_edge(G.find(RelationshipNode::IsStreamSet, d), c.second, RelationshipType{ReasonType::Reference}, G);
     }
 }
 
@@ -274,7 +275,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
             }
         };
 
-        const auto j = G.find(kernel);
+        const auto j = G.find(RelationshipNode::IsKernel, kernel);
 
         for (const auto e : make_iterator_range(in_edges(j, G))) {
             addPopCountDependency(source(e, G), G[e]);
@@ -344,7 +345,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
         kernels.emplace_back(popCountKernel, 0U);
         mInternalKernels.emplace_back(popCountKernel);
 
-        const auto k = G.add(popCountKernel, RelationshipNodeFlag::ImplicitlyAdded);
+        const auto k = G.add(RelationshipNode::IsKernel, popCountKernel, RelationshipNodeFlag::ImplicitlyAdded);
         vertex.push_back(k);
         addConsumerStreamSets(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), false);
         addProducerStreamSets(PortType::Output, k, popCountKernel->getOutputStreamSetBindings());
@@ -353,16 +354,16 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
         for (const auto e : make_iterator_range(out_edges(i, H))) {
             const Edge & ed = H[e];
             const Kernel * const kernel = kernels[target(e, H)].Object;
-            const auto consumer = G.find(kernel);
+            const auto consumer = G.find(RelationshipNode::IsKernel, kernel);
             assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
             StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
-            const auto streamVertex = G.find(stream);
+            const auto streamVertex = G.find(RelationshipNode::IsStreamSet, stream);
 
             // append the popcount rate stream to the kernel
             Rational stepRate{ed.StrideLength, strideLength * kernel->getStride()};
             Binding * const popCount = new Binding("#popcount" + std::to_string(ed.Port.Number), stream, FixedRate(stepRate));
             mInternalBindings.emplace_back(popCount);
-            const auto popCountBinding = G.add(popCount, RelationshipNodeFlag::ImplicitlyAdded);
+            const auto popCountBinding = G.add(RelationshipNode::IsBinding, popCount, RelationshipNodeFlag::ImplicitlyAdded);
 
             const unsigned portNum = in_degree(consumer, G);
             add_edge(streamVertex, popCountBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
@@ -456,7 +457,7 @@ void combineDuplicateKernels(BuilderRef /* b */) {
 
     std::vector<unsigned> kernelList;
     for (const auto & K : mKernels) {
-        kernelList.push_back(G.addOrFind(K.Object));
+        kernelList.push_back(G.addOrFind(RelationshipNode::IsKernel, K.Object));
     }
 
     std::map<KernelId, unsigned> Ids;
@@ -499,16 +500,12 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                                 assert (G[source(e, G)].Type == RelationshipNode::IsBinding);
                             } else {
                                 relationship = source(e, G);
-                                assert (G[relationship].Type == RelationshipNode::IsRelationship);
-                                #ifndef NDEBUG
-                                const auto r = G[relationship].Relationship;
-                                assert (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r) || isa<TruncatedStreamSet>(r));
-                                #endif
+                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
                             }
                         }
                         inputs[port.Number] = std::make_pair(relationship, ref);
                         ++numOfStreams;
-                    } else if (node.Type == RelationshipNode::IsRelationship) {
+                    } else if (node.Type == RelationshipNode::IsScalar) {
                         assert (isa<Scalar>(G[input].Relationship));
                         scalars[port.Number] = input;
                     }
@@ -540,11 +537,11 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                             const RelationshipNode & node = G[output];
                             if (node.Type == RelationshipNode::IsBinding) {
                                 const auto relationship = child(output, G);
-                                assert (G[relationship].Type == RelationshipNode::IsRelationship);
+                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
                                 assert (isa<StreamSet>(G[relationship].Relationship));
                                 outputs[port.Number] = relationship;
                                 ++numOfStreams;
-                            } else if (node.Type == RelationshipNode::IsRelationship) {
+                            } else if (node.Type == RelationshipNode::IsScalar) {
                                 assert (isa<Scalar>(G[output].Relationship));
                                 scalars[port.Number] = output;
                             }
@@ -560,14 +557,12 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                             unsigned original = 0;
                             if (node.Type == RelationshipNode::IsBinding) {
                                 const auto relationship = child(output, G);
-                                assert (G[relationship].Type == RelationshipNode::IsRelationship);
+                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
                                 assert (isa<StreamSet>(G[relationship].Relationship));
                                 original = relationship;
-                            } else if (node.Type == RelationshipNode::IsRelationship) {
-                                assert (isa<Scalar>(G[output].Relationship));
+                            } else if (node.Type == RelationshipNode::IsScalar) {
                                 original = output;
                             }
-                            assert (G[original].Type == RelationshipNode::IsRelationship);
 
                             unsigned replacement = 0;
                             if (node.Type == RelationshipNode::IsBinding) {
@@ -577,7 +572,7 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                                 assert (port.Number < scalars.size());
                                 replacement = scalars[port.Number];
                             }
-                            assert (G[replacement].Type == RelationshipNode::IsRelationship);
+                            assert (G[replacement].Type == G[original].Type);
 
                             Relationship * const a = G[original].Relationship;
                             Relationship * const b = G[replacement].Relationship;
@@ -624,19 +619,19 @@ void removeUnusedKernels(const unsigned p_in, const unsigned p_out) {
 
     // identify all nodes that must be in the final pipeline
     for (const Binding & output : mPipelineKernel->getOutputScalarBindings()) {
-        const auto p = G.find(output.getRelationship());
+        const auto p = G.find(RelationshipNode::IsScalar, output.getRelationship());
         pending.push(p);
         visited.insert_unique(p);
     }
     for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
-        const auto c = G.find(&C);
+        const auto c = G.find(RelationshipNode::IsCallee, &C);
         pending.push(c);
         visited.insert_unique(c);
     }
     for (const auto & K : mKernels) {
         const Kernel * kernel = K.Object;
         if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
-            const auto k = G.find(kernel);
+            const auto k = G.find(RelationshipNode::IsKernel, kernel);
             pending.push(k);
             visited.insert_unique(k);
         }
@@ -669,7 +664,7 @@ void removeUnusedKernels(const unsigned p_in, const unsigned p_out) {
                 for (const auto e : make_iterator_range(out_edges(v, G))) {
                     const auto b = target(e, G);
                     const RelationshipNode & rb = G[b];
-                    assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsRelationship);
+                    assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsScalar);
                     visited.insert(b); // output binding/scalar
                     if (LLVM_LIKELY(rb.Type == RelationshipNode::IsBinding)) {
                         if (LLVM_LIKELY(out_degree(b, G) > 0)) {
@@ -727,7 +722,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
         llvm::report_fatal_error("Pipeline must have at least one kernel");
     }
     assert (num_vertices(Relationships) == 0);
-    const unsigned p_in = add_vertex(RelationshipNode(mPipelineKernel), Relationships);
+    const unsigned p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
     const auto n = mKernels.size();
     KernelVertexVec vertex(n);
@@ -743,9 +738,9 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
         }
 
         const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
-        vertex[i] = Relationships.add(K, flags);
+        vertex[i] = Relationships.add(RelationshipNode::IsKernel, K, flags);
     }
-    const unsigned p_out = add_vertex(RelationshipNode(mPipelineKernel), Relationships);
+    const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     PipelineOutput = p_out;
 
 
@@ -833,16 +828,11 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
                 assert (rn.Kernel);
                 kernels.push_back(i);
                 break;
-            case RelationshipNode::IsRelationship:
-                assert (rn.Relationship);
-                BEGIN_SCOPED_REGION
-                const auto r = rn.Relationship;
-                if (isa<RepeatingStreamSet>(r) || isa<StreamSet>(r) || isa<TruncatedStreamSet>(r)) {
-                    streamSets.push_back(i);
-                } else if (isa<Scalar>(rn.Relationship)) {
-                    scalars.push_back(i);
-                }
-                END_SCOPED_REGION
+            case RelationshipNode::IsScalar:
+                scalars.push_back(i);
+                break;
+            case RelationshipNode::IsStreamSet:
+                streamSets.push_back(i);
                 break;
             case RelationshipNode::IsCallee:
                 assert (&rn.Callee);
@@ -1113,12 +1103,12 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     mScalarGraph = RelationshipGraph{numOfKernels + numOfCallees + numOfScalars};
 
     transcribe(kernels, mScalarGraph);
-    copy_in_edges(kernels, mScalarGraph, RelationshipNode::IsRelationship);
-    copy_out_edges(kernels, mScalarGraph, RelationshipNode::IsRelationship);
+    copy_in_edges(kernels, mScalarGraph, RelationshipNode::IsScalar);
+    copy_out_edges(kernels, mScalarGraph, RelationshipNode::IsScalar);
 
     transcribe(callees, mScalarGraph);
-    copy_in_edges(callees, mScalarGraph, RelationshipNode::IsRelationship);
-    copy_out_edges(callees, mScalarGraph, RelationshipNode::IsRelationship);
+    copy_in_edges(callees, mScalarGraph, RelationshipNode::IsScalar);
+    copy_out_edges(callees, mScalarGraph, RelationshipNode::IsScalar);
 
     transcribe(scalars, mScalarGraph);
 
@@ -1275,11 +1265,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
             const auto f = first_in_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = source(f, G);
-            assert (G[streamSet].Type == RelationshipNode::IsRelationship);
-            #ifndef NDEBUG
-            const auto r = G[streamSet].Relationship;
-            assert (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r) || isa<TruncatedStreamSet>(r));
-            #endif
+            assert (G[streamSet].Type == RelationshipNode::IsStreamSet);
             insertionFunction(PortType::Input, binding, streamSet);
         } else {
             const auto binding = target(e, G);
@@ -1287,11 +1273,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
             const auto f = first_out_edge(binding, G);
             assert (G[f].Reason != ReasonType::Reference);
             const auto streamSet = target(f, G);
-            assert (G[streamSet].Type == RelationshipNode::IsRelationship);
-            #ifndef NDEBUG
-            const auto r = G[streamSet].Relationship;
-            assert (isa<StreamSet>(r) || isa<TruncatedStreamSet>(r));
-            #endif
+            assert (G[streamSet].Type == RelationshipNode::IsStreamSet);
             insertionFunction(PortType::Output, binding, streamSet);
         }
     }

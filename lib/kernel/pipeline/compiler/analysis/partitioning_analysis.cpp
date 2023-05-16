@@ -63,7 +63,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                 }
                 END_SCOPED_REGION
                 break;
-            case RelationshipNode::IsRelationship:
+            case RelationshipNode::IsStreamSet:
                 BEGIN_SCOPED_REGION
                 const Relationship * const ss = Relationships[u].Relationship;
                 // NOTE: We explicitly ignore RepeatingStreamSets here; trying to reason
@@ -283,7 +283,7 @@ add_output_rate:    O.set(nextRateId++);
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
-        if (node.Type == RelationshipNode::IsRelationship) {
+        if (node.Type == RelationshipNode::IsStreamSet) {
             const auto j = parent(i, G);
             assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = partitionIds[j];
@@ -340,7 +340,7 @@ add_output_rate:    O.set(nextRateId++);
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
-        if (node.Type == RelationshipNode::IsRelationship) {
+        if (node.Type == RelationshipNode::IsStreamSet) {
             const auto j = parent(i, G);
             assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = componentId[j];
@@ -434,7 +434,7 @@ add_output_rate:    O.set(nextRateId++);
             const auto streamSet = T[e];
             if (LLVM_UNLIKELY(streamSet == 0)) continue;
             assert (streamSet < num_vertices(Relationships));
-            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
             if (duplicateFilter.emplace(k, streamSet).second) {
                 add_edge(j, k, streamSet, P);
             }
@@ -534,7 +534,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
                 }
                 END_SCOPED_REGION
                 break;
-            case RelationshipNode::IsRelationship:
+            case RelationshipNode::IsStreamSet:
                 BEGIN_SCOPED_REGION
                 const Relationship * const ss = Relationships[u].Relationship;
                 if (LLVM_LIKELY(isa<StreamSet>(ss) || isa<TruncatedStreamSet>(ss))) {
@@ -677,7 +677,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
         } else { // just propagate the bitsets
 
-            assert (node.Type == RelationshipNode::IsRelationship);
+            assert (node.Type == RelationshipNode::IsStreamSet || node.Type == RelationshipNode::IsScalar);
 
             // If a streamset has consumers that zero-extend it but also some
             // that do not, we may end up kernels who view the streamset as
@@ -803,7 +803,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
-        if (node.Type == RelationshipNode::IsRelationship) {
+        if (node.Type == RelationshipNode::IsStreamSet) {
             const auto j = parent(i, G);
             assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = partitionIds[j];
@@ -860,7 +860,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
-        if (node.Type == RelationshipNode::IsRelationship) {
+        if (node.Type == RelationshipNode::IsStreamSet) {
             const auto j = parent(i, G);
             assert (Relationships[sequence[j]].Type == RelationshipNode::IsKernel);
             const auto prodPartId = componentId[j];
@@ -968,7 +968,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             const auto streamSet = T[e];
             if (LLVM_UNLIKELY(streamSet == 0)) continue;
             assert (streamSet < num_vertices(Relationships));
-            assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
             if (duplicateFilter.emplace(k, streamSet).second) {
                 add_edge(j, k, streamSet, P);
             }
@@ -1114,7 +1114,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
 
         if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
         } else {
             const auto output = in_edge(streamSet, mBufferGraph);

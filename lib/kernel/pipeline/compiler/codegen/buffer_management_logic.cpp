@@ -85,7 +85,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 Value * const handle = b->getScalarFieldPtr(handleName);
                 buffer->setHandle(handle);
                 const auto & sn = mStreamGraph[streamSet];
-                assert (sn.Type == RelationshipNode::IsRelationship);
+                assert (sn.Type == RelationshipNode::IsStreamSet);
                 if (cast<RepeatingStreamSet>(sn.Relationship)->isDynamic()) {
                     const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
                     Value * const mod = b->getScalarField(lengthName);

@@ -8,6 +8,18 @@
 
 namespace kernel {
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief checkForSufficientIO
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::checkForSufficientIO(BuilderRef b) {
+
+    // TODO: rework the loop structure to move an initial I/O check here and rely on the loopback only
+    // to determine whether there is sufficient I/O for another subsegment
+
+}
+
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineNumOfLinearStrides
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -28,14 +40,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
-    BufferGraph::in_edge_iterator ei, ei_end;
-    std::tie(ei, ei_end) = in_edges(mKernelId, mBufferGraph);
-
     Value * maxSegmentLength = mMaximumNumOfStrides;
-
-    if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
-        mStrideStepSize = b->getSize(StrideStepLength[mKernelId]);
-    }
 
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
@@ -53,8 +58,7 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
     /// TODO: this logic doesn't correctly support circular buffers. To allow for them, we
     /// need to calculate the number of strides we could process and if we can perform a
     /// full stride step, allow it to single strides when necessary when the buffer does
-    /// not support a full step before wrapping around. We could size the buffer appropriately
-    /// for fixed-rate data but not otherwise.
+    /// not support a full step before wrapping around. Resize the overflow appropriately.
 
     ConstantInt * const sz_ONE = b->getSize(1);
     if (mHasExhaustedClosedInput) { assert (mStrideStepSize);
@@ -135,7 +139,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
             ensureSufficientOutputSpace(b, port, streamSet);
         }
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -376,8 +379,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
 
-
-
     if (LLVM_LIKELY(mIsPartitionRoot)) { // && !port.isZeroExtended()
         if (mAnyClosed) {
             mAnyClosed = b->CreateOr(mAnyClosed, closed);
@@ -601,8 +602,8 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
             Value * const remaining = b->CreateSub(avail, processed, "remaining");
             Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex);
             Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-            // Value * const hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
-            Value * const hasEnough = b->CreateICmpUGE(remaining, required);
+            Value * const hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
+            // Value * const hasEnough = b->CreateICmpUGE(remaining, required);
 
             if (enoughInput) {
                 enoughInput = b->CreateAnd(enoughInput, hasEnough);
@@ -616,9 +617,9 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
         b->SetInsertPoint(lastTestExit);
         Value * hasEnough = enoughInputPhi; assert (enoughInputPhi);
-        if (mHasExhaustedClosedInput) {
-            hasEnough = b->CreateOr(mHasExhaustedClosedInput, enoughInputPhi);
-        }
+//        if (mHasExhaustedClosedInput) {
+//            hasEnough = b->CreateOr(mHasExhaustedClosedInput, enoughInputPhi);
+//        }
         return b->CreateAnd(hasEnough, nonFinal);
 
     } else {
