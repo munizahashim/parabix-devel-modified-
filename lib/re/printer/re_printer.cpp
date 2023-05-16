@@ -32,6 +32,8 @@ struct REStringBuilder {
 
     REStringBuilder() : tmp(), out(tmp) {}
 
+    REStringBuilder(std::set<std::string> externals) : tmp(), out(tmp), mExternals(externals) {}
+
     void buildString(const RE * re);
 
     std::string toString() {
@@ -43,6 +45,7 @@ struct REStringBuilder {
  private:
     std::string tmp;
     raw_string_ostream out;
+    std::set<std::string> mExternals;
 };
 
 void REStringBuilder::buildString(const RE * re) {
@@ -67,12 +70,18 @@ void REStringBuilder::buildString(const RE * re) {
         out << re_cc->canonicalName();
         out << "\" ";
     } else if (const Name* re_name = dyn_cast<const Name>(re)) {
-        out << "Name \"";
-        if (re_name->hasNamespace()) {
-            out << re_name->getNamespace() << ':';
+        if (mExternals.find(re_name->getFullName()) != mExternals.end()) {
+            out << "Name \"";
+            if (re_name->hasNamespace()) {
+                out << re_name->getNamespace() << ':';
+            }
+            out << re_name->getName();
+            out << '\"';
+        } else {
+            out << "Internal[";
+            buildString(re_name->getDefinition());
+            out << "]";
         }
-        out << re_name->getName();
-        out << '\"';
     } else if (const Capture * c = dyn_cast<const Capture>(re)) {
         out << "Capture \"";
         out << c->getName();
@@ -182,8 +191,10 @@ void REStringBuilder::buildString(const RE * re) {
         out << ')';
     } else if (isa<const Start>(re)) {
         out << "Start";
-    } else if (isa<const Any>(re)) {
-        out << "Any";
+    } else if (const Any * a = dyn_cast<Any>(re)) {
+        out << "Any(";
+        out << a->getAlphabet()->getName();
+        out << ")";
     } else {
         out << "???";
     }
@@ -192,6 +203,12 @@ void REStringBuilder::buildString(const RE * re) {
 
 const std::string Printer_RE::PrintRE(const RE * re) {
     REStringBuilder sb;
+    sb.buildString(re);
+    return sb.toString();
+}
+
+const std::string Printer_RE::PrintRE(const RE * re, std::set<std::string> ext) {
+    REStringBuilder sb(ext);
     sb.buildString(re);
     return sb.toString();
 }

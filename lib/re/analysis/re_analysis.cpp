@@ -127,8 +127,8 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
                                   UTF8_Encoder.encoded_length(hi_codepoint(cc->back())));
         }
         return std::make_pair(1, INT_MAX);
-    } else if (isa<Any>(re)) {
-        if (indexAlphabet == &cc::Unicode) return std::make_pair(1, 1);
+    } else if (const Any * a = dyn_cast<Any>(re)) {
+        if (indexAlphabet == a->getAlphabet()) return std::make_pair(1, 1);
         if (indexAlphabet == &cc::UTF8) {
             return std::make_pair(1, 4);
         }
@@ -338,7 +338,7 @@ struct FixedUTF8Validator : public RE_Validator {
     }
 
     bool validateAny(const Any * a) override {
-        return false;
+        return a->getAlphabet() == &cc::UTF8;
     }
 
     bool validateName(const Name * name) override {

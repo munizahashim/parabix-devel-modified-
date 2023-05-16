@@ -281,15 +281,6 @@ void GrepEngine::initRE(re::RE * re) {
     StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
     StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
-    if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
-        setComponent(mExternalComponents, Component::UTF8index);
-    } else if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-        mBreakCC = re::makeCC(0, &cc::Unicode);  // Null
-    } else {
-        mBreakCC = re::makeCC(0x0A, &cc::Unicode); // LF
-    }
-
     mRefInfo = re::buildReferenceInfo(mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
@@ -319,10 +310,6 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
         }
     }
-    //
-    // As grep should match within lines, but not across lines, we process
-    // the RE to remove any line break characters.
-    mRE = re::exclude_CC(mRE, mBreakCC);
     if (!mColoring) mRE = remove_nullable_ends(mRE);
 
     mRE = regular_expression_passes(mRE);
@@ -359,18 +346,6 @@ void GrepEngine::initRE(re::RE * re) {
                 mExternalTable.declareExternal(Unicode, mpx->getName() + "_basis", new MultiplexedExternal(mpx));
             }
         }
-    }
-    if (anyStartAnchor(mRE)) {
-        if (UnicodeIndexing) {
-            auto U_Starts = new LineStartsExternal({"$"});
-            mExternalTable.declareExternal(Unicode, "^", U_Starts);
-        }
-        std::vector<std::string> lineStartParms = {"$"};
-        if (mLengthAlphabet == &cc::Unicode) {
-            lineStartParms.push_back("u8index");
-        }
-        auto u8_Starts = new LineStartsExternal(lineStartParms);
-        mExternalTable.declareExternal(u8, "^", u8_Starts);
     }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (hasGraphemeClusterBoundary(mRE)) {
@@ -425,9 +400,8 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (hasComponent(mInternalComponents, Component::MoveMatchesToEOL)) {
-        re::RE * notBreak = re::makeDiff(re::makeByte(0x00, 0xFF), toUTF8(mBreakCC));
         if (!hasEndAnchor(mRE)) {
-            mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
+            mRE = re::makeSeq({mRE, re::makeRep(re::makeAny(mLengthAlphabet), 0, re::Rep::UNBOUNDED_REP), re::makeEnd()});
         }
     }
     if (mColoring) {
@@ -469,9 +443,6 @@ void GrepEngine::initRE(re::RE * re) {
     } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-    //if (mExternalTable.hasReferenceTo(u8, "u8index")) {
-    //    mExternalTable.declareExternal(u8, "u8index", new U8Index_External());
-    //}
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
@@ -565,14 +536,6 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
             if (defn) re::collectAlphabets(defn, alphas);
         }
     }
-    if (anyStartAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "^");
-        options->addExternal("^", extStream, 1, std::make_pair(0,0));
-    }
-    if (anyEndAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "$");
-        options->addExternal("$", extStream, 1, std::make_pair(0,0));
-    }
     for (auto & a : alphas) {
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
             std::string basisName = a->getName() + "_basis";
@@ -593,6 +556,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         for (unsigned i = 0; i < mSpanNames.size(); i++) {
             allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
         }
+        if (allSpans.size() == 1) return allSpans[0];
         StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
@@ -619,7 +583,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Source, StreamSet * Results) {
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
@@ -631,10 +595,12 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
         re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
+    auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
+    options->setBarrier(mExternalTable.getStreamSet(P, indexing, "$"));
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
     Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
+    if (mIllustrator) mIllustrator->captureBitstream(P, "RunGrep", Results);
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
@@ -644,7 +610,7 @@ StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
     StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(P, mIndexAlphabet, mRE, SourceStream, Matches);
+    RunGrep(P, mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
@@ -1398,6 +1364,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
 
     StreamSet * MatchResults = E->CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
+    options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
@@ -1482,11 +1449,12 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         auto options = std::make_unique<GrepKernelOptions>();
 
         auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
-        r = re::exclude_CC(r, breakCC);
-        r = resolveAnchors(r, breakCC);
+        //r = re::exclude_CC(r, breakCC);
+        //r = resolveAnchors(r, breakCC);
         r = regular_expression_passes(r);
         r = toUTF8(r);
 
+        options->setBarrier(RecordBreakStream);
         options->setRE(r);
         options->addAlphabet(&cc::UTF8, BasisBits);
         options->setResults(MatchResults);
