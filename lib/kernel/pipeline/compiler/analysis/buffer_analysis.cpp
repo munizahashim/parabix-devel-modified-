@@ -140,6 +140,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             } else {
                 if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
                     bn.Type |= BufferType::Truncated;
+                    cannotBePlacedIntoThreadLocalMemory = true;
                 }
                 if (cannotBePlacedIntoThreadLocalMemory) {
                     mNonThreadLocalStreamSets.insert(streamSet);

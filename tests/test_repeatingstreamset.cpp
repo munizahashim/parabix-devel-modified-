@@ -584,7 +584,11 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output);
 
-    P->CreateKernelCall<StreamEq>(RepeatingStream, Output, P->getInputScalar("output"));
+    Scalar * output = P->getInputScalar("output");
+
+    P->CreateKernelCall<StreamEq>(RepeatingStream, Output, output);
+
+    P->CreateKernelCall<StreamEq>(Output, RepeatingStream, output);
 
     const auto f = reinterpret_cast<TestFunctionType>(P->compile());
 

@@ -865,6 +865,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal()) {
+            assert (!bn.isTruncated());
             assert (RequiredThreadLocalStreamSetMemory > 0);
             assert (mThreadLocalStreamSetBaseAddress);
             assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == int8Ty);
