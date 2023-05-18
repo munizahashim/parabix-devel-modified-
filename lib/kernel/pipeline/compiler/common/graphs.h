@@ -65,7 +65,6 @@ struct RelationshipNode {
     enum RelationshipNodeType : unsigned {
         IsNil
         , IsKernel
-        //, IsRelationship
         , IsStreamSet
         , IsScalar
         , IsCallee
@@ -267,6 +266,7 @@ enum BufferType : unsigned {
     , Unowned = 2
     , Shared = 4
     , Returned = 8
+    , Truncated = 16
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -322,6 +322,10 @@ struct BufferNode {
 
     bool isReturned() const {
         return (Type & BufferType::Returned) != 0;
+    }
+
+    bool isTruncated() const {
+        return (Type & BufferType::Truncated) != 0;
     }
 
     bool isThreadLocal() const {
@@ -433,7 +437,6 @@ struct ConsumerEdge {
         , UpdateConsumedCount = 1
         , WriteConsumedCount = 2
         , UpdateExternalCount = 4
-        , MayHaveJumpedConsumer = 8
     };
 
     unsigned Port = 0;

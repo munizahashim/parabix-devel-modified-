@@ -86,8 +86,8 @@ const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".ISIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
-const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
-const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
+const static std::string CONSUMED_ITEM_COUNT_PREFIX = "@CON";
+const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@TCN";
 
 const static std::string REPEATING_STREAMSET_HANDLE_PREFIX = "@RSS.";
 const static std::string REPEATING_STREAMSET_LENGTH_PREFIX = "@RSSL.";
@@ -366,6 +366,7 @@ public:
 
 // consumer codegen functions
 
+    unsigned getConsumerId(const unsigned streamSet) const;
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
     void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(BuilderRef b);
@@ -422,7 +423,7 @@ public:
 
 
     void initializeBufferExpansionHistory(BuilderRef b) const;
-    void recordBufferExpansionHistory(BuilderRef b, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
+    void recordBufferExpansionHistory(BuilderRef b, const unsigned streamSet, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
     void printOptionalBufferExpansionHistory(BuilderRef b);
 
     void initializeStridesPerSegment(BuilderRef b) const;

@@ -257,6 +257,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (bn.isReturned()) {
             out << 'R';
         }
+        if (bn.isTruncated()) {
+            out << 'T';
+        }
         if (bn.isShared()) {
             out << '*';
         }

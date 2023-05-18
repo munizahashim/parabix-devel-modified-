@@ -38,8 +38,14 @@ void addProducerStreamSets(const PortType portType, const unsigned producer, con
         const auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel);
         add_edge(binding, relationship, RelationshipType{portType, i}, G);
         if (isa<TruncatedStreamSet>(rel)) {
-            const StreamSet * const d = cast<TruncatedStreamSet>(rel)->getData();
-            TruncatedStreamSets.emplace_back(d, relationship);
+            const Relationship * d = rel;
+            for (;;) {
+                d = cast<TruncatedStreamSet>(d)->getData();
+                if (LLVM_LIKELY(!isa<TruncatedStreamSet>(d))) {
+                    break;
+                }
+            }
+            TruncatedStreamSets.emplace_back(cast<StreamSet>(d), relationship);
         }
     }
 }
@@ -165,7 +171,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
                 report_fatal_error(msg.str());
             }
             const Binding & ref = getReferenceBinding(kernel, refPort);
-            assert (isa<StreamSet>(ref.getRelationship()));
+            assert (ref.getRelationship()->isStreamSet());
             if (LLVM_UNLIKELY(rate.isRelative() && ref.getRate().isFixed())) {
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
@@ -326,8 +332,8 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
         if (LLVM_UNLIKELY(type & CountingType::Negative)) {
             negative = driver.CreateStreamSet(1, sizeTy->getBitWidth());
         }
-
-        StreamSet * const input = cast<StreamSet>(H[i]); assert (input);
+        assert (H[i]->isStreamSet());
+        StreamSet * const input = static_cast<StreamSet *>(H[i]); assert (input);
         PopCountKernel * popCountKernel = nullptr;
         switch (type) {
             case CountingType::Positive:
@@ -1093,6 +1099,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     copy_out_edges(kernels, mStreamGraph, RelationshipNode::IsBinding);
 
     transcribe(streamSets, mStreamGraph);
+    copy_in_edges(streamSets, mStreamGraph, RelationshipNode::IsStreamSet);
     copy_in_edges(streamSets, mStreamGraph, RelationshipNode::IsBinding);
     copy_out_edges(streamSets, mStreamGraph, RelationshipNode::IsBinding);
 

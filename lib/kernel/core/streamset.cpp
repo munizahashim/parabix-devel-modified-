@@ -889,7 +889,6 @@ Value * DynamicBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const prod
         indices[1] = b->getInt32(InitialConsumedCount);
         Value * const initConsumedField = b->CreateInBoundsGEP(mHandle, indices);
         Value * const initConsumed = b->CreateLoad(initConsumedField);
-
         ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
         Value * const consumedChunks = b->CreateUDiv(consumedItems, BLOCK_WIDTH);
         Value * const reclaimedSinceCopyBack = b->CreateSub(consumedChunks, initConsumed);

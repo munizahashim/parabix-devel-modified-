@@ -71,7 +71,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         const BufferPort & port = mBufferGraph[output];
         if (port.canModifySegmentLength()) {
             const auto streamSet = target(output, mBufferGraph);
-            assert (isa<StaticBuffer>(mBufferGraph[streamSet].Buffer));
             checkForSufficientOutputSpace(b, port, streamSet);
         }
     }
@@ -102,6 +101,14 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
         numOfLinearStrides = b->CreateZExt(b->CreateNot(exhausted), b->getSizeTy());
     }
 
+    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[output];
+        if (port.canModifySegmentLength()) {
+            Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
+            numOfLinearStrides = b->CreateUMin(numOfLinearStrides, strides);
+        }
+    }
+
     mPotentialSegmentLength = numOfLinearStrides;
     if (mIsPartitionRoot) {
         assert (numOfLinearStrides);
@@ -122,15 +129,6 @@ void PipelineCompiler::determineNumOfLinearStrides(BuilderRef b) {
 
     mNumOfLinearStrides = numOfLinearStrides;
     mUpdatedNumOfStrides = b->CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-
-    //    Value * numOfLinearOutputStrides = numOfLinearStrides;
-    //    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-    //        const BufferPort & port = mBufferGraph[output];
-    //        if (port.canModifySegmentLength()) {
-    //            Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
-    //            numOfLinearOutputStrides = b->CreateUMin(numOfLinearOutputStrides, strides);
-    //        }
-    //    }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
@@ -467,22 +465,24 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
     // of producing the output for any given input.) Just ignore them.
 
     const BufferNode & bn = mBufferGraph[streamSet];
-    if (LLVM_LIKELY(bn.isOwned() && bn.isNonThreadLocal())) {
-        Value * const writable = getWritableOutputItems(b, outputPort, true);
-      //  Value * const required = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], mStrideStepSize);
-        Value * const required = getOutputStrideLength(b, outputPort);
-        const auto prefix = makeBufferName(mKernelId, outputPort.Port);
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + "_checkWritable = %" PRIu64, writable);
-        debugPrint(b, prefix + "_checkRequired = %" PRIu64, required);
-        #endif
-        Value * const hasEnough = b->CreateICmpULE(required, writable, prefix + "_hasEnough");
-        BasicBlock * const target = b->CreateBasicBlock(prefix + "_hasOutputSpace", mKernelLoopCall);
-        assert (mKernelInsufficientInput);
-        b->CreateCondBr(hasEnough, target, mKernelInsufficientInput);
-
-        b->SetInsertPoint(target);
+    if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.isTruncated())) {
+        return;
     }
+
+    Value * const writable = getWritableOutputItems(b, outputPort, true);
+  //  Value * const required = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], mStrideStepSize);
+    Value * const required = getOutputStrideLength(b, outputPort);
+    const auto prefix = makeBufferName(mKernelId, outputPort.Port);
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, prefix + "_checkWritable = %" PRIu64, writable);
+    debugPrint(b, prefix + "_checkRequired = %" PRIu64, required);
+    #endif
+    Value * const hasEnough = b->CreateICmpULE(required, writable, prefix + "_hasEnough");
+    BasicBlock * const target = b->CreateBasicBlock(prefix + "_hasOutputSpace", mKernelLoopCall);
+    assert (mKernelInsufficientInput);
+    b->CreateCondBr(hasEnough, target, mKernelInsufficientInput);
+
+    b->SetInsertPoint(target);
 
 }
 
@@ -741,7 +741,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.isThreadLocal() || bn.isUnowned()) {
+    if (bn.isThreadLocal() || bn.isUnowned() || bn.isTruncated()) {
         return;
     }
 
@@ -838,7 +838,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     if (isa<DynamicBuffer>(buffer)) {
         Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-            recordBufferExpansionHistory(b, bn, port, buffer);
+            recordBufferExpansionHistory(b, streamSet, bn, port, buffer);
         }
         if (isMultithreaded()) {
             b->CreateStore(priorBuffer, priorBufferPtr);
@@ -970,36 +970,51 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
     const StreamSetBuffer * const buffer = bn.Buffer;
+
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
-    Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, outputPort);
     debugPrint(b, prefix + "_produced = %" PRIu64, produced);
-    debugPrint(b, prefix + "_consumed (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), consumed);
     #endif
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-        const Binding & output = getOutputBinding(outputPort);
-        Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
-        b->CreateAssert(sanityCheck,
-                        "%s.%s: consumed count (%" PRIu64 ") exceeds produced count (%" PRIu64 ")",
-                        mCurrentKernelName,
-                        b->GetString(output.getName()),
-                        consumed, produced);        
-    }
+
+    Value * writable = nullptr;
 
     ConstantInt * overflow = nullptr;
-    if (useOverflow && (bn.CopyBack || port.Add)) {
-        const auto k = std::max<unsigned>(bn.CopyBack, port.Add);
-        overflow = b->getSize(k);
+
+    if (LLVM_UNLIKELY(bn.isTruncated())) {
+        const auto id = getConsumerId(streamSet);
+        Value * const avail = mLocallyAvailableItems[id];
+        writable = b->CreateSub(avail, produced);
+    } else {
+
+        Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+
         #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + "_overflow = %" PRIu64, overflow);
+        debugPrint(b, prefix + "_consumed (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), consumed);
         #endif
+
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            const Binding & output = getOutputBinding(outputPort);
+            Value * const sanityCheck = b->CreateICmpULE(consumed, produced);
+            b->CreateAssert(sanityCheck,
+                            "%s.%s: consumed count (%" PRIu64 ") exceeds produced count (%" PRIu64 ")",
+                            mCurrentKernelName,
+                            b->GetString(output.getName()),
+                            consumed, produced);
+        }
+
+        if (useOverflow && (bn.CopyBack || port.Add)) {
+            const auto k = std::max<unsigned>(bn.CopyBack, port.Add);
+            overflow = b->getSize(k);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, prefix + "_overflow = %" PRIu64, overflow);
+            #endif
+        }
+
+        writable = buffer->getLinearlyWritableItems(b, produced, consumed, overflow);
     }
-
-
-    Value * const writable = buffer->getLinearlyWritableItems(b, produced, consumed, overflow);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable = (%" PRIu64 ") %" PRIu64, b->getSize(streamSet), writable);

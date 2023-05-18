@@ -133,11 +133,17 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     default: break;
                 }
             }
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
+            const auto r = mStreamGraph[streamSet].Relationship;
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
                 bn.Locality = BufferLocality::ConstantShared;
                 bn.IsLinear = true;
-            } else if (cannotBePlacedIntoThreadLocalMemory) {
-                mNonThreadLocalStreamSets.insert(streamSet);
+            } else {
+                if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                    bn.Type |= BufferType::Truncated;
+                }
+                if (cannotBePlacedIntoThreadLocalMemory) {
+                    mNonThreadLocalStreamSets.insert(streamSet);
+                }
             }
             return bp;
         };
@@ -558,7 +564,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
 
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyPortsThatModifySegmentLength
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -589,14 +594,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
-//        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//            BufferPort & outputRate = mBufferGraph[e];
-//            const auto streamSet = target(e, mBufferGraph);
-//            const BufferNode & N = mBufferGraph[streamSet];
-//            if (!N.IsLinear) {
-//                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
-//            }
-//        }
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            BufferPort & outputRate = mBufferGraph[e];
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferNode & N = mBufferGraph[streamSet];
+            if (N.isTruncated()) {
+                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+            }
+        }
     }
 }
 
@@ -750,7 +755,9 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             const BufferPort & consumerRate = mBufferGraph[consumerInput];
             const Binding & input = consumerRate.Binding;
             buffer = new RepeatingBuffer(streamSet, b, input.getType());
-        } else  {
+        } else if (LLVM_UNLIKELY(bn.isTruncated())) {
+            continue;
+        } else {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
@@ -793,6 +800,22 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         assert ("missing buffer?" && buffer);
         mInternalBuffers[streamSet - FirstStreamSet].reset(buffer);
         bn.Buffer = buffer;
+    }
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            StreamSetBuffer * buffer = nullptr;
+            for (const auto e : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                if (mStreamGraph[e].Reason == ReasonType::Reference) {
+                    const auto sourceStreamSet = source(e, mStreamGraph);
+                    buffer = mBufferGraph[sourceStreamSet].Buffer;
+                    break;
+                }
+            }
+            assert ("missing source buffer for truncated streamset?" && buffer);
+            bn.Buffer = buffer;
+        }
     }
 
 }

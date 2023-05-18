@@ -358,6 +358,34 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
 
+    // update threadlocal status of sources for truncated buffers
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            unsigned srcStreamSet = 0;
+            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                const auto & v = mStreamGraph[ref];
+                if (v.Reason == ReasonType::Reference) {
+                    srcStreamSet = source(ref, mBufferGraph);
+                    assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
+                    break;
+                }
+            }
+            assert (srcStreamSet);
+            const auto producer = parent(srcStreamSet, mBufferGraph);
+            const auto partId = KernelPartitionId[producer];
+
+            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                if (partId != KernelPartitionId[consumer]) {
+                    mNonThreadLocalStreamSets.insert(srcStreamSet);
+                    break;
+                }
+            }
+        }
+    }
+
     for (;;) {
 
         for (const auto streamSet : mNonThreadLocalStreamSets) {

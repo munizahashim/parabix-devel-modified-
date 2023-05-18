@@ -12,6 +12,8 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
+
         const BufferPort & rd = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
@@ -74,6 +76,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
 void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         // external buffers already have a buffer handle
         StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.isNonThreadLocal() == nonLocal) {
@@ -151,6 +154,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
             if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -192,6 +196,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         if (bn.isNonThreadLocal() && bn.isOwned() && !bn.isReturned() && !bn.isConstant()) {
             StreamSetBuffer * const buffer = bn.Buffer;
             assert (isFromCurrentFunction(b, buffer->getHandle(), false));
@@ -207,6 +212,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isTruncated())) continue;
             if (bn.isNonThreadLocal() && bn.isOwned()) {
                 StreamSetBuffer * const buffer = bn.Buffer;
                 if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
@@ -898,10 +904,10 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
                                                 const bool prefetch,
                                                 const bool write) const {
 
-
     const StreamSetBuffer * const buffer = bufferNode.Buffer;
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
+
 
     Value * const baseAddress = buffer->getBaseAddress(b);
 

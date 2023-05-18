@@ -24,45 +24,65 @@ void PipelineAnalysis::makeConsumerGraph() {
         }
 
         const BufferNode & bn = mBufferGraph[streamSet];
+        auto id = streamSet;
+
         if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned()) {
             continue;
         }
 
-        // copy the producing edge
-        const auto pe = in_edge(streamSet, mBufferGraph);
-        const BufferPort & output = mBufferGraph[pe];
-        const auto producer = source(pe, mBufferGraph);
-        add_edge(producer, streamSet, ConsumerEdge{output.Port, 0, ConsumerEdge::None}, mConsumerGraph);
 
-        const auto partitionId = KernelPartitionId[producer];
+
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                const auto & v = mStreamGraph[ref];
+                if (v.Reason == ReasonType::Reference) {
+                    id = source(ref, mBufferGraph);
+                    assert (mBufferGraph[streamSet].isNonThreadLocal());
+                    assert (id >= FirstStreamSet && id <= LastStreamSet);
+                    break;
+                }
+            }
+        } else {
+            // copy the producing edge
+            const auto pe = in_edge(streamSet, mBufferGraph);
+            const BufferPort & output = mBufferGraph[pe];
+            const auto producer = source(pe, mBufferGraph);
+            assert (producer >= PipelineInput && producer <= LastKernel);
+            add_edge(producer, streamSet, ConsumerEdge{output.Port, 0, ConsumerEdge::None}, mConsumerGraph);
+        }
+        // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
+        // the same amount of data so we only need to update this value after invoking the last one.
+
+        unsigned index = out_degree(id, mConsumerGraph);
+
+        for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(ce, mBufferGraph);
+            const BufferPort & input = mBufferGraph[ce];
+            add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+        }
+
+    }
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+
+        if (LLVM_UNLIKELY(out_degree(streamSet, mConsumerGraph) == 0)) {
+            assert (in_degree(streamSet, mConsumerGraph) == 0);
+            continue;
+        }
+
+        assert (in_degree(streamSet, mConsumerGraph) == 1);
 
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
 
         size_t lastConsumer = PipelineInput;
 
-        unsigned index = 0;
-
-        for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(ce, mBufferGraph);
+        for (const auto ce : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
+            const auto consumer = target(ce, mConsumerGraph);
             lastConsumer = std::max<size_t>(lastConsumer, consumer);
-            const BufferPort & input = mBufferGraph[ce];
-            add_edge(streamSet, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
 
         assert (lastConsumer != 0);
-
-        const auto lastConsumerPartitionId = KernelPartitionId[lastConsumer];
-
-        unsigned lastConsumerFlags = ConsumerEdge::WriteConsumedCount;
-        for (const auto ce : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-            const auto consumer = target(ce, mConsumerGraph);
-            const auto jumpId = PartitionJumpTargetId[KernelPartitionId[consumer]];
-            if (jumpId <= lastConsumerPartitionId) {
-                lastConsumerFlags |= ConsumerEdge::MayHaveJumpedConsumer;
-                break;
-            }
-        }
 
         // Although we may already know the final consumed item count prior
         // to executing the last consumer, we need to defer writing the final
@@ -72,7 +92,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         bool exists;
         std::tie(e, exists) = edge(streamSet, lastConsumer, mConsumerGraph); assert (exists);
         ConsumerEdge & cn = mConsumerGraph[e];
-        cn.Flags |= lastConsumerFlags;
+        cn.Flags |= ConsumerEdge::WriteConsumedCount;
     }
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
@@ -91,9 +111,8 @@ void PipelineAnalysis::makeConsumerGraph() {
     }
 
 #if 0
-
+    BEGIN_SCOPED_REGION
     auto & out = errs();
-
     out << "digraph \"ConsumerGraph\" {\n";
     for (auto v : make_iterator_range(vertices(mConsumerGraph))) {
         out << "v" << v << " [label=\"" << v << "\"];\n";
@@ -104,9 +123,6 @@ void PipelineAnalysis::makeConsumerGraph() {
         out << "v" << s << " -> v" << t <<
                " [label=\"";
         const ConsumerEdge & c = mConsumerGraph[e];
-        if (c.Flags & ConsumerEdge::UpdatePhi) {
-            out << 'U';
-        }
         if (c.Flags & ConsumerEdge::WriteConsumedCount) {
             out << 'W';
         }
@@ -118,7 +134,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     out << "}\n\n";
     out.flush();
-
+    END_SCOPED_REGION
 #endif
 
 }
