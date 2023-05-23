@@ -94,14 +94,18 @@ bool Kernel::requiresExplicitPartialFinalStride() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasFixedRateInput
+ * @brief hasFixedRateIO
  ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasFixedRateInput() const {
-    const auto n = getNumOfStreamInputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & input = getInputStreamSetBinding(i);
+bool Kernel::hasFixedRateIO() const {
+    for (const auto & input : mInputStreamSets) {
         const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
+        if (rate.isFixed()) {
+            return true;
+        }
+    }
+    for (const auto & output : mOutputStreamSets) {
+        const ProcessingRate & rate = output.getRate();
+        if (rate.isFixed()) {
             return true;
         }
     }
@@ -705,7 +709,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
             fields.push_back(sizeTy); // external SegNo
         }
         fields.push_back(sizeTy); // numOfStrides
-        if (LLVM_LIKELY(hasFixedRateInput())) {
+        if (LLVM_LIKELY(hasFixedRateIO())) {
             fields.push_back(sizeTy); // fixed rate factor
         }
     }
@@ -816,7 +820,7 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
                 setNextArgName("segNo");
             }
             setNextArgName("numOfStrides");
-            if (hasFixedRateInput()) {
+            if (hasFixedRateIO()) {
                 setNextArgName("fixedRateFactor");
             }
         }

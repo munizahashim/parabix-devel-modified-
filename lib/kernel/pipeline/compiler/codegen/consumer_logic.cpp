@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getConsumerId
  ** ------------------------------------------------------------------------------------------------------------- */
-unsigned PipelineCompiler::getConsumerId(const unsigned streamSet) const {
+unsigned PipelineCompiler::getTruncatedStreamSetSourceId(const unsigned streamSet) const {
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
@@ -39,7 +39,7 @@ void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned 
         const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
         if (LLVM_UNLIKELY(numOfIndependentConsumers != 0)) {
 
-            assert (getConsumerId(streamSet) == streamSet);
+            assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
 
             // Although we can PHI out the thread's current min. consumed summary count for each
             // buffer, in any complex program, we'll inevitably have general register spill/reloads.
@@ -123,8 +123,8 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
 
-        // A returned buffer never releases data.
         const auto & bn = mBufferGraph[streamSet];
+        // A returned buffer never releases data.
         if (bn.isReturned()) {
             return b->getSize(0);
         }
@@ -156,11 +156,15 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         itemCount = produced;
     } else {
 
+        if (in_degree(streamSet, mConsumerGraph) == 0) {
+            errs() << "err: " << mKernelId << " -> " << streamSet << "\n";
+        }
+
         const auto e = in_edge(streamSet, mConsumerGraph);
         const ConsumerEdge & c = mConsumerGraph[e];
         const auto producer = source(e, mConsumerGraph);
         if (LLVM_LIKELY(producer != PipelineInput || mTraceIndividualConsumedItemCounts)) {
-            const auto id = getConsumerId(streamSet);
+            const auto id = getTruncatedStreamSetSourceId(streamSet);
             Value * ptr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
                 Constant * const ZERO = b->getInt32(0);
@@ -182,7 +186,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
  * @brief writeTransitoryConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced) {
-    const auto id = getConsumerId(streamSet);
+    const auto id = getTruncatedStreamSetSourceId(streamSet);
     if (out_degree(id, mConsumerGraph) != 0) {
         b->setScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id), produced);
     }
@@ -214,7 +218,7 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
                 setConsumedItemCount(b, streamSet, processed, c.Index);
             }
 
-            const auto id = getConsumerId(streamSet);
+            const auto id = getTruncatedStreamSetSourceId(streamSet);
             if (out_degree(id, mConsumerGraph) > 0) {
                 Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
                 Value * const prior = b->CreateLoad(transConsumedPtr);
@@ -241,7 +245,7 @@ void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
         const auto streamSet = source(e, mConsumerGraph);
         // check to see if we've fully finished processing any stream
         if (c.Flags & ConsumerEdge::WriteConsumedCount) {
-            const auto id = getConsumerId(streamSet);
+            const auto id = getTruncatedStreamSetSourceId(streamSet);
             Value * const consumed = b->getScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
             #ifdef PRINT_DEBUG_MESSAGES
             const auto output = in_edge(streamSet, mBufferGraph);
@@ -265,7 +269,7 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
     assert (isFromCurrentFunction(b, consumed, false));
 
-    const auto id = getConsumerId(streamSet);
+    const auto id = getTruncatedStreamSetSourceId(streamSet);
 
     Value * ptr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
@@ -310,7 +314,7 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
-            assert (streamSet == getConsumerId(streamSet));
+            assert (streamSet == getTruncatedStreamSetSourceId(streamSet));
             const auto consumer = target(e, mConsumerGraph);
             if (consumer >= mKernelId) { // && consumer <= targetKernelId
                 Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));

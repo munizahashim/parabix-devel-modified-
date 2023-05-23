@@ -19,18 +19,12 @@ void PipelineAnalysis::makeConsumerGraph() {
         // returned to the outside environment, we cannot ever release data from it
         // even if it has an internal consumer.
 
-        if (LLVM_UNLIKELY(out_degree(streamSet, mBufferGraph) == 0)) {
-            continue;
-        }
-
-        const BufferNode & bn = mBufferGraph[streamSet];
         auto id = streamSet;
 
+        const BufferNode & bn = mBufferGraph[id];
         if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned()) {
             continue;
         }
-
-
 
         if (LLVM_UNLIKELY(bn.isTruncated())) {
             for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
@@ -42,6 +36,12 @@ void PipelineAnalysis::makeConsumerGraph() {
                     break;
                 }
             }
+
+            const BufferNode & sn = mBufferGraph[id];
+            if (sn.isThreadLocal() || sn.isConstant() || sn.isReturned()) {
+                continue;
+            }
+
         } else {
             // copy the producing edge
             const auto pe = in_edge(streamSet, mBufferGraph);
@@ -53,6 +53,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
 
+
         unsigned index = out_degree(id, mConsumerGraph);
 
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
@@ -60,17 +61,20 @@ void PipelineAnalysis::makeConsumerGraph() {
             const BufferPort & input = mBufferGraph[ce];
             add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
-
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         if (LLVM_UNLIKELY(out_degree(streamSet, mConsumerGraph) == 0)) {
-            assert (in_degree(streamSet, mConsumerGraph) == 0);
+            clear_in_edges(streamSet, mConsumerGraph);
             continue;
         }
 
+        #ifndef NDEBUG
+        const BufferNode & bn = mBufferGraph[streamSet];
+        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || bn.isTruncated()));
         assert (in_degree(streamSet, mConsumerGraph) == 1);
+        #endif
 
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.

@@ -121,7 +121,13 @@ void PipelineCompiler::signalAbnormalTermination(BuilderRef b) {
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally) const {
-    const auto streamSet = getInputBufferVertex(inputPort);
+    return isClosed(b, getInputBufferVertex(inputPort), normally);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isClosed
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::isClosed(BuilderRef b, const unsigned streamSet, const bool normally) const {
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b->getFalse();
@@ -138,6 +144,7 @@ Value * PipelineCompiler::isClosed(BuilderRef b, const StreamSetPort inputPort, 
     }
     return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
 }
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosedNormally
@@ -277,13 +284,16 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
         Value * atLeastOneExhausted = nullptr;
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) continue;
+
             Value * const closed = isClosed(b, br.Port);
 
             Value * fullyConsumed = nullptr;
             if (LLVM_UNLIKELY(br.isZeroExtended())) {
                 fullyConsumed = closed;
             } else {
-                const auto streamSet = source(e, mBufferGraph);
                 Value * const avail = mLocallyAvailableItems[streamSet];
                 Value * const processed = mProcessedItemCountAtTerminationPhi[br.Port]; assert (processed);
                 fullyConsumed = b->CreateAnd(closed, b->CreateICmpULE(avail, processed));

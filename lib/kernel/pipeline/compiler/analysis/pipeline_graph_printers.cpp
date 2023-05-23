@@ -137,6 +137,9 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 case ReasonType::ImplicitPopCount:
                     out << " (popcount)";
                     break;
+                case ReasonType::ImplicitTruncatedSource:
+                    out << " (truncated)";
+                    break;
                 case ReasonType::ImplicitRegionSelector:
                     out << " (region)";
                     break;
@@ -314,6 +317,27 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
 
         out << "}}\"];\n";
 
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+
+            const auto ts = cast<TruncatedStreamSet>(mStreamGraph[streamSet].Relationship);
+            const auto d = ts->getData();
+
+
+            for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+                const auto ss = static_cast<const StreamSet *>(mStreamGraph[i].Relationship);
+                if (LLVM_UNLIKELY(ss == d)) {
+                    out << "v" << i << " -> v" << streamSet <<
+                           " ["
+                              "style=\"dotted\""
+                           "];\n";
+
+                    break;
+                }
+            }
+
+
+        }
+
     };
 
     auto currentPartition = PartitionCount;
@@ -388,6 +412,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
             }
             out << "\\n";
         }
+        assert (kernelObj);
         if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
             out << "<InternallySynchronized>\\n";
         }
@@ -434,10 +459,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
     }
 
     bool hidePipelineOutput = in_degree(PipelineOutput, mBufferGraph) == 0;
-    for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
-        if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
-            hidePipelineOutput = false;
-            break;
+    if (LLVM_LIKELY(KernelPartitionId.size() > 0 && PartitionJumpTargetId.size() > 0)) {
+        for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
+            if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
+                hidePipelineOutput = false;
+                break;
+            }
         }
     }
 
@@ -564,18 +591,22 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         out << "];\n";
     }
 
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        const auto a = i;
-        const auto b = PartitionJumpTargetId[i];
-        if (b > (a + 1)) {
-            const auto s = firstKernelOfPartition[a];
-            const auto t = firstKernelOfPartition[b];
-            out << "v" << s << " -> v" << t <<
-                   " ["
-                      "style=\"dotted,bold\","
-                      "color=\"red\""
-                   "];\n";
+    if (LLVM_LIKELY(PartitionJumpTargetId.size() > 0)) {
+
+        for (unsigned i = 0; i < PartitionCount; ++i) {
+            const auto a = i;
+            const auto b = PartitionJumpTargetId[i];
+            if (b > (a + 1)) {
+                const auto s = firstKernelOfPartition[a];
+                const auto t = firstKernelOfPartition[b];
+                out << "v" << s << " -> v" << t <<
+                       " ["
+                          "style=\"dotted,bold\","
+                          "color=\"red\""
+                       "];\n";
+            }
         }
+
     }
 
     #ifndef USE_SIMPLE_BUFFER_GRAPH

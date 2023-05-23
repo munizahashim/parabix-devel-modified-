@@ -348,7 +348,7 @@ public:
     void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
- //   Value * isClosed(BuilderRef b, const unsigned streamSet) const;
+    Value * isClosed(BuilderRef b, const unsigned streamSet, const bool normally = false) const;
     unsigned getTerminationSignalIndex(const unsigned consumer) const;
     Value * isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
@@ -366,7 +366,7 @@ public:
 
 // consumer codegen functions
 
-    unsigned getConsumerId(const unsigned streamSet) const;
+    unsigned getTruncatedStreamSetSourceId(const unsigned streamSet) const;
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
     void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(BuilderRef b);

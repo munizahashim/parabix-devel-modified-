@@ -456,7 +456,7 @@ protected:
 
     static std::string getStringHash(const llvm::StringRef str);
 
-    LLVM_READNONE bool hasFixedRateInput() const;
+    LLVM_READNONE bool hasFixedRateIO() const;
 
     virtual void addInternalProperties(BuilderRef) { }
 

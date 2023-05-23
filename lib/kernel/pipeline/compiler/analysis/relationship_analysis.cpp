@@ -18,7 +18,23 @@ using RefVector = SmallVector<ProgramGraph::Vertex, 4>;
 
 using KernelVertexVec = SmallVector<ProgramGraph::Vertex, 64>;
 
-using TruncatedStreamSetVec = SmallVector<std::pair<const StreamSet *, ProgramGraph::Vertex>, 4>;
+struct TruncatedStreamSetData {
+
+    TruncatedStreamSetData(const unsigned producer, const unsigned binding, StreamSet * const src, const unsigned streamSet)
+    : Producer(producer)
+    , Binding(binding)
+    , SourceData(src)
+    , TruncatedStreamSetVertex(streamSet) {
+
+    }
+
+    const unsigned Producer;
+    const unsigned Binding;
+    StreamSet * const SourceData;
+    const unsigned TruncatedStreamSetVertex;
+};
+
+using TruncatedStreamSetVec = SmallVector<TruncatedStreamSetData, 2>;
 
 //TODO: change enum tag to distinguish relationships and streamsets
 
@@ -45,7 +61,9 @@ void addProducerStreamSets(const PortType portType, const unsigned producer, con
                     break;
                 }
             }
-            TruncatedStreamSets.emplace_back(cast<StreamSet>(d), relationship);
+            assert (isa<StreamSet>(d) || isa<RepeatingStreamSet>(d));
+            const auto s = static_cast<const StreamSet *>(d);
+            TruncatedStreamSets.emplace_back(producer, binding, const_cast<StreamSet *>(s), relationship);
         }
     }
 }
@@ -195,8 +213,29 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
  ** ------------------------------------------------------------------------------------------------------------- */
 void addTruncatedStreamSetContraints() {
     for (const auto & c : TruncatedStreamSets) {
-        auto d = const_cast<StreamSet *>(c.first);
-        add_edge(G.find(RelationshipNode::IsStreamSet, d), c.second, RelationshipType{ReasonType::Reference}, G);
+        const auto src = G.find(RelationshipNode::IsStreamSet, c.SourceData);
+        const auto dst = c.TruncatedStreamSetVertex;
+        add_edge(src, dst, RelationshipType{ReasonType::Reference}, G);
+
+        assert (G[c.Binding].Type == RelationshipNode::IsBinding);
+        const Binding & output = G[c.Binding].Binding;
+        const auto producer = c.Producer;
+        assert (G[producer].Type == RelationshipNode::IsKernel);
+
+        // TODO: if we take this as an input with an equivalent rate, do not add it as a check?
+        // Or make general check to prevent that for any port drawing from the same streamset?
+        #warning not completely finished yet
+
+        Binding * const trunc = new Binding("#trunc", c.SourceData, output.getRate());
+        mInternalBindings.emplace_back(trunc);
+        const auto truncBinding = G.add(RelationshipNode::IsBinding, trunc, RelationshipNodeFlag::ImplicitlyAdded);
+
+        const unsigned portNum = in_degree(producer, G);
+        add_edge(src, truncBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
+        add_edge(truncBinding, producer, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
+
+
+
     }
 }
 
@@ -1121,7 +1160,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
 }
 
-
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addKernelRelationshipsInReferenceOrdering
+ ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned kernel, const RelationshipGraph & G,
                                                                  std::function<void(PortType, unsigned, unsigned)> insertionFunction) {
 

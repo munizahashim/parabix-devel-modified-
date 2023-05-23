@@ -131,6 +131,7 @@ enum class ReasonType : unsigned {
     // -----------------------------
     , ImplicitRegionSelector
     , ImplicitPopCount
+    , ImplicitTruncatedSource
     // -----------------------------
     , Reference
     // -----------------------------
@@ -340,6 +341,9 @@ struct BufferNode {
         return (Locality == BufferLocality::ConstantShared);
     }
 
+    bool isDeallocatable() const {
+        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isReturned());
+    }
 };
 
 enum BufferPortType : unsigned {

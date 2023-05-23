@@ -1103,7 +1103,7 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
 
     // consumer processed item count [3,n)
     if (LLVM_LIKELY(!bn.isReturned())) {
-        const auto id = getConsumerId(streamSet);
+        const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * const consumerDataPtr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
         const auto n = entryTy->getArrayNumElements(); assert (n > 3);
         assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));

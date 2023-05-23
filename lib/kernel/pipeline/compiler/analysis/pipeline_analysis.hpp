@@ -86,7 +86,6 @@ public:
 
         P.determineBufferSize(b);
 
-
         P.makeConsumerGraph();
 
         P.calculatePartialSumStepFactors(b);

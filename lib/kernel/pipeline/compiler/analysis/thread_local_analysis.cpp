@@ -363,6 +363,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) {
+            mNonThreadLocalStreamSets.insert(streamSet);
             unsigned srcStreamSet = 0;
             for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
                 const auto & v = mStreamGraph[ref];
@@ -373,6 +374,11 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                 }
             }
             assert (srcStreamSet);
+            const BufferNode & bn = mBufferGraph[srcStreamSet];
+            if (LLVM_UNLIKELY(bn.isConstant())) {
+                continue;
+            }
+
             const auto producer = parent(srcStreamSet, mBufferGraph);
             const auto partId = KernelPartitionId[producer];
 

@@ -583,7 +583,7 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
     }
     const auto prefix = makeKernelName(mKernelId);
     mNumOfLinearStridesPhi = b->CreatePHI(sizeTy, 2, prefix + "_numOfLinearStridesPhi");
-    if (LLVM_LIKELY(mKernel->hasFixedRateInput())) {
+    if (LLVM_LIKELY(mKernel->hasFixedRateIO())) {
         mFixedRateFactorPhi = b->CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
     }
     mCurrentFixedRateFactor = mFixedRateFactorPhi;

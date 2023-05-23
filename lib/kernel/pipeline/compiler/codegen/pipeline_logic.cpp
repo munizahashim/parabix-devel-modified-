@@ -190,8 +190,6 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
-            const auto streamSet = source(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {
@@ -204,7 +202,6 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
-            const auto streamSet = target(e, mBufferGraph);
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {

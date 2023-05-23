@@ -401,9 +401,9 @@ void PipelineAnalysis::identifyOwnedBuffers() {
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
             if (LLVM_UNLIKELY(rate.isManaged())) {
+                // Every managed buffer is considered linear to the pipeline
                 const auto streamSet = target(e, mBufferGraph);
                 BufferNode & bn = mBufferGraph[streamSet];
-                // Every managed buffer is considered linear to the pipeline
                 bn.Type |= BufferType::Unowned;
                 if (rate.isShared()) {
                     bn.Type |= BufferType::Shared;
@@ -595,14 +595,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
-        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            BufferPort & outputRate = mBufferGraph[e];
-            const auto streamSet = target(e, mBufferGraph);
-            const BufferNode & N = mBufferGraph[streamSet];
-            if (N.isTruncated()) {
-                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
-            }
-        }
+//        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//            BufferPort & outputRate = mBufferGraph[e];
+//            const auto streamSet = target(e, mBufferGraph);
+//            const BufferNode & N = mBufferGraph[streamSet];
+//            if (N.isTruncated()) {
+//                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+//            }
+//        }
     }
 }
 

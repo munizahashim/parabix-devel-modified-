@@ -196,8 +196,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
-        if (bn.isNonThreadLocal() && bn.isOwned() && !bn.isReturned() && !bn.isConstant()) {
+        if (LLVM_LIKELY(bn.isDeallocatable())) {
             StreamSetBuffer * const buffer = bn.Buffer;
             assert (isFromCurrentFunction(b, buffer->getHandle(), false));
             buffer->releaseBuffer(b);
@@ -212,8 +211,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.isTruncated())) continue;
-            if (bn.isNonThreadLocal() && bn.isOwned()) {
+            if (LLVM_LIKELY(bn.isDeallocatable())) {
                 StreamSetBuffer * const buffer = bn.Buffer;
                 if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
                     const auto pe = in_edge(streamSet, mBufferGraph);
@@ -979,8 +977,6 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         }
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-
-        assert ((bn.Locality != BufferLocality::ConstantShared) ^ isa<RepeatingBuffer>(bn.Buffer));
 
         if (LLVM_UNLIKELY(bn.isUnowned() && bn.isInternal())) {
             const auto output = in_edge(streamSet, mBufferGraph);

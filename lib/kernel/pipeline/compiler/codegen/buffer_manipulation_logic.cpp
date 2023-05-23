@@ -156,9 +156,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
 
-        Rational maxItemsPerSegment{mKernel->getStride() * rate.getUpperBound()};
+        //if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || bn.isTruncated() || bn.isConstant())) {
 
-        if (LLVM_LIKELY(rate.isFixed())) {
+            Rational maxItemsPerSegment{mKernel->getStride() * rate.getUpperBound()};
 
             // TODO: support popcount/partialsum
 
@@ -190,7 +190,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             const auto prefix = makeBufferName(mKernelId, inputPort);
 
-
             Constant * const ITEM_WIDTH = b->getSize(itemWidth);
 
             PointerType * const bufferType = buffer->getPointerType();
@@ -199,16 +198,23 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             BasicBlock * const maskedInput = b->CreateBasicBlock(prefix + "_maskInput", mKernelCheckOutputSpace);
             BasicBlock * const selectedInput = b->CreateBasicBlock(prefix + "_selectInput", mKernelCheckOutputSpace);
 
-            Value * selected = accessibleItems[inputPort.Number];
-            Value * totalNumOfItems = getAccessibleInputItems(b, port);
-            Value * const tooMany = b->CreateICmpULT(selected, totalNumOfItems);
-            Value * computeMask = tooMany;
-            if (mIsInputZeroExtended[inputPort]) {
-                computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
-            }
-
             BasicBlock * const entryBlock = b->GetInsertBlock();
-            b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
+
+            Value * const selected = accessibleItems[inputPort.Number];
+            Value * const totalNumOfItems = getAccessibleInputItems(b, port);
+
+            const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
+
+            if (LLVM_UNLIKELY(alwaysTruncate)) {
+                b->CreateBr(maskedInput);
+            } else {
+                Value * const tooMany = b->CreateICmpULT(selected, totalNumOfItems);
+                Value * computeMask = tooMany;
+                if (mIsInputZeroExtended[inputPort]) {
+                    computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
+                }
+                b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
+            }
 
             b->SetInsertPoint(maskedInput);
 
@@ -298,9 +304,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 Value * const mallocBytes = b->CreateSub(requiredPtrInt, initialPtrInt);
 
                 const auto blockSize = b->getBitBlockWidth() / 8;
-
                 Value * const maskedBuffer = b->CreateAlignedMalloc(mallocBytes, blockSize);
                 b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
+
                 // TODO: look into checking whether the OS supports aligned realloc.
                 b->CreateFree(b->CreateLoad(bufferStorage));
                 b->CreateStore(maskedBuffer, bufferStorage);
@@ -390,11 +396,13 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             b->SetInsertPoint(selectedInput);
             PHINode * const phi = b->CreatePHI(bufferType, 2);
-            phi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
+            if (!alwaysTruncate) {
+                phi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
+            }
             phi->addIncoming(maskedAddress, maskedInputLoopExit);
             inputBaseAddresses[inputPort.Number] = phi;
 
-        }
+        //}
     }
     #endif
 }
@@ -407,7 +415,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
     const auto blockWidth = b->getBitBlockWidth();
     const auto log2BlockWidth = floor_log2(blockWidth);
     Constant * const LOG_2_BLOCK_WIDTH = b->getSize(log2BlockWidth);
-    Constant * const ZERO = b->getSize(0);
+    Constant * const sz_ZERO = b->getSize(0);
     Constant * const ONE = b->getSize(1);
     Constant * const BLOCK_MASK = b->getSize(blockWidth - 1);
 
@@ -419,8 +427,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         // stream, any clearing of data is the responsibility of the owner.
         // Simply ignore any external buffers for the purpose of zeroing out
         // unnecessary data.
-        if (bn.isUnowned()) {
-            assert (bn.isNonThreadLocal());
+        if (LLVM_UNLIKELY(bn.isUnowned() || bn.isTruncated() || bn.isConstant())) {
             continue;
         }
 
@@ -432,6 +439,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         const auto itemWidth = getItemWidth(buffer->getBaseType());
 
         const auto prefix = makeBufferName(mKernelId, port);
+
         Value * produced = nullptr;
         if (LLVM_UNLIKELY(bn.OutputItemCountId != streamSet)) {
             produced = mLocallyAvailableItems[bn.OutputItemCountId];
@@ -453,31 +461,43 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         BasicBlock * const maskExit = b->CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
         Value * const numOfStreams = buffer->getStreamSetCount(b);
         Value * const baseAddress = buffer->getBaseAddress(b);
+
         #ifdef PRINT_DEBUG_MESSAGES
-        Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, ZERO, ZERO, ZERO);
+        Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, sz_ZERO, sz_ZERO, sz_ZERO);
         #endif
         BasicBlock * const entry = b->GetInsertBlock();
-        b->CreateBr(maskLoop);
+        b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
 
         b->SetInsertPoint(maskLoop);
         PHINode * const streamIndex = b->CreatePHI(b->getSizeTy(), 2);
-        streamIndex->addIncoming(ZERO, entry);
-        Value * ptr = nullptr;
+        streamIndex->addIncoming(sz_ZERO, entry);
+        Value * inputPtr = nullptr;
         if (itemWidth > 1) {
-            ptr = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
+            inputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
         } else {
-            ptr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
+            inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
         }
         DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(ptr->getType());
+        Type * const intPtrTy = DL.getIntPtrType(inputPtr->getType());
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
-        Value * const ptrInt = b->CreatePtrToInt(ptr, intPtrTy);
+        Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
+
         debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
-        Value * const value = b->CreateBlockAlignedLoad(ptr);
+        Value * const value = b->CreateBlockAlignedLoad(inputPtr);
         Value * const maskedValue = b->CreateAnd(value, mask);
-        b->CreateBlockAlignedStore(maskedValue, ptr);
+
+        Value * outputPtr = inputPtr;
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            if (itemWidth > 1) {
+                outputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
+            } else {
+                outputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
+            }
+
+        }
+        b->CreateBlockAlignedStore(maskedValue, outputPtr);
         if (itemWidth > 1) {
             // Since packs are laid out sequentially in memory, it will hopefully be cheaper to zero them out here
             // because they may be within the same cache line.
@@ -502,6 +522,10 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         b->SetInsertPoint(maskExit);
         // Zero out any blocks we could potentially touch
 
+
+   //     const auto blocksToZero = buffer->getOverflow();
+
+
         Rational strideLength{0};
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];
@@ -513,14 +537,16 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             strideLength = std::max(strideLength, R);
         }
 
-        const auto blocksToZero = ceiling(strideLength * Rational{1, blockWidth});
+        const auto blocksToZero = ceiling(Rational{strideLength.numerator(), blockWidth * strideLength.denominator()});
+
+
         if (blocksToZero > 1) {
             Value * const nextBlockIndex = b->CreateAdd(blockIndex, ONE);
             Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
-            Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, nextOffset);
+            Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
             Value * const startPtrInt = b->CreatePtrToInt(startPtr, intPtrTy);
             Value * const endOffset = b->CreateRoundUp(nextOffset, b->getSize(blocksToZero));
-            Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, ZERO, endOffset);
+            Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
             Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b->CreateSub(endPtrInt, startPtrInt);
             #ifdef PRINT_DEBUG_MESSAGES

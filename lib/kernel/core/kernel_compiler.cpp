@@ -392,7 +392,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             mIsFinal = b->CreateIsNull(mRawNumOfStrides);
             mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
         }
-        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+        if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
             mFixedRateFactor = nextArg();
         }
@@ -651,7 +651,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
 
     if (LLVM_LIKELY(!isMainPipeline)) {
         props.push_back(mNumOfStrides); assert (mNumOfStrides);
-        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+        if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             props.push_back(mFixedRateFactor);
         }
     }
