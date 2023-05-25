@@ -20,7 +20,19 @@
 using namespace kernel;
 using namespace llvm;
 
-bool verbose = true;
+static cl::opt<unsigned> optFieldWidth("field-width", cl::desc("Field width of pattern elements"), cl::init(0));
+
+static cl::opt<unsigned> optNumElements("num-elements", cl::desc("Number of elements in pattern streamset"), cl::init(0));
+
+static cl::opt<unsigned> optPatternLength("pattern-length", cl::desc("Length of each pattern"), cl::init(0));
+
+static cl::opt<unsigned> optRepetitionLength("repetition-length", cl::desc("Total length of repeating data"), cl::init(0));
+
+static cl::opt<unsigned> optCopyLength("copy-length", cl::desc("Copy length for repeating data"), cl::init(0));
+
+static cl::opt<unsigned> optPassLength("pass-length", cl::desc("Truncated pass-through length for repeating data"), cl::init(0));
+
+static cl::opt<bool> optVerbose("v", cl::desc("Verbose output"), cl::init(false));
 
 class CopyKernel final : public SegmentOrientedKernel {
 public:
@@ -30,7 +42,15 @@ protected:
 };
 
 CopyKernel::CopyKernel(BuilderRef b, StreamSet * input, StreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(b, "copykernel",
+: SegmentOrientedKernel(b, [&]() {
+    std::string backing;
+    raw_string_ostream str(backing);
+    str << "copykernel"
+        << "<i" << input->getFieldWidth() << ">"
+        << "[" << input->getNumElements() << "]";
+    str.flush();
+    return backing;
+}(),
 // input streams
 {Binding{"input", input}},
 // output stream
@@ -45,7 +65,6 @@ CopyKernel::CopyKernel(BuilderRef b, StreamSet * input, StreamSet * output, Scal
 
 void CopyKernel::generateDoSegmentMethod(BuilderRef b) {
 
-    BasicBlock * const copyAll = b->CreateBasicBlock("copyAll");
     BasicBlock * const copyPartial = b->CreateBasicBlock("copyPartial");
     BasicBlock * const segmentExit = b->CreateBasicBlock("segmentExit");
 
@@ -60,30 +79,30 @@ void CopyKernel::generateDoSegmentMethod(BuilderRef b) {
 
     ConstantInt * const sz_ZERO = b->getSize(0);
 
-    Value * const inputPtr = b->getInputStreamBlockPtr("input", sz_ZERO);
-    Value * const outputPtr = b->getOutputStreamBlockPtr("output", sz_ZERO);
+    Value * const inputPtr = b->getInputStreamBlockPtr("input", sz_ZERO, sz_ZERO);
+    Value * const outputPtr = b->getOutputStreamBlockPtr("output", sz_ZERO, sz_ZERO);
 
-    b->CreateLikelyCondBr(b->CreateICmpULE(avail, upTo), copyAll, copyPartial);
+    Value * const needsPartialCopy = b->CreateICmpUGE(avail, upTo);
 
-    b->SetInsertPoint(copyAll);
-    Constant * const bytesPerStride = b->getSize(ne * fw * bw  / 8);
-    Value * const numBytes = b->CreateMul(bytesPerStride, b->getNumOfStrides());
-    b->CreateMemCpy(outputPtr, inputPtr, numBytes, bw / 8);
-    b->CreateBr(segmentExit);
-
-
-    b->SetInsertPoint(copyPartial);
     Value * const remaining = b->CreateSub(upTo, processed);
     Constant * const BLOCK_WIDTH = b->getSize(bw);
-    Value * const fullStrides = b->CreateUDiv(remaining, BLOCK_WIDTH);
-    Value * const fullStrideBytes = b->CreateMul(bytesPerStride, fullStrides);
-    b->CreateMemCpy(outputPtr, inputPtr, fullStrideBytes, bw / 8);
+    Value * const blockIndex = b->CreateUDiv(remaining, BLOCK_WIDTH);
+    Value * const toCopy = b->CreateSelect(needsPartialCopy, blockIndex, b->getNumOfStrides());
+    Value * const endInputPtr = b->getInputStreamBlockPtr("input", sz_ZERO, toCopy);
 
+    DataLayout dl(b->getModule());
+    Type * const intPtrTy = dl.getIntPtrType(b->getContext());
+    Value * const inputPtrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
+    Value * const endInputPtrInt = b->CreatePtrToInt(endInputPtr, intPtrTy);
+    Value * const numBytes = b->CreateSub(endInputPtrInt, inputPtrInt);
+    b->CreateMemCpy(outputPtr, inputPtr, numBytes, bw / 8);
+    b->CreateLikelyCondBr(b->CreateICmpUGE(avail, upTo), copyPartial, segmentExit);
+
+    b->SetInsertPoint(copyPartial);
     Value * items = b->CreateURem(remaining, BLOCK_WIDTH);
-    if (fw) {
+    if (fw > 1) {
         items = b->CreateMul(items, b->getSize(fw));
     }
-
     for (unsigned i = 0; i < ne; ++i) {
         Value * inputPtr = nullptr;
         Value * outputPtr = nullptr;
@@ -91,12 +110,12 @@ void CopyKernel::generateDoSegmentMethod(BuilderRef b) {
         Value * current = items;
         for (unsigned j = 0; j < fw; ++j) {
             if (fw == 1) {
-                inputPtr = b->getInputStreamBlockPtr("input", sz_I);
-                outputPtr = b->getOutputStreamBlockPtr("output", sz_I);
+                inputPtr = b->getInputStreamBlockPtr("input", sz_I, blockIndex);
+                outputPtr = b->getOutputStreamBlockPtr("output", sz_I, blockIndex);
             } else {
                 Constant * const sz_J = b->getSize(j);
-                inputPtr = b->getInputStreamPackPtr("input", sz_I, sz_J);
-                outputPtr = b->getOutputStreamPackPtr("output", sz_I, sz_J);
+                inputPtr = b->getInputStreamPackPtr("input", sz_I, sz_J, blockIndex);
+                outputPtr = b->getOutputStreamPackPtr("output", sz_I, sz_J, blockIndex);
             }
             Value * const maskPos = b->CreateUMin(current, BLOCK_WIDTH);
             Value * const mask = b->CreateNot(b->bitblock_mask_from(maskPos));
@@ -173,11 +192,11 @@ StreamEq::StreamEq(
        raw_string_ostream str(backing);
        str << "StreamEq::["
            << "<i" << lhs->getFieldWidth() << ">"
-           << "[" << lhs->getNumElements() << "],"
-           << "<i" << rhs->getFieldWidth() << ">"
+           << "[" << lhs->getNumElements() << "]";
+       str << ",<i" << rhs->getFieldWidth() << ">"
            << "[" << rhs->getNumElements() << "]]";
-        str.flush();
-        return backing;
+       str.flush();
+       return backing;
     }(),
     {{"lhs", lhs}, {"rhs", rhs}},
     {},
@@ -187,7 +206,6 @@ StreamEq::StreamEq(
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
-    setStride(b->getBitBlockWidth() / lhs->getFieldWidth());
     addAttribute(SideEffecting());
 }
 
@@ -217,28 +235,40 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
     PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
+
     for (uint32_t i = 0; i < COUNT; ++i) {
-        Value * lhs;
-        Value * rhs;
-        if (FW == 1) {
-            lhs = b->loadInputStreamBlock("lhs", b->getInt32(i), strideNo);
-            rhs = b->loadInputStreamBlock("rhs", b->getInt32(i), strideNo);
-        } else {
-            // TODO: using strideNo in this fashion is technically going to refer to the
-            // correct pack in memory but will exceed the number of elements in the pack
-            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), strideNo);
-            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), strideNo);
+
+        Constant * const I = b->getInt32(i);
+
+        for (unsigned j = 0; j < FW; ++j) {
+
+            Value * lhs;
+            Value * rhs;
+            if (FW == 1) {
+                lhs = b->getInputStreamBlockPtr("lhs", I, strideNo);
+                rhs = b->getInputStreamBlockPtr("rhs", I, strideNo);
+            } else {
+                Constant * const J = b->getInt32(j);
+                lhs = b->getInputStreamPackPtr("lhs", I, J, strideNo);
+                rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
+            }
+            lhs = b->CreateBlockAlignedLoad(lhs);
+            rhs = b->CreateBlockAlignedLoad(rhs);
+
+            // Perform vector comparison lhs != rhs.
+            // Result will be a vector of all zeros if lhs == rhs
+            Value * const vComp = b->CreateICmpNE(lhs, rhs);
+            Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+        //    b->CallPrintInt("comp", comp);
+            // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
+            nextAccum = b->CreateAnd(nextAccum, comp);
+
         }
-        // Perform vector comparison lhs != rhs.
-        // Result will be a vector of all zeros if lhs == rhs
-        Value * const vComp = b->CreateICmpNE(lhs, rhs);
-        Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
-        // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-        Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-    //    b->CallPrintInt("comp", comp);
-        // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        nextAccum = b->CreateAnd(nextAccum, comp);
+
     }
+
 
     Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
     strideNo->addIncoming(nextStrideNo, loopBlock);
@@ -268,7 +298,13 @@ void StreamEq::generateFinalizeMethod(BuilderRef b) {
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);
 
-bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
+bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
+                               uint64_t numElements,
+                               uint64_t fieldWidth,
+                               uint64_t patternLength,
+                               uint64_t copyCountVal,
+                               uint64_t passCountVal,
+                               std::default_random_engine & rng) {
 
     auto & b = pxDriver.getBuilder();
 
@@ -281,21 +317,9 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
                  Binding{int32PtrTy, "output"}},
                 {});
 
-    std::uniform_int_distribution<uint64_t> fwDist(0, 5);
+    const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
-    const auto fieldWidth = fwDist(rng);
-
-    std::uniform_int_distribution<uint64_t> numElemDist(1, 8);
-
-    std::uniform_int_distribution<uint64_t> dist(0ULL, (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL);
-
-    std::uniform_int_distribution<uint64_t> patLength(1, 100);
-
-
-    const auto numElements = numElemDist(rng);
-
-    const auto patternLength = patLength(rng);
-
+    std::uniform_int_distribution<uint64_t> dist(0ULL, maxVal);
 
     std::vector<std::vector<uint64_t>> pattern(numElements);
     for (unsigned i = 0; i < numElements; ++i) {
@@ -306,47 +330,50 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         }
     }
 
-    Scalar * const copyCount = P->getInputScalar("copyCount");
+    Scalar * const copyCountScalar = P->getInputScalar("copyCount");
 
     RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
 
     StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
 
-    P->CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCount);
+    P->CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
 
     TruncatedStreamSet * const Trunc1 = P->CreateTruncatedStreamSet(RepeatingStream);
 
     TruncatedStreamSet * const Trunc2 = P->CreateTruncatedStreamSet(Output);
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc1, copyCount);
+    P->CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
 
-    Scalar * const passCount = P->getInputScalar("passCount");
+    Scalar * const passCountScalar = P->getInputScalar("passCount");
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc2, passCount);
+    P->CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
 
     Scalar * output = P->getInputScalar("output");
 
     P->CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
 
-
     const auto f = reinterpret_cast<TestFunctionType>(P->compile());
-
-    std::uniform_int_distribution<uint64_t> countDist(1, 22000);
-
-    const uint64_t copyCountVal = countDist(rng);
-
-    const uint64_t passCountVal = countDist(rng);
 
     uint32_t result = 0;
 
-    f(copyCountVal, passCountVal, &result);
+    const bool verbose = optVerbose;
 
-    if (result != 0 || verbose) {
-
+    if (verbose) {
         llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength <<
                         " copyCount = " << copyCountVal <<
                         " passCount = " << passCountVal <<
                         " -- ";
+    }
+
+    f(copyCountVal, passCountVal, &result);
+
+    if (result != 0 || verbose) {
+        if (!verbose) {
+            llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength <<
+                            " copyCount = " << copyCountVal <<
+                            " passCount = " << passCountVal <<
+                            " -- ";
+        }
         if (result == 0) {
             llvm::errs() << "success";
         } else {
@@ -355,9 +382,44 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         llvm::errs() << '\n';
     }
 
-
     return (result != 0);
 }
+
+bool runRandomRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
+
+    size_t numElements = optNumElements;
+    if (numElements == 0) {
+        std::uniform_int_distribution<uint64_t> numElemDist(1, 8);
+        numElements = numElemDist(rng);
+    }
+
+    size_t fieldWidth = optFieldWidth;
+    if (fieldWidth == 0) {
+        std::uniform_int_distribution<uint64_t> fwDist(0, 5);
+        fieldWidth = 1ULL << fwDist(rng);
+    }
+
+    size_t patternLength = optPatternLength;
+    if (patternLength == 0) {
+        std::uniform_int_distribution<uint64_t> patLength(1, 100);
+        patternLength = patLength(rng);
+    }
+
+    size_t copyCountVal = optCopyLength;
+    if (copyCountVal == 0) {
+        std::uniform_int_distribution<uint64_t> countDist(1, 22000);
+        copyCountVal = countDist(rng);
+    }
+
+    size_t passCountVal = optPassLength;
+    if (passCountVal == 0) {
+        std::uniform_int_distribution<uint64_t> countDist(1, 22000);
+        passCountVal = countDist(rng);
+    }
+
+    return runRepeatingStreamSetTest(pxDriver, numElements, fieldWidth, patternLength, copyCountVal, passCountVal, rng);
+}
+
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
@@ -366,8 +428,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    for (unsigned rounds = 0; rounds < 1; ++rounds) {
-        testResult |= runRepeatingStreamSetTest(pxDriver, rng);
+    for (unsigned rounds = 0; rounds < 10; ++rounds) {
+        testResult |= runRandomRepeatingStreamSetTest(pxDriver, rng);
     }
     return testResult ? -1 : 0;
 }

@@ -186,10 +186,15 @@ struct Attribute {
         // Either an input buffer is required to be linearly accessible or a managed output
         // is promised to be linearly accessible.
 
-        Misaligned,
+        AllowsUnalignedAccess,
 
-        // Assume that we cannot statically compute the alignment of this stream set and
-        // perform any operations accordingly
+        // Indicates to the pipeline that the kernel code uses unaligned store/loads
+        // and does not require that the pipeline ensures all streamset data is in blockwidth
+        // aligned units.
+
+        // NOTE: no verification is performed by the pipeline. It is a programmer responsibility
+        // to ensure that unaligned functions are used. A Segfault is likely if this is not
+        // the case.
 
         BlockSize,
 
@@ -463,8 +468,8 @@ inline Attribute Linear() {
     return Attribute(Attribute::KindId::Linear, 0);
 }
 
-inline Attribute Misaligned() {
-    return Attribute(Attribute::KindId::Misaligned, 0);
+inline Attribute AllowsUnalignedAccess() {
+    return Attribute(Attribute::KindId::AllowsUnalignedAccess, 0);
 }
 
 inline Attribute IndependentRegionBegin(const unsigned streamIndex) {

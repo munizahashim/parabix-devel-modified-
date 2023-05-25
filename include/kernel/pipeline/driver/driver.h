@@ -46,6 +46,8 @@ public:
 
     kernel::TruncatedStreamSet * CreateTruncatedStreamSet(const kernel::StreamSet * data) noexcept;
 
+    kernel::RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet, const bool isDynamic = true) noexcept;
+
     kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType) noexcept;
 
     kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;

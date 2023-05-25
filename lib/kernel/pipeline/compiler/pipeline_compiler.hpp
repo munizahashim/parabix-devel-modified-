@@ -398,7 +398,7 @@ public:
     void deallocateRepeatingBuffers(BuilderRef b);
     void generateMetaDataForRepeatingStreamSets(BuilderRef b);
     bool readsRepeatingStreamSet() const;
-    Constant * getMaximumNumOfStridesForRepeatingStreamSet(BuilderRef b, const unsigned streamSet) const;
+    Constant * getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const;
     void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
 // prefetch instructions
