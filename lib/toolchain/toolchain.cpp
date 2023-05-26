@@ -173,7 +173,9 @@ MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
 static cl::opt<unsigned, true>
 ThreadNumOption("thread-num", cl::location(SegmentThreads),
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
-                cl::init(llvm::sys::getHostNumPhysicalCores()),
+                // If we have more than 2 cores, leave one for other processes,
+                // and use the rest for multithreading of the pipeline.
+                cl::init(std::max(llvm::sys::getHostNumPhysicalCores() - 1, 2)),
 #else
                 cl::init(2),
 #endif
