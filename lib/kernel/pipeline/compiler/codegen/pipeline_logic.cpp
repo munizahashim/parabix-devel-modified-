@@ -83,11 +83,9 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 
     IntegerType * const sizeTy = b->getSizeTy();
 
-    #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (!mIsNestedPipeline) {
+    if (mUseDynamicMultithreading) {
         mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, 0);
     }
-    #endif
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
 
@@ -451,11 +449,9 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     if (LLVM_UNLIKELY(mIsNestedPipeline)) {
         mSegNo = mExternalSegNo; assert (mExternalSegNo);
     }
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
     else {
         mSegNo = b->getSize(0);
     }
-    #endif
     start(b);
     branchToInitialPartition(b);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
@@ -482,9 +478,9 @@ StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) {
 
 enum : unsigned {
     PIPELINE_PARAMS
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
     , INITIAL_SEG_NO
-    #endif
+    , ACCUMULATED_SEGMENT_TIME
+    , ACCUMULATED_SYNCHRONIZATION_TIME
     , PROCESS_THREAD_ID    
     , TERMINATION_SIGNAL
     // -------------------
@@ -888,21 +884,30 @@ StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
 
     assert (mNumOfThreads > 1);
 
+    IntegerType * const sizeTy = b->getSizeTy();
+    Type * const emptyTy = StructType::get(C);
+
     // NOTE: both the shared and thread local objects are parameters to the kernel.
     // They get automatically set by reading in the appropriate params.
 
     fields[PIPELINE_PARAMS] = StructType::get(C, mTarget->getDoSegmentFields(b));
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    fields[INITIAL_SEG_NO] = b->getSizeTy();
-    #endif
+    if (mUseDynamicMultithreading) {
+        fields[INITIAL_SEG_NO] = sizeTy;
+        fields[ACCUMULATED_SEGMENT_TIME] = sizeTy;
+        fields[ACCUMULATED_SYNCHRONIZATION_TIME] = sizeTy;
+    } else {
+        fields[INITIAL_SEG_NO] = emptyTy;
+        fields[ACCUMULATED_SEGMENT_TIME] = emptyTy;
+        fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
+    }
+
     Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
     fields[PROCESS_THREAD_ID] = pthreadSelfFn->getReturnType();
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
-        fields[TERMINATION_SIGNAL] = b->getSizeTy();
+        fields[TERMINATION_SIGNAL] = sizeTy;
     } else {
-        fields[TERMINATION_SIGNAL] = StructType::get(C);
+        fields[TERMINATION_SIGNAL] = emptyTy;
     }
-
 
     return StructType::get(C, fields);
 }
@@ -927,10 +932,15 @@ Value * PipelineCompiler::constructThreadStructObject(BuilderRef b, Value * cons
     }
     FixedArray<Value *, 2> indices2;
     indices2[0] = b->getInt32(0);
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    indices2[1] = b->getInt32(INITIAL_SEG_NO);
-    b->CreateStore(b->getSize(threadNum), b->CreateInBoundsGEP(threadState, indices2));
-    #endif
+    if (mUseDynamicMultithreading) {
+        indices2[1] = b->getInt32(INITIAL_SEG_NO);
+        b->CreateStore(b->getSize(threadNum), b->CreateInBoundsGEP(threadState, indices2));
+        Constant * const sz_ZERO = b->getSize(0);
+        indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP(threadState, indices2));
+        indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP(threadState, indices2));
+    }
     indices2[1] = b->getInt32(PROCESS_THREAD_ID);
     b->CreateStore(threadId, b->CreateInBoundsGEP(threadState, indices2));
     return threadState;
@@ -958,10 +968,17 @@ void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) 
     FixedArray<Value *, 2> indices2;
     indices2[0] = ZERO;
     assert (!mIsNestedPipeline && mNumOfThreads != 1);
-    #ifdef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    indices2[1] = b->getInt32(INITIAL_SEG_NO);
-    mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
-    #endif
+    if (mUseDynamicMultithreading) {
+        indices2[1] = b->getInt32(INITIAL_SEG_NO);
+        mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
+        indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+        mAccumulatedFullSegmentTimePtr = b->CreateInBoundsGEP(threadState, indices2);
+        indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+        mAccumulatedSynchronizationTimePtr = b->CreateInBoundsGEP(threadState, indices2);
+    } else {
+        mAccumulatedFullSegmentTimePtr = nullptr;
+        mAccumulatedSynchronizationTimePtr = nullptr;
+    }
     mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
     if (PipelineHasTerminationSignal) {
         indices2[1] = b->getInt32(TERMINATION_SIGNAL);

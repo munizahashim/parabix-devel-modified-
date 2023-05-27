@@ -231,7 +231,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const beforeKernelCall = startCycleCounter(b);
+    Value * const beforeKernelCall = startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
 
 
     Value * doSegmentRetVal = nullptr;

@@ -25,18 +25,23 @@ using IDISA::FixedVectorType;
 namespace kernel {
 
 enum CycleCounter {
-  KERNEL_SYNCHRONIZATION
-  , PARTITION_JUMP_SYNCHRONIZATION
-  , BUFFER_EXPANSION  
-  , BUFFER_COPY
-  , KERNEL_EXECUTION
-  , TOTAL_TIME
+  KERNEL_SYNCHRONIZATION            = 0
+  , PARTITION_JUMP_SYNCHRONIZATION  = 1
+  , BUFFER_EXPANSION                = 2
+  , BUFFER_COPY                     = 3
+  , KERNEL_EXECUTION                = 4
+  , TOTAL_TIME                      = 5
   // ----------------------
-  , NUM_OF_CYCLE_COUNTERS
+  , NUM_OF_CYCLE_COUNTERS           = 6
   // ----------------------
-  , SQ_SUM_TOTAL_TIME = NUM_OF_CYCLE_COUNTERS
-  , NUM_OF_INVOCATIONS = NUM_OF_CYCLE_COUNTERS + 1
+  , FULL_PIPELINE_TIME              = 6
+  // ----------------------
+  , SQ_SUM_TOTAL_TIME               = 6
+  , NUM_OF_INVOCATIONS              = 7
+  // ----------------------
+
 };
+
 
 #ifdef ENABLE_PAPI
 enum PAPIKernelCounter {
@@ -408,7 +413,9 @@ public:
 // cycle counter functions
 
     void addCycleCounterProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
-    Value * startCycleCounter(BuilderRef b);
+
+    Value * startCycleCounter(BuilderRef b, const CycleCounter type);
+    Value * startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types);
     void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, const CycleCounter type) const;
     void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
     void updateTotalCycleCounterTime(BuilderRef b) const;
@@ -583,6 +590,8 @@ protected:
     const bool                                  mTraceIndividualConsumedItemCounts;
     const bool                                  mGenerateTransferredItemCountHistogram;
     const bool                                  mGenerateDeferredItemCountHistogram;
+    const bool                                  mIsNestedPipeline;
+    const bool                                  mUseDynamicMultithreading;
 
     const unsigned                              mNumOfThreads;
 
@@ -605,7 +614,6 @@ protected:
 
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
-    const bool                                  mIsNestedPipeline;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
     const bool                                  EnableCycleCounter;
@@ -837,6 +845,11 @@ protected:
     FixedVector<PHINode *>                      mPartitionStartTimePhi;
     FixedArray<Value *, NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
 
+    // dynamic multithreading cycle counter state
+    Value *                                     mFullSegmentStartTime = nullptr;
+    Value *                                     mAccumulatedFullSegmentTimePtr = nullptr;
+    Value *                                     mAccumulatedSynchronizationTimePtr = nullptr;
+
     // papi counter state
     #ifdef ENABLE_PAPI
     SmallVector<int, 8>                         PAPIEventList;
@@ -897,6 +910,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
+, mIsNestedPipeline(P.IsNestedPipeline)
+, mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !mIsNestedPipeline)
 , mNumOfThreads(P.NumOfThreads)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
@@ -913,7 +928,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
 
-, mIsNestedPipeline(P.IsNestedPipeline)
+
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))

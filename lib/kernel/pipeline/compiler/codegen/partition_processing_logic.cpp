@@ -152,7 +152,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, FirstKernel, PAPIReadInitialMeasurementArray);
     #endif
-    mKernelStartTime = startCycleCounter(b);
+    mKernelStartTime = startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
     if (isMultithreaded()) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
@@ -387,7 +387,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const startTime = startCycleCounter(b);
+    Value * const startTime = startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
     assert (firstKernelInTargetPartition <= PipelineOutput);
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -606,7 +606,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         #ifdef ENABLE_PAPI
         readPAPIMeasurement(b, nextKernel, PAPIReadInitialMeasurementArray);
         #endif
-        mKernelStartTime = startCycleCounter(b);
+        mKernelStartTime = startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
         const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, nextKernel, type, nextSegNo);
         updateCycleCounter(b, nextKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);

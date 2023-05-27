@@ -22,7 +22,7 @@ void PipelineCompiler::start(BuilderRef b) {
         mRethrowException = b->WriteDefaultRethrowBlock();
     }
 
-    mPipelineStartTime = startCycleCounter(b);
+    mPipelineStartTime = startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugInit(b);

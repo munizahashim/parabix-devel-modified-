@@ -132,6 +132,11 @@ static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
 
+bool EnableDynamicMultithreading;
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),
                                                     cl::desc("The number of free calls to allow in bisecting"), cl::cat(CodeGenOptions));
 

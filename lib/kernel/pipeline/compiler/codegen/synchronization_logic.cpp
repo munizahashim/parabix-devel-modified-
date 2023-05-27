@@ -40,24 +40,17 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo);
     } else {
-        #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-        ConstantInt * const sz_ONE = b->getSize(1);
-        if (LLVM_LIKELY(mNumOfThreads > 1)) {
+        if (mUseDynamicMultithreading) {
+            ConstantInt * const sz_ONE = b->getSize(1);
             Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
             // NOTE: this must be atomic or the pipeline will deadlock when some thread
             // fetches a number before the prior one to fetch the same number updates it.
             mSegNo = b->CreateAtomicFetchAndAdd(sz_ONE, segNoPtr);
         } else {
-            Value * const initialSegNo = sz_ONE;
-        #else
-            Value * const initialSegNo = mSegNo; assert (mSegNo);
-        #endif
-            PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
-            segNo->addIncoming(initialSegNo, entryBlock);
+            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
+            segNo->addIncoming(mSegNo, entryBlock);
             mSegNo = segNo;
-        #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
         }
-        #endif
     }
     assert (mSegNo);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -70,12 +63,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
-    #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (LLVM_UNLIKELY(mNumOfThreads != 1)) {
-        return;
-    }
-    #endif
-    if (LLVM_LIKELY(mIsNestedPipeline)) {
+    if (LLVM_LIKELY(mIsNestedPipeline || mUseDynamicMultithreading)) {
         return;
     }
     assert (mNumOfThreads > 0);

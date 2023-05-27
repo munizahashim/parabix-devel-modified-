@@ -99,6 +99,7 @@ extern unsigned SegmentThreads;
 extern unsigned ScanBlocks;
 extern bool EnableObjectCache;
 extern bool EnablePipelineObjectCache;
+extern bool EnableDynamicMultithreading;
 extern bool TraceObjectCache;
 extern unsigned GroupNum;
 extern std::string ProgramName;

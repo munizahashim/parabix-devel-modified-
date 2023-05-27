@@ -753,7 +753,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const beforeCopy = startCycleCounter(b);
+    Value * const beforeCopy = startCycleCounter(b, CycleCounter::BUFFER_COPY);
 
     Value * source = buffer->getOverflowAddress(b);
     Value * target = buffer->getMallocAddress(b);

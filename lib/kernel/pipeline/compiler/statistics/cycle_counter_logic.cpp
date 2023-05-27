@@ -90,9 +90,20 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief startOptionalCycleCounter
+ * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::startCycleCounter(BuilderRef b) {
+Value * PipelineCompiler::startCycleCounter(BuilderRef b, const CycleCounter type) {
+    Value * counter = nullptr;
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        counter = b->CreateReadCycleCounter();
+    }
+    return counter;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief startCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types) {
     Value * counter = nullptr;
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         counter = b->CreateReadCycleCounter();
