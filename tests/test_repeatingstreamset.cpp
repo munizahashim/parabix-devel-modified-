@@ -646,6 +646,8 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     Scalar *  const repLength = P->CreateConstant(b->getSize(repetitionLength));
 
+    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
+
     Scalar * output = P->getInputScalar("output");
 
     P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, output);

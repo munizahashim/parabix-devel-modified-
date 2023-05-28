@@ -42,6 +42,7 @@ SRC
     compiler/codegen/kernel_family_logic.cpp
     compiler/codegen/kernel_io_calculation_logic.cpp
     compiler/codegen/kernel_logic.cpp
+    compiler/codegen/multithreading_model_logic.cpp
     compiler/codegen/kernel_segment_processing_logic.cpp
     compiler/codegen/optimization_branch_logic.cpp
     compiler/codegen/partition_processing_logic.cpp

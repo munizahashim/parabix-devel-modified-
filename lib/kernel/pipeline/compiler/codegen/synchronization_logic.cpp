@@ -38,21 +38,23 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
-        assert (mSegNo == mExternalSegNo);
+        assert (mSegNo == mExternalSegNo && mSegNo);
+    } else if (mUseDynamicMultithreading) {
+        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
+        // NOTE: this must be atomic or the pipeline will deadlock when some thread
+        // fetches a number before the prior one to fetch the same number updates it.
+        mSegNo = b->CreateAtomicFetchAndAdd(b->getSize(1), segNoPtr);
     } else {
-        if (mUseDynamicMultithreading) {
-            ConstantInt * const sz_ONE = b->getSize(1);
-            Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
-            // NOTE: this must be atomic or the pipeline will deadlock when some thread
-            // fetches a number before the prior one to fetch the same number updates it.
-            mSegNo = b->CreateAtomicFetchAndAdd(sz_ONE, segNoPtr);
+        Value * initialSegNo = nullptr;
+        if (mNumOfThreads == 1) {
+            initialSegNo = b->getSize(0);
         } else {
-            PHINode * const segNo = b->CreatePHI(mSegNo->getType(), 2, "segNo");
-            segNo->addIncoming(mSegNo, entryBlock);
-            mSegNo = segNo;
+            initialSegNo = mSegNo; assert (mSegNo);
         }
+        PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
+        segNo->addIncoming(initialSegNo, entryBlock);
+        mSegNo = segNo;
     }
-    assert (mSegNo);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mBaseSegNo = mSegNo;
     mCurrentNestedSynchronizationVariable = 0;

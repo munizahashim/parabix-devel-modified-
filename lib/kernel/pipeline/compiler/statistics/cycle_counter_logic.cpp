@@ -16,26 +16,25 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         // TODO: make these thread local to prevent false sharing and enable
         // analysis of thread distributions?
-        IntegerType * const int64Ty = b->getInt64Ty();
-        IntegerType * const intSumSqTy = b->getIntNTy(64);
-
-        SmallVector<Type *, NUM_OF_CYCLE_COUNTERS + 2> type;
-        type.push_back(int64Ty);
+        Type * const int64Ty = b->getInt64Ty();
+        Type * rootPropertyIntTy = int64Ty;
         if (isRoot) {
-            type.push_back(int64Ty);
+            rootPropertyIntTy = int64Ty;
         } else {
-            Type * const emptyTy = StructType::get(b->getContext());
-            type.push_back(emptyTy);
-        }
-        for (unsigned i = 2; i < NUM_OF_CYCLE_COUNTERS; ++i) {
-            type.push_back(int64Ty);
-        }
-        type.push_back(intSumSqTy);
-        if (isRoot) {
-            type.push_back(int64Ty);
+            rootPropertyIntTy = StructType::get(b->getContext());
         }
 
-        StructType * const cycleCounterTy = StructType::get(b->getContext(), type);
+        FixedArray<Type *, NUM_OF_KERNEL_CYCLE_COUNTERS> fields;
+        fields[KERNEL_SYNCHRONIZATION] = int64Ty;
+        fields[PARTITION_JUMP_SYNCHRONIZATION] = rootPropertyIntTy;
+        fields[BUFFER_EXPANSION] = int64Ty;
+        fields[BUFFER_COPY] = int64Ty;
+        fields[KERNEL_EXECUTION] = int64Ty;
+        fields[TOTAL_TIME] = int64Ty;
+        fields[SQ_SUM_TOTAL_TIME] = rootPropertyIntTy;
+        fields[NUM_OF_INVOCATIONS] = rootPropertyIntTy;
+
+        StructType * const cycleCounterTy = StructType::get(b->getContext(), fields);
         const auto prefix = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
         mTarget->addInternalScalar(cycleCounterTy, prefix, groupId);
     }
@@ -244,12 +243,12 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     auto maxCyclesPerItem = baseCyclesPerItem;
 
     #ifndef NDEBUG
-    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
+    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
     #endif
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto k = i * (NUM_OF_CYCLE_COUNTERS + 3);
-        assert ((k + TOTAL_TIME) < numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3));
+        const auto k = i * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
+        assert ((k + TOTAL_TIME) < numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3));
         const uint64_t itemCount = values[k];
         maxItemCount = std::max(maxItemCount, itemCount);
         const auto cycleCount = values[k + TOTAL_TIME + 1];
@@ -300,8 +299,8 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     boost::format ratefmt("%.1f");
     boost::format covfmt(" +- %4.1f\n");
 
-    std::array<uint64_t, NUM_OF_CYCLE_COUNTERS + 1> subtotals;
-    std::fill_n(subtotals.begin(), NUM_OF_CYCLE_COUNTERS + 1, 0);
+    std::array<uint64_t, NUM_OF_KERNEL_CYCLE_COUNTERS + 1> subtotals;
+    std::fill_n(subtotals.begin(), NUM_OF_KERNEL_CYCLE_COUNTERS + 1, 0);
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
 
@@ -387,7 +386,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         out << center_justify("--", maxCyclesPerItemLength + 1);
     }
 
-    for (unsigned j = 0; j <= NUM_OF_CYCLE_COUNTERS; ++j) {
+    for (unsigned j = 0; j <= NUM_OF_KERNEL_CYCLE_COUNTERS; ++j) {
         const auto v = subtotals[j];
         assert (v <= totalCycles);
         const double cycPerc = (((long double)(v * 100)) / fTotal);
@@ -432,7 +431,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 
         Value * const arrayOfKernelNames = toGlobal(kernelNames, int8PtrTy, numOfKernels);
 
-        const auto REQ_INTEGERS = numOfKernels * (NUM_OF_CYCLE_COUNTERS + 3);
+        const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
 
         Constant * const requiredSpace =  b->getSize(sizeof(uint64_t) * REQ_INTEGERS);
 

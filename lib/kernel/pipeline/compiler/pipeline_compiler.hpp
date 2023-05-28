@@ -24,6 +24,17 @@ using IDISA::FixedVectorType;
 
 namespace kernel {
 
+enum PipelineStateObjectField : unsigned {
+    PIPELINE_PARAMS
+    , INITIAL_SEG_NO
+    , ACCUMULATED_SEGMENT_TIME
+    , ACCUMULATED_SYNCHRONIZATION_TIME
+    , PROCESS_THREAD_ID
+    , TERMINATION_SIGNAL
+    // -------------------
+    , THREAD_STRUCT_SIZE
+};
+
 enum CycleCounter {
   KERNEL_SYNCHRONIZATION            = 0
   , PARTITION_JUMP_SYNCHRONIZATION  = 1
@@ -32,16 +43,14 @@ enum CycleCounter {
   , KERNEL_EXECUTION                = 4
   , TOTAL_TIME                      = 5
   // ----------------------
-  , NUM_OF_CYCLE_COUNTERS           = 6
-  // ----------------------
-  , FULL_PIPELINE_TIME              = 6
-  // ----------------------
   , SQ_SUM_TOTAL_TIME               = 6
   , NUM_OF_INVOCATIONS              = 7
   // ----------------------
-
+  , FULL_PIPELINE_TIME              = 8
+  // ----------------------
+  , NUM_OF_KERNEL_CYCLE_COUNTERS    = 8
+  , TOTAL_NUM_OF_CYCLE_COUNTERS    = 9
 };
-
 
 #ifdef ENABLE_PAPI
 enum PAPIKernelCounter {
@@ -542,6 +551,9 @@ public:
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
 
+    Value * makeStateObject(BuilderRef b, Type * type);
+    void destroyStateObject(BuilderRef b, Value * threadState);
+
     LLVM_READNONE std::string makeKernelName(const size_t kernelIndex) const;
     LLVM_READNONE std::string makeBufferName(const size_t kernelIndex, const StreamSetPort port) const;
 
@@ -843,7 +855,7 @@ protected:
     Value *                                     mKernelStartTime = nullptr;
     Value *                                     mAcquireAndReleaseStartTime = nullptr;
     FixedVector<PHINode *>                      mPartitionStartTimePhi;
-    FixedArray<Value *, NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
+    FixedArray<Value *, TOTAL_NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
 
     // dynamic multithreading cycle counter state
     Value *                                     mFullSegmentStartTime = nullptr;

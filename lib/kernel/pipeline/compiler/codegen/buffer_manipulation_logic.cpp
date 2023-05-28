@@ -156,11 +156,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
 
+        if (LLVM_UNLIKELY(rate.isGreedy())) {
+            continue;
+        }
+
         //if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || bn.isTruncated() || bn.isConstant())) {
-
-            Rational maxItemsPerSegment{mKernel->getStride() * rate.getUpperBound()};
-
-            // TODO: support popcount/partialsum
 
             const auto itemWidth = getItemWidth(buffer->getBaseType());
 
@@ -373,6 +373,15 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             FixedArray<Value *, 6> args;
             args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
+            assert (mKernel->getStride() > 0);
+            if (rate.getUpperBound().numerator() == 0) {
+                errs() << mKernel->getName() << "." << mKernel->getInputStreamSetBinding(inputPort.Number).getName() << "\n";
+            }
+
+            assert (rate.getUpperBound().numerator() > 0);
+
+
+
             const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
 
