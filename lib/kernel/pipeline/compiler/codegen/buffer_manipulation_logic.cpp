@@ -134,7 +134,6 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(BuilderRef b,
     #endif
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroInputAfterFinalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -177,10 +176,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
 
             AllocaInst * bufferStorage = nullptr;
+            PointerType * const int8PtrTy = b->getInt8PtrTy();
+            Constant * const nullPtr = ConstantPointerNull::get(int8PtrTy);
             if (mNumOfTruncatedInputBuffers < mTruncatedInputBuffer.size()) {
                 bufferStorage = mTruncatedInputBuffer[mNumOfTruncatedInputBuffers];
             } else { // create a stack entry for this buffer at the start of the pipeline
-                PointerType * const int8PtrTy = b->getInt8PtrTy();
                 bufferStorage = b->CreateAllocaAtEntryPoint(int8PtrTy);
                 Instruction * const nextNode = bufferStorage->getNextNode(); assert (nextNode);
                 new StoreInst(ConstantPointerNull::get(int8PtrTy), bufferStorage, nextNode);
@@ -193,7 +193,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             Constant * const ITEM_WIDTH = b->getSize(itemWidth);
 
             PointerType * const bufferType = buffer->getPointerType();
-            PointerType * const int8PtrTy = b->getInt8PtrTy();
 
             BasicBlock * const maskedInput = b->CreateBasicBlock(prefix + "_maskInput", mKernelCheckOutputSpace);
             BasicBlock * const selectedInput = b->CreateBasicBlock(prefix + "_selectInput", mKernelCheckOutputSpace);
@@ -213,6 +212,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 if (mIsInputZeroExtended[inputPort]) {
                     computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
                 }
+                b->CreateStore(nullPtr, bufferStorage);
                 b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
             }
 
@@ -306,9 +306,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 const auto blockSize = b->getBitBlockWidth() / 8;
                 Value * const maskedBuffer = b->CreateAlignedMalloc(mallocBytes, blockSize);
                 b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
-
-                // TODO: look into checking whether the OS supports aligned realloc.
-                b->CreateFree(b->CreateLoad(bufferStorage));
                 b->CreateStore(maskedBuffer, bufferStorage);
                 Value * const mallocedAddress = b->CreatePointerCast(maskedBuffer, bufferPtrTy);
                 Value * const total = b->CreateLShr(end, LOG_2_BLOCK_WIDTH);
@@ -351,8 +348,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                     Value * const bytesToCopy = b->CreateSub(partialCopyInputEndPtrInt, partialCopyInputStartPtrInt);
                     b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, blockSize);
                     inputPtr = partialCopyInputEndPtr;
-                    Value * const afterCopyOutputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
-                    outputPtr = afterCopyOutputPtr;
+                    outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
                 }
                 assert (inputPtr->getType() == outputPtr->getType());
                 Value * const val = b->CreateBlockAlignedLoad(inputPtr);
@@ -373,18 +369,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             FixedArray<Value *, 6> args;
             args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
-            assert (mKernel->getStride() > 0);
-            if (rate.getUpperBound().numerator() == 0) {
-                errs() << mKernel->getName() << "." << mKernel->getInputStreamSetBinding(inputPort.Number).getName() << "\n";
-            }
-
-            assert (rate.getUpperBound().numerator() > 0);
-
-
-
             const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
-
             if (port.isDeferred()) {
                 args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
             } else {
@@ -414,6 +400,16 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         //}
     }
     #endif
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief freeZeroedInputBuffers
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::freeZeroedInputBuffers(BuilderRef b) {
+    // free any truncated input buffers
+    for (unsigned i = 0; i < mNumOfTruncatedInputBuffers; ++i) {
+        b->CreateFree(b->CreateLoad(mTruncatedInputBuffer[i]));
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -492,7 +488,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
         Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
 
-        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
+//        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
         Value * const value = b->CreateBlockAlignedLoad(inputPtr);
         Value * const maskedValue = b->CreateAnd(value, mask);
@@ -516,10 +512,10 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, ITEM_WIDTH);
             Value * const endInt = b->CreatePtrToInt(end, intPtrTy);
             Value * const remainingPackBytes = b->CreateSub(endInt, startInt);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
-            debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
-            #endif
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
+//            debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
+//            #endif
             b->CreateMemZero(start, remainingPackBytes, blockWidth / 8);
         }
         BasicBlock * const maskLoopExit = b->GetInsertBlock();
@@ -558,10 +554,10 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
             Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b->CreateSub(endPtrInt, startPtrInt);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b->CreateSub(startPtrInt, epochInt));
-            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
-            #endif
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b->CreateSub(startPtrInt, epochInt));
+//            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
+//            #endif
             b->CreateMemZero(startPtr, remainingBytes, blockWidth / 8);
         }
     }

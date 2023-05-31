@@ -8,65 +8,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief start
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::start(BuilderRef b) {
-
-    mCurrentKernelName = mKernelName[PipelineInput];
-    mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
-    mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
-
-    makePartitionEntryPoints(b);
-
-    if (CheckAssertions) {
-        mRethrowException = b->WriteDefaultRethrowBlock();
-    }
-
-    mPipelineStartTime = startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
-
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugInit(b);
-    if (mIsNestedPipeline) {
-        debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
-    } else {
-        debugPrint(b, "================================================= START %" PRIx64, getHandle());
-    }
-    const auto prefix = mTarget->getName();
-    if (mNumOfStrides) {
-        debugPrint(b, prefix + " +++ NUM OF STRIDES %" PRIu64 "+++", mNumOfStrides);
-    }
-    if (mIsFinal) {
-        debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
-    }
-    #endif
-
-    #ifdef ENABLE_PAPI
-    createEventSetAndStartPAPI(b);
-    #endif
-
-    mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
-    initializeFlowControl(b);
-    readExternalConsumerItemCounts(b);
-    loadInternalStreamSetHandles(b, true);
-    loadInternalStreamSetHandles(b, false);
-
-    mKernel = nullptr;
-    mKernelId = 0;
-    mAddressableItemCountPtr.clear();
-    mVirtualBaseAddressPtr.clear();
-    mNumOfTruncatedInputBuffers = 0;
-    mTruncatedInputBuffer.clear();
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    b->CreateBr(mPipelineLoop);
-
-    b->SetInsertPoint(mPipelineLoop);
-    mMadeProgressInLastSegment = b->CreatePHI(b->getInt1Ty(), 2, "madeProgressInLastSegment");
-    mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
-    mPipelineProgress = b->getFalse();
-    obtainCurrentSegmentNumber(b, entryBlock);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(BuilderRef b) {
@@ -282,6 +223,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
+    freeZeroedInputBuffers(b);
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);
 
@@ -894,81 +836,6 @@ void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
             mUpdatedProducedDeferredPhi[port]->addIncoming(produced, exitBlock);
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief end
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::end(BuilderRef b) {
-
-    // A pipeline will end for one or two reasons:
-
-    // 1) Process has *halted* due to insufficient external I/O.
-
-    // 2) All pipeline sinks have terminated (i.e., any kernel that writes
-    // to a pipeline output, is marked as having a side-effect, or produces
-    // an input for some call in which no dependent kernels is a pipeline
-    // sink).
-
-    // TODO: if we determine that all of the pipeline I/O is consumed in one invocation of the
-    // pipeline, we can avoid testing at the end whether its terminated.
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    b->CreateBr(mPartitionEntryPoint[PartitionCount]);
-
-    b->SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
-    #endif
-    Value * terminated = nullptr;
-    if (mIsNestedPipeline) {
-        if (mCurrentThreadTerminationSignalPtr) {
-            terminated = hasPipelineTerminated(b);
-        }
-        b->CreateBr(mPipelineEnd);
-    } else {
-        terminated = hasPipelineTerminated(b);
-        Value * const done = b->CreateIsNotNull(terminated);
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
-            Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
-            b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
-        }
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-        incrementCurrentSegNo(b, exitBlock);
-        b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
-    }
-    b->SetInsertPoint(mPipelineEnd);
-    if (mCurrentThreadTerminationSignalPtr) {
-        assert (canSetTerminateSignal());
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "# pipeline terminated = %" PRIu64 " for %" PRIx64, terminated, getHandle());
-        #endif
-        b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
-    }
-    // free any truncated input buffers
-    for (Value * const bufferPtr : mTruncatedInputBuffer) {
-        b->CreateFree(b->CreateLoad(bufferPtr));
-    }
-    #ifdef PRINT_DEBUG_MESSAGES
-    if (mIsNestedPipeline) {
-        debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
-    } else {
-        debugPrint(b, "================================================= END %" PRIx64, getHandle());
-    }
-    #endif
-
-    #ifdef ENABLE_PAPI
-    stopPAPIAndDestroyEventSet(b);
-    #endif
-
-    updateTotalCycleCounterTime(b);
-
-    mExpectedNumOfStridesMultiplier = nullptr;
-    mThreadLocalStreamSetBaseAddress = nullptr;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    mSegNo = mBaseSegNo;
-    #endif
-
 }
 
 

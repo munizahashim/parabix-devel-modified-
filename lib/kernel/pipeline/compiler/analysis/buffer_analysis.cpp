@@ -595,14 +595,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
-//        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//            BufferPort & outputRate = mBufferGraph[e];
-//            const auto streamSet = target(e, mBufferGraph);
-//            const BufferNode & N = mBufferGraph[streamSet];
-//            if (N.isTruncated()) {
-//                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
-//            }
-//        }
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            BufferPort & outputRate = mBufferGraph[e];
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferNode & N = mBufferGraph[streamSet];
+            if (N.isUnowned()) {
+                outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+            }
+        }
     }
 }
 

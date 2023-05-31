@@ -212,6 +212,8 @@ public:
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
     Value * constructThreadStructObject(BuilderRef b, Value * const threadId, Value * const threadLocal, const unsigned threadNum);
     void readThreadStuctObject(BuilderRef b, Value * threadState);
+    void readInitialSegmentNum(BuilderRef b, Value * threadState);
+    void getThreadedTerminationSignalPtr(BuilderRef b, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
@@ -299,6 +301,7 @@ public:
     Value * revertTransitiveAddCalculation(BuilderRef b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
 
     void zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses);
+    void freeZeroedInputBuffers(BuilderRef b);
 
     Value * allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlock * const insertBefore) const;
 

@@ -118,10 +118,10 @@ void addConsumerCalls(const PortType portType, const CallBinding & call) {
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    const auto consumer = G.addOrFind(RelationshipNode::IsCallee, &call);
+    const auto callFunc = G.addOrFind(RelationshipNode::IsCallee, &call);
     for (unsigned i = 0; i < n; ++i) {
-        const auto relationship = G.addOrFind(RelationshipNode::IsKernel, array[i]);
-        add_edge(relationship, consumer, RelationshipType{portType, i}, G);
+        const auto relationship = G.find(RelationshipNode::IsScalar, array[i]);
+        add_edge(relationship, callFunc, RelationshipType{portType, i}, G);
     }
 }
 

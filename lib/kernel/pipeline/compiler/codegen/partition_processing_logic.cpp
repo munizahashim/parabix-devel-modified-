@@ -11,11 +11,11 @@ void PipelineCompiler::makePartitionEntryPoints(BuilderRef b) {
         mPartitionEntryPoint[i] = b->CreateBasicBlock("Partition" + std::to_string(i), mPipelineEnd);
     }
 
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    mPartitionEntryPoint[PartitionCount] = b->CreateBasicBlock("PipelineLoopCond", mPipelineEnd);
-    #else
-    mPartitionEntryPoint[PartitionCount] = mPipelineEnd;
-    #endif
+//    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+//    mPartitionEntryPoint[PartitionCount] = b->CreateBasicBlock("PipelineLoopCond", mPipelineEnd);
+//    #else
+//    mPartitionEntryPoint[PartitionCount] = mPipelineEnd;
+//    #endif
 
     IntegerType * const boolTy = b->getInt1Ty();
     IntegerType * const sizeTy = b->getInt64Ty();
