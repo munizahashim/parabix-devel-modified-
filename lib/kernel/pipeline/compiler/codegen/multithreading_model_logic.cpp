@@ -254,7 +254,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (isFromCurrentFunction(b, getHandle()));
     assert (isFromCurrentFunction(b, getThreadLocalHandle()));
     mSegNo = &*args;
-
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugInit(b);
+    #endif
     // generate the pipeline logic for this thread
     start(b);
     branchToInitialPartition(b);
@@ -506,7 +508,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (b->getCompiler() == this);
 
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
-    updateExternalPipelineIO(b);
+    updateExternalConsumedItemCounts(b);
+    updateExternalProducedItemCounts(b);
 
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
@@ -537,7 +540,7 @@ void PipelineCompiler::start(BuilderRef b) {
 
     mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
     initializeFlowControl(b);
-    readExternalConsumerItemCounts(b);
+//    readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
 
@@ -828,7 +831,8 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
         executeKernel(b);
     }
     end(b);
-    updateExternalPipelineIO(b);
+    updateExternalConsumedItemCounts(b);
+    updateExternalProducedItemCounts(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         // TODO: this isn't fully correct when this is a nested pipeline
         concludeStridesPerSegmentRecording(b);

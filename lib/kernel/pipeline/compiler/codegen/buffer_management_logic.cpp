@@ -227,9 +227,9 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateExternalPipelineIO
+ * @brief updateExternalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
+void PipelineCompiler::updateExternalProducedItemCounts(BuilderRef b) {
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -909,7 +909,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
 
 
     Value * const baseAddress = buffer->getBaseAddress(b);
-
     if (bufferNode.isUnowned()) {
         assert (bufferNode.isNonThreadLocal());
         assert (!bufferNode.isConstant());

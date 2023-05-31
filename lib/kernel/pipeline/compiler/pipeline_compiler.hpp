@@ -221,7 +221,7 @@ public:
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void clearInternalState(BuilderRef b);
-    void updateExternalPipelineIO(BuilderRef b);
+    void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
 
 // partitioning codegen functions
@@ -390,8 +390,8 @@ public:
     void readConsumedItemCounts(BuilderRef b);
     Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
     void setConsumedItemCount(BuilderRef b, const size_t streamSet, Value * consumed, const unsigned slot) const;
+    void updateExternalConsumedItemCounts(BuilderRef b);
     void zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId);
-    void readAllConsumerItemCounts(BuilderRef b);
 
 // buffer management codegen functions
 
@@ -476,7 +476,6 @@ public:
     bool requiresExplicitFinalStride() const ;
     void identifyPipelineInputs(const unsigned kernelId);
     void identifyLocalPortIds(const unsigned kernelId);
-    bool hasExternalIO(const size_t kernel) const;
 
 // synchronization functions
 
@@ -592,8 +591,6 @@ public:
     bool hasAnyGreedyInput(const unsigned kernelId) const;
     bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
-
-    static unsigned selectNumOfThreadsBasedOnPipelineGraph(const unsigned maxThreads, const bool nested, const BufferGraph & G);
 
 protected:
 

@@ -255,21 +255,6 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
     }
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasExternalIO
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::hasExternalIO(const size_t kernel) const {
-    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-        const auto streamSet = source(input, mBufferGraph);
-        const BufferNode & node = mBufferGraph[streamSet];
-        if (node.isExternal()) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasAtLeastOneNonGreedyInput
  ** ------------------------------------------------------------------------------------------------------------- */

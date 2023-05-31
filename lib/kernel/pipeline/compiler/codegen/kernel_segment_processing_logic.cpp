@@ -33,7 +33,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #endif
     identifyPipelineInputs(mKernelId);
 
-
     mIsBounded = isBounded();
     mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
     bool checkInputChannels = false;

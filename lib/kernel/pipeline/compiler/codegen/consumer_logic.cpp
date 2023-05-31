@@ -155,11 +155,6 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         }
         itemCount = produced;
     } else {
-
-        if (in_degree(streamSet, mConsumerGraph) == 0) {
-            errs() << "err: " << mKernelId << " -> " << streamSet << "\n";
-        }
-
         const auto e = in_edge(streamSet, mConsumerGraph);
         const ConsumerEdge & c = mConsumerGraph[e];
         const auto producer = source(e, mConsumerGraph);
@@ -300,11 +295,23 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
     b->CreateStore(consumed, ptr);
 
-    // update external count
-    if (LLVM_UNLIKELY(producer == PipelineInput && slot == 0)) {
+//    // update external count
+//    if (LLVM_UNLIKELY(producer == PipelineInput && slot == 0)) {
+//        b->CreateStore(consumed, getProcessedInputItemsPtr(outputPort.Port.Number));
+//    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateExternalConsumedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateExternalConsumedItemCounts(BuilderRef b) {
+    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const auto streamSet = target(input, mBufferGraph);
+        Value * const consumed = readConsumedItemCount(b, streamSet);
+        const BufferPort & outputPort = mBufferGraph[input];
         b->CreateStore(consumed, getProcessedInputItemsPtr(outputPort.Port.Number));
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
