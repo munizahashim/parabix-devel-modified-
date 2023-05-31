@@ -220,7 +220,6 @@ public:
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
-    void clearInternalState(BuilderRef b);
     void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
 
@@ -258,7 +257,6 @@ public:
     void addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
     void initializeInitialSlidingWindowSegmentLengths(BuilderRef b, Value * const segmentLengthScalingFactor);
     void initializeFlowControl(BuilderRef b);
-    void loadCurrentThreadLocalMemoryAddress(BuilderRef b);
     void detemineMaximumNumberOfStrides(BuilderRef b);
     void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
 
@@ -414,7 +412,6 @@ public:
     void addRepeatingStreamSetBufferProperties(BuilderRef b);
     void deallocateRepeatingBuffers(BuilderRef b);
     void generateMetaDataForRepeatingStreamSets(BuilderRef b);
-    bool readsRepeatingStreamSet() const;
     Constant * getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const;
     void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
@@ -483,7 +480,6 @@ public:
     void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
     void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
-    void verifyPostSynchronizationLock(BuilderRef b) ;
     Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
     inline LLVM_READNONE bool isMultithreaded() const;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS

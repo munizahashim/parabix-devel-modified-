@@ -529,9 +529,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 void PipelineCompiler::start(BuilderRef b) {
 
     mCurrentKernelName = mKernelName[PipelineInput];
-//    mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
-//    mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
-
     makePartitionEntryPoints(b);
 
     if (CheckAssertions) {
@@ -540,7 +537,7 @@ void PipelineCompiler::start(BuilderRef b) {
 
     mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
     initializeFlowControl(b);
-//    readExternalConsumerItemCounts(b);
+    readExternalConsumerItemCounts(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
 

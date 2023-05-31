@@ -177,33 +177,6 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     }
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief verifyPostSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::verifyPostSynchronizationLock(BuilderRef b) {
-    if (isMultithreaded()) {
-        auto checkLockVal = [&](unsigned typeId) {
-            Value * const lockPtr = getSynchronizationLockPtrForKernel(b, mKernelId, typeId);
-            return b->CreateICmpUGE(b->CreateLoad(lockPtr), mSegNo);
-        };
-
-        Value * valid = nullptr;
-
-        if (isDataParallel(mKernelId)) {
-            Value * const A = checkLockVal(SYNC_LOCK_PRE_INVOCATION);
-            Value * const B = checkLockVal(SYNC_LOCK_POST_INVOCATION);
-            valid = b->CreateAnd(A, B);
-        } else {
-            Value * const F = checkLockVal(SYNC_LOCK_FULL);
-            valid = F;
-        }
-
-        b->CreateAssert(valid, "%s: invalid post-synchronization segment number detected!",
-                        mKernelName[mKernelId]);
-    }
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */

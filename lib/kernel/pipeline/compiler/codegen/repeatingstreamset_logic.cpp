@@ -73,18 +73,6 @@ Constant * PipelineCompiler::getGuaranteedRepeatingStreamSetLength(BuilderRef b,
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief readsRepeatingStreamSet
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::readsRepeatingStreamSet() const {
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isConstant()) return true;
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindRepeatingStreamSetInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {

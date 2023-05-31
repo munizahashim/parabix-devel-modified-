@@ -531,22 +531,4 @@ Value * PipelineCompiler::readTerminationSignalFromLocalState(BuilderRef b, Valu
     return signal;
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief clearInternalState
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::clearInternalState(BuilderRef b) {
-
-    mPartitionEntryPoint.reset(0, PartitionCount);
-    mKernelTerminationSignal.reset(FirstKernel, LastKernel);
-
-    mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
-
-    std::fill_n(mPartitionProducedItemCountPhi.data(), mPartitionProducedItemCountPhi.num_elements(), nullptr);
-    std::fill_n(mPartitionConsumedItemCountPhi.data(), mPartitionConsumedItemCountPhi.num_elements(), nullptr);
-    std::fill_n(mPartitionTerminationSignalPhi.data(), mPartitionTerminationSignalPhi.num_elements(), nullptr);
-    mPartitionPipelineProgressPhi.reset(0, PartitionCount - 1);
-
-    resetInternalBufferHandles();
-}
-
 }
