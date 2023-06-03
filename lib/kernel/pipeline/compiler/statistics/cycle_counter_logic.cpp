@@ -31,8 +31,8 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
         fields[BUFFER_COPY] = int64Ty;
         fields[KERNEL_EXECUTION] = int64Ty;
         fields[TOTAL_TIME] = int64Ty;
-        fields[SQ_SUM_TOTAL_TIME] = rootPropertyIntTy;
-        fields[NUM_OF_INVOCATIONS] = rootPropertyIntTy;
+        fields[SQ_SUM_TOTAL_TIME] = int64Ty;
+        fields[NUM_OF_INVOCATIONS] = int64Ty;
 
         StructType * const cycleCounterTy = StructType::get(b->getContext(), fields);
         const auto prefix = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
@@ -89,60 +89,87 @@ void PipelineCompiler::addCycleCounterProperties(BuilderRef b, const unsigned ke
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief startCycleCounter
+ * @brief trackCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::startCycleCounter(BuilderRef b, const CycleCounter type) {
-    Value * counter = nullptr;
+inline bool PipelineCompiler::trackCycleCounter(const CycleCounter type) const {
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        counter = b->CreateReadCycleCounter();
+        return true;
     }
-    return counter;
+    if (mUseDynamicMultithreading) {
+        return (type == KERNEL_SYNCHRONIZATION) || (type == PARTITION_JUMP_SYNCHRONIZATION);
+    }
+    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types) {
-    Value * counter = nullptr;
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        counter = b->CreateReadCycleCounter();
+void PipelineCompiler::startCycleCounter(BuilderRef b, const CycleCounter type) {
+    if (trackCycleCounter(type)) {
+        Value * const counter = b->CreateReadCycleCounter();
+        mCycleCounters[(unsigned)type] = counter;
     }
-    return counter;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief startCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types) {
+    Value * counter = nullptr;
+    for (auto type : types) {
+        if (trackCycleCounter(type)) {
+            if (counter == nullptr) {
+                counter = b->CreateReadCycleCounter();
+            }
+            mCycleCounters[(unsigned)type] = counter;
+        }
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, const CycleCounter type) const {
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, const CycleCounter type) const {
+    if (trackCycleCounter(type)) {
         Value * const end = b->CreateReadCycleCounter();
+        Value * const start = mCycleCounters[(unsigned)type]; assert (start);
         Value * const duration = b->CreateSub(end, start);
 
-        const auto prefix = makeKernelName(kernelId);
-        Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
-        FixedArray<Value *, 2> index;
-        index[0] = b->getInt32(0);
-        index[1] = b->getInt32(type);
-        Value * const sumCounterPtr = b->CreateGEP(ptr, index);
-        Value * const sumRunningCount = b->CreateLoad(sumCounterPtr);
-        Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
-        b->CreateStore(sumUpdatedCount, sumCounterPtr);
+        if (mUseDynamicMultithreading) {
+            Value * const cur = b->CreateLoad(mAccumulatedSynchronizationTimePtr);
+            Value * const accum = b->CreateAdd(cur, duration);
+            b->CreateStore(accum, mAccumulatedSynchronizationTimePtr);
+        }
 
-        if (type == CycleCounter::TOTAL_TIME) {
-            index[1] = b->getInt32(SQ_SUM_TOTAL_TIME);
-            Value * const sqSumCounterPtr = b->CreateGEP(ptr, index);
-            Value * const sqSumRunningCount = b->CreateLoad(sqSumCounterPtr);
-            Value * sqDuration = b->CreateZExt(duration, sqSumRunningCount->getType());
-            sqDuration = b->CreateMul(sqDuration, sqDuration);
-            Value * const sqSumUpdatedCount = b->CreateAdd(sqSumRunningCount, sqDuration);
-            b->CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
-            if (mIsPartitionRoot) {
-                index[1] = b->getInt32(NUM_OF_INVOCATIONS);
-                Value * const invokePtr = b->CreateGEP(ptr, index);
-                Value * const invoked = b->CreateLoad(invokePtr);
-                Value * const invoked2 = b->CreateAdd(invoked, b->getSize(1));
-                b->CreateStore(invoked2, invokePtr);
+        if (EnableCycleCounter) {
+
+            const auto prefix = makeKernelName(kernelId);
+            Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
+            FixedArray<Value *, 2> index;
+            index[0] = b->getInt32(0);
+            index[1] = b->getInt32(type);
+            Value * const sumCounterPtr = b->CreateGEP(ptr, index);
+            Value * const sumRunningCount = b->CreateLoad(sumCounterPtr);
+            Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
+            b->CreateStore(sumUpdatedCount, sumCounterPtr);
+
+            if (type == CycleCounter::TOTAL_TIME) {
+                index[1] = b->getInt32(SQ_SUM_TOTAL_TIME);
+                Value * const sqSumCounterPtr = b->CreateGEP(ptr, index);
+                Value * const sqSumRunningCount = b->CreateLoad(sqSumCounterPtr);
+                Value * sqDuration = b->CreateZExt(duration, sqSumRunningCount->getType());
+                sqDuration = b->CreateMul(sqDuration, sqDuration);
+                Value * const sqSumUpdatedCount = b->CreateAdd(sqSumRunningCount, sqDuration);
+                b->CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
+                if (mIsPartitionRoot) {
+                    index[1] = b->getInt32(NUM_OF_INVOCATIONS);
+                    Value * const invokePtr = b->CreateGEP(ptr, index);
+                    Value * const invoked = b->CreateLoad(invokePtr);
+                    Value * const invoked2 = b->CreateAdd(invoked, b->getSize(1));
+                    b->CreateStore(invoked2, invokePtr);
+                }
             }
+
         }
 
     }
@@ -151,9 +178,11 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const {
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const {
+    if (EnableCycleCounter) {
         Value * const end = b->CreateReadCycleCounter();
+        Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
+        assert (mCycleCounters[(unsigned)ifFalse] == start);
         Value * const duration = b->CreateSub(end, start);
         const auto prefix = makeKernelName(kernelId);
         Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
@@ -175,9 +204,9 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateTotalCycleCounterTime(BuilderRef b) const {
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+    if (trackCycleCounter(FULL_PIPELINE_TIME)) {
         Value * const end = b->CreateReadCycleCounter();
-        Value * const duration = b->CreateSub(end, mPipelineStartTime);
+        Value * const duration = b->CreateSub(end, mCycleCounters[(unsigned)FULL_PIPELINE_TIME]);
         // total is thread local but gets summed at the end; no need to worry about
         // multiple threads updating it.
         Value * const ptr = getScalarFieldPtr(b.get(), STATISTICS_CYCLE_COUNT_TOTAL);
@@ -243,12 +272,12 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     auto maxCyclesPerItem = baseCyclesPerItem;
 
     #ifndef NDEBUG
-    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
+    const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 1);
     #endif
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
-        const auto k = i * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
-        assert ((k + TOTAL_TIME) < numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3));
+        const auto k = i * (NUM_OF_KERNEL_CYCLE_COUNTERS + 1);
+        assert ((k + TOTAL_TIME) < numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 1));
         const uint64_t itemCount = values[k];
         maxItemCount = std::max(maxItemCount, itemCount);
         const auto cycleCount = values[k + TOTAL_TIME + 1];
@@ -296,11 +325,12 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     const long double fTotal = totalCycles;
 
     boost::format percfmt("%5.1f");
+    boost::format fixedfmt("%.0f");
     boost::format ratefmt("%.1f");
     boost::format covfmt(" +- %4.1f\n");
 
-    std::array<uint64_t, NUM_OF_KERNEL_CYCLE_COUNTERS + 1> subtotals;
-    std::fill_n(subtotals.begin(), NUM_OF_KERNEL_CYCLE_COUNTERS + 1, 0);
+    std::array<uint64_t, KERNEL_EXECUTION + 3> subtotals;
+    std::fill_n(subtotals.begin(), KERNEL_EXECUTION + 3, 0);
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
 
@@ -326,7 +356,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
             assert (cyclesPerItem <= maxCyclesPerItem);
             out << right_justify((ratefmt % cyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
         } else {
-            out << center_justify("--", maxCyclesPerItemLength + 1);
+            out << right_justify("--", maxCyclesPerItemLength + 1);
         }
 
         uint64_t knownOverheads = 0;
@@ -344,22 +374,20 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         knownOverheads += intExecTime;
         assert (knownOverheads <= intSubTotal);
 
-        const auto intOverhead = (intSubTotal - knownOverheads);
+        const auto intOverhead = (knownOverheads < intSubTotal) ? 0UL : (intSubTotal - knownOverheads);
 
-        subtotals[4] += intOverhead;
-        subtotals[5] += intExecTime;
+        subtotals[KERNEL_EXECUTION] += intOverhead;
+        subtotals[KERNEL_EXECUTION + 1] += intExecTime;
 
         const double overheadPerc = (((long double)intOverhead) * 100.0L) / fSubTotal;
         out << (percfmt % overheadPerc).str() << ' ';
-
-
 
         const double execTimePerc = (((long double)intExecTime) * 100.0L) / fSubTotal;
         out << (percfmt % execTimePerc).str() << ' ';
         assert (values[k] == intSubTotal);
         ++k;
 
-        subtotals[6] += intSubTotal;
+        subtotals[KERNEL_EXECUTION + 2] += intSubTotal;
 
         const auto perc = (fSubTotal * 100.0L) / fTotal;
         out << (percfmt % perc).str();
@@ -376,23 +404,14 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     assert (k == REQ_INTEGERS);
 
     out << "\n";
-    out.indent(maxKernelIdLength + maxNameLength + maxCycleCountLength + 7);
+    out.indent(maxKernelIdLength + maxNameLength + maxItemCountLength + maxCyclesPerItemLength);
     out << "TOTAL:";
 
-    if (baseItemCount > 0) {
-        assert (baseCyclesPerItem <= maxCyclesPerItem);
-        out << right_justify((ratefmt % baseCyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
-    } else {
-        out << center_justify("--", maxCyclesPerItemLength + 1);
-    }
-
-    for (unsigned j = 0; j <= NUM_OF_KERNEL_CYCLE_COUNTERS; ++j) {
+    for (unsigned j = KERNEL_SYNCHRONIZATION; j < (KERNEL_EXECUTION + 3); ++j) {
         const auto v = subtotals[j];
-        assert (v <= totalCycles);
         const double cycPerc = (((long double)(v * 100)) / fTotal);
-        out << (percfmt % cycPerc).str() << ' ';
+        out << ' ' << (percfmt % cycPerc).str();
     }
-
     out << '\n';
 
 }
@@ -431,7 +450,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 
         Value * const arrayOfKernelNames = toGlobal(kernelNames, int8PtrTy, numOfKernels);
 
-        const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 3);
+        const auto REQ_INTEGERS = numOfKernels * (NUM_OF_KERNEL_CYCLE_COUNTERS + 1);
 
         Constant * const requiredSpace =  b->getSize(sizeof(uint64_t) * REQ_INTEGERS);
 

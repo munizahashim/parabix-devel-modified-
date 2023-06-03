@@ -152,11 +152,11 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, FirstKernel, PAPIReadInitialMeasurementArray);
     #endif
-    mKernelStartTime = startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+    startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
     if (isMultithreaded()) {
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
-        updateCycleCounter(b, FirstKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
+        updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
         accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, FirstKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
         #endif
@@ -387,7 +387,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const startTime = startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+    startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION});
     assert (firstKernelInTargetPartition <= PipelineOutput);
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -405,8 +405,9 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(BuilderRef b, const u
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         const auto partId = KernelPartitionId[firstKernelInTargetPartition];
         if (partId < (PartitionCount - 1)) {
-            updateCycleCounter(b, mKernelId, startTime, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+            updateCycleCounter(b, mKernelId, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
             BasicBlock * const exitBlock = b->GetInsertBlock();
+            Value * const startTime = mCycleCounters[CycleCounter::PARTITION_JUMP_SYNCHRONIZATION];
             mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
         }
     }
@@ -468,7 +469,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(BuilderRef b) {
 
         ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, true);
 
-        updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
+        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
         #ifdef ENABLE_PAPI
         accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
         #endif
@@ -568,7 +569,7 @@ void PipelineCompiler::writeJumpToNextPartition(BuilderRef b) {
 
     ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, false);
 
-    updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
+    updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
     #endif
@@ -593,7 +594,7 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
 
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
-    updateCycleCounter(b, mKernelId, mKernelStartTime, CycleCounter::TOTAL_TIME);
+    updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
     const auto type = isDataParallel(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type, mSegNo);
 
@@ -606,10 +607,10 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         #ifdef ENABLE_PAPI
         readPAPIMeasurement(b, nextKernel, PAPIReadInitialMeasurementArray);
         #endif
-        mKernelStartTime = startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+        startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
         const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, nextKernel, type, nextSegNo);
-        updateCycleCounter(b, nextKernel, mKernelStartTime, CycleCounter::KERNEL_SYNCHRONIZATION);
+        updateCycleCounter(b, nextKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
         accumPAPIMeasurementWithoutReset(b, PAPIReadInitialMeasurementArray, nextKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
         #endif
@@ -646,8 +647,8 @@ void PipelineCompiler::checkForPartitionExit(BuilderRef b) {
         // Since there may be multiple paths into this kernel, phi out the start time
         // for each path.
         if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId < (PartitionCount - 1))) {
-            mPartitionStartTimePhi[nextPartitionId]->addIncoming(mKernelStartTime, exitBlock);
-            mKernelStartTime = mPartitionStartTimePhi[nextPartitionId];
+            mPartitionStartTimePhi[nextPartitionId]->addIncoming(mCycleCounters[TOTAL_TIME], exitBlock);
+            mCycleCounters[TOTAL_TIME] = mPartitionStartTimePhi[nextPartitionId];
         }
 
         const auto n = LastStreamSet - FirstStreamSet + 1U;

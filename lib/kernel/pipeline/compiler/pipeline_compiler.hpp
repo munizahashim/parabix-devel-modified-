@@ -212,8 +212,6 @@ public:
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
     Value * constructThreadStructObject(BuilderRef b, Value * const threadId, Value * const threadLocal, const unsigned threadNum);
     void readThreadStuctObject(BuilderRef b, Value * threadState);
-    void readInitialSegmentNum(BuilderRef b, Value * threadState);
-    void getThreadedTerminationSignalPtr(BuilderRef b, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
@@ -423,10 +421,11 @@ public:
 
     void addCycleCounterProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
 
-    Value * startCycleCounter(BuilderRef b, const CycleCounter type);
-    Value * startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types);
-    void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, const CycleCounter type) const;
-    void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const start, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
+    bool trackCycleCounter(const CycleCounter type) const;
+    void startCycleCounter(BuilderRef b, const CycleCounter type);
+    void startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types);
+    void updateCycleCounter(BuilderRef b, const unsigned kernelId, const CycleCounter type) const;
+    void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
     void updateTotalCycleCounterTime(BuilderRef b) const;
 
     static void linkInstrumentationFunctions(BuilderRef b);
@@ -847,15 +846,11 @@ protected:
 
 
     // cycle counter state
-    Value *                                     mPipelineStartTime = nullptr;
-    Value *                                     mKernelStartTime = nullptr;
-    Value *                                     mAcquireAndReleaseStartTime = nullptr;
     FixedVector<PHINode *>                      mPartitionStartTimePhi;
     FixedArray<Value *, TOTAL_NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
 
     // dynamic multithreading cycle counter state
     Value *                                     mFullSegmentStartTime = nullptr;
-    Value *                                     mAccumulatedFullSegmentTimePtr = nullptr;
     Value *                                     mAccumulatedSynchronizationTimePtr = nullptr;
 
     // papi counter state
@@ -919,7 +914,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
-, mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !mIsNestedPipeline)
+, mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline && P.NumOfThreads > 1)
 , mNumOfThreads(P.NumOfThreads)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)

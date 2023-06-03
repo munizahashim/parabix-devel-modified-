@@ -231,9 +231,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const beforeKernelCall = startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
-
-
+    startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
@@ -248,7 +246,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         doSegmentRetVal = b->CreateCall(doSegFuncType, doSegment, args);
     }
 
-    updateCycleCounter(b, mKernelId, beforeKernelCall, CycleCounter::KERNEL_EXECUTION);
+    updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif

@@ -753,7 +753,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const beforeCopy = startCycleCounter(b, CycleCounter::BUFFER_COPY);
+    startCycleCounter(b, CycleCounter::BUFFER_COPY);
 
     Value * source = buffer->getOverflowAddress(b);
     Value * target = buffer->getMallocAddress(b);
@@ -811,7 +811,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
         if (EnableCycleCounter || EnablePAPICounters) {
             b->SetInsertPoint(recordCopyCycleCount);
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
@@ -828,7 +828,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
         if (EnableCycleCounter || EnablePAPICounters) {
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif

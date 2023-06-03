@@ -224,9 +224,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     SmallVector<Type *, 3> csRetValFields;
     const auto returnsTerminationSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
-    if (LLVM_LIKELY(mUseDynamicMultithreading)) {
-        csRetValFields.push_back(sizeTy); // synchronization time
-    }
     if (LLVM_LIKELY(returnsTerminationSignal)) {
         csRetValFields.push_back(sizeTy); // has terminated
     }
@@ -257,6 +254,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugInit(b);
     #endif
+    Value * segmentStartTime = nullptr;
+    if (mUseDynamicMultithreading) {
+        segmentStartTime = b->CreateReadCycleCounter();
+    }
+
     // generate the pipeline logic for this thread
     start(b);
     branchToInitialPartition(b);
@@ -267,11 +269,21 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     mKernel = nullptr;
     mKernelId = 0;
     mSegNo = nullptr;
+    if (mUseDynamicMultithreading) {
+        Value * const segmentEndTime = b->CreateReadCycleCounter();
+        Value * const totalSegmentTime = b->CreateSub(segmentEndTime, segmentStartTime);
+
+        FixedArray<Value *, 2> indices2;
+        Constant * const ZERO = b->getInt32(0);
+        indices2[0] = b->getInt32(0);
+        indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+        Value * const segPtr = b->CreateInBoundsGEP(threadStruct, indices2);
+        Value * const current = b->CreateLoad(segPtr);
+        Value * const accum = b->CreateAdd(current, totalSegmentTime);
+        b->CreateStore(accum, segPtr);
+    }
 
     SmallVector<Value *, 2> csRetVal;
-    if (LLVM_LIKELY(mUseDynamicMultithreading)) {
-        csRetVal.push_back(b->getSize(0)); // sync cost
-    }
     if (LLVM_LIKELY(returnsTerminationSignal)) {
         csRetVal.push_back(hasPipelineTerminated(b));
     }
@@ -300,29 +312,29 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         registerPAPIThread(b);
         #endif
 
-        mPipelineStartTime = startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+        startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugInit(b);
-//        if (mIsNestedPipeline) {
-//            debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
-//        } else {
-//            debugPrint(b, "================================================= START %" PRIx64, getHandle());
-//        }
-//        const auto prefix = mTarget->getName();
-//        if (mNumOfStrides) {
-//            debugPrint(b, prefix + " +++ NUM OF STRIDES %" PRIu64 "+++", mNumOfStrides);
-//        }
-//        if (mIsFinal) {
-//            debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
-//        }
+        if (mIsNestedPipeline) {
+            debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
+        } else {
+            debugPrint(b, "================================================= START %" PRIx64, getHandle());
+        }
+        const auto prefix = mTarget->getName();
+        if (mNumOfStrides) {
+            debugPrint(b, prefix + " +++ NUM OF STRIDES %" PRIu64 "+++", mNumOfStrides);
+        }
+        if (mIsFinal) {
+            debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
+        }
         #endif
 
         #ifdef ENABLE_PAPI
         createEventSetAndStartPAPI(b);
         #endif
 
-        readInitialSegmentNum(b, threadStruct);
+        readThreadStuctObject(b, threadStruct);
 
         // generate the pipeline logic for this thread
         mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
@@ -349,10 +361,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
         unsigned index = 0;
         FixedArray<unsigned, 1> idx;
-        if (LLVM_LIKELY(mUseDynamicMultithreading)) {
-            idx[0] = index++;
-            syncCost = b->CreateExtractValue(csRetVal, idx);
-        }
         if (LLVM_LIKELY(returnsTerminationSignal)) {
             idx[0] = index++;
             terminated = b->CreateExtractValue(csRetVal, idx);
@@ -382,7 +390,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
         b->SetInsertPoint(mPipelineEnd);
         if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
-            getThreadedTerminationSignalPtr(b, threadStruct);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, "# pipeline terminated = %" PRIu64 " for %" PRIx64, terminated, getHandle());
             #endif
@@ -391,13 +398,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
         }
 
-//        #ifdef PRINT_DEBUG_MESSAGES
-//        if (mIsNestedPipeline) {
-//            debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
-//        } else {
-//            debugPrint(b, "================================================= END %" PRIx64, getHandle());
-//        }
-//        #endif
+        #ifdef PRINT_DEBUG_MESSAGES
+        if (mIsNestedPipeline) {
+            debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
+        } else {
+            debugPrint(b, "================================================= END %" PRIx64, getHandle());
+        }
+        #endif
 
         #ifdef ENABLE_PAPI
         stopPAPIAndDestroyEventSet(b);
@@ -698,22 +705,6 @@ Value * PipelineCompiler::constructThreadStructObject(BuilderRef b, Value * cons
     return threadState;
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readInitialSegmentNum
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readInitialSegmentNum(BuilderRef b, Value * threadState) {
-    assert (mNumOfThreads > 1);
-    if (mUseDynamicMultithreading) {
-        return;
-    }
-    FixedArray<Value *, 2> indices2;
-    Constant * const ZERO = b->getInt32(0);
-    indices2[0] = b->getInt32(0);
-    indices2[1] = b->getInt32(INITIAL_SEG_NO);
-    mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readThreadStuctObject
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -737,31 +728,18 @@ void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) 
     indices2[0] = ZERO;
     assert (!mIsNestedPipeline && mNumOfThreads != 1);
     if (mUseDynamicMultithreading) {
-        indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-        mAccumulatedFullSegmentTimePtr = b->CreateInBoundsGEP(threadState, indices2);
         indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
         mAccumulatedSynchronizationTimePtr = b->CreateInBoundsGEP(threadState, indices2);
     } else {
         indices2[1] = b->getInt32(INITIAL_SEG_NO);
         mSegNo = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices2));
-        mAccumulatedFullSegmentTimePtr = nullptr;
         mAccumulatedSynchronizationTimePtr = nullptr;
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readThreadStuctObject
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::getThreadedTerminationSignalPtr(BuilderRef b, Value * threadState) {
-    assert (mNumOfThreads > 1);
     mCurrentThreadTerminationSignalPtr = getTerminationSignalPtr();
     if (PipelineHasTerminationSignal) {
-        FixedArray<Value *, 2> indices2;
-        indices2[0] = b->getInt32(0);
         indices2[1] = b->getInt32(TERMINATION_SIGNAL);
         mCurrentThreadTerminationSignalPtr = b->CreateInBoundsGEP(threadState, indices2);
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -810,6 +788,9 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     } else {
         mSegNo = b->getSize(0);
     }
+
+    startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+
     start(b);
 
     mPipelineLoop = b->CreateBasicBlock("PipelineLoop");

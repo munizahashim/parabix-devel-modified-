@@ -805,11 +805,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * cycleCounterStart = nullptr;
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        cycleCounterStart = b->CreateReadCycleCounter();
-    }
-
+    startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
     Value * priorBufferPtr = nullptr;
     if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
@@ -883,9 +879,9 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     b->SetInsertPoint(afterCopyBackOrExpand);
     if (mustExpand) {
-        updateCycleCounter(b, mKernelId, cycleCounterStart, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+        updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
     } else {
-        updateCycleCounter(b, mKernelId, cycleCounterStart, CycleCounter::BUFFER_EXPANSION);
+        updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
     }
     #ifdef ENABLE_PAPI
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
