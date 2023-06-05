@@ -426,6 +426,27 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexing, spanName, new MarkedSpanExternal(prefixStr, prefixLgth, nameStr, offset));
             mSpanNames.push_back(spanName);
         }
+        re::Repeated_CC_Seq_Namer RCCSnamer;
+        mRE = RCCSnamer.transformRE(mRE);
+        for (auto m : RCCSnamer.mNameMap) {
+            std::string nameStr = m.first;
+            llvm::errs() << nameStr << "\n";
+            re::RE * namedRE = m.second;
+            auto r = new RE_External(this, namedRE, mIndexAlphabet);
+            mExternalTable.declareExternal(indexing, nameStr, r);
+            auto f = RCCSnamer.mInfoMap.find(nameStr);
+            if (f != RCCSnamer.mInfoMap.end()) {
+                const re::CC * varCC = f->second.first;
+                unsigned fixed= f->second.second;
+                auto maskName = nameStr + "mask";
+                auto e1 = new CCmask(mIndexAlphabet, varCC);
+                mExternalTable.declareExternal(indexing, maskName, e1);
+                auto spanName = nameStr + "Span";
+                auto e2 = new MaskedFixedSpanExternal(maskName, nameStr, fixed, grepOffset(namedRE));
+                mExternalTable.declareExternal(indexing, spanName, e2);
+                mSpanNames.push_back(spanName);
+            }
+        }
     }
     if (mLengthAlphabet == &cc::Unicode) {
         setComponent(mExternalComponents, Component::S2P);

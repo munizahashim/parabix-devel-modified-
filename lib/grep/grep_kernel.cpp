@@ -40,6 +40,8 @@
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/stream_select.h>
+#include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/unicode/boundary_kernels.h>
 #include <kernel/unicode/utf8_decoder.h>
@@ -365,6 +367,52 @@ void MarkedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSe
     SpreadByMask(P, mask, filteredSpanMarks, spanMarks);
     StreamSet * spans = P->CreateStreamSet(1);
     P->CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
+    installStreamSet(spans);
+}
+
+const std::vector<std::string> CCmask::getParameters() {
+    //if (mIndexAlphabet != &cc::Unicode) return std::vector<std::string>{"basis", "u8index"};
+    return std::vector<std::string>{"basis"};
+}
+
+void CCmask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+    StreamSet * basis = inputs[0];
+    StreamSet * mask = P->CreateStreamSet(1);
+    StreamSet * index = nullptr;
+    if (mIndexAlphabet != &cc::Unicode) {
+        //index = inputs[1];
+    }
+    P->CreateKernelCall<MaskCC>(mCC_to_mask, basis, mask, index);
+    installStreamSet(mask);
+}
+
+const std::vector<std::string> CCselfTransitionMask::getParameters() {
+    return std::vector<std::string>{"basis", "index"};
+}
+
+void CCselfTransitionMask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+    StreamSet * basis = inputs[0];
+    StreamSet * index = inputs[1];
+    StreamSet * mask = P->CreateStreamSet(1);
+    P->CreateKernelCall<MaskSelfTransitions>(mTransitionCCs, basis, mask, index);
+    installStreamSet(mask);
+}
+
+const std::vector<std::string> MaskedFixedSpanExternal::getParameters() {
+    return std::vector<std::string>{mMask, mMatches};
+}
+
+void MaskedFixedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+    StreamSet * positions_mask = inputs[0];
+    StreamSet * matches = inputs[1];
+    StreamSet * filteredMatches = P->CreateStreamSet(1);
+    FilterByMask(P, positions_mask, matches, filteredMatches);
+    StreamSet * filteredMatchStarts = P->CreateStreamSet(1);
+    P->CreateKernelCall<ShiftBack>(filteredMatches, filteredMatchStarts, mLengthRange.first);
+    StreamSet * matchStarts = P->CreateStreamSet(1);
+    SpreadByMask(P, positions_mask, filteredMatchStarts, matchStarts);
+    StreamSet * spans = P->CreateStreamSet(1);
+    P->CreateKernelCall<InclusiveSpans>(0, mOffset, streamutils::Select(P, std::vector<StreamSet *>{matchStarts, matches}), spans);
     installStreamSet(spans);
 }
 
@@ -1039,4 +1087,76 @@ void InclusiveSpans::generatePabloMethod() {
     }
     PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {starts, ends});
     pb.createAssign(pb.createExtract(getOutputStreamVar("spans"), pb.getInteger(0)), spans);
+}
+
+std::string CC_string(std::vector<const CC *> transitionCCs, StreamSet * index) {
+    std::stringstream s;
+    if (index != nullptr) s << "+ix";
+    for (auto & cc : transitionCCs) {
+        s << "_" << cc->canonicalName();
+    }
+    return s.str();
+}
+
+MaskCC::MaskCC(BuilderRef b, const CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(b, "MaskCC" + basis->shapeString() + CC_string(std::vector<const CC *>{CC_to_mask}, index),
+              {Binding{"basis", basis}},
+              {Binding{"mask", mask}}), mCC_to_mask(CC_to_mask), mIndexStrm(nullptr) {
+                  if (index != nullptr) {
+                      mInputStreamSets.push_back(Binding{"index", index});
+                      mIndexStrm = index;
+                  }
+              }
+
+void MaskCC::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::unique_ptr<cc::CC_Compiler> ccc;
+    if (basis.size() == 1) {
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basis[0]);
+    } else {
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basis);
+    }
+    PabloAST * mask = pb.createNot(ccc->compileCC(mCC_to_mask));
+    if (mIndexStrm) {
+        PabloAST * idx = getInputStreamSet("index")[0];
+        mask = pb.createAnd(idx, mask);
+    }
+    pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
+}
+
+MaskSelfTransitions::MaskSelfTransitions(BuilderRef b, const std::vector<const CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(b, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
+              {Binding{"basis", basis}},
+              {Binding{"mask", mask}}), mTransitionCCs(transitionCCs), mIndexStrm(nullptr) {
+                  if (index != nullptr) {
+                      mInputStreamSets.push_back(Binding{"index", index});
+                      mIndexStrm = index;
+                  }
+              }
+
+void MaskSelfTransitions::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::unique_ptr<cc::CC_Compiler> ccc;
+    if (basis.size() == 1) {
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basis[0]);
+    } else {
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basis);
+    }
+    PabloAST * transitions = pb.createZeroes();
+    PabloAST * idx = nullptr;
+    if (mIndexStrm) {
+        idx = getInputStreamSet("index")[0];
+    }
+    for (unsigned i = 0; i < mTransitionCCs.size(); i++) {
+        PabloAST * trCC = ccc->compileCC(mTransitionCCs[i]);
+        PabloAST * transition = pb.createAnd(pb.createIndexedAdvance(trCC, idx, 1), trCC);
+        transitions = pb.createOr(transitions, transition);
+    }
+    PabloAST * mask = pb.createNot(transitions);
+    if (mIndexStrm) {
+        mask = pb.createAnd(mask, idx);
+    }
+    pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
