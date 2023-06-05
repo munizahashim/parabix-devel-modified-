@@ -367,6 +367,10 @@ void GrepEngine::initRE(re::RE * re) {
             llvm::report_fatal_error("Expected property expression");
         }
     }
+    if (mIndexAlphabet == &cc::UTF8) {
+        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
+        mRE = toUTF8(mRE, useInternalNaming);
+    }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);
     for (auto m : CCnamer.mNameMap) {
@@ -430,7 +434,6 @@ void GrepEngine::initRE(re::RE * re) {
         mRE = RCCSnamer.transformRE(mRE);
         for (auto m : RCCSnamer.mNameMap) {
             std::string nameStr = m.first;
-            llvm::errs() << nameStr << "\n";
             re::RE * namedRE = m.second;
             auto r = new RE_External(this, namedRE, mIndexAlphabet);
             mExternalTable.declareExternal(indexing, nameStr, r);
@@ -602,8 +605,6 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
             indexStream = mU8index;
             options->setIndexing(indexStream);
         }
-        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
-        re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());

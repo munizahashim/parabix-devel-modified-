@@ -129,11 +129,18 @@ RE * UniquePrefixNamer::transform(RE * r) {
 
 const CC * variableCodepoints(const RE * re) {
     if (const Seq * seq = dyn_cast<Seq>(re)) {
-        CC * variable = makeCC();
+        const CC * accumCC = nullptr;
         for (const RE * e : *seq) {
-            variable = makeCC(variable, variableCodepoints(e));
+            const CC * variable = variableCodepoints(e);
+            if (!variable->empty()) {
+                if (accumCC == nullptr) {
+                    accumCC = variable;
+                } else {
+                    accumCC = makeCC(variable, accumCC);
+                }
+            }
         }
-        return variable;
+        if (accumCC) return accumCC;
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
         if (rep->getLB() == rep->getUB()) {
             return variableCodepoints(rep->getRE());
@@ -223,7 +230,6 @@ RE * Repeated_CC_Seq_Namer::transform(RE * r) {
     const CC * varCC = variableCodepoints(r);
     if (varCC->empty()) return r;
     unsigned fixed = fixedCodepointCount(r, varCC);
-    llvm::errs() << "fixedCodepointCount" << fixed << "\n";
     if (fixed > 0) {
         auto nameStr = genSym();
         Name * n = createName(nameStr, r);
