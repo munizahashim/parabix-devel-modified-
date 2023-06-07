@@ -202,7 +202,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) const {
+void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) {
 
 }
 

@@ -96,7 +96,13 @@ inline bool PipelineCompiler::trackCycleCounter(const CycleCounter type) const {
         return true;
     }
     if (mUseDynamicMultithreading) {
-        return (type == KERNEL_SYNCHRONIZATION) || (type == PARTITION_JUMP_SYNCHRONIZATION);
+        switch (type) {
+            case KERNEL_SYNCHRONIZATION:
+            case PARTITION_JUMP_SYNCHRONIZATION:
+//            case TOTAL_TIME:
+                return true;
+            default: break;
+        }
     }
     return false;
 }

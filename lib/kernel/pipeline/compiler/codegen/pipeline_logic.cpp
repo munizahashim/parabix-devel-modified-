@@ -33,11 +33,17 @@ void PipelineCompiler::destroyStateObject(BuilderRef b, Value * threadState) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindAdditionalInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {
+void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) {
     bindFamilyInitializationArguments(b, arg, arg_end);
     const PipelineKernel * const pk = cast<PipelineKernel>(mTarget);
     if (LLVM_UNLIKELY(pk->generatesDynamicRepeatingStreamSets())) {
         bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
+    }
+    b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
+    if (codegen::EnableDynamicMultithreading) {
+        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
+        b->setScalarField(SEGMENTS_PER_CHECK, arg++);
+        b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
     }
     assert (arg == arg_end);
 }
@@ -67,6 +73,14 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 
     if (mUseDynamicMultithreading) {
         mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, 0);
+
+        mTarget->addInternalScalar(sizeTy, MINIMUM_NUM_OF_THREADS, PipelineOutput);
+        mTarget->addInternalScalar(sizeTy, MAXIMUM_NUM_OF_THREADS, PipelineOutput);
+        mTarget->addInternalScalar(sizeTy, SEGMENTS_PER_CHECK, PipelineOutput);
+        // float?
+        mTarget->addInternalScalar(sizeTy, ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, PipelineOutput);
+    } else {
+        mTarget->addInternalScalar(sizeTy, MINIMUM_NUM_OF_THREADS, PipelineOutput);
     }
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
@@ -513,22 +527,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
         b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
     }
     freePendingFreeableDynamicBuffers(b);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readTerminationSignalFromLocalState
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const {
-    // TODO: generalize a OR/ADD/etc "combination" mechanism for thread-local to output scalars?
-    assert (threadState);
-    assert (mCurrentThreadTerminationSignalPtr);
-    assert (PipelineHasTerminationSignal);
-    FixedArray<Value *, 2> indices;
-    indices[0] = b->getInt32(0);
-    indices[1] = b->getInt32(TERMINATION_SIGNAL);
-    Value * const signal = b->CreateLoad(b->CreateInBoundsGEP(threadState, indices));
-    assert (signal->getType()->isIntegerTy());
-    return signal;
 }
 
 }

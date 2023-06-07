@@ -80,6 +80,11 @@ const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
 #endif
 
+const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
+const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
+const static std::string SEGMENTS_PER_CHECK = "SEG.C";
+const static std::string ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TST.A";
+
 #define SYNC_LOCK_FULL 0U
 #define SYNC_LOCK_PRE_INVOCATION 1U
 #define SYNC_LOCK_POST_INVOCATION 2U
@@ -133,6 +138,9 @@ const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 
+
+
+
 using ArgVec = Vec<Value *, 64>;
 
 using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;
@@ -168,8 +176,7 @@ public:
     void generateFinalizeThreadLocalMethod(BuilderRef b);
     std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
     void runOptimizationPasses(BuilderRef b);
-    void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const override;
-
+    void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) override;
 
     static void linkPThreadLibrary(BuilderRef b);
     #ifdef ENABLE_PAPI
@@ -210,13 +217,14 @@ public:
 // internal pipeline functions
 
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
-    Value * constructThreadStructObject(BuilderRef b, Value * const threadId, Value * const threadLocal, const unsigned threadNum);
+    void initThreadStructObject(BuilderRef b, Value *threadState, Value * const threadId, Value * const threadLocal, Value * const threadNum);
     void readThreadStuctObject(BuilderRef b, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
+    void writeTerminationSignalToLocalState(BuilderRef b, Value * const threadState, Value * const terminated) const;
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
@@ -665,8 +673,12 @@ protected:
     #endif
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
-    Value *                                     mCurrentThreadTerminationSignalPtr = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
+
+    Value *                                     mMinimumNumOfThreads = nullptr;
+    Value *                                     mMaximumNumOfThreads = nullptr;
+    Value *                                     mDynamicMultithreadingSegmentsPerCheck = nullptr;
+    Value *                                     mDynamicMultithreadingAdditionalThreadSynchronizationThreshold = nullptr;
 
     BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;

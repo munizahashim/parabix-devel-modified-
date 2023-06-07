@@ -185,6 +185,9 @@ Kernel * PipelineBuilder::makeKernel() {
     if (mExternallySynchronized) {
         out << 'E';
     }
+    if (codegen::EnableDynamicMultithreading) {
+        out << 'D';
+    }
 
     switch (codegen::PipelineCompilationMode) {
         case codegen::PipelineCompilationModeOptions::DefaultFast:

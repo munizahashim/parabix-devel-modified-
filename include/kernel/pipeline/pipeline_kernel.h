@@ -153,7 +153,7 @@ private:
 
     void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
 
-    void recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const final;
+    void supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const final;
 
     void linkExternalMethods(BuilderRef b) final;
 

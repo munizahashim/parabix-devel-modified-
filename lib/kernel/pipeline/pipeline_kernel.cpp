@@ -162,9 +162,11 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
             n += k2;
         }
     }
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
     if (LLVM_LIKELY(n > 0)) {
-        argTypes.append(n, b->getVoidPtrTy());
+        argTypes.append(n, voidPtrTy);
     }
+    IntegerType * const sizeTy = b->getSizeTy();
     if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
         flat_set<const RepeatingStreamSet *> observed;
         unsigned n = 0;
@@ -183,9 +185,22 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
         }
         argTypes.reserve(n * 2);
         for (unsigned i = 0; i < n; ++i) {
-            argTypes.push_back(b->getVoidPtrTy());
-            argTypes.push_back(b->getSizeTy());
+            argTypes.push_back(voidPtrTy);
+            argTypes.push_back(sizeTy);
         }
+    }
+    if (codegen::EnableDynamicMultithreading) {
+        // minimum num of threads
+        argTypes.push_back(sizeTy);
+        // maximum num of threads
+        argTypes.push_back(sizeTy);
+        // number of segments between checks
+        argTypes.push_back(sizeTy);
+        // synchronization cost threshold for adding thread
+        argTypes.push_back(sizeTy);
+    } else {
+        // num of threads
+        argTypes.push_back(sizeTy);
     }
 }
 
@@ -202,11 +217,10 @@ void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & 
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief recursivelyConstructRepeatingStreamSets
+ * @brief supplyAdditionalInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
+void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
     if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
 
         Module * const M = getModule();
@@ -232,7 +246,7 @@ void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitA
         for (unsigned i = 0, j = 0; i != m; ++i) {
             const Kernel * const kernel = mKernels[i].Object;
             if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
-                kernel->recursivelyConstructRepeatingStreamSets(b, args, params, getJthOffset(j++));
+                kernel->supplyAdditionalInitializationArgTypes(b, args, params, getJthOffset(j++));
             }
             const auto n = kernel->getNumOfStreamInputs();
             PointerType * const voidPtrTy = b->getVoidPtrTy();
@@ -250,8 +264,21 @@ void PipelineKernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitA
                 }
             }
         }
-
     }
+    if (codegen::EnableDynamicMultithreading) {
+        // minimum num of threads
+        args.push_back(b->getSize(2));
+        // maximum num of threads
+        args.push_back(b->getSize(std::min(2U, codegen::SegmentThreads)));
+        // number of segments between checks
+        args.push_back(b->getSize(50));
+        // synchronization cost threshold for adding thread
+        args.push_back(b->getSize(10 * 100));
+    } else {
+        // num of threads
+        args.push_back(b->getSize(codegen::SegmentThreads));
+    }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -447,11 +474,6 @@ bool PipelineKernel::isCachable() const {
     return codegen::EnablePipelineObjectCache;
 }
 
-size_t __getStridesPerSegment() {
-    return codegen::BufferSegments * codegen::SegmentSize;
-}
-
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addOrDeclareMainFunction
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -605,6 +627,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         segmentArgs[argCount++] = threadLocalHandle;
         toFree.push_back(threadLocalHandle);
     }
+
     assert (argCount == suppliedArgs);
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {

@@ -878,7 +878,9 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             }
 
         }
-        assert (arg == doSegment->arg_end());
+
+
+        //assert (arg == doSegment->arg_end());
     }
     return doSegment;
 }
@@ -1115,10 +1117,8 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         initArgs.push_back(f->second); assert (initArgs.back());
     }
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
-    if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
-        ParamMap repeatingStreamSets;
-        recursivelyConstructRepeatingStreamSets(b, initArgs, repeatingStreamSets, 1U);
-    }
+    supplyAdditionalInitializationArgTypes(b, initArgs, params, 1U);
+
     Function * const init = getInitializeFunction(b);
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b->CreateCall(init->getFunctionType(), init, initArgs);
@@ -1153,9 +1153,9 @@ void Kernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, Pa
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief recursivelyConstructRepeatingStreamSets
+ * @brief supplyAdditionalInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
+void Kernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
 
 }
 
