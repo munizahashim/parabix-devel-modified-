@@ -377,6 +377,10 @@ void GrepEngine::initRE(re::RE * re) {
             llvm::report_fatal_error("Expected property expression");
         }
     }
+    if (mIndexAlphabet == &cc::UTF8) {
+        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
+        mRE = toUTF8(mRE, useInternalNaming);
+    }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);
     for (auto m : CCnamer.mNameMap) {
@@ -435,6 +439,26 @@ void GrepEngine::initRE(re::RE * re) {
             auto spanName = nameStr + "Span";
             mExternalTable.declareExternal(indexing, spanName, new MarkedSpanExternal(prefixStr, prefixLgth, nameStr, offset));
             mSpanNames.push_back(spanName);
+        }
+        re::Repeated_CC_Seq_Namer RCCSnamer;
+        mRE = RCCSnamer.transformRE(mRE);
+        for (auto m : RCCSnamer.mNameMap) {
+            std::string nameStr = m.first;
+            re::RE * namedRE = m.second;
+            auto r = new RE_External(this, namedRE, mIndexAlphabet);
+            mExternalTable.declareExternal(indexing, nameStr, r);
+            auto f = RCCSnamer.mInfoMap.find(nameStr);
+            if (f != RCCSnamer.mInfoMap.end()) {
+                const re::CC * varCC = f->second.first;
+                unsigned fixed= f->second.second;
+                auto maskName = nameStr + "mask";
+                auto e1 = new CCmask(mIndexAlphabet, varCC);
+                mExternalTable.declareExternal(indexing, maskName, e1);
+                auto spanName = nameStr + "Span";
+                auto e2 = new MaskedFixedSpanExternal(maskName, nameStr, fixed, grepOffset(namedRE));
+                mExternalTable.declareExternal(indexing, spanName, e2);
+                mSpanNames.push_back(spanName);
+            }
         }
     }
     if (mLengthAlphabet == &cc::Unicode) {
@@ -591,8 +615,6 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
             indexStream = mU8index;
             options->setIndexing(indexStream);
         }
-        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
-        re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());

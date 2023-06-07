@@ -2,8 +2,7 @@
  *  Copyright (c) 2022 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  */
-#ifndef GREP_KERNEL_H
-#define GREP_KERNEL_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <pablo/pablo_toolchain.h>
@@ -67,7 +66,8 @@ public:
         U21, PreDefined, LineStarts, CC_External, RE_External,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
         WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
-        FilterByMask, FixedSpan, MarkedSpanExternal
+        FilterByMask, FixedSpan, MarkedSpanExternal,
+        CCmask, CCselfTransitionMask, MaskedFixedSpan
     };
     inline Kind getKind() const {
         return mKind;
@@ -343,6 +343,69 @@ private:
     const std::string mMatchMarks;
 };
 
+class CCmask final : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::CCmask;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    const std::vector<std::string> getParameters() override;
+    CCmask(const cc::Alphabet * indexAlphabet, const re::CC * CC_to_mask) :
+        ExternalStreamObject(Kind::CCmask, std::make_pair(1, 1)),
+            mIndexAlphabet(indexAlphabet), mCC_to_mask(CC_to_mask) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    const cc::Alphabet * mIndexAlphabet;
+    const re::CC * mCC_to_mask;
+};
+
+class CCselfTransitionMask final : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::CCselfTransitionMask;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    const std::vector<std::string> getParameters() override;
+    CCselfTransitionMask(const std::vector<const re::CC *> transitionCCs) :
+        ExternalStreamObject(Kind::CCselfTransitionMask, std::make_pair(1, 1)),  mTransitionCCs(transitionCCs) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    const std::vector<const re::CC *> mTransitionCCs;
+};
+
+//
+// The MaskedFixedSpanExternal is used to determine the spans of regular
+// expression matches, when there are an identifiable fixed set of
+// positions that must be matched during the matching process, including
+// a fixed position that marks the match start.
+//
+// The parameters of the external are the name of the mask stream identifying
+// the fixed positions, the name of the matches stream that identifies
+// RE matches, the fixed lookahead distance between the first fixed position
+// of the match and the final match position, and the offset distance between
+// the first fixed position and the actual match start position.
+//
+class MaskedFixedSpanExternal final : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::MaskedFixedSpan;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    const std::vector<std::string> getParameters() override;
+    MaskedFixedSpanExternal(std::string mask, std::string matches, unsigned lgth, int offset) :
+        ExternalStreamObject(Kind::MaskedFixedSpan, std::make_pair(lgth, lgth), offset), mMask(mask), mMatches(matches) {}
+    void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
+private:
+    const std::string mMask;
+    const std::string mMatches;
+};
+
 //
 // Compute a stream marking UTF-8 character positions.   Each valid
 // character is marked at the position of its final UTF-8 byte.
@@ -557,5 +620,38 @@ private:
     unsigned mPrefixOffset;
     unsigned mSuffixOffset;
 };
+
+class MaskCC final : public pablo::PabloKernel {
+public:
+    MaskCC(BuilderRef b, const re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
+protected:
+    void generatePabloMethod() override;
+private:
+    const re::CC * mCC_to_mask;
+    StreamSet * mIndexStrm;
+};
+
+//  Compute a mask stream for filtering out self transitions of
+//  one or more character classes.   A self transition is a set
+//  of consecutive occurrences of members of a given character class.
+//  The index stream, if present, marks positions considered as
+//  full character positions, otherwise the all positions are
+//  considered full character positions (equivalent to an index
+//  stream of all ones).
+//
+//  The computed mask stream will consist of a 0 bit at each
+//  character position such that it marks a character in the
+//  given class and the immediate prior character posiiton
+//  also marks a character in the same class.
+
+class MaskSelfTransitions final : public pablo::PabloKernel {
+public:
+    MaskSelfTransitions(BuilderRef b, const std::vector<const re::CC *> transitionCCs,
+                        StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
+protected:
+    void generatePabloMethod() override;
+private:
+    const std::vector<const re::CC *> mTransitionCCs;
+    StreamSet * mIndexStrm;
+};
 }
-#endif
