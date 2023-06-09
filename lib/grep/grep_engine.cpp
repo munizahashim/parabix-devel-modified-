@@ -1124,6 +1124,7 @@ std::string GrepEngine::linePrefix(std::string fileName) {
 
 // Default: do not show anything
 void GrepEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {
+
 }
 
 void CountOnlyEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {

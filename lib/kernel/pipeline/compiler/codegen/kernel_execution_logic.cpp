@@ -434,7 +434,12 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             #endif
             addNextArg(b->CreatePointerCast(addr, voidPtrTy));
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-                Value * const isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
+                Value * isExhausted = nullptr;
+                if (mExhaustedInputPortPhi[inputPort]) {
+                    isExhausted = mExhaustedInputPortPhi[inputPort];
+                } else {
+                    isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
+                }
                 addNextArg(isExhausted);
             }
 

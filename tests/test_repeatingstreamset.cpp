@@ -165,7 +165,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     }
 
     StreamSetBuffer * const outputBuffer = b->getOutputStreamSetBuffer("output");
-    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();    
+    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
     Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
 
 
@@ -337,7 +337,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
         Value * const src = b->CreateGEP(streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
-        b->CreateMemCpy(dst, src, elementSize, length);
+        b->CreateMemCpy(dst, src, elementSize, 1U);
     }
 
     Value * const currentProduced = b->CreateAdd(producedPhi, sz_BlockWidth);
@@ -444,6 +444,7 @@ private:
     inline Bindings makeInputBindings(StreamSet * lhs, const bool unalignedLHS, StreamSet * rhs, const bool unalignedRHS);
 private:
     const bool UnalignedLHS;
+    const bool UnalignedRHS;
 };
 
 inline Bindings StreamEq::makeInputBindings(StreamSet * lhs, const bool unalignedLHS, StreamSet * rhs, const bool unalignedRHS) {
@@ -491,6 +492,7 @@ StreamEq::StreamEq(
     {},
     {InternalScalar(b->getInt1Ty(), "accum")})
 , UnalignedLHS(unalignedLHS)
+, UnalignedRHS(unalignedRHS)
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
@@ -545,7 +547,11 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
             } else {
                 lhs = b->CreateBlockAlignedLoad(lhs);
             }
-            rhs = b->CreateBlockAlignedLoad(rhs);
+            if (UnalignedRHS) {
+                rhs = b->CreateAlignedLoad(rhs, 1);
+            } else {
+                rhs = b->CreateBlockAlignedLoad(rhs);
+            }
 
             // Perform vector comparison lhs != rhs.
             // Result will be a vector of all zeros if lhs == rhs
@@ -646,6 +652,8 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     Scalar *  const repLength = P->CreateConstant(b->getSize(repetitionLength));
 
+    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
+
     Scalar * output = P->getInputScalar("output");
 
     P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, output);
@@ -695,8 +703,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    //for (unsigned rounds = 0; rounds < 10; ++rounds) {
+    for (unsigned rounds = 0; rounds < 10; ++rounds) {
         testResult |= runRepeatingStreamSetTest(pxDriver, rng);
-    //}
+    }
     return testResult ? -1 : 0;
 }

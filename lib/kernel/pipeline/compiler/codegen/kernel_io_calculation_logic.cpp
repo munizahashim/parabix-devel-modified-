@@ -154,7 +154,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
                                Value * const fixedRateFactor,
                                Value * const terminationSignal,
                                Value * const numOfLinearStrides,
-                               Value * const fixedRatePartialStrideRemainder) {
+                               Value * const fixedRatePartialStrideRemainder,
+                               const bool isFinalStride) {
         BasicBlock * const exitBlock = b->GetInsertBlock();
         for (unsigned i = 0; i < numOfInputs; ++i) {
             const auto port = StreamSetPort{ PortType::Input, i };
@@ -162,6 +163,15 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             mLinearInputItemsPhi[port]->addIncoming(accessibleItems[i], exitBlock);
             assert (mInputVirtualBaseAddressPhi[port] && inputVirtualBaseAddress[i]);
             mInputVirtualBaseAddressPhi[port]->addIncoming(inputVirtualBaseAddress[i], exitBlock);
+            if (mExhaustedInputPortPhi[port]) {
+                Value * exhausted = nullptr;
+                if (isFinalStride) {
+                    exhausted = mExhaustedInputPort[port]; assert (exhausted);
+                } else {
+                    exhausted = b->getFalse();
+                }
+                mExhaustedInputPortPhi[port]->addIncoming(exhausted, exitBlock);
+            }
         }
         for (unsigned i = 0; i < numOfOutputs; ++i) {
             const auto port = StreamSetPort{ PortType::Output, i };
@@ -273,7 +283,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         zeroInputAfterFinalItemCount(b, accessibleItems, truncatedInputVirtualBaseAddress);
         phiOutItemCounts(accessibleItems, truncatedInputVirtualBaseAddress, writableItems,
-                         fixedItemFactor, completed, sz_ZERO, partialPartitionStride);
+                         fixedItemFactor, completed, sz_ZERO, partialPartitionStride, true);
         b->CreateBr(mKernelCheckOutputSpace);
 
         /// -------------------------------------------------------------------------------------
@@ -326,6 +336,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
     if (mFixedRateFactorPhi) {
         const Rational stride(mKernel->getStride());
         fixedRateFactor  = b->CreateMulRational(nonFinalNumOfLinearStrides, stride * mFixedRateLCM);
+    } else {
+        fixedRateFactor = sz_ZERO;
     }
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -339,7 +351,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
     }
 
     phiOutItemCounts(accessibleItems, inputVirtualBaseAddress, writableItems,
-                     fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO);
+                     fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, false);
 
     b->CreateBr(mKernelCheckOutputSpace);
     b->SetInsertPoint(mKernelCheckOutputSpace);
@@ -388,10 +400,13 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     Value * const hasEnough = b->CreateICmpUGE(accessible, required);
     Value * const isExhausted = b->CreateNot(hasEnough);
 
-    if (LLVM_UNLIKELY(port.getRate().isGreedy())) {
-        mExhaustedInputPort[inputPort] = closed;
-    } else {
-        mExhaustedInputPort[inputPort] = isExhausted;
+    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
+        if (LLVM_UNLIKELY(port.getRate().isGreedy())) {
+            mExhaustedInputPort[inputPort] = closed;
+        } else {
+            mExhaustedInputPort[inputPort] = isExhausted;
+        }
+        assert (mExhaustedInputPort[inputPort]);
     }
 
     if (mStrideStepSize) {

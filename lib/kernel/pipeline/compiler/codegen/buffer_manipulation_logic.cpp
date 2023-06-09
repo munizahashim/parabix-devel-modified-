@@ -134,7 +134,6 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(BuilderRef b,
     #endif
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroInputAfterFinalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -156,11 +155,16 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
 
+        // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
+        // nested pipelines but could replace the source output.
+
+        const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
+
+        if (LLVM_UNLIKELY(rate.isGreedy() && !alwaysTruncate)) {
+            continue;
+        }
+
         //if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || bn.isTruncated() || bn.isConstant())) {
-
-            Rational maxItemsPerSegment{mKernel->getStride() * rate.getUpperBound()};
-
-            // TODO: support popcount/partialsum
 
             const auto itemWidth = getItemWidth(buffer->getBaseType());
 
@@ -177,10 +181,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
 
             AllocaInst * bufferStorage = nullptr;
+            PointerType * const int8PtrTy = b->getInt8PtrTy();
+            Constant * const nullPtr = ConstantPointerNull::get(int8PtrTy);
             if (mNumOfTruncatedInputBuffers < mTruncatedInputBuffer.size()) {
                 bufferStorage = mTruncatedInputBuffer[mNumOfTruncatedInputBuffers];
             } else { // create a stack entry for this buffer at the start of the pipeline
-                PointerType * const int8PtrTy = b->getInt8PtrTy();
                 bufferStorage = b->CreateAllocaAtEntryPoint(int8PtrTy);
                 Instruction * const nextNode = bufferStorage->getNextNode(); assert (nextNode);
                 new StoreInst(ConstantPointerNull::get(int8PtrTy), bufferStorage, nextNode);
@@ -193,7 +198,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             Constant * const ITEM_WIDTH = b->getSize(itemWidth);
 
             PointerType * const bufferType = buffer->getPointerType();
-            PointerType * const int8PtrTy = b->getInt8PtrTy();
 
             BasicBlock * const maskedInput = b->CreateBasicBlock(prefix + "_maskInput", mKernelCheckOutputSpace);
             BasicBlock * const selectedInput = b->CreateBasicBlock(prefix + "_selectInput", mKernelCheckOutputSpace);
@@ -203,7 +207,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             Value * const selected = accessibleItems[inputPort.Number];
             Value * const totalNumOfItems = getAccessibleInputItems(b, port);
 
-            const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
+
 
             if (LLVM_UNLIKELY(alwaysTruncate)) {
                 b->CreateBr(maskedInput);
@@ -213,6 +217,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 if (mIsInputZeroExtended[inputPort]) {
                     computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
                 }
+                b->CreateStore(nullPtr, bufferStorage);
                 b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
             }
 
@@ -306,9 +311,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 const auto blockSize = b->getBitBlockWidth() / 8;
                 Value * const maskedBuffer = b->CreateAlignedMalloc(mallocBytes, blockSize);
                 b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
-
-                // TODO: look into checking whether the OS supports aligned realloc.
-                b->CreateFree(b->CreateLoad(bufferStorage));
                 b->CreateStore(maskedBuffer, bufferStorage);
                 Value * const mallocedAddress = b->CreatePointerCast(maskedBuffer, bufferPtrTy);
                 Value * const total = b->CreateLShr(end, LOG_2_BLOCK_WIDTH);
@@ -351,8 +353,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                     Value * const bytesToCopy = b->CreateSub(partialCopyInputEndPtrInt, partialCopyInputStartPtrInt);
                     b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, blockSize);
                     inputPtr = partialCopyInputEndPtr;
-                    Value * const afterCopyOutputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
-                    outputPtr = afterCopyOutputPtr;
+                    outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
                 }
                 assert (inputPtr->getType() == outputPtr->getType());
                 Value * const val = b->CreateBlockAlignedLoad(inputPtr);
@@ -373,9 +374,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             FixedArray<Value *, 6> args;
             args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
-            const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
+            const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound());
+            assert (itemsPerSegment >= 1 || rate.isGreedy());
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
-
             if (port.isDeferred()) {
                 args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
             } else {
@@ -462,8 +463,12 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * const numOfStreams = buffer->getStreamSetCount(b);
         Value * const baseAddress = buffer->getBaseAddress(b);
 
+        DataLayout DL(b->getModule());
+        Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
+
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, sz_ZERO, sz_ZERO, sz_ZERO);
+        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
         #endif
         BasicBlock * const entry = b->GetInsertBlock();
         b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
@@ -477,12 +482,8 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         } else {
             inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
         }
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(inputPtr->getType());
         #ifdef PRINT_DEBUG_MESSAGES
-        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
         Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
-
         debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
         Value * const value = b->CreateBlockAlignedLoad(inputPtr);
