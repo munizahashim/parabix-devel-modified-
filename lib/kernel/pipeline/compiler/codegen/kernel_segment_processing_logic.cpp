@@ -506,6 +506,8 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
 void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
     b->SetInsertPoint(mKernelCheckOutputSpace);
     IntegerType * const sizeTy = b->getSizeTy();
+    const auto makeExhaustedInputPhi =
+        mKernelIsInternallySynchronized && StrideStepLength[mKernelId] > 1 && mIsPartitionRoot;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -514,6 +516,9 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
         mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();
         mInputVirtualBaseAddressPhi[inputPort] = b->CreatePHI(bufferTy, 2, prefix + "_baseAddress");
+        if (LLVM_UNLIKELY(makeExhaustedInputPhi)) {
+            mExhaustedInputPortPhi[inputPort] = b->CreatePHI(b->getInt1Ty(), 2, prefix + "_isExhaustedPhi");
+        }
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;

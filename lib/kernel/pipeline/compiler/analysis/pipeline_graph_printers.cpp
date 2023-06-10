@@ -239,6 +239,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (bn.isThreadLocal()) {
             out << 'T';
         }
+        if (bn.isUnowned()) {
+            out << 'U';
+        }
         if (buffer == nullptr) {
             out << '?';
         } else {
@@ -248,15 +251,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 case BufferId::DynamicBuffer:
                     out << 'D'; break;
                 case BufferId::ExternalBuffer:
-                    assert (bn.isExternal() || bn.isThreadLocal());
+                    assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
                     break;
                 case BufferId::RepeatingBuffer:
                     out << 'R'; break;
                 default: llvm_unreachable("unknown streamset type");
             }
-        }
-        if (bn.isUnowned()) {
-            out << 'U';
         }
         if (bn.IsLinear) {
             out << 'L';

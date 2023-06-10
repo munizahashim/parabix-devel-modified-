@@ -65,16 +65,15 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
-    if (LLVM_LIKELY(mIsNestedPipeline || mUseDynamicMultithreading)) {
-        return;
-    }
+    assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
     assert (mNumOfThreads > 0);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    Value * const segNo = mBaseSegNo;
+    Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
     #else
-    Value * const segNo = mSegNo;
+    Value * const segNo = mSegNo; assert (mSegNo);
     #endif
-    Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(mNumOfThreads));
+    assert (mNumOfFixedThreads);
+    Value * const nextSegNo = b->CreateAdd(segNo, mNumOfFixedThreads);
     cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
 }
 

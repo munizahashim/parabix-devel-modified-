@@ -24,17 +24,6 @@ using IDISA::FixedVectorType;
 
 namespace kernel {
 
-enum PipelineStateObjectField : unsigned {
-    PIPELINE_PARAMS
-    , INITIAL_SEG_NO
-    , ACCUMULATED_SEGMENT_TIME
-    , ACCUMULATED_SYNCHRONIZATION_TIME
-    , PROCESS_THREAD_ID
-    , TERMINATION_SIGNAL
-    // -------------------
-    , THREAD_STRUCT_SIZE
-};
-
 enum CycleCounter {
   KERNEL_SYNCHRONIZATION            = 0
   , PARTITION_JUMP_SYNCHRONIZATION  = 1
@@ -217,7 +206,7 @@ public:
 // internal pipeline functions
 
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
-    void initThreadStructObject(BuilderRef b, Value *threadState, Value * const threadId, Value * const threadLocal, Value * const threadNum);
+    void initThreadStructObject(BuilderRef b, Value *threadState, Value * const threadId, Value * const threadLocal, Value * const threadNum, Value * const numOfThreads);
     void readThreadStuctObject(BuilderRef b, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
@@ -665,6 +654,7 @@ protected:
     Value *                                     mKernelSharedHandle = nullptr;
     Value *                                     mKernelThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
+    Value *                                     mNumOfFixedThreads = nullptr;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value *                                     mBaseSegNo = nullptr;
     PHINode *                                   mPartitionExitSegNoPhi = nullptr;
@@ -819,6 +809,7 @@ protected:
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
 
     InputPortVector<Value *>                    mExhaustedInputPort;
+    InputPortVector<PHINode *>                  mExhaustedInputPortPhi;
 
     InputPortVector<PHINode *>                  mCurrentProcessedItemCountPhi;
     InputPortVector<PHINode *>                  mCurrentProcessedDeferredItemCountPhi;
@@ -1006,6 +997,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
 , mExhaustedInputPort(P.MaxNumOfInputPorts, mAllocator)
+, mExhaustedInputPortPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedDeferredItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentLinearInputItems(P.MaxNumOfInputPorts, mAllocator)

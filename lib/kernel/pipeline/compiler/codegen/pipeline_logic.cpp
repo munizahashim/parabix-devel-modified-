@@ -39,11 +39,13 @@ void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIt
     if (LLVM_UNLIKELY(pk->generatesDynamicRepeatingStreamSets())) {
         bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
     }
-    b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
-    if (codegen::EnableDynamicMultithreading) {
-        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
-        b->setScalarField(SEGMENTS_PER_CHECK, arg++);
-        b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
+    if (LLVM_LIKELY(!pk->hasAttribute(AttrId::InternallySynchronized))) {
+        b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
+        if (codegen::EnableDynamicMultithreading) {
+            b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
+            b->setScalarField(SEGMENTS_PER_CHECK, arg++);
+            b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
+        }
     }
     assert (arg == arg_end);
 }

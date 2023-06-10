@@ -189,6 +189,9 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
             argTypes.push_back(sizeTy);
         }
     }
+    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+        return;
+    }
     if (codegen::EnableDynamicMultithreading) {
         // minimum num of threads
         argTypes.push_back(sizeTy);
@@ -265,6 +268,11 @@ void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitAr
             }
         }
     }
+    // TODO: temporary fix; pipeline should contain both full multithreaded
+    // programs and an internally synchronized version.
+    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
+        return;
+    }
     if (codegen::EnableDynamicMultithreading) {
         // minimum num of threads
         args.push_back(b->getSize(2));
@@ -278,7 +286,6 @@ void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitAr
         // num of threads
         args.push_back(b->getSize(codegen::SegmentThreads));
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

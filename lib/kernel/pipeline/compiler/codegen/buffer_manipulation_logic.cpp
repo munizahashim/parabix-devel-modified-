@@ -155,7 +155,12 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
 
-        if (LLVM_UNLIKELY(rate.isGreedy())) {
+        // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
+        // nested pipelines but could replace the source output.
+
+        const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
+
+        if (LLVM_UNLIKELY(rate.isGreedy() && !alwaysTruncate)) {
             continue;
         }
 
@@ -202,7 +207,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             Value * const selected = accessibleItems[inputPort.Number];
             Value * const totalNumOfItems = getAccessibleInputItems(b, port);
 
-            const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
+
 
             if (LLVM_UNLIKELY(alwaysTruncate)) {
                 b->CreateBr(maskedInput);
@@ -369,7 +374,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             FixedArray<Value *, 6> args;
             args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
-            const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound()); assert (itemsPerSegment >= 1);
+            const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound());
+            assert (itemsPerSegment >= 1 || rate.isGreedy());
             args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
             if (port.isDeferred()) {
                 args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
@@ -467,8 +473,12 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * const numOfStreams = buffer->getStreamSetCount(b);
         Value * const baseAddress = buffer->getBaseAddress(b);
 
+        DataLayout DL(b->getModule());
+        Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
+
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, sz_ZERO, sz_ZERO, sz_ZERO);
+        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
         #endif
         BasicBlock * const entry = b->GetInsertBlock();
         b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
@@ -482,13 +492,9 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         } else {
             inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
         }
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(inputPtr->getType());
         #ifdef PRINT_DEBUG_MESSAGES
-        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
         Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
-
-//        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
+        debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
         Value * const value = b->CreateBlockAlignedLoad(inputPtr);
         Value * const maskedValue = b->CreateAnd(value, mask);
