@@ -1064,7 +1064,9 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordBufferExpansionHistory
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const BufferNode & bn,
+void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
+                                                    const unsigned streamSet,
+                                                    const BufferNode & bn,
                                                     const BufferPort & port,
                                                     const StreamSetBuffer * const buffer) const {
 
@@ -1101,7 +1103,8 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b, const BufferNo
 
     // consumer processed item count [3,n)
     if (LLVM_LIKELY(!bn.isReturned())) {
-        Value * const consumerDataPtr = b->getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
+        const auto id = getTruncatedStreamSetSourceId(streamSet);
+        Value * const consumerDataPtr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
         const auto n = entryTy->getArrayNumElements(); assert (n > 3);
         assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
         Value * const processedPtr = b->CreateGEP(consumerDataPtr, { ZERO, ONE });

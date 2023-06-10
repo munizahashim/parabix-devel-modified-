@@ -1225,8 +1225,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                if (LLVM_UNLIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                const auto r = Relationships[streamSet].Relationship;
+                if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     streamSets.insert(streamSet);
                 }
             }
@@ -1237,8 +1238,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_out_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                if (LLVM_UNLIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                const auto r = Relationships[streamSet].Relationship;
+                if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     streamSets.insert(streamSet);
                 }
             }
@@ -1291,9 +1293,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                if (LLVM_UNLIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                const auto r = Relationships[streamSet].Relationship;
+                if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
                     assert (j < num_vertices(G));
                     const RelationshipNode & rn = Relationships[binding];
@@ -1329,8 +1331,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_out_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                if (LLVM_UNLIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                const auto r = Relationships[streamSet].Relationship;
+                if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
                     assert (j < num_vertices(G));
 
@@ -1409,8 +1412,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
                 const auto f = first_in_edge(binding, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                if (LLVM_UNLIKELY(isa<StreamSet>(Relationships[streamSet].Relationship))) {
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                const auto r = Relationships[streamSet].Relationship;
+                if (LLVM_UNLIKELY(isa<StreamSet>(r) || isa<TruncatedStreamSet>(r))) {
                     const auto j = getStreamSetIndex(streamSet);
                     assert (j < num_vertices(G));
                     const RelationshipNode & rn = Relationships[binding];
@@ -1451,6 +1455,7 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         const auto j = getStreamSetIndex(streamSet);
         SchedulingGraph::in_edge_iterator ei, ei_end;
         std::tie(ei, ei_end) = in_edges(j, G);
+        assert (ei != ei_end);
         auto itemsPerStride = G[*ei];
         while (++ei != ei_end) {
             const auto & r = G[*ei];
@@ -2168,8 +2173,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
                 if (LLVM_UNLIKELY(streamSet == 0)) continue;
 
                 assert (streamSet < num_vertices(Relationships));
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
 
                 const auto f = first_in_edge(streamSet, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);

@@ -86,8 +86,8 @@ const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".ISIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
-const static std::string CONSUMED_ITEM_COUNT_SUFFIX = ".CON";
-const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@CON";
+const static std::string CONSUMED_ITEM_COUNT_PREFIX = "@CON";
+const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@TCN";
 
 const static std::string REPEATING_STREAMSET_HANDLE_PREFIX = "@RSS.";
 const static std::string REPEATING_STREAMSET_LENGTH_PREFIX = "@RSSL.";
@@ -259,7 +259,7 @@ public:
     void initializeKernelInsufficientIOExitPhis(BuilderRef b);
     void initializeKernelLoopExitPhis(BuilderRef b);
     void initializeKernelExitPhis(BuilderRef b);
-
+    void checkForSufficientIO(BuilderRef b);
     void determineNumOfLinearStrides(BuilderRef b);
     void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
@@ -348,7 +348,7 @@ public:
     void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
     Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
     Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
- //   Value * isClosed(BuilderRef b, const unsigned streamSet) const;
+    Value * isClosed(BuilderRef b, const unsigned streamSet, const bool normally = false) const;
     unsigned getTerminationSignalIndex(const unsigned consumer) const;
     Value * isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
@@ -366,6 +366,7 @@ public:
 
 // consumer codegen functions
 
+    unsigned getTruncatedStreamSetSourceId(const unsigned streamSet) const;
     void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
     void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(BuilderRef b);
@@ -397,7 +398,7 @@ public:
     void deallocateRepeatingBuffers(BuilderRef b);
     void generateMetaDataForRepeatingStreamSets(BuilderRef b);
     bool readsRepeatingStreamSet() const;
-    Constant * getMaximumNumOfStridesForRepeatingStreamSet(BuilderRef b, const unsigned streamSet) const;
+    Constant * getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const;
     void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
 
 // prefetch instructions
@@ -422,7 +423,7 @@ public:
 
 
     void initializeBufferExpansionHistory(BuilderRef b) const;
-    void recordBufferExpansionHistory(BuilderRef b, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
+    void recordBufferExpansionHistory(BuilderRef b, const unsigned streamSet, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
     void printOptionalBufferExpansionHistory(BuilderRef b);
 
     void initializeStridesPerSegment(BuilderRef b) const;
@@ -748,6 +749,7 @@ protected:
     PHINode *                                   mIsFinalInvocationPhi = nullptr;
     Value *                                     mIsFinalInvocation = nullptr;
     Value *                                     mHasMoreInput = nullptr;
+    PHINode *                                   mStrideStepSizeAtLoopEntryPhi = nullptr;
     Value *                                     mStrideStepSize = nullptr;
     Value *                                     mAnyClosed = nullptr;
     Value *                                     mHasExhaustedClosedInput = nullptr;
@@ -790,6 +792,7 @@ protected:
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
 
     InputPortVector<Value *>                    mExhaustedInputPort;
+    InputPortVector<PHINode *>                  mExhaustedInputPortPhi;
 
     InputPortVector<PHINode *>                  mCurrentProcessedItemCountPhi;
     InputPortVector<PHINode *>                  mCurrentProcessedDeferredItemCountPhi;
@@ -974,6 +977,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mProcessedDeferredItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedDeferredItemCount(P.MaxNumOfInputPorts, mAllocator)
 , mExhaustedInputPort(P.MaxNumOfInputPorts, mAllocator)
+, mExhaustedInputPortPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedDeferredItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentLinearInputItems(P.MaxNumOfInputPorts, mAllocator)

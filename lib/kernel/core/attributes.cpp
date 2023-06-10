@@ -31,7 +31,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(ManagedBuffer);
         NAME(SharedManagedBuffer);
         NAME(ReturnedBuffer);
-        NAME(Misaligned);
+        NAME(AllowsUnalignedAccess);
         NAME_AMOUNT(BlockSize);
         NAME(ReverseAdapter);
         NAME_AMOUNT(SliceOffset);

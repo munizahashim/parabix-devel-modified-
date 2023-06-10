@@ -94,14 +94,18 @@ bool Kernel::requiresExplicitPartialFinalStride() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasFixedRateInput
+ * @brief hasFixedRateIO
  ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasFixedRateInput() const {
-    const auto n = getNumOfStreamInputs();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & input = getInputStreamSetBinding(i);
+bool Kernel::hasFixedRateIO() const {
+    for (const auto & input : mInputStreamSets) {
         const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed())) {
+        if (rate.isFixed()) {
+            return true;
+        }
+    }
+    for (const auto & output : mOutputStreamSets) {
+        const ProcessingRate & rate = output.getRate();
+        if (rate.isFixed()) {
             return true;
         }
     }
@@ -138,6 +142,30 @@ std::string Kernel::makeCacheName(BuilderRef b) {
     std::string cacheName;
     raw_string_ostream out(cacheName);
     out << getName() << '_' << b->getBuilderUniqueName();
+#if 0
+    auto appendStreamSetType = [&](const char code, const Bindings & bindings) {
+        for (const auto & binding : bindings) {
+            const auto r = static_cast<const StreamSet *>(binding.getRelationship();
+            out << '_' << code << r->getNumElements() << 'x' << r->getFieldWidth();
+        }
+    };
+    appendStreamSetType('I', mInputStreamSets);
+    appendStreamSetType('O', mOutputStreamSets);
+    auto appendScalarType = [&](const char code, const Bindings & bindings) {
+        for (const auto & binding : bindings) {
+            const auto r = static_cast<const Scalar *>(binding.getRelationship();
+            out << '_' << code << r->getFieldWidth();
+        }
+    };
+    appendScalarType('I', mInputScalars);
+    appendScalarType('O', mOutputScalars);
+
+    for (const auto & internal : mInternalScalars) {
+        out << 'X' << (unsigned)internal.getScalarType()
+            << '.' << internal.getGroup();
+        internal.getType().print(out);
+    }
+#endif
     out.flush();
     return cacheName;
 }
@@ -705,7 +733,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
             fields.push_back(sizeTy); // external SegNo
         }
         fields.push_back(sizeTy); // numOfStrides
-        if (LLVM_LIKELY(hasFixedRateInput())) {
+        if (LLVM_LIKELY(hasFixedRateIO())) {
             fields.push_back(sizeTy); // fixed rate factor
         }
     }
@@ -816,7 +844,7 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
                 setNextArgName("segNo");
             }
             setNextArgName("numOfStrides");
-            if (hasFixedRateInput()) {
+            if (hasFixedRateIO()) {
                 setNextArgName("fixedRateFactor");
             }
         }

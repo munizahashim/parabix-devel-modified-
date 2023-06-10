@@ -915,8 +915,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                 const auto output = child(kernelId, Relationships);
                 assert (Relationships[output].Type == RelationshipNode::IsBinding);
                 const auto streamSet = child(output, Relationships);
-                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                 partialSumMap.emplace(streamSet, PartialSumData{k});
             }
 
@@ -931,11 +930,10 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                     const auto f = first_in_edge(input, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = source(f, Relationships);
-                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                     if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(Relationships[streamSet].Relationship))) {
                         continue;
                     }
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
                     const auto g = first_in_edge(streamSet, Relationships);
                     assert (Relationships[g].Reason != ReasonType::Reference);
                     const auto output = source(g, Relationships);
@@ -962,22 +960,22 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                     const auto f = first_out_edge(output, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
-                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                     for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
                         const auto input = target(e, Relationships);
                         const RelationshipNode & inputNode = Relationships[input];
-                        assert (inputNode.Type == RelationshipNode::IsBinding);
-                        const auto f = first_out_edge(input, Relationships);
-                        assert (Relationships[f].Reason != ReasonType::Reference);
-                        const auto consumer = target(f, Relationships);
-                        const auto c = PartitionIds.find(consumer);
-                        assert (c != PartitionIds.end());
-                        const auto consumerPartitionId = c->second;
-                        assert (partitionId <= consumerPartitionId);
-                        if (consumerPartitionId != partitionId) {
-                            add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
-                            break;
+                        if (LLVM_LIKELY(inputNode.Type == RelationshipNode::IsBinding)) {
+                            const auto f = first_out_edge(input, Relationships);
+                            assert (Relationships[f].Reason != ReasonType::Reference);
+                            const auto consumer = target(f, Relationships);
+                            const auto c = PartitionIds.find(consumer);
+                            assert (c != PartitionIds.end());
+                            const auto consumerPartitionId = c->second;
+                            assert (partitionId <= consumerPartitionId);
+                            if (consumerPartitionId != partitionId) {
+                                add_vertex(PortNode{static_cast<unsigned>(output), static_cast<unsigned>(streamSet)}, H);
+                                break;
+                            }
                         }
                     }
                 }
@@ -1013,7 +1011,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                             assert (cap > 0);
 
                             const auto partialSumStreamSet = parent(ref, Relationships);
-                            assert (Relationships[partialSumStreamSet].Type == RelationshipNode::IsRelationship);
+                            assert (Relationships[partialSumStreamSet].Type == RelationshipNode::IsStreamSet);
                             assert (isa<StreamSet>(Relationships[partialSumStreamSet].Relationship));
                             auto p = partialSumMap.find(partialSumStreamSet);
                             if (p == partialSumMap.end()) {
@@ -1026,7 +1024,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
 
                                 assert (Relationships[input].Reason != ReasonType::Reference);
                                 const auto streamSet = source(input, Relationships);
-                                assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
+                                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                                 const auto output = parent(streamSet, Relationships);
                                 assert (Relationships[output].Type == RelationshipNode::IsBinding);
                                 const auto producer = parent(output, Relationships);
@@ -1687,7 +1685,7 @@ equivalent_relationship_already_exists:
                 const auto g = partialSumGeneratorMap.find(p.Reference);
                 BasePartialSumGenerator * gen = nullptr;
                 if (LLVM_LIKELY(g == partialSumGeneratorMap.end())) {
-                    assert (Relationships[p.Reference].Type == RelationshipNode::IsRelationship);
+                    assert (Relationships[p.Reference].Type == RelationshipNode::IsStreamSet);
                     assert ((data.RequiredCapacity % data.GCD) == 0);
                     const auto max = data.StepSize * data.GCD;
 

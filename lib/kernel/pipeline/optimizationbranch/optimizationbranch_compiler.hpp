@@ -578,7 +578,7 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         addNextArg(segNo);
     }
     addNextArg(mRawNumOfStrides);
-    if (kernel->hasFixedRateInput()) {
+    if (kernel->hasFixedRateIO()) {
         addNextArg(mFixedRateFactor);
     }
 

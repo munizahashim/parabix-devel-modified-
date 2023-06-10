@@ -38,8 +38,11 @@ public:
     }
 
     enum class ClassTypeId {
+        // streamset types
         StreamSet
         , RepeatingStreamSet
+        , TruncatedStreamSet
+        // scalar types
         , Scalar
         , ScalarConstant
     };
@@ -50,6 +53,14 @@ public:
 
     llvm::Type * getType() const noexcept {
         return mType;
+    }
+
+    bool isScalar() const noexcept {
+        return (mClassTypeId >= ClassTypeId::Scalar);
+    }
+
+    bool isStreamSet() const noexcept {
+        return (mClassTypeId < ClassTypeId::Scalar);
     }
 
     void* operator new (std::size_t size, Allocator & A) noexcept {
@@ -114,9 +125,14 @@ public:
         return _isDynamic;
     }
 
-    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet, bool isDynamic = false) noexcept
+    bool isUnaligned() const {
+        return _isUnaligned;
+    }
+
+    RepeatingStreamSet(llvm::LLVMContext & C, const unsigned FieldWidth, std::vector<std::vector<uint64_t>> stringSet, bool isDynamic, bool isUnaligned) noexcept
     : StreamSet(C, ClassTypeId::RepeatingStreamSet, stringSet.size(), FieldWidth)
     , _isDynamic(isDynamic)
+    , _isUnaligned(isUnaligned)
     , _StringSet(std::move(stringSet)) {
 
     }
@@ -124,7 +140,33 @@ public:
 private:
 
     const bool _isDynamic;
+    const bool _isUnaligned;
     std::vector<std::vector<uint64_t>> _StringSet;
+
+};
+
+class TruncatedStreamSet : public StreamSet {
+public:
+    static bool classof(const Relationship * e) {
+        return e->getClassTypeId() == ClassTypeId::TruncatedStreamSet;
+    }
+    static bool classof(const void *) {
+        return false;
+    }
+
+    const StreamSet * getData() const {
+        return _Data;
+    }
+
+    TruncatedStreamSet(llvm::LLVMContext & C, const StreamSet * const data) noexcept
+    : StreamSet(C, ClassTypeId::TruncatedStreamSet, data->getNumElements(), data->getFieldWidth())
+    , _Data(data) {
+
+    }
+
+private:
+
+    const StreamSet * const _Data;
 
 };
 

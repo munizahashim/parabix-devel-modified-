@@ -175,6 +175,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);
+    checkForSufficientIO(b);
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         b->CreateUnlikelyCondBr(mInitiallyTerminated, mKernelInitiallyTerminated, mKernelLoopEntry);
@@ -378,6 +379,9 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     assert (mHasMoreInput);
 
     BasicBlock * const exitBlockAfterLoopAgainTest = b->GetInsertBlock();
+    if (mStrideStepSizeAtLoopEntryPhi) {
+        mStrideStepSizeAtLoopEntryPhi->addIncoming(mStrideStepSize, exitBlockAfterLoopAgainTest);
+    }
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
@@ -493,6 +497,14 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
 
     b->SetInsertPoint(mKernelLoopEntry);
 
+    if (StrideStepLength[mKernelId] > 1 && mIsPartitionRoot) {
+        ConstantInt * strideStep = b->getSize(StrideStepLength[mKernelId]);
+        mStrideStepSizeAtLoopEntryPhi =
+            b->CreatePHI(sizeTy, 2, makeKernelName(mKernelId) + "_strideStepSizePhi");
+        mStrideStepSizeAtLoopEntryPhi->addIncoming(strideStep, mKernelLoopStart);
+        mStrideStepSize = mStrideStepSizeAtLoopEntryPhi;
+    }
+
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto port = br.Port;
@@ -553,6 +565,8 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
 void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
     b->SetInsertPoint(mKernelCheckOutputSpace);
     IntegerType * const sizeTy = b->getSizeTy();
+    const auto makeExhaustedInputPhi =
+        mKernelIsInternallySynchronized && StrideStepLength[mKernelId] > 1 && mIsPartitionRoot;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -561,6 +575,9 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
         mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();
         mInputVirtualBaseAddressPhi[inputPort] = b->CreatePHI(bufferTy, 2, prefix + "_baseAddress");
+        if (LLVM_UNLIKELY(makeExhaustedInputPhi)) {
+            mExhaustedInputPortPhi[inputPort] = b->CreatePHI(b->getInt1Ty(), 2, prefix + "_isExhaustedPhi");
+        }
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto outputPort = mBufferGraph[e].Port;
@@ -571,7 +588,7 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(BuilderRef b) {
     }
     const auto prefix = makeKernelName(mKernelId);
     mNumOfLinearStridesPhi = b->CreatePHI(sizeTy, 2, prefix + "_numOfLinearStridesPhi");
-    if (LLVM_LIKELY(mKernel->hasFixedRateInput())) {
+    if (LLVM_LIKELY(mKernel->hasFixedRateIO())) {
         mFixedRateFactorPhi = b->CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
     }
     mCurrentFixedRateFactor = mFixedRateFactorPhi;
@@ -721,7 +738,6 @@ void PipelineCompiler::writeInsufficientIOExit(BuilderRef b) {
         mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b->getSize(0), exitBlock);
     }
-
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         mUpdatedProcessedPhi[port]->addIncoming(mAlreadyProcessedPhi[port], exitBlock);

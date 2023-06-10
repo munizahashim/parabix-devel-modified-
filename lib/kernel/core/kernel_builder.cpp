@@ -113,33 +113,57 @@ void KernelBuilder::setTerminationSignal(Value * const value) {
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const processed = getProcessedItemCount(name);
-    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(processedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const processed = getProcessedItemCount(name);
-    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(processedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
 }
 
 Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    return CreateBlockAlignedLoad(getInputStreamBlockPtr(name, streamIndex, blockOffset));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    const auto bw = getBitBlockWidth();
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(processedPtr), floor_log2(bw));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const addr = buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return CreateAlignedLoad(addr, unaligned ? 1U : (bw / 8));
 }
 
 Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    return CreateBlockAlignedLoad(getInputStreamPackPtr(name, streamIndex, packIndex, blockOffset));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    const auto bw = getBitBlockWidth();
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(processedPtr), floor_log2(bw));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const addr = buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return CreateAlignedLoad(addr, unaligned ? 1U : (bw / 8));
 }
 
 Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
@@ -148,24 +172,26 @@ Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
 }
 
 Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * streamIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const produced = getProducedItemCount(name);
-    Value * blockIndex = CreateLShr(produced, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(producedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const produced = getProducedItemCount(name);
-    Value * blockIndex = CreateLShr(produced, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(producedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
 }
 
@@ -177,7 +203,17 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
         out << "[" << c->getZExtValue() << "]";
     }
     toStore->setName(out.str());
-    Value * const ptr = getOutputStreamBlockPtr(name, streamIndex, blockOffset);
+
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(producedPtr), floor_log2(getBitBlockWidth()));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+
     Type * const storeTy = toStore->getType();
     Type * const ptrElemTy = ptr->getType()->getPointerElementType();
     if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
@@ -192,7 +228,10 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
             storeTy->print(out);
         }
     }
-    return CreateBlockAlignedStore(toStore, ptr);
+
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto bw = getBitBlockWidth();
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
 }
 
 StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset, Value * toStore) {
@@ -203,7 +242,17 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
         out << "[" << c->getZExtValue() << "]";
     }
     toStore->setName(out.str());
-    Value * const ptr = getOutputStreamPackPtr(name, streamIndex, packIndex, blockOffset);
+
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(producedPtr), floor_log2(getBitBlockWidth()));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+
     Type * const storeTy = toStore->getType();
     Type * const ptrElemTy = ptr->getType()->getPointerElementType();
     if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
@@ -218,7 +267,10 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
             storeTy->print(out);
         }
     }
-    return CreateBlockAlignedStore(toStore, ptr);
+
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto bw = getBitBlockWidth();
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
 }
 
 Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {

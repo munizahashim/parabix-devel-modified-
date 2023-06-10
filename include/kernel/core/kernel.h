@@ -242,7 +242,7 @@ public:
 
     LLVM_READNONE StreamSet * getInputStreamSet(const unsigned i) const {
         auto streamSet = getInputStreamSetBinding(i).getRelationship();
-        assert (llvm::isa<StreamSet>(streamSet) || llvm::isa<RepeatingStreamSet>(streamSet));
+        assert (llvm::isa<TruncatedStreamSet>(streamSet) || llvm::isa<StreamSet>(streamSet) || llvm::isa<RepeatingStreamSet>(streamSet));
         return static_cast<StreamSet *>(streamSet);
     }
 
@@ -258,7 +258,9 @@ public:
     }
 
     LLVM_READNONE StreamSet * getOutputStreamSet(const unsigned i) const {
-        return llvm::cast<StreamSet>(getOutputStreamSetBinding(i).getRelationship());
+        auto streamSet = getOutputStreamSetBinding(i).getRelationship();
+        assert (llvm::isa<TruncatedStreamSet>(streamSet) || llvm::isa<StreamSet>(streamSet));
+        return static_cast<StreamSet *>(streamSet);
     }
 
     const Bindings & getOutputStreamSetBindings() const {
@@ -454,7 +456,7 @@ protected:
 
     static std::string getStringHash(const llvm::StringRef str);
 
-    LLVM_READNONE bool hasFixedRateInput() const;
+    LLVM_READNONE bool hasFixedRateIO() const;
 
     virtual void addInternalProperties(BuilderRef) { }
 

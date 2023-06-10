@@ -138,7 +138,7 @@ public:
 
     virtual llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const;
 
-    virtual llvm::Value * getStreamLogicalBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const streamIndex, llvm::Value * blockIndex) const = 0;
+    virtual llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
 
     virtual llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
@@ -187,7 +187,7 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
-    llvm::Value * getStreamLogicalBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const streamIndex, llvm::Value * blockIndex) const override;
+    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
     llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * overflowItems = nullptr) const override;
 
@@ -234,9 +234,9 @@ public:
 
     llvm::Value * getStreamPackPtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const final;
 
-    llvm::Value * getStreamLogicalBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const streamIndex, llvm::Value * blockIndex) const final;
+    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const final;
+//    llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const final;
 
     llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const final;
 
@@ -415,9 +415,11 @@ public:
 
     enum Field { BaseAddress };
 
-    RepeatingBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type);
+    RepeatingBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type, const bool unaligned);
 
     llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const override;
+
+    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
@@ -456,6 +458,7 @@ public:
 private:
 
     llvm::Value * mModulus;
+    const bool mUnaligned;
 
 };
 

@@ -86,7 +86,6 @@ public:
 
         P.determineBufferSize(b);
 
-
         P.makeConsumerGraph();
 
         P.calculatePartialSumStepFactors(b);
@@ -133,27 +132,11 @@ private:
 
     void generateInitialPipelineGraph(BuilderRef b);
 
-    #ifdef ENABLE_GRAPH_TESTING_FUNCTIONS
-    void generateRandomPipelineGraph(BuilderRef b, const uint64_t seed,
-                                     const unsigned desiredKernels, const unsigned desiredStreamSets,
-                                     const unsigned desiredPartitions);
-    #endif
-
-    using KernelVertexVec = SmallVector<ProgramGraph::Vertex, 64>;
-
-    void addRegionSelectorKernels(BuilderRef b, Kernels & partition, KernelVertexVec & vertex, ProgramGraph & G);
-
-    void addPopCountKernels(BuilderRef b, Kernels & partition, KernelVertexVec & vertex, ProgramGraph & G);
-
-    void combineDuplicateKernels(BuilderRef b, ProgramGraph & G);
-
-    void removeUnusedKernels(const unsigned p_in, const unsigned p_out, ProgramGraph & G);
-
     void identifyPipelineInputs();
 
     void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
 
-    void gatherInfo() {        
+    void gatherInfo() {
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
         MaxNumOfOutputPorts = out_degree(PipelineInput, mBufferGraph);
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
@@ -267,15 +250,13 @@ public:
     void printBufferGraph(BuilderRef b, raw_ostream & out) const;
     static void printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name = "G");
 
-private:
+public:
 
     PipelineKernel * const          mPipelineKernel;
     const unsigned					mNumOfThreads;
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
-
-public:
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;

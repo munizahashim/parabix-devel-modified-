@@ -80,7 +80,17 @@ using namespace kernel;
 
 namespace grep {
 
-static cl::opt<bool> MaxLimitTerminationMode("maxlimit-termination-mode", cl::desc("force pipeline termination when maxlimit reached."), cl::init(true));
+using UntilNMode = UntilNkernel::Mode;
+
+static cl::opt<UntilNMode>
+MaxLimitTerminationMode("maxlimit-termination-mode",
+                  cl::init(UntilNMode::TerminateAtN),
+                  cl::desc("method of pipeline termination when -m=maxlimit is reached."),
+                  cl::values(clEnumValN(UntilNMode::ReportAcceptedLengthAtAndBeforeN, "report", "halt pipeline after maxlimit using truncated streamset"),
+                             clEnumValN(UntilNMode::TerminateAtN, "terminate", "halt pipeline after maxlimit using streamset copy"),
+                             clEnumValN(UntilNMode::ZeroAfterN, "zero", "fully process the file")
+                  CL_ENUM_VAL_SENTINEL));
+
 
 const auto ENCODING_BITS = 8;
 
@@ -651,9 +661,14 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
-        StreamSet * const MaxCountLines = P->CreateStreamSet();
+        StreamSet * MaxCountLines = nullptr;
         Scalar * const maxCount = P->getInputScalar("maxCount");
-        UntilNkernel::Mode m = MaxLimitTerminationMode ? UntilNkernel::Mode::TerminateAtN : UntilNkernel::Mode::ZeroAfterN;
+        const UntilNMode m = MaxLimitTerminationMode;
+        if (m == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
+            MaxCountLines = P->CreateTruncatedStreamSet(MatchedLineEnds);
+        } else {
+            MaxCountLines = P->CreateStreamSet();
+        }
         P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
         if (mIllustrator) mIllustrator->captureBitstream(P, "MaxCountLines", MaxCountLines);
         MatchedLineEnds = MaxCountLines;
@@ -1109,6 +1124,7 @@ std::string GrepEngine::linePrefix(std::string fileName) {
 
 // Default: do not show anything
 void GrepEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {
+
 }
 
 void CountOnlyEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {
