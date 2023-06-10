@@ -603,6 +603,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 outputRate.Flags |= BufferPortType::CanModifySegmentLength;
             }
         }
+
     }
 }
 

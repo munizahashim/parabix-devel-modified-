@@ -121,6 +121,8 @@ inline CC * makeCC(const codepoint_t lo, const codepoint_t hi, const cc::Alphabe
 }
 
 inline CC * makeCC(const CC * cc1, const CC * cc2) {
+    if (cc1->empty()) return new CC(*cc2);
+    if (cc2->empty()) return new CC(*cc1);
     return new CC(cc1, cc2);
 }
 

@@ -907,7 +907,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
 
-
     Value * const baseAddress = buffer->getBaseAddress(b);
     if (bufferNode.isUnowned()) {
         assert (bufferNode.isNonThreadLocal());
