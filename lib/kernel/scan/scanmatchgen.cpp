@@ -350,9 +350,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
     Value * const avail = b->getAvailableItemCount("InputStream");
-    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
-    //b->CallPrintInt("maxFileNum", maxFileNum);
-
+    Value * fileCount = b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator});
+    Value * maxFileNum = b->CreateSub(fileCount, b->getInt32(1));
     Value * const initialLineStart = b->getProcessedItemCount("InputStream");
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
@@ -377,10 +376,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         pendingLineNum = b->CreatePHI(sizeTy, 2);
         pendingLineNum->addIncoming(initialLineNum, entryBlock);
-        ////b->CallPrintInt("stride pendingLineNum", pendingLineNum);
     }
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
-    //b->CallPrintInt("stridePos", stridePos);
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * matchWordBasePtr = b->getInputStreamBlockPtr("matchResult", sz_ZERO, strideBlockOffset);
     matchWordBasePtr = b->CreatePointerCast(matchWordBasePtr, sw.pointerTy);
@@ -393,6 +390,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     Value * fileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b->CreateSelect(inFinalFile, availableLimit, fileLimit);
+
     b->setScalarField("pendingFileLimit", pendingLimit);
     b->CreateBr(stridePrecomputation);
 
@@ -517,15 +515,12 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     pendingLimit = b->getScalarField("pendingFileLimit");
     Value * beyondFileEnd = b->CreateICmpUGE(matchStart, pendingLimit);
+
     b->CreateUnlikelyCondBr(beyondFileEnd, nextInBatch, dispatch);
 
     b->SetInsertPoint(nextInBatch);
     batchFileNum = b->getScalarField("batchFileNum");
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch matchStart", matchStart);
-    //b->CallPrintInt("nextInBatch pendingLimit", pendingLimit);
-
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
@@ -536,7 +531,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
         Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         //b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, batchFileNum, priorLineCount});
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
@@ -547,7 +541,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
-    //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGE(matchStart, limit);
@@ -601,7 +594,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     //  We've processed available stride data looking for matches, now check
     //  for any files that are terminated within the stride and finalize them.
     Value * strideLimit = b->CreateUMin(b->CreateAdd(stridePos, sz_STRIDE), availableLimit);
-    //b->CallPrintInt("strideLimit", strideLimit);
     pendingLimit = b->getScalarField("pendingFileLimit");
     //  We use a strictly greater than test here; if the pendingLimit is the availableLimit,
     //  this means that we are at the end of the available data, not necessarily a file end.
@@ -610,31 +602,22 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     b->SetInsertPoint(nextInBatch2);
     batchFileNum = b->getScalarField("batchFileNum");
-    //b->CallPrintInt("nextInBatch2 batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch2 maxFileNum", maxFileNum);
-    pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch2 pendingLimit", pendingLimit);
+    // pendingLimit = b->getScalarField("pendingFileLimit");
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
-        //b->CallPrintInt("nextInBatch2 strideOffsetPos", strideOffsetPos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
-        //b->CallPrintInt("nextInBatch2 offsetIdx", offsetIdx);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        //b->CallPrintInt("nextInBatch2 offsetPosInWord", offsetPosInWord);
         Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        //b->CallPrintInt("nextInBatch2 offsetLineCount", offsetLineCount);
         Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
@@ -662,9 +645,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->SetInsertPoint(callFinalizeScan);
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
     b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, bufferEnd});
-    //b->CallPrintInt("finalizeScan maxFileNum", maxFileNum);
     /*if (mLineNumbering) {
-        //b->CallPrintInt("strideFinalLineNumPhi", strideFinalLineNumPhi);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, strideFinalLineNumPhi});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, sz_ZERO});
@@ -976,8 +957,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
     Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
-    //b->CallPrintInt("maxFileNum", maxFileNum);
-
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
     Value * lineCountArrayWordPtr = nullptr;
@@ -1002,10 +981,8 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     if (mLineNumbering) {
         pendingLineNum = b->CreatePHI(sizeTy, 2);
         pendingLineNum->addIncoming(initialLineNum, entryBlock);
-        ////b->CallPrintInt("stride pendingLineNum", pendingLineNum);
     }
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
-    //b->CallPrintInt("stridePos", stridePos);
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * matchWordBasePtr = b->getInputStreamBlockPtr("matchResult", sz_ZERO, strideBlockOffset);
     matchWordBasePtr = b->CreatePointerCast(matchWordBasePtr, sw.pointerTy);
@@ -1132,9 +1109,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     b->SetInsertPoint(nextInBatch);
     batchFileNum = b->getScalarField("batchFileNum");
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch pendingLimit", pendingLimit);
-
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
@@ -1145,7 +1119,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
         Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
@@ -1155,7 +1128,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
-    //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGT(matchEndPos, limit);
@@ -1174,7 +1146,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
         Value * lineNum = b->CreateAdd(pendingLineNum, lineCountInStride);
-        //b->CallPrintInt("storing lineNum", lineNum);
         b->CreateStore(lineNum, b->getRawOutputPointer("Coordinates", b->getInt32(BATCH_LINE_NUMBERS), matchNumPhi));
     }
 
@@ -1207,7 +1178,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     //  We've processed available stride data looking for matches, now check
     //  for any files that are terminated within the stride and finalize them.
     Value * strideLimit = b->CreateUMin(b->CreateAdd(stridePos, sz_STRIDE), availableLimit);
-    //b->CallPrintInt("strideLimit", strideLimit);
     pendingLimit = b->getScalarField("pendingFileLimit");
     //  We use a strictly greater than test here; if the pendingLimit is the availableLimit,
     //  this means that we are at the end of the available data, not necessarily a file end.
@@ -1216,31 +1186,22 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
 
     b->SetInsertPoint(nextInBatch2);
     batchFileNum = b->getScalarField("batchFileNum");
-    //b->CallPrintInt("nextInBatch2 batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch2 maxFileNum", maxFileNum);
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch2 pendingLimit", pendingLimit);
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
-        //b->CallPrintInt("nextInBatch2 strideOffsetPos", strideOffsetPos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
-        //b->CallPrintInt("nextInBatch2 offsetIdx", offsetIdx);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        //b->CallPrintInt("nextInBatch2 offsetPosInWord", offsetPosInWord);
         Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        //b->CallPrintInt("nextInBatch2 offsetLineCount", offsetLineCount);
         Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});

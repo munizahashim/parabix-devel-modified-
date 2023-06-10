@@ -18,7 +18,7 @@ namespace kernel {
 
 class UntilNkernel final : public MultiBlockKernel {
 public:
-    enum class Mode {ZeroAfterN, TerminateAtN};
+    enum Mode {ZeroAfterN, TerminateAtN, ReportAcceptedLengthAtAndBeforeN};
     UntilNkernel(BuilderRef b, Scalar * N, StreamSet * Markers, StreamSet * FirstN,
                  UntilNkernel::Mode m = UntilNkernel::Mode::TerminateAtN);
 private:

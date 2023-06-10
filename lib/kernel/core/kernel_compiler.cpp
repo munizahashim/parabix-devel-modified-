@@ -392,7 +392,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             mIsFinal = b->CreateIsNull(mRawNumOfStrides);
             mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
         }
-        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+        if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
             mFixedRateFactor = nextArg();
         }
@@ -651,7 +651,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
 
     if (LLVM_LIKELY(!isMainPipeline)) {
         props.push_back(mNumOfStrides); assert (mNumOfStrides);
-        if (LLVM_LIKELY(mTarget->hasFixedRateInput())) {
+        if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             props.push_back(mFixedRateFactor);
         }
     }
@@ -794,10 +794,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
                 produced = b->CreateLoad(mProducedOutputItemPtr[i]);
             }
             assert (isFromCurrentFunction(b, produced, true));
-            Value * const blockIndex = b->CreateLShr(produced, LOG_2_BLOCK_WIDTH);
-            Value * vba = buffer->getStreamLogicalBasePtr(b.get(), baseAddress, ZERO, blockIndex);
-
-            assert (isFromCurrentFunction(b, vba, true));
+            Value * vba = buffer->getVirtualBasePtr(b.get(), baseAddress, produced);
             vba = b->CreatePointerCast(vba, b->getVoidPtrTy());
 
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));

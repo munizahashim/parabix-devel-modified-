@@ -399,6 +399,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mStrideStepSize = nullptr;
     mAnyClosed = nullptr;
     mHasExhaustedClosedInput = nullptr;
+    mStrideStepSizeAtLoopEntryPhi = nullptr;
 
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;
@@ -433,6 +434,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedDeferredItemCountPtr.reset(numOfInputs);
     mProcessedDeferredItemCount.reset(numOfInputs);
     mExhaustedInputPort.reset(numOfInputs);
+    mExhaustedInputPortPhi.reset(numOfInputs);
     mCurrentProcessedItemCountPhi.reset(numOfInputs);
     mCurrentProcessedDeferredItemCountPhi.reset(numOfInputs);
     mCurrentLinearInputItems.reset(numOfInputs);

@@ -48,7 +48,7 @@ Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
     if (LLVM_UNLIKELY(in_degree(index, mScalarGraph) == 0)) {
         assert (index >= FirstScalar && index <= LastScalar);
         const RelationshipNode & rn = mScalarGraph[index];
-        assert (rn.Type == RelationshipNode::IsRelationship);
+        assert (rn.Type == RelationshipNode::IsScalar);
         const Relationship * const rel = rn.Relationship; assert (rel);
         value = cast<ScalarConstant>(rel)->value();
     } else {

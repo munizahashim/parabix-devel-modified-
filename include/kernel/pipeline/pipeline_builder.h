@@ -76,7 +76,24 @@ public:
 
     template<unsigned FieldWidth, unsigned NumOfElements>
     RepeatingStreamSet * CreateRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()});
+        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
+    }
+
+    RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(unsigned FieldWidth, pattern_t string, const bool isDynamic = true) {
+        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
+    }
+
+    RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string, const bool isDynamic = true) {
+        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::move(string), isDynamic);
+    }
+
+    template<unsigned FieldWidth, unsigned NumOfElements>
+    RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
+        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
+    }
+
+    TruncatedStreamSet * CreateTruncatedStreamSet(const StreamSet * data) {
+        return mDriver.CreateTruncatedStreamSet(data);
     }
 
     template <typename ExternalFunctionType>

@@ -56,7 +56,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
         assert (mStreamGraph[f].Reason != ReasonType::Reference);
         const auto streamSet = source(f, mStreamGraph);
         const auto & rn = mStreamGraph[streamSet];
-        assert (rn.Type == RelationshipNode::IsRelationship);
+        assert (rn.Type == RelationshipNode::IsStreamSet);
         if (cast<StreamSet>(rn.Relationship) == cond) {
             condInput = mStreamGraph[e];
             assert (condInput.Type == PortType::Input);

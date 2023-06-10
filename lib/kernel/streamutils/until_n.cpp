@@ -159,17 +159,23 @@ void UntilNkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const num
     // If we've found the n-th bit, end the segment after clearing the markers
     b->SetInsertPoint(foundNthBit);
     b->setScalarField("observed", N);
+
+
     Value * const packPosition = b->CreateZExtOrTrunc(b->CreateCountForwardZeroes(remainingBits), sizeTy);
     Value * const basePosition = b->CreateMul(packOffset, PACK_SIZE);
     Value * const blockOffset = b->CreateOr(basePosition, packPosition);
-    Value * const inputValue2 = b->loadInputStreamBlock("bits", ZERO, blockIndex2);
-    Value * const mask = b->bitblock_mask_to(blockOffset, true);
-    Value * const maskedInputValue = b->CreateAnd(inputValue2, mask, "untilNmasked");
-    b->storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
     Value * const priorProducedItemCount = b->getProducedItemCount("uptoN");
+
+    if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
+        Value * const inputValue2 = b->loadInputStreamBlock("bits", ZERO, blockIndex2);
+        Value * const mask = b->bitblock_mask_to(blockOffset, true);
+        Value * const maskedInputValue = b->CreateAnd(inputValue2, mask, "untilNmasked");
+        b->storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
+    }
+
     const auto log2BlockWidth = std::log2(b->getBitBlockWidth());
     Value * positionOfNthItem = nullptr;
-    if (mMode == UntilNkernel::Mode::TerminateAtN) {
+    if ((mMode == Mode::TerminateAtN) || (mMode == Mode::ReportAcceptedLengthAtAndBeforeN)) {
         positionOfNthItem = b->CreateShl(blockIndex2, log2BlockWidth);
         positionOfNthItem = b->CreateAdd(positionOfNthItem, b->CreateAdd(blockOffset, ONE));
         positionOfNthItem = b->CreateAdd(positionOfNthItem, priorProducedItemCount);
@@ -178,49 +184,59 @@ void UntilNkernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const num
             Value * const positionLessThanAvail = b->CreateICmpULT(positionOfNthItem, availableBits);
             b->CreateAssert(positionLessThanAvail, "position of n-th item exceeds available items!");
         }
+        b->setProducedItemCount("uptoN", positionOfNthItem);
         b->setTerminationSignal();
     } else {
         Value * nextBlk = b->CreateAdd(blockIndex2, ONE);
         BasicBlock * const memZeroRemaining = b->CreateBasicBlock("memZeroRemaining");
         b->CreateCondBr(b->CreateICmpULT(nextBlk, numOfBlocks), memZeroRemaining, segmentDone);
+
         b->SetInsertPoint(memZeroRemaining);
         Value * outputPtr = b->getOutputStreamBlockPtr("uptoN", ZERO, nextBlk);
         outputPtr = b->CreatePointerCast(outputPtr, b->getInt8PtrTy());
         Value * bytesToZero = b->CreateMul(b->CreateSub(numOfBlocks, nextBlk), BLOCK_BYTES);
         b->CreateMemZero(outputPtr, bytesToZero, /* alignment = */ b->getBitBlockWidth()/8);
-        b->CreateBr(segmentDone);
     }
     b->CreateBr(segmentDone);
 
     b->SetInsertPoint(nextStride);
     blocksRemaining->addIncoming(b->CreateSub(blocksRemaining, MAXIMUM_BLOCKS_PER_ITERATION), nextStride);
     baseBlockIndex->addIncoming(b->CreateAdd(baseBlockIndex, MAXIMUM_BLOCKS_PER_ITERATION), nextStride);
-    Value * const availableBits = b->getAvailableItemCount("bits");
-    b->CreateLikelyCondBr(b->CreateICmpULE(blocksRemaining, MAXIMUM_BLOCKS_PER_ITERATION), segmentDone, strideLoop);
+//    Value * const availableBits = b->getAvailableItemCount("bits");
+    Value * const done = b->CreateICmpULE(blocksRemaining, MAXIMUM_BLOCKS_PER_ITERATION);
+    b->CreateLikelyCondBr(done, segmentDone, strideLoop);
 
     b->SetInsertPoint(segmentDone);
-    if (mMode == UntilNkernel::Mode::TerminateAtN) {
-        PHINode * const produced = b->CreatePHI(sizeTy, 2);
-        produced->addIncoming(positionOfNthItem, foundNthBit);
-        produced->addIncoming(availableBits, nextStride);
-        b->setProducedItemCount("uptoN", produced);
-    }
 }
 
 UntilNkernel::UntilNkernel(BuilderRef b, Scalar * N, StreamSet * Markers, StreamSet * FirstN, UntilNkernel::Mode m)
-: MultiBlockKernel(b, (m == UntilNkernel::Mode::TerminateAtN ? "UntilN_terminating" : "UntilN_zeroing"),
+: MultiBlockKernel(b, [&]() -> std::string {
+    std::string tmp;
+    raw_string_ostream nm(tmp);
+    nm << "UntilN_";
+    switch (m) {
+        case Mode::TerminateAtN:
+            nm << "t"; break;
+        case Mode::ZeroAfterN:
+            nm << "z"; break;
+        case Mode::ReportAcceptedLengthAtAndBeforeN:
+            nm << "r"; break;
+    }
+    nm.flush();
+    return tmp;
+}(),
 {Binding{"bits", Markers}},
 // outputs
-{},
+{Binding{"uptoN", FirstN}},
 // input scalar
 {Binding{"N", N}}, {},
 // internal state
 {InternalScalar{N->getType(), "observed"}}), mMode(m) {
-    if (mMode == UntilNkernel::Mode::TerminateAtN) {
-        mOutputStreamSets.push_back(Binding{"uptoN", FirstN, BoundedRate(0, 1)});
-        addAttribute(CanTerminateEarly());
-    } else {
-        mOutputStreamSets.push_back(Binding{"uptoN", FirstN, FixedRate(1)});
+    switch (m) {
+        case Mode::TerminateAtN:
+        case Mode::ReportAcceptedLengthAtAndBeforeN:
+            addAttribute(CanTerminateEarly());
+        default: break;
     }
 }
 

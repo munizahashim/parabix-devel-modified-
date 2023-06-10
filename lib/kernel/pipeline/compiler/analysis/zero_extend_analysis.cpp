@@ -37,7 +37,7 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
             auto h =  first_in_edge(k, mStreamGraph);
             assert (mStreamGraph[h].Reason != ReasonType::Reference);
             const auto streamSet = source(h, mStreamGraph);
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
             const auto isConstant = isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
             const auto zeroExtend = binding.hasAttribute(AttrId::ZeroExtended);
             if (LLVM_UNLIKELY(isConstant && zeroExtend)) {
