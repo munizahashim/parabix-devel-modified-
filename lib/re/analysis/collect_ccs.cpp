@@ -10,7 +10,44 @@
 using namespace llvm;
 
 namespace re {
-    
+
+struct CC_Collector final : public RE_Inspector {
+
+    CC_Collector(re::NameProcessingMode m)
+    : RE_Inspector(m, InspectionMode::IgnoreNonUnique)
+    , mUnionCC(makeCC()) {
+
+    }
+    void inspectAssertion(Assertion * a) final {
+        // assertions cannot add any characters to
+        // matched strings.
+    }
+
+    void inspectDiff(Diff * d) final {
+        inspectRE(d->getLH());
+    }
+
+    void inspectIntersect(Intersect * ix) final {
+        inspectRE(ix->getLH());
+    }
+
+    void inspectCC(CC * cc) final {
+        if (mUnionCC->empty()) {
+            mUnionCC = cc;
+        } else {
+            mUnionCC = makeCC(cc, mUnionCC);
+        }
+    }
+
+    CC * mUnionCC;
+};
+
+CC * unionCC(RE * re, re::NameProcessingMode m) {
+    CC_Collector collector(m);
+    collector.inspectRE(re);
+    return collector.mUnionCC;
+}
+
 struct SetCollector final : public RE_Inspector {
 
     SetCollector(const cc::Alphabet * alphabet, re::NameProcessingMode m, CC_Set & ccs)
