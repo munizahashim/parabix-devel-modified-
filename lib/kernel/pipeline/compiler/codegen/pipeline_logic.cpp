@@ -418,12 +418,12 @@ void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     // verifyBufferRelationships();
     mScalarValue.reset(FirstKernel, LastScalar);
    // readPipelineIOItemCounts(b);
-    if (LLVM_UNLIKELY(mNumOfThreads == 0)) {
-        report_fatal_error("Fatal error: cannot construct a 0-thread pipeline.");
-    }
-    if (mNumOfThreads == 1) {
-        generateSingleThreadKernelMethod(b);
-    } else {
+//    if (LLVM_UNLIKELY(mNumOfThreads == 0)) {
+//        report_fatal_error("Fatal error: cannot construct a 0-thread pipeline.");
+//    }
+//    if (mNumOfThreads == 1) {
+//        generateSingleThreadKernelMethod(b);
+//    } else {
         if (LLVM_UNLIKELY(mIsNestedPipeline)) {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -433,7 +433,7 @@ void PipelineCompiler::generateKernelMethod(BuilderRef b) {
             report_fatal_error(out.str());
         }
         generateMultiThreadKernelMethod(b);
-    }
+//    }
     resetInternalBufferHandles();
 }
 

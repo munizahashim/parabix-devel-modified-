@@ -181,7 +181,7 @@ Kernel * PipelineBuilder::makeKernel() {
     signature.reserve(1024);
     raw_string_ostream out(signature);
 
-    out << 'P' << mNumOfThreads << 'B' << codegen::BufferSegments;
+    out << 'P'; // << mNumOfThreads << 'B' << codegen::BufferSegments;
     if (mExternallySynchronized) {
         out << 'E';
     }

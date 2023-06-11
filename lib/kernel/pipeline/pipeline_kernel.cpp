@@ -130,10 +130,15 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
  * @brief addAdditionalFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::addAdditionalFunctions(BuilderRef b) {
+    // TODO: to ensure that we can pass the correct num of threads, we cannot statically compile the
+    // main method until we add the thread count as a parameter. Investigate whether we can make a
+    // better "wrapper" method for that that allows easier access to the output scalars.
+#if 0
     if (hasAttribute(AttrId::InternallySynchronized) || containsKernelFamilyCalls() || generatesDynamicRepeatingStreamSets()) {
         return;
     }
     addOrDeclareMainFunction(b, Kernel::AddExternal);
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -650,7 +655,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         }
         // pass in the desired number of segments
         //TODO: fix this so BufferSegments is an argument to main
-        allocArgs.push_back(sz_ONE);
+        allocArgs.push_back(b->getSize(codegen::SegmentThreads * codegen::BufferSegments));
         b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);

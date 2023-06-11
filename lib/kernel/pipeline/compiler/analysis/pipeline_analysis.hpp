@@ -119,7 +119,7 @@ private:
     PipelineAnalysis(PipelineKernel * const pipelineKernel)
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
-    , mNumOfThreads(pipelineKernel->getNumOfThreads())
+//    , mNumOfThreads(pipelineKernel->getNumOfThreads())
     , mKernels(pipelineKernel->mKernels)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
@@ -253,7 +253,7 @@ public:
 public:
 
     PipelineKernel * const          mPipelineKernel;
-    const unsigned					mNumOfThreads;
+//    const unsigned					mNumOfThreads;
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;

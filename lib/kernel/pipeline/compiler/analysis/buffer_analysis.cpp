@@ -777,8 +777,8 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                     // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                     // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                     // determine this.
-                    auto mult = mNumOfThreads + 1U;
-                    auto bufferSize = bn.RequiredCapacity * mult;
+                    //auto mult = mNumOfThreads + 1U;
+                    auto bufferSize = bn.RequiredCapacity; // * mult;
                     assert (bufferSize > 0);
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                     bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;

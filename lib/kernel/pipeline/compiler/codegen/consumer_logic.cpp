@@ -165,11 +165,11 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
                 Constant * const ZERO = b->getInt32(0);
                 ptr = b->CreateInBoundsGEP(ptr, { ZERO, ZERO } );
             }
-            itemCount = b->CreateLoad(ptr, mNumOfThreads > 1);
+            itemCount = b->CreateLoad(ptr, true);
         } else {
             Value * const ptr = getProcessedInputItemsPtr(c.Port);
             assert (isFromCurrentFunction(b, ptr, false));
-            itemCount = b->CreateLoad(ptr, mNumOfThreads > 1);
+            itemCount = b->CreateLoad(ptr, true);
         }
     }
 

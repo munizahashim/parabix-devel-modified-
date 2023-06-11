@@ -91,8 +91,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     // use the process thread to handle the initial segment function after spawning
     // (n - 1) threads to handle the subsequent offsets
-    assert (mNumOfThreads > 1);
-    const auto numOfAdditionalThreads = mNumOfThreads - 1U;
 
     Function * const pthreadSelfFn = m->getFunction("pthread_self");
     Function * const pthreadCreateFn = m->getFunction("pthread_create");
@@ -717,9 +715,6 @@ void PipelineCompiler::start(BuilderRef b) {
 StructType * PipelineCompiler::getThreadStuctType(BuilderRef b) const {
     FixedArray<Type *, THREAD_STRUCT_SIZE + 1> fields;
     LLVMContext & C = b->getContext();
-
-    assert (mNumOfThreads > 1);
-
     IntegerType * const sizeTy = b->getSizeTy();
     Type * const emptyTy = StructType::get(C);
 
@@ -809,8 +804,6 @@ void PipelineCompiler::initThreadStructObject(BuilderRef b, Value * threadState,
  * @brief readThreadStuctObject
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) {
-    assert (mNumOfThreads > 1);
-
     FixedArray<Value *, 3> indices3;
     Constant * const ZERO = b->getInt32(0);
     indices3[0] = ZERO;
@@ -826,7 +819,6 @@ void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) 
 
     FixedArray<Value *, 2> indices2;
     indices2[0] = ZERO;
-    assert (!mIsNestedPipeline && mNumOfThreads != 1);
     if (mUseDynamicMultithreading) {
         indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
         mAccumulatedSynchronizationTimePtr = b->CreateInBoundsGEP(threadState, indices2);

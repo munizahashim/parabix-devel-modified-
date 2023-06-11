@@ -46,11 +46,11 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
         mSegNo = b->CreateAtomicFetchAndAdd(b->getSize(1), segNoPtr);
     } else {
         Value * initialSegNo = nullptr;
-        if (mNumOfThreads == 1) {
-            initialSegNo = b->getSize(0);
-        } else {
+//        if (mNumOfThreads == 1) {
+//            initialSegNo = b->getSize(0);
+//        } else {
             initialSegNo = mSegNo; assert (mSegNo);
-        }
+//        }
         PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
         segNo->addIncoming(initialSegNo, entryBlock);
         mSegNo = segNo;
@@ -66,7 +66,6 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
     assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
-    assert (mNumOfThreads > 0);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
     #else

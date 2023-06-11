@@ -141,8 +141,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                const auto scale = MaximumNumOfStrides[i] * Rational{mNumOfThreads};
-                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, scale));
+                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
 
                 FunctionType * const funcType = cast<FunctionType>(func->getType()->getPointerElementType());
 

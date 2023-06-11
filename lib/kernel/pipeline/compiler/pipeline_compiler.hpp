@@ -577,7 +577,6 @@ public:
 
     void clearInternalStateForCurrentKernel();
     void initializeKernelAssertions(BuilderRef b);
-  //  void verifyBufferRelationships() const;
 
     bool hasAtLeastOneNonGreedyInput() const;
     bool hasAnyGreedyInput(const unsigned kernelId) const;
@@ -597,7 +596,7 @@ protected:
     const bool                                  mIsNestedPipeline;
     const bool                                  mUseDynamicMultithreading;
 
-    const unsigned                              mNumOfThreads;
+//    const unsigned                              mNumOfThreads;
 
     const LengthAssertions &                    mLengthAssertions;
 
@@ -918,7 +917,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
 , mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline && P.NumOfThreads > 1)
-, mNumOfThreads(P.NumOfThreads)
+//, mNumOfThreads(P.NumOfThreads)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
 , PipelineOutput(P.PipelineOutput)
