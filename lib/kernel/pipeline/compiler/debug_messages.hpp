@@ -14,12 +14,8 @@ namespace kernel {
 #define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)
 
 inline void PipelineCompiler::debugInit(BuilderRef b) {
-    if (mNumOfThreads > 1) {
-        Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
-        mThreadId = b->CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
-    } else {
-        mThreadId = nullptr;
-    }
+    Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
+    mThreadId = b->CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
 }
 
 template <typename ... Args>

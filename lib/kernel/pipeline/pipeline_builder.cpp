@@ -507,7 +507,6 @@ Kernel * PipelineBuilder::makeKernel() {
 
     PipelineKernel * const pipeline =
         new PipelineKernel(mDriver.getBuilder(), std::move(signature),
-                           mNumOfThreads,
                            containsKernelFamilyCalls, hasRepeatingStreamSet,
                            std::move(mKernels), std::move(mCallBindings),
                            std::move(mInputStreamSets), std::move(mOutputStreamSets),

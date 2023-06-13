@@ -75,8 +75,6 @@ public:
                             out.flush();
                             return tmp;
                          }()
-                         // num of threads
-                         , 1
                          // contains kernel family calls
                          , true
                          // has repeating streamset

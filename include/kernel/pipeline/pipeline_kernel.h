@@ -109,10 +109,6 @@ public:
         return mSignature;
     }
 
-    unsigned getNumOfThreads() const {
-        return mNumOfThreads;
-    }
-
     const Kernels & getKernels() const {
         return mKernels;
     }
@@ -137,7 +133,6 @@ protected:
 
     PipelineKernel(BuilderRef b,
                    std::string && signature,
-                   const unsigned numOfThreads,
                    const bool containsKernelFamilyCalls,
                    const bool hasRepeatingStreamSet,
                    Kernels && kernels, CallBindings && callBindings,
@@ -185,7 +180,6 @@ protected:
 
 protected:
 
-    const unsigned                            mNumOfThreads;
     const bool                                mContainsKernelFamilies;
     const bool                                mHasRepeatingStreamSet;
     const std::string                         mSignature;

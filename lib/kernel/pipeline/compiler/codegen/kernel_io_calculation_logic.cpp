@@ -680,7 +680,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
-    auto & A = mAccessibleInputItems[inputPort.Number];
+    auto & A = mInternalAccessibleInputItems[inputPort.Number];
 
     Value * const alreadyComputed = A[useOverflow ? WITH_OVERFLOW : WITHOUT_OVERFLOW];
     if (alreadyComputed) {
@@ -804,7 +804,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b->CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
-    const auto beforeExpansion = mWritableOutputItems[outputPort.Number];
+    const auto beforeExpansion = mInternalWritableOutputItems[outputPort.Number];
 
     Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion[WITH_OVERFLOW]);
 
@@ -902,7 +902,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
     #endif
 
-    auto & afterExpansion = mWritableOutputItems[outputPort.Number];
+    auto & afterExpansion = mInternalWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;
     afterExpansion[WITHOUT_OVERFLOW] = nullptr;
 
@@ -1004,7 +1004,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     const auto outputPort = port.Port;
     assert (outputPort.Type == PortType::Output);
 
-    auto & W = mWritableOutputItems[outputPort.Number];
+    auto & W = mInternalWritableOutputItems[outputPort.Number];
     Value * const alreadyComputed = W[useOverflow ? WITH_OVERFLOW : WITHOUT_OVERFLOW];
     if (alreadyComputed) {
         return alreadyComputed;

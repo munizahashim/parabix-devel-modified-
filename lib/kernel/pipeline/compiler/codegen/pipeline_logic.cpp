@@ -2,34 +2,6 @@
 
 namespace kernel {
 
-// NOTE: the following is a workaround for an LLVM bug for 32-bit VMs on 64-bit architectures.
-// When calculating the address of a local stack allocated object, the size of a pointer is
-// 32-bits but when performing the same GEP on a pointer returned by "malloc" or passed as a
-// function argument, the size is 64-bits. More investigation is needed to determine which
-// versions of LLVM are affected by this bug.
-
-LLVM_READNONE bool allocateOnHeap(BuilderRef b) {
-    DataLayout DL(b->getModule());
-    return (DL.getPointerSizeInBits() != b->getSizeTy()->getBitWidth());
-}
-
-Value * PipelineCompiler::makeStateObject(BuilderRef b, Type * type) {
-    Value * ptr = nullptr;
-    if (LLVM_UNLIKELY(allocateOnHeap(b))) {
-        ptr = b->CreatePageAlignedMalloc(type);
-    } else {
-        ptr = b->CreateCacheAlignedAlloca(type);
-    }
-    b->CreateMemZero(ptr, ConstantExpr::getSizeOf(type), b->getCacheAlignment());
-    return ptr;
-}
-
-void PipelineCompiler::destroyStateObject(BuilderRef b, Value * threadState) {
-    if (LLVM_UNLIKELY(allocateOnHeap(b))) {
-        b->CreateFree(threadState);
-    }
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindAdditionalInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -40,11 +12,13 @@ void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIt
         bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
     }
     if (LLVM_LIKELY(!pk->hasAttribute(AttrId::InternallySynchronized))) {
-        b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
         if (codegen::EnableDynamicMultithreading) {
+            b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
             b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
             b->setScalarField(SEGMENTS_PER_CHECK, arg++);
             b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
+        } else {
+            b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
         }
     }
     assert (arg == arg_end);
@@ -73,16 +47,15 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 
     IntegerType * const sizeTy = b->getSizeTy();
 
-    if (mUseDynamicMultithreading) {
+    if (mUseDynamicMultithreading) { assert (!mIsNestedPipeline);
         mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, 0);
-
         mTarget->addInternalScalar(sizeTy, MINIMUM_NUM_OF_THREADS, PipelineOutput);
         mTarget->addInternalScalar(sizeTy, MAXIMUM_NUM_OF_THREADS, PipelineOutput);
         mTarget->addInternalScalar(sizeTy, SEGMENTS_PER_CHECK, PipelineOutput);
         // float?
         mTarget->addInternalScalar(sizeTy, ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, PipelineOutput);
-    } else {
-        mTarget->addInternalScalar(sizeTy, MINIMUM_NUM_OF_THREADS, PipelineOutput);
+    } else if (!mIsNestedPipeline) {
+        mTarget->addInternalScalar(sizeTy, MAXIMUM_NUM_OF_THREADS, PipelineOutput);
     }
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
@@ -369,7 +342,12 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
-    allocateOwnedBuffers(b, expectedNumOfStrides, true);
+    Value * bufferSize = expectedNumOfStrides;
+    if (!mIsNestedPipeline) {
+        Value * const threadCount = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
+        bufferSize = b->CreateMul(bufferSize, threadCount);
+    }
+    allocateOwnedBuffers(b, bufferSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
 }
@@ -415,25 +393,12 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     initializeKernelAssertions(b);
-    // verifyBufferRelationships();
     mScalarValue.reset(FirstKernel, LastScalar);
-   // readPipelineIOItemCounts(b);
-//    if (LLVM_UNLIKELY(mNumOfThreads == 0)) {
-//        report_fatal_error("Fatal error: cannot construct a 0-thread pipeline.");
-//    }
-//    if (mNumOfThreads == 1) {
-//        generateSingleThreadKernelMethod(b);
-//    } else {
-        if (LLVM_UNLIKELY(mIsNestedPipeline)) {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << "A multi-threaded pipeline is already internally synchronized. "
-                "Explicitly annotating " << mTarget->getName() << " with the InternallySynchronized attribute "
-                "will prevent an outer pipeline kernel from behaving in the intended manner.";
-            report_fatal_error(out.str());
-        }
+    if (mIsNestedPipeline) {
+        generateSingleThreadKernelMethod(b);
+    } else {
         generateMultiThreadKernelMethod(b);
-//    }
+    }
     resetInternalBufferHandles();
 }
 

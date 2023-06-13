@@ -205,8 +205,8 @@ public:
 
 // internal pipeline functions
 
-    LLVM_READNONE StructType * getThreadStuctType(BuilderRef b) const;
-    void initThreadStructObject(BuilderRef b, Value *threadState, Value * const threadId, Value * const threadLocal, Value * const threadNum, Value * const numOfThreads);
+    LLVM_READNONE StructType * getThreadStuctType(BuilderRef b, const std::vector<Value *> & props) const;
+    void writeThreadStructObject(BuilderRef b, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
     void readThreadStuctObject(BuilderRef b, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
@@ -214,6 +214,11 @@ public:
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
     Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
     void writeTerminationSignalToLocalState(BuilderRef b, Value * const threadState, Value * const terminated) const;
+
+    std::vector<llvm::Value *> storeDoSegmentState() const;
+    void readDoSegmentState(BuilderRef b, Value * const propertyState);
+    void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
+
     inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
     void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
@@ -545,9 +550,6 @@ public:
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
 
-    Value * makeStateObject(BuilderRef b, Type * type);
-    void destroyStateObject(BuilderRef b, Value * threadState);
-
     LLVM_READNONE std::string makeKernelName(const size_t kernelIndex) const;
     LLVM_READNONE std::string makeBufferName(const size_t kernelIndex, const StreamSetPort port) const;
 
@@ -666,6 +668,7 @@ protected:
 
     Value *                                     mMinimumNumOfThreads = nullptr;
     Value *                                     mMaximumNumOfThreads = nullptr;
+    Value *                                     mBufferSegments = nullptr;
     Value *                                     mDynamicMultithreadingSegmentsPerCheck = nullptr;
     Value *                                     mDynamicMultithreadingAdditionalThreadSynchronizationThreshold = nullptr;
 
@@ -798,7 +801,7 @@ protected:
     InputPortVector<PHINode *>                  mInputVirtualBaseAddressPhi;
     InputPortVector<Value *>                    mFirstInputStrideLength;
 
-    OverflowItemCounts                          mAccessibleInputItems;
+    OverflowItemCounts                          mInternalAccessibleInputItems;
     InputPortVector<PHINode *>                  mLinearInputItemsPhi;
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
     InputPortVector<Value *>                    mProcessedItemCountPtr; // exiting the segment loop
@@ -826,7 +829,7 @@ protected:
     OutputPortVector<PHINode *>                 mAlreadyProducedDeferredPhi;
     OutputPortVector<Value *>                   mFirstOutputStrideLength;
 
-    OverflowItemCounts                          mWritableOutputItems;
+    OverflowItemCounts                          mInternalWritableOutputItems;
     OutputPortVector<PHINode *>                 mLinearOutputItemsPhi;
     OutputPortVector<Value *>                   mReturnedOutputVirtualBaseAddressPtr; // written by the kernel
     OutputPortVector<Value *>                   mReturnedProducedItemCountPtr; // written by the kernel

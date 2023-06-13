@@ -92,8 +92,6 @@ public:
 
         P.makeTerminationPropagationGraph();
 
-        P.determineNumOfThreads();
-
         P.numberDynamicRepeatingStreamSets();
 
         P.identifyPortsThatModifySegmentLength();
@@ -222,8 +220,6 @@ private:
 
     void numberDynamicRepeatingStreamSets();
 
-    void determineNumOfThreads();
-
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
     // zero extension analysis function
@@ -317,27 +313,6 @@ public:
     OwningVector<Binding>           mInternalBindings;
     OwningVector<StreamSetBuffer>   mInternalBuffers;
 };
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineNumOfThreads
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineAnalysis::determineNumOfThreads() {
-    if (IsNestedPipeline) {
-        NumOfThreads = 1U;
-    } else {
-        const auto numKernels = LastKernel - FirstKernel + 1U;
-        NumOfThreads = mPipelineKernel->getNumOfThreads();
-        if (LLVM_UNLIKELY(numKernels < NumOfThreads)) {
-            for (auto k = FirstKernel; k <= LastKernel; ++k) {
-                if (LLVM_LIKELY(!isKernelStateFree(k))) {
-                    NumOfThreads = numKernels;
-                    break;
-                }
-            }
-        }
-    }
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printGraph

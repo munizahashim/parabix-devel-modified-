@@ -813,8 +813,6 @@ public:
                          , [&]() -> std::string {
                              return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
                          }()
-                         // num of threads
-                         , 1
                          // contains kernel family calls
                          , false
                          // has repeating streamset
