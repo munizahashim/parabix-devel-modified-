@@ -97,11 +97,8 @@ void PipelineCompiler::addPAPIEventCounterPipelineProperties(BuilderRef b) {
         // a design. The following choice to use a global accumulator in the thread local
         // destructor can easily be converted to doing this.
 
-        if (mNumOfThreads > 1) {
-            mTarget->addThreadLocalScalar(papiEventCounterTotalTy, STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY, 0);
-        }
+        mTarget->addThreadLocalScalar(papiEventCounterTotalTy, STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY, 0, ThreadLocalScalarAccumulationRule::Sum);
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            papiEventCounterTotalTy = ArrayType::get(papiCounterTy, numOfEvents * mNumOfThreads);
             mTarget->addThreadLocalScalar(b->getSizeTy(), STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX, 0);
         }
         mTarget->addInternalScalar(papiEventCounterTotalTy, STATISTICS_GLOBAL_PAPI_COUNT_ARRAY, 0);
@@ -140,12 +137,11 @@ void PipelineCompiler::initializePAPI(BuilderRef b) const {
         ConstantInt * const version = ConstantInt::get(intTy, PAPI_VER_CURRENT);
         Value * PAPI_init = b->CreateCall(PAPIlibInitFn->getFunctionType(), PAPIlibInitFn, { version });
         checkPAPIRetValAndExitOnError(b,  "PAPI_library_init", PAPI_VER_CURRENT, PAPI_init);
-        if (mNumOfThreads > 1) {
-            Function * PAPIThreadInitFn = m->getFunction("PAPI_thread_init");
-            Function * pthreadSelfFn = m->getFunction("pthread_self");
-            Value * thrd_init = b->CreateCall(PAPIThreadInitFn->getFunctionType(), PAPIThreadInitFn, pthreadSelfFn);
-            checkPAPIRetValAndExitOnError(b,  "PAPI_thread_init", PAPI_OK, thrd_init);
-        }
+
+        Function * PAPIThreadInitFn = m->getFunction("PAPI_thread_init");
+        Function * pthreadSelfFn = m->getFunction("pthread_self");
+        Value * thrd_init = b->CreateCall(PAPIThreadInitFn->getFunctionType(), PAPIThreadInitFn, pthreadSelfFn);
+        checkPAPIRetValAndExitOnError(b,  "PAPI_thread_init", PAPI_OK, thrd_init);
     }
 }
 
@@ -308,12 +304,7 @@ void PipelineCompiler::stopPAPIAndDestroyEventSet(BuilderRef b) {
 
         Module * const m = b->getModule();
 
-        Value * finalEventReads = nullptr;
-        if (mNumOfThreads > 1) {
-            finalEventReads = b->getScalarFieldPtr(STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY);
-        } else {
-            finalEventReads = b->getScalarFieldPtr(STATISTICS_GLOBAL_PAPI_COUNT_ARRAY);
-        }
+        Value * finalEventReads = b->getScalarFieldPtr(STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY);
 
         PointerType * const counterPtrTy = TypeBuilder<papi_counter_t, false>::get(b->getContext())->getPointerTo();
 
@@ -339,47 +330,6 @@ void PipelineCompiler::stopPAPIAndDestroyEventSet(BuilderRef b) {
         Function * const PAPIDestroyEventsetFn = m->getFunction("PAPI_destroy_eventset");
         Value * const destroyRetVal = b->CreateCall(PAPIDestroyEventsetFn->getFunctionType(), PAPIDestroyEventsetFn, args);
         checkPAPIRetValAndExitOnError(b,  "PAPI_destroy_eventset", PAPI_OK, destroyRetVal);
-    }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief accumulateFinalPAPICounters
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::accumulateFinalPAPICounters(BuilderRef b) {
-    if (LLVM_UNLIKELY(EnablePAPICounters && mNumOfThreads > 1)) {
-
-        PointerType * const counterPtrTy = TypeBuilder<papi_counter_t, false>::get(b->getContext())->getPointerTo();
-
-        Value * const localFinalEventReads = b->CreatePointerCast(b->getScalarFieldPtr(STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY), counterPtrTy);
-        Value * const globalFinalEventReads = b->CreatePointerCast(b->getScalarFieldPtr(STATISTICS_GLOBAL_PAPI_COUNT_ARRAY), counterPtrTy);
-        const auto n = PAPIEventList.size();
-
-
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            Value * const threadIdx = b->getScalarField(STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX);
-            for (unsigned i = 0; i < n; ++i) {
-                ConstantInt * const x = b->getInt32(i);
-                Value * const val = b->CreateLoad(b->CreateGEP(localFinalEventReads, x));
-                Value * const y = b->CreateAdd(b->getSize(i * mNumOfThreads), threadIdx);
-                Value * const ptr = b->CreateGEP(globalFinalEventReads, y);
-                b->CreateStore(val, ptr);
-            }
-        } else {
-
-            for (unsigned i = 0; i < n; ++i) {
-                Value * const offset = b->getInt32(i);
-                Value * const val = b->CreateLoad(b->CreateGEP(localFinalEventReads, offset));
-                Value * const ptr = b->CreateGEP(globalFinalEventReads, offset);
-                Value * const updated = b->CreateAdd(val, b->CreateLoad(ptr));
-                b->CreateStore(updated, ptr);
-            }
-
-
-        }
-
-
-
     }
 }
 
@@ -754,7 +704,7 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
 
             FixedArray<Value *, 4> args;
-            args[0] = ConstantInt::get(intTy, mNumOfThreads);
+            args[0] = mMaximumNumOfThreads;
             args[1] = ConstantInt::get(intTy, numOfEvents);
             args[2] = arrayOfEventCodes;
             args[3] = b->CreatePointerCast(totals, counterPtrTy);

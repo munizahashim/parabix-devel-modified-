@@ -515,7 +515,6 @@ public:
     void unregisterPAPIThread(BuilderRef b) const;
     void stopPAPIAndDestroyEventSet(BuilderRef b);
     void shutdownPAPI(BuilderRef b) const;
-    void accumulateFinalPAPICounters(BuilderRef b);
     void printPAPIReportIfRequested(BuilderRef b);
     void checkPAPIRetValAndExitOnError(BuilderRef b, StringRef source, const int expected, Value * const retVal) const;
 

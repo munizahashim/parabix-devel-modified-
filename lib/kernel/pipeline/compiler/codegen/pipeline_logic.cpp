@@ -481,9 +481,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
         }
     }
 
-    #ifdef ENABLE_PAPI
-    accumulateFinalPAPICounters(b);
-    #endif
     // Since all of the nested kernels thread local state is contained within
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
