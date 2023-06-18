@@ -104,20 +104,6 @@ void BasisCombine::generatePabloMethod() {
     }
 }
 
-StreamSet * CreateRepeatingBixNum(const std::unique_ptr<ProgramBuilder> & P, unsigned bixNumBits, std::vector<uint64_t> nums) {
-    std::vector<std::vector<uint64_t>> templatePattern;
-    templatePattern.resize(bixNumBits);
-    for (unsigned i = 0; i < bixNumBits; i++) {
-        templatePattern[i].resize(nums.size());
-    }
-    for (unsigned j = 0; j < nums.size(); j++) {
-        for (unsigned i = 0; i < bixNumBits; i++) {
-            templatePattern[i][j] = static_cast<uint64_t>((nums[j] >> i) & 1U);
-        }
-    }
-    return P->CreateRepeatingStreamSet(1, templatePattern, TestDynamicRepeatingFile);
-}
-
 void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
                  StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
@@ -132,7 +118,6 @@ void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
     SpreadByMask(P, inverted, b, expandedB);
     P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
-
 
 CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
@@ -202,7 +187,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
-    StreamSet * PrefixLgths = CreateRepeatingBixNum(P, insertLengthBits, insertionAmts);
+    StreamSet * PrefixLgths = P->CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
 
     StreamSet * fieldStarts = P->CreateStreamSet(1);
     P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
@@ -221,7 +206,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     fieldSuffixLgths.push_back(3);
 
     const unsigned suffixLgthBits = 2;  // insert 1-3 characters.
-    StreamSet * RepeatingSuffixLgths = CreateRepeatingBixNum(P, suffixLgthBits, fieldSuffixLgths);
+    StreamSet * RepeatingSuffixLgths = P->CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
     StreamSet * SuffixInsertBixNum = P->CreateStreamSet(suffixLgthBits);
     SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
@@ -245,7 +230,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
             templateBytes.push_back(static_cast<uint64_t>(','));
         }
     }
-    StreamSet * TemplateBasis = CreateRepeatingBixNum(P, 8, templateBytes);
+    StreamSet * TemplateBasis = P->CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
     StreamSet * FinalBasis = P->CreateStreamSet(8);
     if (UseMergeByMaskKernel) {

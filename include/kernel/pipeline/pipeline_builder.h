@@ -74,6 +74,8 @@ public:
         return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string), isDynamic);
     }
 
+    StreamSet * CreateRepeatingBixNum(unsigned bixNumBits, pattern_t nums, const bool isDynamic = true);
+
     template<unsigned FieldWidth, unsigned NumOfElements>
     RepeatingStreamSet * CreateRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
         return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
