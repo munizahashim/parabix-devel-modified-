@@ -246,6 +246,10 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
     if (LLVM_LIKELY(out_degree(PipelineInput, mBufferGraph) > 0)) {
         for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
+            if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
+                assert ("non-constant streamset without a producer?" && mBufferGraph[streamSet].isConstant());
+                continue;
+            }
             const auto producer = parent(streamSet, mBufferGraph);
             if (LLVM_UNLIKELY(producer == PipelineInput)) {
                 const BufferPort & br = mBufferGraph[e];
