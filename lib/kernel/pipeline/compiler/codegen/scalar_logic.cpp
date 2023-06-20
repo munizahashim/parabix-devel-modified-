@@ -58,7 +58,7 @@ void PipelineCompiler::initializeScalarValues(BuilderRef b) {
  * @brief getScalar
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
-    assert (index >= FirstScalar && index <= LastScalar);
+    assert (index >= FirstKernel && index <= LastScalar);
     Value * value = mScalarValue[index];
     if (value) {
         return value;
