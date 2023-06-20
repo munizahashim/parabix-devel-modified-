@@ -11,16 +11,6 @@ void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIt
     if (LLVM_UNLIKELY(pk->generatesDynamicRepeatingStreamSets())) {
         bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
     }
-    if (LLVM_LIKELY(!pk->hasAttribute(AttrId::InternallySynchronized))) {
-        if (codegen::EnableDynamicMultithreading) {
-            b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
-            b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
-            b->setScalarField(SEGMENTS_PER_CHECK, arg++);
-            b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
-        } else {
-            b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
-        }
-    }
     assert (arg == arg_end);
 }
 
@@ -46,17 +36,6 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // must be allocated dynamically.
 
     IntegerType * const sizeTy = b->getSizeTy();
-
-    if (mUseDynamicMultithreading) { assert (!mIsNestedPipeline);
-        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, 0);
-        mTarget->addInternalScalar(sizeTy, MINIMUM_NUM_OF_THREADS, PipelineOutput);
-        mTarget->addInternalScalar(sizeTy, MAXIMUM_NUM_OF_THREADS, PipelineOutput);
-        mTarget->addInternalScalar(sizeTy, SEGMENTS_PER_CHECK, PipelineOutput);
-        // float?
-        mTarget->addInternalScalar(sizeTy, ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, PipelineOutput);
-    } else if (!mIsNestedPipeline) {
-        mTarget->addInternalScalar(sizeTy, MAXIMUM_NUM_OF_THREADS, PipelineOutput);
-    }
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
 
@@ -112,6 +91,19 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     #endif
 }
 
+//#ifdef ENABLE_PAPI
+//bindPAPIInitializationArguments(b, arg, arg_end);
+//#endif
+//if (LLVM_LIKELY(!mIsNestedPipeline)) {
+//    if (codegen::EnableDynamicMultithreading) {
+//        b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
+//        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
+//        b->setScalarField(SEGMENTS_PER_CHECK, arg++);
+//        b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
+//    } else {
+//        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
+//    }
+//}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
@@ -267,13 +259,8 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 
     // TODO: if we detect a fatal error at init, we should not execute
     // the pipeline loop.
-    #ifdef ENABLE_PAPI
-    if (!mIsNestedPipeline) {
-        initializePAPI(b);
-    }
-    #endif
 
-    mScalarValue.reset(FirstKernel, LastScalar);
+    initializeScalarValues(b);
 
     initializeKernelAssertions(b);
 
@@ -321,7 +308,6 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
             } else {
                 terminated = terminatedOnInit;
             }
-
         }
 
         // Is this the last kernel in a partition? If so, store the accumulated
@@ -393,7 +379,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateKernelMethod(BuilderRef b) {
     initializeKernelAssertions(b);
-    mScalarValue.reset(FirstKernel, LastScalar);
+    initializeScalarValues(b);
     if (mIsNestedPipeline) {
         generateSingleThreadKernelMethod(b);
     } else {
@@ -431,7 +417,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         }
     }
 
-    mScalarValue.reset(FirstKernel, LastScalar);
+    initializeScalarValues(b);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
         SmallVector<Value *, 1> params;
@@ -451,11 +437,6 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
     deallocateRepeatingBuffers(b);
     releaseOwnedBuffers(b);
     resetInternalBufferHandles();
-    #ifdef ENABLE_PAPI
-    if (!mIsNestedPipeline) {
-        shutdownPAPI(b);
-    }
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

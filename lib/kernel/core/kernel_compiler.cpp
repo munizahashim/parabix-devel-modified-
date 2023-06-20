@@ -1,4 +1,4 @@
-#include <kernel/core/kernel_compiler.h>
+﻿#include <kernel/core/kernel_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -783,8 +783,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
                                     "computed from a null base address.";
                 b->CreateAssert(baseAddress, out.str(), b->GetString(output.getName()));
             }
-            Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
-            Constant * const ZERO = b->getSize(0);
             Value * produced = mInitiallyProducedOutputItems[i];
             assert (isFromCurrentFunction(b, produced, false));
             // TODO: will LLVM optimizations replace the following with the already loaded value?
@@ -1043,7 +1041,9 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
                     addToScalarFieldMap(INTERNAL_COMMON_THREAD_LOCAL_PREFIX + binding.getName(), scalar, binding.getValueType());
 
-                    if (binding.getAccumulationRule() != Kernel::ThreadLocalScalarAccumulationRule::DoNothing) {
+                    using AccumRule = Kernel::ThreadLocalScalarAccumulationRule;
+
+                    if (binding.getAccumulationRule() != AccumRule::DoNothing) {
 
                         const auto ip = b->saveIP();
                         b->SetInsertPoint(combineExit);
@@ -1051,42 +1051,79 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                         Type * const ty = mainScalar->getType()->getPointerElementType();
                         if (isa<ArrayType>(ty)) {
                             ArrayType * const arrayTy = cast<ArrayType>(ty);
-                            const auto m = arrayTy->getNumElements();
-                            if (LLVM_UNLIKELY(m == 0)) {
-                                report_fatal_error(getName() + ": cannot automatically accumulate a 0-element scalar");
+
+                            unsigned depth = 2;
+                            for (ArrayType * aTy = arrayTy;;) {
+                                Type * const eTy = aTy->getArrayElementType();
+                                if (eTy->isArrayTy()) {
+                                    aTy = cast<ArrayType>(eTy);
+                                    ++depth;
+                                } else {
+                                    assert (eTy->isIntOrIntVectorTy());
+                                    break;
+                                }
                             }
+
+                            const auto size = depth;
 
                             ConstantInt * const i32_ZERO = b->getInt32(0);
                             ConstantInt * const i32_ONE = b->getInt32(1);
 
-                            FixedArray<Value *, 2> indices;
+                            SmallVector<Value *, 4> indices(size);
                             indices[0] = i32_ZERO;
 
-                            BasicBlock * const entry = b->GetInsertBlock();
-                            BasicBlock * const loop = b->CreateBasicBlock();
-                            BasicBlock * const exit = b->CreateBasicBlock();
-                            b->CreateBr(loop);
+                            std::function<BasicBlock *(unsigned, Type *)> recursiveAccum = [&](const unsigned idx, Type * const elemTy) {
+                                assert (idx <= size);
+                                assert (indices.size() == size);
 
-                            b->SetInsertPoint(loop);
-                            PHINode * const idxPhi = b->CreatePHI(b->getInt32Ty(), 2);
-                            idxPhi->addIncoming(i32_ZERO, entry);
-                            indices[1] = idxPhi;
-                            Value * const scalarVal = b->CreateLoad(b->CreateGEP(scalar, indices));
-                            Value * const mainScalarPtr = b->CreateGEP(mainScalar, indices);
-                            Value * mainScalarVal = b->CreateLoad(mainScalarPtr);
-                            switch (binding.getAccumulationRule()) {
-                                case Kernel::ThreadLocalScalarAccumulationRule::Sum:
-                                    mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
-                                    break;
-                                default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
-                            }
-                            b->CreateStore(mainScalarVal, mainScalarPtr);
-                            Value * const nextIdx = b->CreateAdd(idxPhi, i32_ONE);
-                            idxPhi->addIncoming(nextIdx, loop);
-                            b->CreateCondBr(b->CreateICmpNE(nextIdx, b->getInt32(m)), loop, exit);
+                                BasicBlock * const entry = b->GetInsertBlock();
 
-                            b->SetInsertPoint(exit);
-                            combineExit = exit;
+                                if (idx == depth) {
+                                    assert (elemTy->isIntOrIntVectorTy());
+
+                                    Value * const scalarVal = b->CreateLoad(b->CreateGEP(scalar, indices));
+                                    Value * const mainScalarPtr = b->CreateGEP(mainScalar, indices);
+                                    Value * mainScalarVal = b->CreateLoad(mainScalarPtr);
+                                    assert (scalarVal->getType() == mainScalarVal->getType());
+                                    switch (binding.getAccumulationRule()) {
+                                        case AccumRule::Sum:
+                                            mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
+                                            break;
+                                        default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
+                                    }
+                                    b->CreateStore(mainScalarVal, mainScalarPtr);
+                                    return entry;
+                                } else {
+
+                                    BasicBlock * const loop = b->CreateBasicBlock();
+                                    b->CreateBr(loop);
+
+                                    b->SetInsertPoint(loop);
+                                    PHINode * const idxPhi = b->CreatePHI(b->getInt32Ty(), 2);
+                                    idxPhi->addIncoming(i32_ZERO, entry);
+                                    assert (idx < indices.size());
+                                    indices[idx] = idxPhi;
+
+                                    BasicBlock * const loopExit =
+                                        recursiveAccum(idx + 1U, cast<ArrayType>(elemTy)->getArrayElementType());
+
+                                    BasicBlock * const exit = b->CreateBasicBlock();
+                                    Value * const nextIdx = b->CreateAdd(idxPhi, i32_ONE);
+                                    idxPhi->addIncoming(nextIdx, loopExit);
+
+                                    const auto m = cast<ArrayType>(elemTy)->getNumElements();
+                                    if (LLVM_UNLIKELY(m == 0)) {
+                                        report_fatal_error(getName() + ": cannot automatically accumulate a 0-element scalar");
+                                    }
+
+                                    b->CreateCondBr(b->CreateICmpNE(nextIdx, b->getInt32(m)), loop, exit);
+
+                                    b->SetInsertPoint(exit);
+                                    return exit;
+                                }
+                            };
+
+                            combineExit = recursiveAccum(1, arrayTy);
                         } else {
                             Value * const scalarVal = b->CreateLoad(scalar);
                             Value * mainScalarVal = b->CreateLoad(mainScalar);

@@ -11,6 +11,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Constants.h>
 #include <toolchain/toolchain.h>
+#include "compiler/pipeline_compiler.hpp"
 
 // TODO: the builders should detect if there is only one kernel in a pipeline / both branches are equivalent and return the single kernel. Modify addOrDeclareMainFunction.
 
@@ -19,6 +20,11 @@
 using namespace llvm;
 using namespace boost;
 using namespace boost::container;
+
+template <typename IntTy>
+inline IntTy round_up_to(const IntTy x, const IntTy y) {
+    return (x + y - 1) & -y;
+}
 
 namespace kernel {
 
@@ -95,14 +101,6 @@ using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, const Relationship
 
 using Vertex = Graph::vertex_descriptor;
 using Map = flat_map<const Relationship *, Vertex>;
-
-template <typename Graph>
-inline typename graph_traits<Graph>::edge_descriptor out_edge(const typename graph_traits<Graph>::vertex_descriptor u, const Graph & G) {
-    assert (out_degree(u, G) == 1);
-    return *out_edges(u, G).first;
-}
-
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAttributesFrom
@@ -185,9 +183,6 @@ Kernel * PipelineBuilder::makeKernel() {
     if (mExternallySynchronized) {
         out << 'E';
     }
-    if (codegen::EnableDynamicMultithreading) {
-        out << 'D';
-    }
 
     switch (codegen::PipelineCompilationMode) {
         case codegen::PipelineCompilationModeOptions::DefaultFast:
@@ -229,12 +224,13 @@ Kernel * PipelineBuilder::makeKernel() {
         }
     }
     #ifdef ENABLE_PAPI
-    if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
+    const auto & S = codegen::PapiCounterOptions;
+    if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
+        out << "+PAPI";
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            out << "+PPO:" << codegen::PapiCounterOptions;
-        } else {
-            out << "+PPA:" << codegen::PapiCounterOptions;
+            out << "TT";
         }
+        out << (std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1);
     }
     #endif
 
@@ -338,7 +334,7 @@ Kernel * PipelineBuilder::makeKernel() {
                 if (LLVM_UNLIKELY(f == M.end())) {
                     // TODO: should we record the consumers of a repeating streamset or is knowing
                     // their count sufficient?
-                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel) || isa<ScalarConstant>(rel))) {
+                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel))) {
                         const auto bufferVertex = add_vertex(rel, G);
                         f = M.emplace(rel, bufferVertex).first;
                     } else {
@@ -456,6 +452,9 @@ Kernel * PipelineBuilder::makeKernel() {
                         break;
                     case TypeId::ScalarConstant:
                         typeCode = 'C';
+                        break;
+                    case TypeId::CommandLineScalar:
+                        typeCode = 'L';
                         break;
                     case TypeId::Scalar:
                         typeCode = 'V';

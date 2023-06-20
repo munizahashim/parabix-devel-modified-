@@ -1,16 +1,12 @@
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <toolchain/toolchain.h>
-
-// #define USE_2020_PIPELINE_COMPILER
-
-#ifdef USE_2020_PIPELINE_COMPILER
-#include "2020/compiler/pipeline_compiler.hpp"
-#else
 #include "compiler/pipeline_compiler.hpp"
-// #include "PROP/compiler/pipeline_compiler.hpp"
-#endif
 #include <llvm/IR/Function.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#ifdef ENABLE_PAPI
+#include <papi.h>
+#include <boost/tokenizer.hpp>
+#endif
 
 // NOTE: the pipeline kernel is primarily a proxy for the pipeline compiler. Ideally, by making some kernels
 // a "family", the pipeline kernel will be compiled once for the lifetime of a program. Thus we can avoid even
@@ -23,6 +19,91 @@ using IDISA::FixedVectorType;
 namespace kernel {
 
 #define COMPILER (static_cast<PipelineCompiler *>(b->getCompiler()))
+
+#ifdef ENABLE_PAPI
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initializePAPI
+ ** ------------------------------------------------------------------------------------------------------------- */
+int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
+
+    const int rvalInit = PAPI_library_init(PAPI_VER_CURRENT);
+    if (rvalInit != PAPI_VER_CURRENT) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "PAPI Library Init Error: ";
+        out << PAPI_strerror(rvalInit);
+        report_fatal_error(out.str());
+    }
+
+    assert (!codegen::PapiCounterOptions.empty());
+
+    tokenizer<escaped_list_separator<char>> events(codegen::PapiCounterOptions);
+    for (const auto & event : events) {
+        int EventCode = PAPI_NULL;
+        const int rvalEventNameToCode = PAPI_event_name_to_code(const_cast<char*>(event.c_str()), &EventCode);
+        if (LLVM_LIKELY(rvalEventNameToCode == PAPI_OK)) {
+            PAPIEventList.push_back(EventCode);
+        } else {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "PAPI Library cannot resolve event name: ";
+            out << event.c_str();
+            out << "\n";
+            out << PAPI_strerror(rvalEventNameToCode);
+            report_fatal_error(out.str());
+        }
+    }
+
+    // sanity test whether this event set is valid
+    int EventSet = PAPI_NULL;
+    const auto rvalCreateEventSet = PAPI_create_eventset(&EventSet);
+    if (rvalCreateEventSet != PAPI_OK) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "PAPI Create Event Set Error: ";
+        out << PAPI_strerror(rvalCreateEventSet);
+        report_fatal_error(out.str());
+    }
+
+    const auto rvalAddEvents = PAPI_add_events(EventSet, PAPIEventList.data(), (int)PAPIEventList.size());
+
+    if (rvalAddEvents != PAPI_OK) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "PAPI Add Events Error: ";
+        out << PAPI_strerror(rvalCreateEventSet < PAPI_OK ? rvalCreateEventSet : PAPI_EINVAL);
+        out << "\n"
+               "Check papi_avail for available options or enter sysctl -w kernel.perf_event_paranoid=0\n"
+               "to reenable cpu event tracing at the kernel level.";
+        report_fatal_error(out.str());
+    }
+
+    if (codegen::SegmentThreads > 1 || codegen::EnableDynamicMultithreading) {
+        const auto rvalThreaedInit = PAPI_thread_init(pthread_self);
+        if (rvalThreaedInit != PAPI_OK) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "PAPI Thread Init Error: ";
+            out << PAPI_strerror(rvalThreaedInit);
+            report_fatal_error(out.str());
+        }
+    }
+
+    return EventSet;
+}
+
+void terminatePAPI(BuilderRef b, Value * eventSet) {
+    Module * const m = b->getModule();
+    FixedArray<Value *, 1> args;
+    args[0] = eventSet;
+    Function * const PAPICleanupEventsetFn = m->getFunction("PAPI_cleanup_eventset");
+    b->CreateCall(PAPICleanupEventsetFn->getFunctionType(), PAPICleanupEventsetFn, args);
+    Function * const PAPIDestroyEventsetFn = m->getFunction("PAPI_destroy_eventset");
+    b->CreateCall(PAPIDestroyEventsetFn->getFunctionType(), PAPIDestroyEventsetFn, args);
+    Function * const PAPIShutdownFn = m->getFunction("PAPI_shutdown");
+    b->CreateCall(PAPIShutdownFn->getFunctionType(), PAPIShutdownFn, {});
+}
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
@@ -88,18 +169,14 @@ bool PipelineKernel::allocatesInternalStreamSets() const {
  * @brief generateAllocateSharedInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) {
-    #ifndef USE_2020_PIPELINE_COMPILER
     COMPILER->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) {
-    #ifndef USE_2020_PIPELINE_COMPILER
     COMPILER->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -118,12 +195,10 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
-    #ifndef USE_2020_PIPELINE_COMPILER
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);
     }
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -194,22 +269,6 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
             argTypes.push_back(sizeTy);
         }
     }
-    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        return;
-    }
-    if (codegen::EnableDynamicMultithreading) {
-        // minimum num of threads
-        argTypes.push_back(sizeTy);
-        // maximum num of threads
-        argTypes.push_back(sizeTy);
-        // number of segments between checks
-        argTypes.push_back(sizeTy);
-        // synchronization cost threshold for adding thread
-        argTypes.push_back(sizeTy);
-    } else {
-        // num of threads
-        argTypes.push_back(sizeTy);
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -249,8 +308,6 @@ void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitAr
 
         flat_set<const RepeatingStreamSet *> observed;
 
-
-
         for (unsigned i = 0, j = 0; i != m; ++i) {
             const Kernel * const kernel = mKernels[i].Object;
             if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
@@ -265,31 +322,13 @@ void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitAr
                     if (streamSet->isDynamic() && observed.insert(streamSet).second) {
                         const auto k = getJthOffset(j++);
                         auto info = createRepeatingStreamSet(b, streamSet, k);
-                        params.insert(std::make_pair(streamSet, info.StreamSet));
+                        params.set(streamSet, info.StreamSet);
                         args.push_back(b->CreatePointerCast(info.StreamSet, voidPtrTy));
                         args.push_back(info.RunLength);
                     }
                 }
             }
         }
-    }
-    // TODO: temporary fix; pipeline should contain both full multithreaded
-    // programs and an internally synchronized version.
-    if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        return;
-    }
-    if (codegen::EnableDynamicMultithreading) {
-        // minimum num of threads
-        args.push_back(b->getSize(2));
-        // maximum num of threads
-        args.push_back(b->getSize(std::min(2U, codegen::SegmentThreads)));
-        // number of segments between checks
-        args.push_back(b->getSize(50));
-        // synchronization cost threshold for adding thread
-        args.push_back(b->getSize(10 * 100));
-    } else {
-        // num of threads
-        args.push_back(b->getSize(codegen::SegmentThreads));
     }
 }
 
@@ -425,9 +464,7 @@ PipelineKernel::RepeatingStreamSetInfo PipelineKernel::createRepeatingStreamSet(
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::runOptimizationPasses(BuilderRef b) const {
-    #ifndef USE_2020_PIPELINE_COMPILER
     COMPILER->runOptimizationPasses(b);
-    #endif
 }
 
 #define JOIN3(X,Y,Z) BOOST_JOIN(X,BOOST_JOIN(Y,Z))
@@ -529,6 +566,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         params.push_back(streamSetPtrTy);
     }
     for (const auto & input : getInputScalarBindings()) {
+        if (isa<CommandLineScalar>(input.getRelationship())) {
+            continue;
+        }
         params.push_back(input.getType());
     }
 
@@ -556,7 +596,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
     auto arg = main->arg_begin();
-    auto nextArg = [&]() {
+    auto nextArg = [&]() -> Value * {
         assert (arg != main->arg_end());
         Value * const v = &*arg;
         std::advance(arg, 1);
@@ -611,16 +651,59 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     }
     Value * sharedHandle = nullptr;
     NestedStateObjs toFree;
-    BEGIN_SCOPED_REGION
     ParamMap paramMap;
-    for (const auto & input : getInputScalarBindings()) {
-        const Scalar * const scalar = cast<Scalar>(input.getRelationship());
-        Value * const value = nextArg();
-        paramMap.insert(std::make_pair(scalar, value));
+
+    #ifdef ENABLE_PAPI
+    Value * eventSet = nullptr;
+    Value * eventListVal = nullptr;
+    if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
+        SmallVector<int, 8> eventList;
+        Type * const intTy = TypeBuilder<int, false>::get(b->getContext());
+        eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
+        const auto n = eventList.size();
+        Constant * const initializer = ConstantDataArray::get(b->getContext(), ArrayRef<int>(eventList.data(), n));
+        eventListVal = new GlobalVariable(*m, intTy, true, GlobalVariable::ExternalLinkage, initializer);
+        PipelineCompiler::linkPAPILibrary(b);
     }
+    #endif
+
+    for (const auto & input : getInputScalarBindings()) {
+        const auto scalar = input.getRelationship(); assert (scalar);
+        Value * value = nullptr;
+        if (isa<CommandLineScalar>(scalar)) {
+            using C = CommandLineScalarType;
+            switch (cast<CommandLineScalar>(scalar)->getCLType()) {
+                case C::MinThreadCount:
+                    value = b->getSize(2);
+                    break;
+                case C::MaxThreadCount:
+                    value = b->getSize(codegen::SegmentThreads);
+                    break;
+                case C::DynamicMultithreadingPeriod:
+                    value = b->getSize(50);
+                    break;
+                case C::DynamicMultithreadingSynchronizationThreshold:
+                    value = b->getSize(10 * 100);
+                    break;
+                #ifdef ENABLE_PAPI
+                case C::PAPIEventSet:
+                    value = eventSet;
+                    break;
+                case C::PAPIEventList:
+                    value = eventListVal;
+                    break;
+                #endif
+                default:
+                    llvm_unreachable("unknown command line scalar");
+            }
+        } else {
+            value = nextArg();
+        }
+        paramMap.set(scalar, value);
+    }
+
     InitArgs args;
     sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
-    END_SCOPED_REGION
     assert (isStateful() || sharedHandle == nullptr);
 
     size_t argCount = 0;
@@ -700,20 +783,25 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     } else {
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
-    SmallVector<Value *, 3> args;
+    SmallVector<Value *, 3> finalizeArgs;
     if (LLVM_LIKELY(isStateful())) {
-        args.push_back(sharedHandle);
+        finalizeArgs.push_back(sharedHandle);
     }
     if (LLVM_LIKELY(hasThreadLocal())) {
-        args.push_back(threadLocalHandle);
-        args.push_back(threadLocalHandle);
-        finalizeThreadLocalInstance(b, args);
-        args.pop_back();
+        finalizeArgs.push_back(threadLocalHandle);
+        finalizeArgs.push_back(threadLocalHandle);
+        finalizeThreadLocalInstance(b, finalizeArgs);
+        finalizeArgs.pop_back();
     }
-    Value * const result = finalizeInstance(b, args);
+    Value * const result = finalizeInstance(b, finalizeArgs);
     for (Value * stateObj : toFree) {
         b->CreateFree(stateObj);
     }
+    #ifdef ENABLE_PAPI
+    if (LLVM_UNLIKELY(eventSet != nullptr)) {
+        terminatePAPI(b, eventSet);
+    }
+    #endif
     b->CreateRet(result);
     return main;
 }
@@ -747,6 +835,28 @@ PipelineKernel::PipelineKernel(BuilderRef b,
 , mKernels(std::move(kernels))
 , mCallBindings(std::move(callBindings))
 , mLengthAssertions(std::move(lengthAssertions)) {
+
+BaseDriver & driver = reinterpret_cast<BaseDriver &>(b->getDriver());
+
+#define ADD_CL_SCALAR(Id,Type) \
+    mInputScalars.emplace_back(Id, driver.CreateCommandLineScalar(CommandLineScalarType::Type))
+
+if (codegen::EnableDynamicMultithreading) {
+    ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
+    ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+    ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
+    ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingSynchronizationThreshold);
+} else {
+    ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+}
+
+#ifdef ENABLE_PAPI
+const auto & S = codegen::PapiCounterOptions;
+if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
+    ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_CODE, PAPIEventSet);
+    ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_LIST, PAPIEventList);
+}
+#endif
 
 }
 

@@ -150,7 +150,7 @@ void PipelineCompiler::branchToInitialPartition(BuilderRef b) {
     mCurrentPartitionId = -1U;
     setActiveKernel(b, FirstKernel, true);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, FirstKernel, PAPIReadInitialMeasurementArray);
+    readPAPIMeasurement(b, PipelineInput, PAPIReadInitialMeasurementArray);
     #endif
     startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
     if (isMultithreaded()) {

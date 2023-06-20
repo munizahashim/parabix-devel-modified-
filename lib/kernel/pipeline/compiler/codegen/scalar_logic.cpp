@@ -38,18 +38,37 @@ void PipelineCompiler::writeOutputScalars(BuilderRef b, const size_t index, std:
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initializeScalarValues
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::initializeScalarValues(BuilderRef b) {
+    mScalarValue.reset(FirstKernel, LastScalar);
+
+    for (auto scalar = FirstScalar; scalar <= LastScalar; ++scalar) {
+        const RelationshipNode & rn = mScalarGraph[scalar];
+        assert (rn.Type == RelationshipNode::IsScalar);
+        const Relationship * const rel = rn.Relationship; assert (rel);
+        if (isa<ScalarConstant>(rel)) {
+            mScalarValue[scalar] = cast<ScalarConstant>(rel)->value();
+        }
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalar
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
+    assert (index >= FirstScalar && index <= LastScalar);
     Value * value = mScalarValue[index];
     if (value) {
         return value;
     }
+
+    const RelationshipNode & rn = mScalarGraph[index];
+    assert (rn.Type == RelationshipNode::IsScalar);
+    const Relationship * const rel = rn.Relationship; assert (rel);
+
     if (LLVM_UNLIKELY(in_degree(index, mScalarGraph) == 0)) {
-        assert (index >= FirstScalar && index <= LastScalar);
-        const RelationshipNode & rn = mScalarGraph[index];
-        assert (rn.Type == RelationshipNode::IsScalar);
-        const Relationship * const rel = rn.Relationship; assert (rel);
         value = cast<ScalarConstant>(rel)->value();
     } else {
         const auto producer = in_edge(index, mScalarGraph);
@@ -74,5 +93,6 @@ Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
     mScalarValue[index] = value;
     return value;
 }
+
 
 }

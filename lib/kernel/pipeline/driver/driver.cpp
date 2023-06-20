@@ -77,6 +77,27 @@ Scalar * BaseDriver::CreateConstant(not_null<llvm::Constant *> value) noexcept {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateCommandLineScalar
+ ** ------------------------------------------------------------------------------------------------------------- */
+Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcept {
+    RelationshipAllocator A(mAllocator);
+    llvm::Type * scalarTy = nullptr;
+    switch (type) {
+
+        #ifdef ENABLE_PAPI
+        case CommandLineScalarType::PAPIEventSet:
+            scalarTy = mBuilder->getInt32Ty(); break;
+        case CommandLineScalarType::PAPIEventList:
+            scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
+        #endif
+        default: scalarTy = mBuilder->getSizeTy(); break;
+    }
+
+
+    return new (A) CommandLineScalar(type, scalarTy);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void BaseDriver::addKernel(not_null<Kernel *> kernel) {

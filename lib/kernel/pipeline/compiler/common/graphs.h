@@ -51,8 +51,6 @@ using BuilderRef = KernelCompiler::BuilderRef;
 using ArgIterator = KernelCompiler::ArgIterator;
 using InitArgTypes = KernelCompiler::InitArgTypes;
 
-using Vertex = unsigned;
-
 using StreamSetId = unsigned;
 
 enum RelationshipNodeFlag {

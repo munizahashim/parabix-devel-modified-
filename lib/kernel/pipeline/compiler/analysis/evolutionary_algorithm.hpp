@@ -21,6 +21,8 @@ public:
 
     using CandidateLengthType = unsigned;
 
+    using Vertex = unsigned;
+
     using Candidate = std::vector<Vertex>;
 
 //    using Queue = boost::lockfree::queue<Candidate>;

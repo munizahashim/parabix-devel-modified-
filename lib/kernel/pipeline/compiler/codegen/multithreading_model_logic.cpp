@@ -80,7 +80,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     ConstantInt * const sz_ONE = b->getSize(1);
 
     SmallVector<char, 256> tmp;
-    const auto threadName = concat(mTarget->getName(), "_DoFixedDataSegmentThread", tmp);
+    const auto threadName = concat(mTarget->getName(), "_MultithreadedDoSegment", tmp);
 
     FunctionType * const threadFuncType = FunctionType::get(voidPtrTy, {voidPtrTy}, false);
     Function * const threadFunc = Function::Create(threadFuncType, Function::InternalLinkage, threadName, m);
@@ -112,6 +112,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
     Value * const threadStateArray =
         b->CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b->getCacheAlignment());
+
     DataLayout DL(b->getModule());
     Type * const intPtrTy = DL.getIntPtrType(voidPtrTy);
     PointerType * const intPtrPtrTy = intPtrTy->getPointerTo();
@@ -172,7 +173,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     pthreadCreateArgs[2] = threadFunc;
     pthreadCreateArgs[3] = b->CreatePointerCast(cThreadState, voidPtrTy);
     b->CreateCall(pthreadCreateFnTy, pthreadCreateFn, pthreadCreateArgs);
-
     if (mUseDynamicMultithreading) {
         b->CreateBr(constructNextThread);
 
@@ -216,7 +216,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     csParams[1] = sizeTy; // segment number
 
     FunctionType * const csFuncType = FunctionType::get(csRetValType, csParams, false);
-    Function * const csFunc = Function::Create(csFuncType, Function::InternalLinkage, threadName, m);
+    const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedThread", tmp);
+    Function * const csFunc = Function::Create(csFuncType, Function::InternalLinkage, outerFuncName, m);
     csFunc->setCallingConv(CallingConv::C);
     if (!mUseDynamicMultithreading) {
         csFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
@@ -233,6 +234,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     mSegNo = &*args;
     #ifdef PRINT_DEBUG_MESSAGES
     debugInit(b);
+    #endif
+    #ifdef ENABLE_PAPI
+    createPAPIMeasurementArrays(b);
+    getPAPIEventSet(b);
     #endif
     Value * segmentStartTime = nullptr;
     if (mUseDynamicMultithreading) {
@@ -304,9 +309,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         readThreadStuctObject(b, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
-        initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+        initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
 
         #ifdef ENABLE_PAPI
+        createPAPIMeasurementArrays(b);
+        getPAPIEventSet(b);
         registerPAPIThread(b);
         #endif
 
@@ -319,10 +326,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         } else {
             debugPrint(b, "================================================= START %" PRIx64, getHandle());
         }
-        #endif
-
-        #ifdef ENABLE_PAPI
-        createEventSetAndStartPAPI(b);
         #endif
 
         // generate the pipeline logic for this thread
@@ -432,7 +435,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             Value * const ts = b->CreateInBoundsGEP(threadStructArray, indices2);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);
-
         } else {
             BasicBlock * const exitBlock = b->GetInsertBlock();
             if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -455,7 +457,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         #endif
 
         #ifdef ENABLE_PAPI
-        stopPAPIAndDestroyEventSet(b);
+        stopPAPI(b);
         #endif
 
         updateTotalCycleCounterTime(b);
@@ -494,26 +496,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     if (mUseDynamicMultithreading) {
 
-//        //    const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
-//        //    const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
-//        //    const static std::string SEGMENTS_PER_CHECK = "SEG.C";
-//        //    const static std::string ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TST.A";
-
-//        Value * const minimumNumOfThreads = b->getScalarField(MINIMUM_NUM_OF_THREADS);
-//        Value * maximumNumOfThreads = nullptr;
-//        if (mUseDynamicMultithreading) {
-//            maximumNumOfThreads = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
-//        } else {
-//            maximumNumOfThreads = minimumNumOfThreads;
-//        }
-
-
         FixedArray<Type *, 2> param;
         param[0] = threadStateArray->getType(); // thread state
         param[1] = sizeTy; // segments per check
 
         FunctionType * const csFuncType = FunctionType::get(b->getVoidTy(), param, false);
-        Function * const csFunc = Function::Create(csFuncType, Function::InternalLinkage, threadName, m);
+        const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedProcessThread", tmp);
+        Function * const csFunc = Function::Create(csFuncType, Function::InternalLinkage, outerFuncName, m);
         csFunc->setCallingConv(CallingConv::C);
         csFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
 
@@ -662,8 +651,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         concludeStridesPerSegmentRecording(b);
     }
 
-   // b->getModule()->dump();
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -678,6 +665,7 @@ void PipelineCompiler::start(BuilderRef b) {
         mRethrowException = b->WriteDefaultRethrowBlock();
     }
 
+
     mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
     initializeFlowControl(b);
     readExternalConsumerItemCounts(b);
@@ -691,7 +679,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mNumOfTruncatedInputBuffers = 0;
     mTruncatedInputBuffer.clear();
     mPipelineProgress = b->getFalse();
-
 
 }
 
@@ -879,9 +866,16 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     }
     mNumOfFixedThreads = b->getSize(1);
 
+    #ifdef ENABLE_PAPI
+    createPAPIMeasurementArrays(b);
+    getPAPIEventSet(b);
+    Value * const es = PAPIEventSetVal;
+    #endif
+
     startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
 
     start(b);
+    assert (es == PAPIEventSetVal);
 
     mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
     mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
@@ -894,12 +888,14 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     obtainCurrentSegmentNumber(b, entryBlock);
 
     branchToInitialPartition(b);
+    assert (es == PAPIEventSetVal);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
         executeKernel(b);
     }
+    assert (es == PAPIEventSetVal);
     end(b);
-
+    assert (es == PAPIEventSetVal);
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
@@ -966,7 +962,7 @@ void PipelineCompiler::end(BuilderRef b) {
     #endif
 
     #ifdef ENABLE_PAPI
-    stopPAPIAndDestroyEventSet(b);
+    stopPAPI(b);
     #endif
 
     updateTotalCycleCounterTime(b);

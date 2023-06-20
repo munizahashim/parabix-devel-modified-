@@ -782,7 +782,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     if (copyLoop) {
 
         BasicBlock * recordCopyCycleCount = nullptr;
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             recordCopyCycleCount = b->CreateBasicBlock(prefix + "RecordCycleCount", copyExit);
         }
 
@@ -808,7 +808,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         BasicBlock * const loopExit = EnableCycleCounter ? recordCopyCycleCount : copyExit;
         b->CreateCondBr(done, loopExit, copyLoop);
 
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             b->SetInsertPoint(recordCopyCycleCount);
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
@@ -826,7 +826,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         #endif
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);

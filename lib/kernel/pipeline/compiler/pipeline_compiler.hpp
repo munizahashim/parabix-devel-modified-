@@ -43,14 +43,16 @@ enum CycleCounter {
 
 #ifdef ENABLE_PAPI
 enum PAPIKernelCounter {
-  PAPI_KERNEL_SYNCHRONIZATION
-  , PAPI_PARTITION_JUMP_SYNCHRONIZATION
-  , PAPI_BUFFER_EXPANSION
-  , PAPI_BUFFER_COPY
-  , PAPI_KERNEL_EXECUTION
-  , PAPI_KERNEL_TOTAL
+  PAPI_KERNEL_SYNCHRONIZATION = 0
+  , PAPI_PARTITION_JUMP_SYNCHRONIZATION = 1
+  , PAPI_BUFFER_EXPANSION = 2
+  , PAPI_BUFFER_COPY = 3
+  , PAPI_KERNEL_EXECUTION = 4
+  , PAPI_KERNEL_TOTAL = 5
   // ------------------
-  , NUM_OF_PAPI_COUNTERS
+  , NUM_OF_PAPI_COUNTERS = 6
+  // ------------------
+  , PAPI_FULL_PIPELINE_TIME = 0
 };
 #endif
 
@@ -71,8 +73,8 @@ const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
 
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
-const static std::string SEGMENTS_PER_CHECK = "SEG.C";
-const static std::string ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TST.A";
+const static std::string DYNAMIC_MULTITHREADING_SEGMENT_PERIOD = "SEG.C";
+const static std::string DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TST.A";
 
 #define SYNC_LOCK_FULL 0U
 #define SYNC_LOCK_PRE_INVOCATION 1U
@@ -107,9 +109,9 @@ const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_C
 
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
-const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY = "!PCS";
-const static std::string STATISTICS_GLOBAL_PAPI_COUNT_ARRAY_INDEX = "!PCI";
-const static std::string STATISTICS_THREAD_LOCAL_PAPI_COUNT_ARRAY = "tPCS";
+const static std::string STATISTICS_PAPI_TOTAL_COUNT_ARRAY = "!PCS";
+const static std::string STATISTICS_PAPI_EVENT_SET_CODE = "PES";
+const static std::string STATISTICS_PAPI_EVENT_SET_LIST = "PESL";
 #endif
 
 const static std::string STATISTICS_BLOCKING_IO_SUFFIX = ".SBY";
@@ -166,7 +168,6 @@ public:
     std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
     void runOptimizationPasses(BuilderRef b);
     void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) override;
-
     static void linkPThreadLibrary(BuilderRef b);
     #ifdef ENABLE_PAPI
     static void linkPAPILibrary(BuilderRef b);
@@ -338,6 +339,7 @@ public:
     void writeUpdatedItemCounts(BuilderRef b);
 
     void writeOutputScalars(BuilderRef b, const size_t index, std::vector<Value *> & args);
+    void initializeScalarValues(BuilderRef b);
     Value * getScalar(BuilderRef b, const size_t index);
 
 // intra-kernel codegen functions
@@ -504,17 +506,18 @@ public:
 
 // papi instrumentation functions
 #ifdef ENABLE_PAPI
-    void convertPAPIEventNamesToCodes();
+    ArrayType * getPAPIEventCounterType(BuilderRef b) const;
     void addPAPIEventCounterPipelineProperties(BuilderRef b);
     void addPAPIEventCounterKernelProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
     void initializePAPI(BuilderRef b) const;
     void registerPAPIThread(BuilderRef b) const;
-    void createEventSetAndStartPAPI(BuilderRef b);
+    void getPAPIEventSet(BuilderRef b);
+    void createPAPIMeasurementArrays(BuilderRef b);
     void readPAPIMeasurement(BuilderRef b, const unsigned kernelId, Value * const measurementArray) const;
     void accumPAPIMeasurementWithoutReset(BuilderRef b, Value * const beforeMeasurement, const unsigned kernelId, const PAPIKernelCounter measurementType) const;
     void unregisterPAPIThread(BuilderRef b) const;
-    void stopPAPIAndDestroyEventSet(BuilderRef b);
-    void shutdownPAPI(BuilderRef b) const;
+    void startPAPI(BuilderRef b);
+    void stopPAPI(BuilderRef b);
     void printPAPIReportIfRequested(BuilderRef b);
     void checkPAPIRetValAndExitOnError(BuilderRef b, StringRef source, const int expected, Value * const retVal) const;
 
@@ -616,16 +619,17 @@ protected:
     const unsigned                              LastScalar;
     const unsigned                              PartitionCount;
 
+    #ifdef ENABLE_PAPI
+    const unsigned                              NumOfPAPIEvents;
+    #else
+    constexpr static unsigned                   NumOfPAPIEvents = 0;
+    #endif
+
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
     const bool                                  EnableCycleCounter;
-    #ifdef ENABLE_PAPI
-    const bool                                  EnablePAPICounters;
-    #else
-    constexpr static bool                       EnablePAPICounters = false;
-    #endif
     const bool                                  TraceIO;
     const bool                                  TraceUnconsumedItemCounts;
     const bool                                  TraceProducedItemCounts;
@@ -859,7 +863,7 @@ protected:
 
     // papi counter state
     #ifdef ENABLE_PAPI
-    SmallVector<int, 8>                         PAPIEventList;
+    //SmallVector<int, 8>                         PAPIEventList;
     Value *                                     PAPIEventSet = nullptr;
     Value *                                     PAPIEventSetVal = nullptr;
     Value *                                     PAPIReadInitialMeasurementArray = nullptr;
@@ -940,7 +944,14 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
 #ifdef ENABLE_PAPI
-, EnablePAPICounters(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)
+, NumOfPAPIEvents([&]() -> unsigned {
+    const auto & S = codegen::PapiCounterOptions;
+    if (S.compare(codegen::OmittedOption) == 0) {
+        return 0;
+    } else {
+        return std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1;
+    }
+}())
 #endif
 , TraceIO(DebugOptionIsSet(codegen::EnableBlockingIOCounter) || DebugOptionIsSet(codegen::TraceBlockedIO))
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
@@ -1042,9 +1053,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mInternalBindings(std::move(P.mInternalBindings))
 , mInternalBuffers(std::move(P.mInternalBuffers))
 {
-    #ifdef ENABLE_PAPI
-    convertPAPIEventNamesToCodes();
-    #endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

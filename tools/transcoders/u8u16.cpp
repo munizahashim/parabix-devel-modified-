@@ -57,28 +57,11 @@ inline bool useAVX2() {
 
 class U8U16Kernel final: public pablo::PabloKernel {
 public:
-    #ifdef USE_2017_U8U16_ALGORITHM
-    U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *delMask, StreamSet *errMask);
-    #else
     U8U16Kernel(BuilderRef b, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
-    #endif
 protected:
     void generatePabloMethod() override;
 };
 
-#ifdef USE_2017_U8U16_ALGORITHM
-U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *delMask, StreamSet *errMask)
-: PabloKernel(b, "u8u16",
-// input
-{Binding{"u8bit", BasisBits}},
-// outputs
-{Binding{"u16bit", u8bits}
-,Binding{"delMask", delMask}
-,Binding{"errMask", errMask}}) {
-
-}
-
-#else
 U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
 : PabloKernel(b, "u8u16",
 // input
@@ -88,9 +71,6 @@ U8U16Kernel::U8U16Kernel(BuilderRef b, StreamSet *BasisBits, StreamSet *u8bits, 
 ,Binding{"selectors", selectors}}) {
 
 }
-#endif
-
-// {Binding{b->getStreamSetTy(16, 1), "u16bit"}, Binding{b->getStreamSetTy(1, 1), "delMask"}, Binding{b->getStreamSetTy(1, 1), "errMask"}}) {
 
 void U8U16Kernel::generatePabloMethod() {
     PabloBuilder main(getEntryScope());
@@ -280,15 +260,8 @@ void U8U16Kernel::generatePabloMethod() {
     for (unsigned i = 0; i < 8; i++) {
         main.createAssign(main.createExtract(output, i), u16_lo[i]);
     }
-    #ifdef USE_2017_U8U16_ALGORITHM
-    Var * delmask_out = getOutputStreamVar("delMask");
-    Var * error_mask_out = getOutputStreamVar("errMask");
-    main.createAssign(main.createExtract(delmask_out, main.getInteger(0)), delmask);
-    main.createAssign(main.createExtract(error_mask_out,  main.getInteger(0)), error_mask);
-    #else
     PabloAST * selectors = main.createInFile(main.createNot(delmask));
     main.createAssign(main.createExtract(getOutputStreamVar("selectors"), main.getInteger(0)), selectors);
-    #endif
 }
 
 typedef void (*u8u16FunctionType)(uint32_t fd, const char *);
@@ -310,21 +283,11 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
 
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
     StreamSet * u8bits = P->CreateStreamSet(16);
-
-    #ifdef USE_2017_U8U16_ALGORITHM
-    StreamSet * DelMask = P->CreateStreamSet();
-    StreamSet * ErrorMask = P->CreateStreamSet();
-    P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, DelMask, ErrorMask);
-    #else
     StreamSet * u16bits = P->CreateStreamSet(16);
     StreamSet * selectors = P->CreateStreamSet();
     P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
-    #endif
     StreamSet * u16bytes = P->CreateStreamSet(1, 16);
     if (useAVX2()) {
-        #ifdef USE_2017_U8U16_ALGORITHM
-        report_fatal_error("Not supported in comparison study");
-        #else
         // Allocate space for fully compressed swizzled UTF-16 bit streams
         std::vector<StreamSet *> u16Swizzles(4);
         u16Swizzles[0] = P->CreateStreamSet(4);
@@ -339,20 +302,12 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
         P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
         #endif
     } else {
-        #ifdef USE_2017_U8U16_ALGORITHM
-        StreamSet * U16Bits = P->CreateStreamSet(16);
-        StreamSet * DeletionCounts = P->CreateStreamSet();
-        P->CreateKernelCall<DeletionKernel>(u8bits, DelMask, U16Bits, DeletionCounts);
-        P->CreateKernelCall<P2S16KernelWithCompressedOutputOld>(U16Bits, DeletionCounts, u16bytes);
-        #else
-
         const auto fieldWidth = b->getBitBlockWidth() / 16;
         P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
                                                  fieldWidth);
         P->CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
-        #endif
     }
 
     Scalar * outputFileName = P->getInputScalar("outputFileName");
@@ -366,7 +321,6 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
 void makeNonAsciiBranch(Kernel::BuilderRef b,
                         const std::unique_ptr<PipelineBuilder> & P,
                         StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
-    #ifndef USE_2017_U8U16_ALGORITHM
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -398,7 +352,6 @@ void makeNonAsciiBranch(Kernel::BuilderRef b,
                                                  fieldWidth);
         P->CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
     }
-    #endif
 }
 
 void makeAllAsciiBranch(const std::unique_ptr<PipelineBuilder> & P, StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {

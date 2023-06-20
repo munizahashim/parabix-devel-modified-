@@ -36,6 +36,8 @@ struct TruncatedStreamSetData {
 
 using TruncatedStreamSetVec = SmallVector<TruncatedStreamSetData, 2>;
 
+using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineScalarType::CommandLineScalarCount>;
+
 //TODO: change enum tag to distinguish relationships and streamsets
 
 struct RelationshipGraphBuilder {
@@ -69,13 +71,29 @@ void addProducerStreamSets(const PortType portType, const unsigned producer, con
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief canonicalizeAnyCommandLineScalar
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline Relationship * canonicalizeAnyCommandLineScalar(Relationship * const rel) { assert (rel);
+    if (isa<CommandLineScalar>(rel)) {
+        const unsigned k = (unsigned)cast<CommandLineScalar>(rel)->getCLType();
+        if (CommandLineScalars[k] == nullptr) {
+            CommandLineScalars[k] = rel;
+        } else {
+            return CommandLineScalars[k];
+        }
+    }
+    return rel;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addProducerRelationships
  ** ------------------------------------------------------------------------------------------------------------- */
 void addProducerScalars(const PortType portType, const unsigned producer, const Bindings & array) {
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
-        assert (isa<Scalar>(array[i].getRelationship()));
-        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, array[i].getRelationship());
+        Relationship * const r = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+        assert (isa<Scalar>(r) || isa<CommandLineScalar>(r));
+        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, r);
         add_edge(producer, relationship, RelationshipType{portType, i}, G);
     }
 }
@@ -102,8 +120,8 @@ void addConsumerStreamSets(const PortType portType, const unsigned consumer, con
 void addConsumerScalars(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
-        assert (isa<Scalar>(array[i].getRelationship()));
-        const auto rel = array[i].getRelationship();
+        Relationship * const rel = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+        assert (isa<Scalar>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel));
         const auto relationship = G.addOrFind(RelationshipNode::IsScalar, rel, addRelationship);
         add_edge(relationship, consumer, RelationshipType{portType, i}, G);
     }
@@ -551,7 +569,6 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                         inputs[port.Number] = std::make_pair(relationship, ref);
                         ++numOfStreams;
                     } else if (node.Type == RelationshipNode::IsScalar) {
-                        assert (isa<Scalar>(G[input].Relationship));
                         scalars[port.Number] = input;
                     }
                 }
@@ -742,7 +759,7 @@ RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
 , mInternalKernels(P.mInternalKernels)
 , mInternalBindings(P.mInternalBindings)
 , mInternalBuffers(P.mInternalBuffers) {
-
+    std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
 }
 
 ProgramGraph & G;
@@ -751,6 +768,7 @@ Kernels & mKernels;
 OwningVector<Kernel> &          mInternalKernels;
 OwningVector<Binding> &         mInternalBindings;
 OwningVector<StreamSetBuffer> & mInternalBuffers;
+CommandLineScalarVec            CommandLineScalars;
 TruncatedStreamSetVec           TruncatedStreamSets;
 };
 

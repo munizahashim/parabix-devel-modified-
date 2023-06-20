@@ -52,6 +52,8 @@ public:
 
     kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;
 
+    kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
+
     void addKernel(not_null<Kernel *> kernel);
 
     virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;

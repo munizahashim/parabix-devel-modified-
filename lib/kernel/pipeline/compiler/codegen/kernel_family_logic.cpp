@@ -157,11 +157,6 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const {
     Function * const init = mKernel->getInitializeFunction(b);
-    if (init->getFunctionType()->getNumParams() != args.size()) {
-        init->print(errs()); errs() << "\n\n";
-        errs() << init->getFunctionType()->getNumParams() << " vs. " << args.size() << "\n";
-    }
-
     assert (init->getFunctionType()->getNumParams() == args.size());
     return b->CreateCall(init->getFunctionType(), init, args);
 }

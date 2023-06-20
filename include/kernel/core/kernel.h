@@ -37,6 +37,7 @@ class Kernel : public AttributeSet {
     friend class KernelCompiler;
     friend class PipelineAnalysis;
     friend class PipelineCompiler;
+    friend class PipelineBuilder;
     friend class PipelineKernel;
     friend class OptimizationBranchCompiler;
     friend class OptimizationBranch;
@@ -62,7 +63,35 @@ public:
 
     using InitArgTypes = llvm::SmallVector<llvm::Type *, 32>;
 
-    using ParamMap = llvm::DenseMap<const Relationship *, llvm::Value *>;
+    struct ParamMap {
+
+        inline llvm::Value * get(const Relationship * inputScalar) const {
+            if (LLVM_UNLIKELY(llvm::isa<CommandLineScalar>(inputScalar))) {
+                const auto k = (unsigned)llvm::cast<CommandLineScalar>(inputScalar)->getCLType();
+                return mCommandLineMap[k];
+            }
+            const auto f = mRelationshipMap.find(inputScalar);
+            if (LLVM_UNLIKELY(f == mRelationshipMap.end())) {
+                return nullptr;
+            }
+            return f->second;
+        }
+
+        inline void set(const Relationship * inputScalar, llvm::Value * value) {
+            if (LLVM_UNLIKELY(llvm::isa<CommandLineScalar>(inputScalar))) {
+                const auto k = (unsigned)llvm::cast<CommandLineScalar>(inputScalar)->getCLType();
+                assert ("relationship is already mapped to that value" && mCommandLineMap[k] == nullptr);
+                mCommandLineMap[k] = value;
+            } else {
+                const auto f = mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
+                assert ("relationship is already mapped to that value" && f.second);
+            }
+        }
+
+    private:
+        llvm::DenseMap<const Relationship *, llvm::Value *> mRelationshipMap;
+        std::array<llvm::Value *, (unsigned)CommandLineScalarType::CommandLineScalarCount> mCommandLineMap{};
+    };
 
     struct LinkedFunction {
         const std::string  Name;

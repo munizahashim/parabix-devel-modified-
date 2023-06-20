@@ -42,6 +42,9 @@ const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateT
 const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
 const static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
 const static auto FINALIZE_SUFFIX = "_Finalize";
+#ifdef ENABLE_PAPI
+const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
+#endif
 
 const static auto SHARED_SUFFIX = "_shared_state";
 const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
@@ -1106,15 +1109,15 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         addHostArg(handle);
     }
     for (const Binding & input : mInputScalars) {
-        const auto f = params.find(cast<Scalar>(input.getRelationship()));
-        if (LLVM_UNLIKELY(f == params.end())) {
+        const auto val = params.get(input.getRelationship());
+        if (LLVM_UNLIKELY(val == nullptr)) {
             SmallVector<char, 512> tmp;
             raw_svector_ostream out(tmp);
             out << "Could not find paramater for " << getName() << ':' << input.getName()
                 << " from the provided program parameters (i.e., unknown input scalar.)";
             report_fatal_error(out.str());
         }
-        initArgs.push_back(f->second); assert (initArgs.back());
+        initArgs.push_back(val);
     }
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
     supplyAdditionalInitializationArgTypes(b, initArgs, params, 1U);
