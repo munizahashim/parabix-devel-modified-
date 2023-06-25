@@ -43,14 +43,6 @@ void PipelineCompiler::writeOutputScalars(BuilderRef b, const size_t index, std:
 void PipelineCompiler::initializeScalarValues(BuilderRef b) {
     mScalarValue.reset(FirstKernel, LastScalar);
 
-    for (auto scalar = FirstScalar; scalar <= LastScalar; ++scalar) {
-        const RelationshipNode & rn = mScalarGraph[scalar];
-        assert (rn.Type == RelationshipNode::IsScalar);
-        const Relationship * const rel = rn.Relationship; assert (rel);
-        if (isa<ScalarConstant>(rel)) {
-            mScalarValue[scalar] = cast<ScalarConstant>(rel)->value();
-        }
-    }
 
 }
 

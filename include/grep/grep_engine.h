@@ -296,7 +296,6 @@ private:
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
     void * mMainMethod;
-    unsigned mNumOfThreads;
 };
 
 enum class PatternKind {Include, Exclude};
@@ -320,7 +319,6 @@ private:
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
     void * mMainMethod;
-    unsigned mNumOfThreads;
 };
 
 /**

@@ -823,40 +823,4 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief numberDynamicRepeatingStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::numberDynamicRepeatingStreamSets() {
-
-    // The programmer's kernel ordering may differ from the pipeline's scheduled ordering.
-    // To avoid adding overhead to the pipeline "main" function creation, we determine the
-    // streamset ids of each input here for use later.
-
-    // NOTE: Since streamset 0 is impossible, we use that to signify a repeating streamset
-    // whose consumers were all removed.
-
-    flat_set<const StreamSet *> added;
-    for (const auto & P : mKernels) {
-        Kernel * const kernel = P.Object;
-        const auto m = kernel->getNumOfStreamInputs();
-        for (unsigned i = 0; i != m; ++i) {
-            const StreamSet * const input = kernel->getInputStreamSet(i);
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
-                if (cast<RepeatingStreamSet>(input)->isDynamic() && added.emplace(input).second) {
-                    unsigned index = 0;
-                    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-                        RelationshipNode & rn = mStreamGraph[streamSet];
-                        assert (rn.Type == RelationshipNode::IsStreamSet);
-                        if (LLVM_UNLIKELY(rn.Relationship == input)) {
-                            index = streamSet;
-                            break;
-                        }
-                    }
-                    mDynamicRepeatingStreamSetId.push_back(index);
-                }
-            }
-        }
-    }
-}
-
 }

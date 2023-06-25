@@ -77,8 +77,6 @@ public:
                          }()
                          // contains kernel family calls
                          , true
-                         // has repeating streamset
-                         , false
                          // make kernel list
                          , [&]() -> Kernels {
                              Kernels kernels;
@@ -141,10 +139,14 @@ public:
                          , {{"basis", BasisBits}, {"u8index", u8index}, {"breaks", breaks}}
                          // stream outputs
                          , {{"matches", matches, FixedRate(), { Add1(), ManagedBuffer() }}}
-                         // scalars
-                         , {}, {}
-                         // length assertions
-                         , {}) {
+                        // input scalars
+                        , {}
+                        // output scalars
+                        , {}
+                        // internally generated streamsets
+                        , {}
+                        // length assertions
+                        , {}) {
         addAttribute(InternallySynchronized());
     }
 
@@ -154,7 +156,6 @@ NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver & driver)
 : mGrepRecordBreak(GrepRecordBreakKind::LF)
 , mCaseInsensitive(false)
 , mGrepDriver(driver)
-, mNumOfThreads(1)
 , mBreakCC(nullptr)
 , mNested(1, nullptr) {
 
@@ -235,7 +236,6 @@ void NestedInternalSearchEngine::grepCodeGen() {
     auto E = mGrepDriver.makePipeline({Binding{"buffer", buffer},
         Binding{"length", length},
         Binding{"accumulator", accumulator}});
-    E->setNumOfThreads(codegen::SegmentThreads);
 
     StreamSet * const ByteStream = E->CreateStreamSet(1, 8);
     E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);

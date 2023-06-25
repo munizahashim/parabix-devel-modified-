@@ -15,14 +15,22 @@ using RelationshipAllocator = Relationship::Allocator;
  * @brief makePipelineWithIO
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, std::move(stream_inputs), std::move(stream_outputs), std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           std::move(stream_inputs), std::move(stream_outputs),
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipeline
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, Bindings{}, Bindings{}, std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           {}, {},
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -147,13 +155,6 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         mUncachedKernel.emplace_back(kernel.get());
     }
 
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief __CreateRepeatingStreamSet8
- ** ------------------------------------------------------------------------------------------------------------- */
-kernel::RepeatingStreamSet * BaseDriver::__CreateRepeatingStreamSet8(const uint8_t * string, size_t length) {
-    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

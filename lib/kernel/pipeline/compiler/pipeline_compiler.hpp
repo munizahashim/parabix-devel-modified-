@@ -410,12 +410,15 @@ public:
 
 // repeating streamset functions
 
+    using InternallyGeneratedStreamSetMap = flat_map<Value *, std::pair<Value *, Value>>;
+
     void generateGlobalDataForRepeatingStreamSet(BuilderRef b, const unsigned streamSet, Value * const expectedNumOfStrides);
     void addRepeatingStreamSetBufferProperties(BuilderRef b);
     void deallocateRepeatingBuffers(BuilderRef b);
     void generateMetaDataForRepeatingStreamSets(BuilderRef b);
     Constant * getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const;
     void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    void addRepeatingStreamSetInitializationArguments(const unsigned kernelId, ArgVec & args) const;
 
 // prefetch instructions
 
@@ -649,8 +652,10 @@ protected:
     const PartialSumStepFactorGraph             mPartialSumStepFactorGraph;
     const TerminationChecks                     mTerminationCheck;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
+    const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
-    const std::vector<unsigned>                 DynamicRepeatingStreamSetId;
+
+
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -922,8 +927,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
-, mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline && P.NumOfThreads > 1)
-//, mNumOfThreads(P.NumOfThreads)
+, mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
 , PipelineOutput(P.PipelineOutput)
@@ -973,9 +977,9 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
+, mInternallyGeneratedStreamSetGraph(std::move(P.mInternallyGeneratedStreamSetGraph))
 
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
-, DynamicRepeatingStreamSetId(std::move(P.mDynamicRepeatingStreamSetId))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

@@ -556,6 +556,13 @@ struct SchedulingNode {
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
 
+struct InternallyGeneratedStreamSetGraphNode {
+    mutable Value * StreamSet = nullptr;
+    mutable Value * RunLength = nullptr;
+};
+
+using InternallyGeneratedStreamSetGraph = adjacency_list<vecS, vecS, bidirectionalS, InternallyGeneratedStreamSetGraphNode, unsigned>;
+
 }
 
 #endif // PIPELINE_KERNEL_HEADER_GRAPHS_H

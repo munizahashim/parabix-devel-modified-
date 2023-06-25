@@ -88,6 +88,8 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
             case RelationshipNode::IsScalar:
                 if (LLVM_UNLIKELY(isa<ScalarConstant>(rn.Relationship))) {
                     out << "Constant: ";
+                } else if (isa<CommandLineScalar>(rn.Relationship)) {
+                    out << "CommandLineScalar: ";
                 } else if (isa<Scalar>(rn.Relationship)) {
                     out << "Scalar: ";
                 } else {

@@ -92,9 +92,9 @@ public:
 
         P.makeTerminationPropagationGraph();
 
-        P.numberDynamicRepeatingStreamSets();
-
         P.identifyPortsThatModifySegmentLength();
+
+        P.mapInternallyGeneratedStreamSets();
 
         // Finish the buffer graph
         P.determineInitialThreadLocalBufferLayout(b, rng);
@@ -218,8 +218,6 @@ private:
 
     void calculatePartialSumStepFactors(BuilderRef b);
 
-    void numberDynamicRepeatingStreamSets();
-
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
     // zero extension analysis function
@@ -240,6 +238,8 @@ private:
     void makeInputTruncationGraph();
 
 
+    void mapInternallyGeneratedStreamSets();
+
 public:
 
     // Debug functions
@@ -249,7 +249,6 @@ public:
 public:
 
     PipelineKernel * const          mPipelineKernel;
-//    const unsigned					mNumOfThreads;
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
@@ -304,10 +303,9 @@ public:
 
     TerminationChecks               mTerminationCheck;
 
-    TerminationPropagationGraph     mTerminationPropagationGraph;
-    BitVector                       HasTerminationSignal;
-
-    std::vector<unsigned>           mDynamicRepeatingStreamSetId;
+    TerminationPropagationGraph         mTerminationPropagationGraph;
+    InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
+    BitVector                           HasTerminationSignal;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;

@@ -89,10 +89,6 @@ protected:
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
 
-private:
-
-    kernel::RepeatingStreamSet * __CreateRepeatingStreamSet8(const uint8_t * string, size_t length);
-
 protected:
 
     std::unique_ptr<llvm::LLVMContext>                      mContext;

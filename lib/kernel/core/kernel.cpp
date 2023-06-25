@@ -500,7 +500,7 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         for (const Binding & binding : mInputScalars) {
             setNextArgName(binding.getName());
         }
-        // TODO: name family args?
+
     }
     return initFunc;
 }
@@ -1114,13 +1114,28 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
             SmallVector<char, 512> tmp;
             raw_svector_ostream out(tmp);
             out << "Could not find paramater for " << getName() << ':' << input.getName()
-                << " from the provided program parameters (i.e., unknown input scalar.)";
+                << " from the provided program parameters";
             report_fatal_error(out.str());
         }
         initArgs.push_back(val);
     }
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
-    supplyAdditionalInitializationArgTypes(b, initArgs, params, 1U);
+    if (hasInternallyGeneratedStreamSets()) {
+        for (const auto & rs : getInternallyGeneratedStreamSets()) {
+            ParamMap::PairEntry entry;
+            if (LLVM_UNLIKELY(!params.get(rs, entry))) {
+                SmallVector<char, 512> tmp;
+                raw_svector_ostream out(tmp);
+                out << "Could not find paramater for "
+                    << "internally generated streamset"
+                    << " from the provided program parameters";
+                report_fatal_error(out.str());
+            }
+            initArgs.push_back(entry.first);
+            initArgs.push_back(entry.second);
+        }
+    }
+//    supplyAdditionalInitializationArgTypes(b, initArgs, params, 1U);
 
     Function * const init = getInitializeFunction(b);
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
@@ -1259,7 +1274,7 @@ std::string Kernel::getFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-inline std::string annotateKernelNameWithDebugFlags(Kernel::TypeId id, std::string && name) {
+/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(TypeId id, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
@@ -1289,10 +1304,10 @@ inline std::string annotateKernelNameWithDebugFlags(Kernel::TypeId id, std::stri
 Kernel::Kernel(BuilderRef b,
                const TypeId typeId,
                std::string && kernelName,
-               Bindings &&stream_inputs,
-               Bindings &&stream_outputs,
-               Bindings &&scalar_inputs,
-               Bindings &&scalar_outputs,
+               Bindings && stream_inputs,
+               Bindings && stream_outputs,
+               Bindings && scalar_inputs,
+               Bindings && scalar_outputs,
                InternalScalars && internal_scalars)
 : mTypeId(typeId)
 , mStride(b->getBitBlockWidth())
@@ -1302,6 +1317,23 @@ Kernel::Kernel(BuilderRef b,
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
 , mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
+
+}
+
+Kernel::Kernel(BuilderRef b,
+               const TypeId typeId,
+               Bindings && stream_inputs,
+               Bindings && stream_outputs,
+               Bindings && scalar_inputs,
+               Bindings && scalar_outputs)
+: mTypeId(typeId)
+, mStride(b->getBitBlockWidth())
+, mInputStreamSets(std::move(stream_inputs))
+, mOutputStreamSets(std::move(stream_outputs))
+, mInputScalars(std::move(scalar_inputs))
+, mOutputScalars(std::move(scalar_outputs))
+, mInternalScalars()
+, mKernelName() {
 
 }
 

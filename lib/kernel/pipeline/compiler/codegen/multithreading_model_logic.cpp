@@ -639,7 +639,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     assert (getThreadLocalHandle() == initialThreadLocal);
     assert (b->getCompiler() == this);
 
-//    initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
 
@@ -875,7 +874,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
 
     start(b);
-    assert (es == PAPIEventSetVal);
 
     mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
     mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
@@ -888,14 +886,11 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     obtainCurrentSegmentNumber(b, entryBlock);
 
     branchToInitialPartition(b);
-    assert (es == PAPIEventSetVal);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
         executeKernel(b);
     }
-    assert (es == PAPIEventSetVal);
     end(b);
-    assert (es == PAPIEventSetVal);
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {

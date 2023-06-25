@@ -23,6 +23,7 @@ SRC
     compiler/analysis/consumer_analysis.cpp
     compiler/analysis/dataflow_analysis.cpp
     compiler/analysis/evolutionary_algorithm.cpp
+    compiler/analysis/internallygeneratedstreamset_analysis.cpp
     compiler/analysis/partitioning_analysis.cpp
     compiler/analysis/pipeline_graph_printers.cpp
     compiler/analysis/relationship_analysis.cpp

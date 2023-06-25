@@ -9,6 +9,8 @@
 
 namespace llvm { class Value; }
 
+class BaseDriver;
+
 namespace kernel {
 
 const static std::string INITIALIZE_FUNCTION_POINTER_SUFFIX = "_IFP";
@@ -28,6 +30,8 @@ class PipelineKernel : public Kernel {
     friend class PipelineCompiler;
     friend class PipelineAnalysis;
     friend class PipelineBuilder;
+    friend class ProgramBuilder;
+    friend class ::BaseDriver;
 public:
 
     static bool classof(const Kernel * const k) {
@@ -39,6 +43,8 @@ public:
 public:
 
     using Scalars = std::vector<Scalar *>;
+
+    using Relationships = std::vector<const Relationship *>;
 
     enum KernelBindingFlag {
         None = 0
@@ -74,13 +80,6 @@ public:
         : Name(std::move(Name)), Type(Type), FunctionPointer(FunctionPointer), Args(Args.begin(), Args.end()), Callee(nullptr) { }    
     };
 
-    struct RepeatingStreamSetInfo {
-        llvm::GlobalVariable * StreamSet;
-        llvm::Constant * RunLength;
-        RepeatingStreamSetInfo(llvm::GlobalVariable * streamSet, llvm::Constant * runLength)
-        : StreamSet(streamSet), RunLength(runLength) {}
-    };
-
     using CallBindings = std::vector<CallBinding>;
 
     using LengthAssertion = std::array<const StreamSet *, 2>;
@@ -92,10 +91,6 @@ public:
     bool isCachable() const override;
 
     bool containsKernelFamilyCalls() const override;
-
-    LLVM_READNONE bool generatesDynamicRepeatingStreamSets() const override {
-        return mHasRepeatingStreamSet;
-    }
 
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
@@ -134,13 +129,35 @@ protected:
     PipelineKernel(BuilderRef b,
                    std::string && signature,
                    const bool containsKernelFamilyCalls,
-                   const bool hasRepeatingStreamSet,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
+                   Relationships && internallyGenerated,
                    LengthAssertions && lengthAssertions);
 
+    PipelineKernel(BuilderRef b,
+                   Bindings && stream_inputs, Bindings && stream_outputs,
+                   Bindings && scalar_inputs, Bindings && scalar_outputs);
+
     virtual void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> &) {}
+
+    static std::string annotateSignatureWithPipelineFlags(std::string && name);
+
+    static std::string makePipelineHashName(const std::string & signature);
+
+private:
+
+    struct Internal {};
+
+    PipelineKernel(Internal, BuilderRef b,
+                   std::string && signature,
+                   const bool containsKernelFamilyCalls,
+                   Kernels && kernels, CallBindings && callBindings,
+                   Bindings && stream_inputs, Bindings && stream_outputs,
+                   Bindings && scalar_inputs, Bindings && scalar_outputs,
+                   Relationships && internallyGenerated,
+                   LengthAssertions && lengthAssertions);
+
 
 private:
 
@@ -176,16 +193,27 @@ private:
 
 protected:
 
-    RepeatingStreamSetInfo createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const unsigned maxStrideLength) const;
+    bool hasInternallyGeneratedStreamSets() const final {
+        return !mInternallyGeneratedStreamSets.empty();
+    }
+
+    const Relationships & getInternallyGeneratedStreamSets() const final {
+        return mInternallyGeneratedStreamSets;
+    }
+
+    void writeInternallyGeneratedStreamSetScaleVector(const Relationships & R, MetadataScaleVector & V, const size_t scale) const final;
+
+    ParamMap::PairEntry createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const size_t maxStrideLength) const;
 
 protected:
 
-    const bool                                mContainsKernelFamilies;
-    const bool                                mHasRepeatingStreamSet;
-    const std::string                         mSignature;
-    Kernels                                   mKernels;
-    CallBindings                              mCallBindings;
-    LengthAssertions                          mLengthAssertions;
+    bool                                mContainsKernelFamilies;
+    std::string                         mSignature;
+    Relationships                       mInternallyGeneratedStreamSets;
+    Kernels                             mKernels;
+    CallBindings                        mCallBindings;
+    LengthAssertions                    mLengthAssertions;
+
 
 };
 

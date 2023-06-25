@@ -9,8 +9,6 @@ class BaseDriver;
 namespace kernel {
 
 class OptimizationBranchBuilder;
-//class PipelineAnalysis;
-//class PipelineCompiler;
 
 class PipelineBuilder {
     friend class PipelineKernel;
@@ -20,6 +18,7 @@ class PipelineBuilder {
 public:
 
     using Kernels = PipelineKernel::Kernels;
+    using Relationships = PipelineKernel::Relationships;
     using CallBinding = PipelineKernel::CallBinding;
     using CallBindings = PipelineKernel::CallBindings;
     using LengthAssertion = PipelineKernel::LengthAssertion;
@@ -66,31 +65,45 @@ public:
 
     using pattern_t = std::vector<uint64_t>;
 
+    #define RETURN_REPSTREAMSET(...) \
+        RepeatingStreamSet * const ss = mDriver.CreateRepeatingStreamSet(__VA_ARGS__); \
+        mTarget->mInternallyGeneratedStreamSets.push_back(ss); \
+        return ss
+
     RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, pattern_t string, const bool isDynamic = true) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
+        RETURN_REPSTREAMSET(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
     }
 
     RepeatingStreamSet * CreateRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string, const bool isDynamic = true) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::move(string), isDynamic);
+        RETURN_REPSTREAMSET(FieldWidth, std::move(string), isDynamic);
     }
 
     template<unsigned FieldWidth, unsigned NumOfElements>
     RepeatingStreamSet * CreateRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
-        return mDriver.CreateRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
+        RETURN_REPSTREAMSET(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
     }
 
+    #undef RETURN_REPSTREAMSET
+
+    #define RETURN_REPSTREAMSET(...) \
+        RepeatingStreamSet * const ss = mDriver.CreateUnalignedRepeatingStreamSet(__VA_ARGS__); \
+        mTarget->mInternallyGeneratedStreamSets.push_back(ss); \
+        return ss
+
     RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(unsigned FieldWidth, pattern_t string, const bool isDynamic = true) {
-        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
+        RETURN_REPSTREAMSET(FieldWidth, std::vector<pattern_t>{std::move(string)}, isDynamic);
     }
 
     RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(unsigned FieldWidth, std::vector<pattern_t> string, const bool isDynamic = true) {
-        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::move(string), isDynamic);
+        RETURN_REPSTREAMSET(FieldWidth, std::move(string), isDynamic);
     }
 
     template<unsigned FieldWidth, unsigned NumOfElements>
     RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
-        return mDriver.CreateUnalignedRepeatingStreamSet(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
+        RETURN_REPSTREAMSET(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
     }
+
+    #undef RETURN_REPSTREAMSET
 
     TruncatedStreamSet * CreateTruncatedStreamSet(const StreamSet * data) {
         return mDriver.CreateTruncatedStreamSet(data);
@@ -102,11 +115,19 @@ public:
         assert ("FunctionTypeBuilder did not resolve a function type." && type);
         assert ("Function was not provided the correct number of args" && type->getNumParams() == args.size());
         // Since the pipeline kernel module has not been made yet, just record the function info and its arguments.
-        mCallBindings.emplace_back(std::move(name), type, reinterpret_cast<void *>(&functionPtr), std::move(args));
+        mTarget->mCallBindings.emplace_back(std::move(name), type, reinterpret_cast<void *>(&functionPtr), std::move(args));
+    }
+
+    StreamSet * getInputStreamSet(const unsigned i) {
+        return static_cast<StreamSet *>(mTarget->mInputStreamSets[i].getRelationship());
+    }
+
+    StreamSet * getOutputStreamSet(const unsigned i) {
+        return static_cast<StreamSet *>(mTarget->mOutputStreamSets[i].getRelationship());
     }
 
     Scalar * getInputScalar(const unsigned i) {
-        return llvm::cast<Scalar>(mInputScalars[i].getRelationship());
+        return static_cast<Scalar *>(mTarget->mInputScalars[i].getRelationship());
     }
 
     Scalar * getInputScalar(const llvm::StringRef name);
@@ -114,7 +135,7 @@ public:
     void setInputScalar(const llvm::StringRef name, Scalar * value);
 
     Scalar * getOutputScalar(const unsigned i) {
-        return llvm::cast<Scalar>(mOutputScalars[i].getRelationship());
+        return static_cast<Scalar *>(mTarget->mOutputScalars[i].getRelationship());
     }
 
     Scalar * getOutputScalar(const llvm::StringRef name);
@@ -122,19 +143,8 @@ public:
     void setOutputScalar(const llvm::StringRef name, Scalar * value);
 
     void AssertEqualLength(const StreamSet * A, const StreamSet * B) {
-        mLengthAssertions.emplace_back(LengthAssertion{{A, B}});
+        mTarget->mLengthAssertions.emplace_back(LengthAssertion{{A, B}});
     }
-
-    PipelineBuilder(BaseDriver & driver,
-                    Bindings && stream_inputs, Bindings && stream_outputs,
-                    Bindings && scalar_inputs, Bindings && scalar_outputs,
-                    const unsigned numOfThreads);
-
-    PipelineBuilder(BaseDriver & driver,
-                    llvm::StringRef pipelineName,
-                    Bindings && stream_inputs, Bindings && stream_outputs,
-                    Bindings && scalar_inputs, Bindings && scalar_outputs,
-                    const unsigned numOfThreads);
 
     virtual ~PipelineBuilder() {}
 
@@ -145,18 +155,12 @@ public:
     }
 
     void setUniqueName(std::string name) {
-        mUniqueName.swap(name);
+        mTarget->mSignature.swap(name);
     }
 
 protected:
 
-
-    // Internal pipeline constructor uses a zero-length tag struct to prevent
-    // overloading errors. This parameter will be dropped by the compiler.
-    struct Internal {};
-    PipelineBuilder(Internal, BaseDriver & driver,
-                    Bindings stream_inputs, Bindings stream_outputs,
-                    Bindings scalar_inputs, Bindings scalar_outputs);
+    PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel);
 
     Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
@@ -164,37 +168,23 @@ protected:
 
 protected:
 
-    BaseDriver &        mDriver;
+    BaseDriver &            mDriver;
     // eventual pipeline configuration
-    unsigned            mNumOfThreads;
-    bool                mExternallySynchronized = false;
-    Bindings            mInputStreamSets;
-    Bindings            mOutputStreamSets;
-    Bindings            mInputScalars;
-    Bindings            mOutputScalars;
-    Bindings            mInternalScalars;
-    Kernels             mKernels;
-    CallBindings        mCallBindings;
-    LengthAssertions    mLengthAssertions;
-    std::string         mUniqueName;
+    PipelineKernel * const  mTarget;
+
+    bool                    mExternallySynchronized = false;
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramBuilder
  ** ------------------------------------------------------------------------------------------------------------- */
-class ProgramBuilder : public PipelineBuilder {
-    friend class PipelineBuilder;
+class ProgramBuilder final : public PipelineBuilder {
+    friend class ::BaseDriver;
 public:
 
     void * compile();
 
-    void setNumOfThreads(const unsigned threads) {
-        mNumOfThreads = threads;
-    }
-
-    ProgramBuilder(BaseDriver & driver,
-                   Bindings && stream_inputs, Bindings && stream_outputs,
-                   Bindings && scalar_inputs, Bindings && scalar_outputs);
+    ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel);
 
 private:
 
@@ -222,8 +212,9 @@ public:
 protected:
 
     OptimizationBranchBuilder(BaseDriver & driver, Relationship * const condition,
-                              Bindings && stream_inputs, Bindings && stream_outputs,
-                              Bindings && scalar_inputs, Bindings && scalar_outputs);
+                              PipelineKernel * const allZero,
+                              PipelineKernel * const nonZero,
+                              PipelineKernel * const branch);
 
     Kernel * makeKernel() override;
 
@@ -232,17 +223,6 @@ private:
     std::unique_ptr<PipelineBuilder> mNonZeroBranch;
     std::unique_ptr<PipelineBuilder> mAllZeroBranch;
 };
-
-inline std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimizationBranch (
-        Relationship * const condition,
-        Bindings && stream_inputs, Bindings && stream_outputs,
-        Bindings && scalar_inputs, Bindings && scalar_outputs) {
-    std::shared_ptr<OptimizationBranchBuilder> branch(
-        new OptimizationBranchBuilder(mDriver, condition,
-            std::move(stream_inputs), std::move(stream_outputs),
-            std::move(scalar_inputs), std::move(scalar_outputs)));
-    return branch;
-}
 
 }
 

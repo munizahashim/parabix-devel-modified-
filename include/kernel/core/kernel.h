@@ -48,6 +48,8 @@ public:
 
     using KernelCompilerRef = const std::unique_ptr<KernelCompiler> &;
 
+    using Relationships = std::vector<const Relationship *>;
+
     enum class TypeId {
         SegmentOriented
         , MultiBlock
@@ -64,6 +66,8 @@ public:
     using InitArgTypes = llvm::SmallVector<llvm::Type *, 32>;
 
     struct ParamMap {
+
+        using PairEntry = std::pair<llvm::Value *, llvm::Value *>;
 
         inline llvm::Value * get(const Relationship * inputScalar) const {
             if (LLVM_UNLIKELY(llvm::isa<CommandLineScalar>(inputScalar))) {
@@ -88,8 +92,23 @@ public:
             }
         }
 
+        inline bool get(const Relationship * inputScalar, PairEntry & pe) const {
+            const auto f = mRelationshipPairMap.find(inputScalar);
+            if (LLVM_UNLIKELY(f == mRelationshipPairMap.end())) {
+                return false;
+            }
+            pe = f->second;
+            return true;
+        }
+
+        inline void set(const Relationship * inputScalar, PairEntry value) {
+            const auto f = mRelationshipPairMap.insert(std::pair<const Relationship *, PairEntry>(inputScalar, value));
+            assert ("relationship is already mapped to that value" && f.second);
+        }
+
     private:
         llvm::DenseMap<const Relationship *, llvm::Value *> mRelationshipMap;
+        llvm::DenseMap<const Relationship *, PairEntry> mRelationshipPairMap;
         std::array<llvm::Value *, (unsigned)CommandLineScalarType::CommandLineScalarCount> mCommandLineMap{};
     };
 
@@ -225,10 +244,6 @@ public:
     }
 
     LLVM_READNONE virtual bool containsKernelFamilyCalls() const {
-        return false;
-    }
-
-    LLVM_READNONE virtual bool generatesDynamicRepeatingStreamSets() const {
         return false;
     }
 
@@ -455,6 +470,20 @@ protected:
 
     virtual void runOptimizationPasses(BuilderRef b) const;
 
+protected:
+
+    virtual bool hasInternallyGeneratedStreamSets() const { return false; }
+
+    virtual const Relationships & getInternallyGeneratedStreamSets() const {
+        llvm_unreachable("not supported");
+    }
+
+    using MetadataScaleVector = llvm::SmallVector<size_t, 8>;
+
+    virtual void writeInternallyGeneratedStreamSetScaleVector(const Relationships & R, MetadataScaleVector & V, const size_t scale) const {
+        llvm_unreachable("not supported");
+    }
+
 public:
 
     virtual llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const;
@@ -520,6 +549,14 @@ protected:
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
+    // Constructor used by pipeline
+    Kernel(BuilderRef b,
+           const TypeId typeId,
+           Bindings &&stream_inputs, Bindings &&stream_outputs,
+           Bindings &&scalar_inputs, Bindings &&scalar_outputs);
+
+    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
+
 protected:
 
     const TypeId                mTypeId;
@@ -534,7 +571,7 @@ protected:
     Bindings                    mInputScalars;
     Bindings                    mOutputScalars;
     InternalScalars             mInternalScalars;
-    const std::string           mKernelName;
+    std::string                 mKernelName;
     LinkedFunctions             mLinkedFunctions;
 };
 

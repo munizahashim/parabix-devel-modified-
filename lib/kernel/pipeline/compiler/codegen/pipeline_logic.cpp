@@ -7,10 +7,7 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) {
     bindFamilyInitializationArguments(b, arg, arg_end);
-    const PipelineKernel * const pk = cast<PipelineKernel>(mTarget);
-    if (LLVM_UNLIKELY(pk->generatesDynamicRepeatingStreamSets())) {
-        bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
-    }
+    bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
     assert (arg == arg_end);
 }
 
@@ -90,20 +87,6 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     addPAPIEventCounterPipelineProperties(b);
     #endif
 }
-
-//#ifdef ENABLE_PAPI
-//bindPAPIInitializationArguments(b, arg, arg_end);
-//#endif
-//if (LLVM_LIKELY(!mIsNestedPipeline)) {
-//    if (codegen::EnableDynamicMultithreading) {
-//        b->setScalarField(MINIMUM_NUM_OF_THREADS, arg++);
-//        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
-//        b->setScalarField(SEGMENTS_PER_CHECK, arg++);
-//        b->setScalarField(ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, arg++);
-//    } else {
-//        b->setScalarField(MAXIMUM_NUM_OF_THREADS, arg++);
-//    }
-//}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
@@ -296,10 +279,12 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
                 const auto scalar = source(e, mScalarGraph);
                 args.push_back(getScalar(b, scalar));
             }
-            for (auto i = 0U; i != args.size(); ++i) {
-                assert (isFromCurrentFunction(b, args[i], false));
+            addRepeatingStreamSetInitializationArguments(i, args);
+            #ifndef NDEBUG
+            for (unsigned j = 0; j != args.size(); ++j) {
+                assert (isFromCurrentFunction(b, args[j], false));
             }
-
+            #endif
             Value * const signal = callKernelInitializeFunction(b, args);
             Value * const terminatedOnInit = b->CreateICmpNE(signal, unterminated);
 
