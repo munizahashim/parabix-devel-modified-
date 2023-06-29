@@ -76,7 +76,7 @@ public:
                             return tmp;
                          }()
                          // contains kernel family calls
-                         , true
+                         , patterns.size() + (outerKernel ? 1U : 0U)
                          // make kernel list
                          , [&]() -> Kernels {
                              Kernels kernels;

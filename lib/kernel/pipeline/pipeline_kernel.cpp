@@ -219,38 +219,42 @@ void PipelineKernel::addAdditionalFunctions(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief containsKernelFamilies
  ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineKernel::containsKernelFamilyCalls() const {
-    return mContainsKernelFamilies;
+unsigned PipelineKernel::getNumOfNestedKernelFamilyCalls() const {
+    return mNumOfKernelFamilyCalls;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const {
-    unsigned n = 0;
+    const auto n = getNumOfNestedKernelFamilyCalls();
+    #ifndef NDEBUG
+    unsigned m = 0;
     for (const auto & k : mKernels) {
-        const Kernel * const kernel = k.Object;
-        const bool isFamilyCall = ((k.Flags & PipelineKernel::KernelBindingFlag::Family) != 0);
-        if (isFamilyCall || kernel->containsKernelFamilyCalls()) {
-            if (LLVM_LIKELY(kernel->isStateful())) {
-                n += 1;
-            }
-            const auto ai = kernel->allocatesInternalStreamSets();
-            const auto k1 = ai ? 3U : 2U;
-            const auto tl = kernel->hasThreadLocal();
-            const auto k2 = tl ? (k1 * 2U) : k1;
-            n += k2;
-        }
+//        const Kernel * const kernel = k.Object;
+
+        // If this is a kernel family call, the "main" will pass in the required pointers.
+        // However, a non-family call could still refer to a kernel that has nested family
+        // calls of its own. During initialization, we pass in the pointers that that
+
+        m += k.isFamilyCall() ? 1U : k.Object->getNumOfNestedKernelFamilyCalls();
     }
+    if (m != n) {
+
+        errs() << getSignature() << "  m=" << m << ", n=" << n << "\n";
+    }
+
+    assert ("reported number of nested kernels does not match actual?" && (m == n));
+    #endif
     PointerType * const voidPtrTy = b->getVoidPtrTy();
     if (LLVM_LIKELY(n > 0)) {
-        argTypes.append(n, voidPtrTy);
+        argTypes.append(n * 7U, voidPtrTy);
     }
     IntegerType * const sizeTy = b->getSizeTy();
     if (LLVM_UNLIKELY(hasInternallyGeneratedStreamSets())) {
-        const auto n = getInternallyGeneratedStreamSets().size();
-        argTypes.reserve(n * 2);
-        for (unsigned i = 0; i < n; ++i) {
+        const auto m = getInternallyGeneratedStreamSets().size();
+        argTypes.reserve(m * 2);
+        for (unsigned i = 0; i < m; ++i) {
             argTypes.push_back(voidPtrTy);
             argTypes.push_back(sizeTy);
         }
@@ -263,9 +267,10 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
 void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
     for (const auto & k : mKernels) {
         const Kernel * const kernel = k.Object;
-        const auto isFamilyCall = ((k.Flags & PipelineKernel::KernelBindingFlag::Family) != 0);
-        if (LLVM_UNLIKELY(isFamilyCall || kernel->containsKernelFamilyCalls())) {
+        if (LLVM_UNLIKELY(k.isFamilyCall())) {
             kernel->constructFamilyKernels(b, args, params, toFree);
+        } else if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls() > 0)) {
+            kernel->recursivelyConstructFamilyKernels(b, args, params, toFree);
         }
     }
 }
@@ -926,7 +931,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
  ** ------------------------------------------------------------------------------------------------------------- */
 PipelineKernel::PipelineKernel(BuilderRef b,
                                std::string && signature,
-                               const bool containsKernelFamilyCalls,
+                               const unsigned numOfKernelFamilyCalls,
                                Kernels && kernels, CallBindings && callBindings,
                                Bindings && stream_inputs, Bindings && stream_outputs,
                                Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -934,8 +939,8 @@ PipelineKernel::PipelineKernel(BuilderRef b,
                                LengthAssertions && lengthAssertions)
 : PipelineKernel(Internal{}
 , b
-, std::move(annotateSignatureWithPipelineFlags(std::move(signature)))
-, containsKernelFamilyCalls
+, annotateSignatureWithPipelineFlags(std::move(signature))
+, numOfKernelFamilyCalls
 , std::move(kernels)
 , std::move(callBindings)
 , std::move(stream_inputs)
@@ -951,7 +956,7 @@ PipelineKernel::PipelineKernel(BuilderRef b,
 
 PipelineKernel::PipelineKernel(Internal, BuilderRef b,
                std::string && signature,
-               const bool containsKernelFamilyCalls,
+               const unsigned numOfKernelFamilyCalls,
                Kernels && kernels, CallBindings && callBindings,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -962,7 +967,7 @@ PipelineKernel::PipelineKernel(Internal, BuilderRef b,
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs),
          {} /* Internal scalars are generated by the PipelineCompiler */)
-, mContainsKernelFamilies(containsKernelFamilyCalls)
+, mNumOfKernelFamilyCalls(numOfKernelFamilyCalls)
 , mSignature(std::move(signature))
 , mInternallyGeneratedStreamSets(std::move(internallyGenerated))
 , mKernels(std::move(kernels))

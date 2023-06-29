@@ -32,7 +32,6 @@ using AttrId = Attribute::KindId;
 using Rational = ProcessingRate::Rational;
 using RateId = ProcessingRate::KindId;
 using StreamSetPort = Kernel::StreamSetPort;
-using KernelCompilerRef = Kernel::KernelCompilerRef;
 using PortType = Kernel::PortType;
 
 const static auto INITIALIZE_SUFFIX = "_Initialize";
@@ -481,6 +480,7 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         for (const Binding & binding : mInputScalars) {
             params.push_back(binding.getType());
         }
+        assert (isGenerated());
         addAdditionalInitializationArgTypes(b, params);
         FunctionType * const initType = FunctionType::get(b->getSizeTy(), params, false);
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
@@ -1091,14 +1091,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
 
     // TODO: need to test for termination on init call
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
-    auto addHostArg = [&](Value * ptr) {
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-            b->CreateAssert(ptr, "constructFamilyKernels cannot pass a null value to pipeline");
-        }
-        hostArgs.push_back(b->CreatePointerCast(ptr, voidPtrTy));
-    };
-
     Value * handle = nullptr;
     BEGIN_SCOPED_REGION
     InitArgs initArgs;
@@ -1106,7 +1098,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         handle = createInstance(b);
         initArgs.push_back(handle);
         toFree.push_back(handle);
-        addHostArg(handle);
     }
     for (const Binding & input : mInputScalars) {
         const auto val = params.get(input.getRelationship());
@@ -1119,7 +1110,14 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         }
         initArgs.push_back(val);
     }
+
+    Function * const init = getInitializeFunction(b);
+
+    // If we're calling this with a family call, then the family kernels associated with it
+    // must be passed into the function itself.
+
     recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
+
     if (hasInternallyGeneratedStreamSets()) {
         for (const auto & rs : getInternallyGeneratedStreamSets()) {
             ParamMap::PairEntry entry;
@@ -1135,30 +1133,70 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
             initArgs.push_back(entry.second);
         }
     }
-//    supplyAdditionalInitializationArgTypes(b, initArgs, params, 1U);
-
-    Function * const init = getInitializeFunction(b);
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b->CreateCall(init->getFunctionType(), init, initArgs);
-
     END_SCOPED_REGION
 
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    Value * const voidPtr = ConstantPointerNull::get(voidPtrTy);
+
+    hostArgs.reserve(7);
+
+    auto addHostArg = [&](Value * ptr) {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            b->CreateAssert(ptr, "constructFamilyKernels cannot pass a null value to pipeline");
+        }
+
+//        b->CallPrintInt(" > " + getName() + ".arg" +
+//                        std::to_string(hostArgs.size()), ptr);
+
+        hostArgs.push_back(b->CreatePointerCast(ptr, voidPtrTy));
+    };
+
+    auto addHostVoidArg = [&]() {
+
+//        b->CallPrintInt(" > " + getName() + ".arg" +
+//                        std::to_string(hostArgs.size()), voidPtr);
+
+        hostArgs.push_back(voidPtr);
+    };
+
+    const auto k = hostArgs.size();
+
+    if (LLVM_LIKELY(isStateful())) {
+        addHostArg(handle);
+    } else {
+        hostArgs.push_back(voidPtr);
+    }
     const auto tl = hasThreadLocal();
     const auto ai = allocatesInternalStreamSets();
     if (ai) {
         addHostArg(getAllocateSharedInternalStreamSetsFunction(b));
+    } else {
+        addHostVoidArg();
     }
     if (tl) {
         addHostArg(getInitializeThreadLocalFunction(b));
         if (ai) {
             addHostArg(getAllocateThreadLocalInternalStreamSetsFunction(b));
+        } else {
+            addHostVoidArg();
         }
+    } else {
+        addHostVoidArg();
+        addHostVoidArg();
     }
     addHostArg(getDoSegmentFunction(b));
-    if (hasThreadLocal()) {
+    if (tl) {
         addHostArg(getFinalizeThreadLocalFunction(b));
+    } else {
+        addHostVoidArg();
     }
+
+    // TODO: queue these in a list of termination functions to add to main?
     addHostArg(getFinalizeFunction(b));
+
+    assert (hostArgs.size() == (k + 7));
 
     return handle;
 }

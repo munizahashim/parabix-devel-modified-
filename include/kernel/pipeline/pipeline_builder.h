@@ -42,12 +42,12 @@ public:
 
     template<typename KernelType, typename... Args>
     PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
     }
 
     template<typename KernelType, typename... Args>
     PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
-        return initializePipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -164,7 +164,7 @@ protected:
 
     Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
-    PipelineKernel * initializePipeline(PipelineKernel * const kernel, const unsigned flags);
+    PipelineKernel * initializeNestedPipeline(PipelineKernel * const kernel, const unsigned flags);
 
 protected:
 
@@ -183,6 +183,8 @@ class ProgramBuilder final : public PipelineBuilder {
 public:
 
     void * compile();
+
+    Kernel * makeKernel() override;
 
     ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel);
 

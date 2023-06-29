@@ -100,6 +100,8 @@ public:
         P.determineInitialThreadLocalBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
 
+        P.scanFamilyKernelBindings();
+
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
@@ -237,6 +239,11 @@ private:
 
     void makeInputTruncationGraph();
 
+    // Family analysis functions
+
+    void scanFamilyKernelBindings();
+
+    // Internally generated streamsets
 
     void mapInternallyGeneratedStreamSets();
 
@@ -306,6 +313,8 @@ public:
     TerminationPropagationGraph         mTerminationPropagationGraph;
     InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
     BitVector                           HasTerminationSignal;
+
+    FamilyScalarGraph               mFamilyScalarGraph;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;

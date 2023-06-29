@@ -495,8 +495,8 @@ public:
 // family functions
 
     void addFamilyKernelProperties(BuilderRef b, const unsigned kernelId, const unsigned groupId) const;
-
     void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    void addFamilyCallInitializationArguments(BuilderRef b, const unsigned kernelId, ArgVec & args) const;
 
 // thread local functions
 
@@ -654,7 +654,7 @@ protected:
     const TerminationPropagationGraph           mTerminationPropagationGraph;
     const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
-
+    const FamilyScalarGraph                     mFamilyScalarGraph;
 
 
     // pipeline state
@@ -980,6 +980,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mInternallyGeneratedStreamSetGraph(std::move(P.mInternallyGeneratedStreamSetGraph))
 
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
+
+, mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

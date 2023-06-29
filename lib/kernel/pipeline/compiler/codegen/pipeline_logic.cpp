@@ -279,6 +279,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
                 const auto scalar = source(e, mScalarGraph);
                 args.push_back(getScalar(b, scalar));
             }
+            addFamilyCallInitializationArguments(b, i, args);
             addRepeatingStreamSetInitializationArguments(i, args);
             #ifndef NDEBUG
             for (unsigned j = 0; j != args.size(); ++j) {

@@ -80,11 +80,8 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef 
         const auto n = S.size(); assert (n > 0);
         assert (out_degree(PipelineInput, mInternallyGeneratedStreamSetGraph) == n);
 
-
         InternallyGeneratedStreamSetGraph::out_edge_iterator ei, ei_end;
         std::tie(ei, ei_end) = out_edges(PipelineInput, mInternallyGeneratedStreamSetGraph);
-
-
 
         for (unsigned i = 0; i < n; ++i) {
 

@@ -46,8 +46,6 @@ public:
 
     using BuilderRef = const std::unique_ptr<KernelBuilder> &;
 
-    using KernelCompilerRef = const std::unique_ptr<KernelCompiler> &;
-
     using Relationships = std::vector<const Relationship *>;
 
     enum class TypeId {
@@ -243,8 +241,8 @@ public:
         return mKernelName;
     }
 
-    LLVM_READNONE virtual bool containsKernelFamilyCalls() const {
-        return false;
+    LLVM_READNONE virtual unsigned getNumOfNestedKernelFamilyCalls() const {
+        return 0;
     }
 
     LLVM_READNONE virtual std::string getFamilyName() const;

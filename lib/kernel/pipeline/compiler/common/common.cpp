@@ -230,7 +230,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
         }
     }
 
-    if (hasForbiddenAttribute || kernelObj->containsKernelFamilyCalls()) {
+    if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls()) {
         return false;
     }
 

@@ -46,6 +46,8 @@ public:
         , Scalar
         , CommandLineScalar
         , ScalarConstant
+        // -----------------
+        , __Count
     };
 
     ClassTypeId getClassTypeId() const noexcept {

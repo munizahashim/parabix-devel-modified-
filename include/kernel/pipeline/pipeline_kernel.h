@@ -90,7 +90,7 @@ public:
 
     bool isCachable() const override;
 
-    bool containsKernelFamilyCalls() const override;
+    unsigned getNumOfNestedKernelFamilyCalls() const override;
 
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
@@ -128,7 +128,7 @@ protected:
 
     PipelineKernel(BuilderRef b,
                    std::string && signature,
-                   const bool containsKernelFamilyCalls,
+                   const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -151,7 +151,7 @@ private:
 
     PipelineKernel(Internal, BuilderRef b,
                    std::string && signature,
-                   const bool containsKernelFamilyCalls,
+                   const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
@@ -207,7 +207,7 @@ protected:
 
 protected:
 
-    bool                                mContainsKernelFamilies;
+    unsigned                            mNumOfKernelFamilyCalls;
     std::string                         mSignature;
     Relationships                       mInternallyGeneratedStreamSets;
     Kernels                             mKernels;

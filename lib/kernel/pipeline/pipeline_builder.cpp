@@ -30,6 +30,9 @@ namespace kernel {
 
 using Scalars = PipelineKernel::Scalars;
 
+#define ADD_CL_SCALAR(Id,Type) \
+    mTarget->mInputScalars.emplace_back(Id, mDriver.CreateCommandLineScalar(CommandLineScalarType::Type))
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief compile()
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -74,17 +77,16 @@ Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializePipeline
+ * @brief initializeNestedPipeline
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk, const unsigned flags) {
+PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * const pk, const unsigned flags) {
     // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
     // this gives me a safe workaround for the problem.
-
     PipelineBuilder nested(mDriver, pk);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();
-    initializeKernel(pk, flags);
+    initializeKernel(nested.makeKernel(), flags);
     return pk;
 }
 
@@ -157,6 +159,24 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
+Kernel * ProgramBuilder::makeKernel() {
+
+    if (codegen::EnableDynamicMultithreading) {
+        ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
+        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingSynchronizationThreshold);
+    } else {
+        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+    }
+
+    return PipelineBuilder::makeKernel();
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * PipelineBuilder::makeKernel() {
 
     mDriver.generateUncachedKernels();
@@ -180,7 +200,7 @@ Kernel * PipelineBuilder::makeKernel() {
 
     auto & signature = mTarget->mSignature;
 
-    bool containsKernelFamilyCalls = false;
+    unsigned numOfNestedKernelFamilyCalls = 0;
 
     auto & internallyGeneratedStreamSets = mTarget->mInternallyGeneratedStreamSets;
 
@@ -193,6 +213,14 @@ Kernel * PipelineBuilder::makeKernel() {
         }
         internallyGeneratedStreamSets.push_back(r);
     };
+
+    #ifdef ENABLE_PAPI
+    const auto & S = codegen::PapiCounterOptions;
+    if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
+        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_CODE, PAPIEventSet);
+        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_LIST, PAPIEventList);
+    }
+    #endif
 
     if (LLVM_LIKELY(signature.empty())) {
 
@@ -225,21 +253,36 @@ Kernel * PipelineBuilder::makeKernel() {
             out << 'E';
         }
 
+//        const auto m = obj->getNumOfNestedKernelFamilyCalls();
+//        if (LLVM_UNLIKELY(m > 0)) {
+//            out << m;
+//        }
+//        if (obj->isStateful()) {
+//            out << 's';
+//        }
+//        if (obj->hasThreadLocal()) {
+//            out << 't';
+//        }
+//        if (obj->allocatesInternalStreamSets()) {
+//            out << 'a';
+//        }
+
+
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            out << "_K";
+            out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
             if (K.isFamilyCall()) {
-                out << obj->getFamilyName();
-                containsKernelFamilyCalls = true;
+                out << 'F' << obj->getFamilyName();
+                numOfNestedKernelFamilyCalls++;
             } else {
+                out << 'K';
+                const auto m = obj->getNumOfNestedKernelFamilyCalls();
+                numOfNestedKernelFamilyCalls += m;
                 if (obj->hasSignature()) {
                     out << obj->getSignature();
                 } else {
                     out << obj->getName();
-                }
-                if (obj->containsKernelFamilyCalls()) {
-                    containsKernelFamilyCalls = true;
                 }
             }
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
@@ -384,75 +427,75 @@ Kernel * PipelineBuilder::makeKernel() {
         const auto lastRelationship = num_vertices(G);
         int numInternallyGenerated = 0;
 
+        using TypeId = Relationship::ClassTypeId;
+
+        std::array<char, (unsigned)TypeId::__Count> typeCode;
+        typeCode[(unsigned)TypeId::StreamSet] = 'S';
+        typeCode[(unsigned)TypeId::RepeatingStreamSet] = 'R';
+        typeCode[(unsigned)TypeId::TruncatedStreamSet] = 'T';
+        typeCode[(unsigned)TypeId::Scalar] = 'v';
+        typeCode[(unsigned)TypeId::CommandLineScalar] = 'l';
+        typeCode[(unsigned)TypeId::ScalarConstant] = 'c';
+
         for (auto i = firstRelationship; i != lastRelationship; ++i) {
             const Relationship * const r = G[i]; assert (r);
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
-                const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
-                const auto numElements = rs->getNumElements();
-                const auto fieldWidth = rs->getNumElements();
-                out << 'R' << numElements << 'x' << fieldWidth;
-                if (rs->isUnaligned()) {
-                    out << 'U';
-                }
-                if (LLVM_LIKELY(rs->isDynamic())) {
-                    const auto j = addAndMapInternallyGenerated(r);
-                    add_edge(j, pipelineInput, --numInternallyGenerated, G);
-                } else {
-                    const auto width = fieldWidth / 4UL;
-                    SmallVector<char, 16> tmp(width + 1);
-                    for (unsigned i = 0;;) {
-                        assert (i < numElements);
-                        const auto & vec = rs->getPattern(i);
-                        out << ':';
-                        // write to hex code
-                        for (auto v : vec) {
-                            unsigned j = 0;
-                            while (v) {
-                                const auto c = (v & 15);
-                                v >>= 4;
-                                if (c < 10) {
-                                    tmp[j] = '0' + c;
-                                } else {
-                                    tmp[j] = 'A' + (c - 10U);
+
+            assert ((unsigned)r->getClassTypeId() < (unsigned)TypeId::__Count);
+
+            out << typeCode[(unsigned)r->getClassTypeId()];
+
+            if (r->isStreamSet()) {
+                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
+                    const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
+                    if (rs->isUnaligned()) {
+                        out << 'U';
+                    }
+                    if (LLVM_LIKELY(rs->isDynamic())) {
+                        const auto j = addAndMapInternallyGenerated(r);
+                        add_edge(j, pipelineInput, --numInternallyGenerated, G);
+                    } else {
+                        const auto numElements = rs->getNumElements();
+                        const auto fieldWidth = rs->getFieldWidth();
+                        const auto width = fieldWidth / 4UL;
+                        SmallVector<char, 16> tmp(width + 1);
+                        for (unsigned i = 0;;) {
+                            assert (i < numElements);
+                            const auto & vec = rs->getPattern(i);
+                            out << ':';
+                            // write to hex code
+                            for (auto v : vec) {
+                                unsigned j = 0;
+                                while (v) {
+                                    const auto c = (v & 15);
+                                    v >>= 4;
+                                    if (c < 10) {
+                                        tmp[j] = '0' + c;
+                                    } else {
+                                        tmp[j] = 'A' + (c - 10U);
+                                    }
+                                    ++j;
                                 }
-                                ++j;
+                                for (auto k = j; k < width; ++k) {
+                                    out << '0';
+                                }
+                                while (j) {
+                                    out << tmp[--j];
+                                }
                             }
-                            for (auto k = j; k < width; ++k) {
-                                out << '0';
+                            if ((++i) == numElements) {
+                                break;
                             }
-                            while (j) {
-                                out << tmp[--j];
-                            }
-                        }
-                        if ((++i) == numElements) {
-                            break;
                         }
                     }
+                } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                    auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
+                    if (LLVM_UNLIKELY(f == M.end())) {
+                        report_fatal_error("Truncated streamset data has no producer");
+                    }
+                    out << '.' << f->second;
                 }
-            } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
-                auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
-                if (LLVM_UNLIKELY(f == M.end())) {
-                    report_fatal_error("Truncated streamset data has no producer");
-                }
-                out << 'T' << f->second;
-            } else {
-                char typeCode;
-                switch (r->getClassTypeId()) {
-                    case TypeId::StreamSet:
-                        typeCode = 'S';
-                        break;
-                    case TypeId::ScalarConstant:
-                        typeCode = 'C';
-                        break;
-                    case TypeId::CommandLineScalar:
-                        typeCode = 'L';
-                        break;
-                    case TypeId::Scalar:
-                        typeCode = 'V';
-                        break;
-                    default: llvm_unreachable("unknown relationship type");
-                }
-                out << typeCode;
+
+                out << ':';
             }
 
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
@@ -475,8 +518,10 @@ Kernel * PipelineBuilder::makeKernel() {
             const auto & K = kernels[i];
             Kernel * const obj = K.Object;
             obj->ensureLoaded();
-            if (K.isFamilyCall() || obj->containsKernelFamilyCalls()) {
-                containsKernelFamilyCalls = true;
+            if (K.isFamilyCall()) {
+                numOfNestedKernelFamilyCalls++;
+            } else {
+                numOfNestedKernelFamilyCalls += obj->getNumOfNestedKernelFamilyCalls();
             }
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
                 for (const auto r : obj->getInternallyGeneratedStreamSets()) {
@@ -486,7 +531,7 @@ Kernel * PipelineBuilder::makeKernel() {
         }
     }
 
-    mTarget->mContainsKernelFamilies = containsKernelFamilyCalls;
+    mTarget->mNumOfKernelFamilyCalls = numOfNestedKernelFamilyCalls;
 
     if (mExternallySynchronized) {
         mTarget->addAttribute(InternallySynchronized());
@@ -497,6 +542,8 @@ Kernel * PipelineBuilder::makeKernel() {
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
     mTarget->mKernelName = PipelineKernel::makePipelineHashName(signature);
+
+  //  errs() << mTarget->mKernelName << " -> " << signature << "\n\n";
 
     return mTarget;
 }
@@ -646,27 +693,6 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
 
 ProgramBuilder::ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel)
 : PipelineBuilder(driver, kernel) {
-
-    #define ADD_CL_SCALAR(Id,Type) \
-        mTarget->mInputScalars.emplace_back(Id, driver.CreateCommandLineScalar(CommandLineScalarType::Type))
-
-    if (codegen::EnableDynamicMultithreading) {
-        ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
-        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingSynchronizationThreshold);
-    } else {
-        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
-    }
-
-    #ifdef ENABLE_PAPI
-    const auto & S = codegen::PapiCounterOptions;
-    if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
-        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_CODE, PAPIEventSet);
-        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_LIST, PAPIEventList);
-    }
-    #endif
-
 
 }
 
