@@ -72,6 +72,17 @@ inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
     return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
 
+void MergeByMask(PipelineBuilder & P,
+                  StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
+inline void MergeByMask(const std::unique_ptr<PipelineBuilder> & P,
+                         StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged){
+    return MergeByMask(*P.get(), mask, a, b, merged);
+}
+inline void MergeByMask(const std::unique_ptr<ProgramBuilder> & P,
+                         StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged){
+    return MergeByMask(*P.get(), mask, a, b, merged);
+}
+
 /*  Create a spread mask for inserting a single item into a stream for each position
     in the given insertion mask that is nonzero.   The insertion mask may be
     a bixnum; in this case the spread mask will have a single insert position
@@ -155,6 +166,24 @@ private:
     const StreamExpandOptimization mOptimization;
 };
 
+/**********************************/
+class StreamMergeKernel final : public MultiBlockKernel {
+public:
+    StreamMergeKernel(BuilderRef b,
+                       StreamSet * mask,
+                       StreamSet * source1,
+                       StreamSet * source2,
+                       StreamSet * merged,
+                       Scalar * base,
+                       const unsigned FieldWidth = sizeof(size_t) * 8);
+protected:
+    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
+private:
+    const unsigned mFieldWidth;
+    const unsigned mSelectedStreamCount;
+};
+
+/*******************************************************/
 class FieldDepositKernel final : public MultiBlockKernel {
 public:
     FieldDepositKernel(BuilderRef, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
@@ -165,9 +194,10 @@ private:
     const unsigned mStreamCount;
 };
 
+
 class PDEPFieldDepositKernel final : public MultiBlockKernel {
 public:
-    PDEPFieldDepositKernel(BuilderRef, StreamSet * mask, StreamSet * expanded, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
+    PDEPFieldDepositKernel(BuilderRef, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
 private:

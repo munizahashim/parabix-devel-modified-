@@ -90,6 +90,19 @@ PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * cons
     return pk;
 }
 
+StreamSet * PipelineBuilder::CreateRepeatingBixNum(unsigned bixNumBits, pattern_t nums, bool isDynamic) {
+    std::vector<std::vector<uint64_t>> templatePattern;
+    templatePattern.resize(bixNumBits);
+    for (unsigned i = 0; i < bixNumBits; i++) {
+        templatePattern[i].resize(nums.size());
+    }
+    for (unsigned j = 0; j < nums.size(); j++) {
+        for (unsigned i = 0; i < bixNumBits; i++) {
+            templatePattern[i][j] = static_cast<uint64_t>((nums[j] >> i) & 1U);
+        }
+    }
+    return CreateRepeatingStreamSet(1, templatePattern, isDynamic);
+}
 
 using Kernels = PipelineBuilder::Kernels;
 

@@ -78,6 +78,8 @@ public:
         RETURN_REPSTREAMSET(FieldWidth, std::move(string), isDynamic);
     }
 
+    StreamSet * CreateRepeatingBixNum(unsigned bixNumBits, pattern_t nums, const bool isDynamic = true);
+
     template<unsigned FieldWidth, unsigned NumOfElements>
     RepeatingStreamSet * CreateRepeatingStreamSet(std::array<pattern_t, NumOfElements> & string) {
         RETURN_REPSTREAMSET(FieldWidth, std::vector<pattern_t>{string.begin(), string.end()}, true);
