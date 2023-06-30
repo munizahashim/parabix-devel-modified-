@@ -231,19 +231,11 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
     #ifndef NDEBUG
     unsigned m = 0;
     for (const auto & k : mKernels) {
-//        const Kernel * const kernel = k.Object;
-
         // If this is a kernel family call, the "main" will pass in the required pointers.
         // However, a non-family call could still refer to a kernel that has nested family
         // calls of its own. During initialization, we pass in the pointers that that
-
         m += k.isFamilyCall() ? 1U : k.Object->getNumOfNestedKernelFamilyCalls();
     }
-    if (m != n) {
-
-        errs() << getSignature() << "  m=" << m << ", n=" << n << "\n";
-    }
-
     assert ("reported number of nested kernels does not match actual?" && (m == n));
     #endif
     PointerType * const voidPtrTy = b->getVoidPtrTy();
@@ -273,54 +265,6 @@ void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & 
             kernel->recursivelyConstructFamilyKernels(b, args, params, toFree);
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief supplyAdditionalInitializationArgTypes
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
-//    if (LLVM_UNLIKELY(hasInternallyGeneratedStreamSets())) {
-
-//        Module * const M = getModule();
-//        NamedMDNode * const msl = M->getNamedMetadata("rsl");
-//        assert (msl);
-//        assert (msl->getNumOperands() > 0);
-//        assert (msl->getOperand(0)->getNumOperands() > 0);
-//        ConstantAsMetadata * const c = cast<ConstantAsMetadata>(msl->getOperand(0)->getOperand(0));
-//        Constant * ar = c->getValue();
-//        const auto m = mKernels.size();
-
-//        auto getJthOffset = [&](unsigned j) {
-//            FixedArray<unsigned, 1> off;
-//            off[0] = j;
-//            const ConstantInt * const v = cast<ConstantInt>(ConstantExpr::getExtractValue(ar, off));
-//            return (v->getLimitedValue() * scale);
-//        };
-
-//        flat_set<const RepeatingStreamSet *> observed;
-
-//        for (unsigned i = 0, j = 0; i != m; ++i) {
-//            const Kernel * const kernel = mKernels[i].Object;
-//            if (LLVM_UNLIKELY(kernel->hasInternallyGeneratedStreamSets())) {
-//                kernel->supplyAdditionalInitializationArgTypes(b, args, params, getJthOffset(j++));
-//            }
-//            const auto n = kernel->getNumOfStreamInputs();
-//            PointerType * const voidPtrTy = b->getVoidPtrTy();
-//            for (unsigned i = 0; i != n; ++i) {
-//                const StreamSet * const input = kernel->getInputStreamSet(i);
-//                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
-//                    const RepeatingStreamSet * const streamSet = cast<RepeatingStreamSet>(input);
-//                    if (streamSet->isDynamic() && observed.insert(streamSet).second) {
-//                        const auto k = getJthOffset(j++);
-//                        auto info = createRepeatingStreamSet(b, streamSet, k);
-//                        params.set(streamSet, info.first);
-//                        args.push_back(b->CreatePointerCast(info.first, voidPtrTy));
-//                        args.push_back(info.RunLength);
-//                    }
-//                }
-//            }
-//        }
-//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

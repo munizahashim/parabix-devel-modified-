@@ -472,7 +472,6 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
     Module * const m = b->getModule();
     Function * initFunc = m->getFunction(funcName);
     if (LLVM_LIKELY(initFunc == nullptr)) {
-
         InitArgTypes params;
         if (LLVM_LIKELY(isStateful())) {
             params.push_back(getSharedStateType()->getPointerTo());
@@ -480,7 +479,6 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         for (const Binding & binding : mInputScalars) {
             params.push_back(binding.getType());
         }
-        assert (isGenerated());
         addAdditionalInitializationArgTypes(b, params);
         FunctionType * const initType = FunctionType::get(b->getSizeTy(), params, false);
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
@@ -1205,13 +1203,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief supplyAdditionalInitializationArgTypes
- ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
 
 }
 

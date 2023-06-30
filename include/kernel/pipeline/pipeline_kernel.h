@@ -90,8 +90,6 @@ public:
 
     bool isCachable() const override;
 
-    unsigned getNumOfNestedKernelFamilyCalls() const override;
-
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
     void setOutputStreamSetAt(const unsigned i, StreamSet * const value) final;
@@ -145,6 +143,8 @@ protected:
 
     static std::string makePipelineHashName(const std::string & signature);
 
+    unsigned getNumOfNestedKernelFamilyCalls() const override;
+
 private:
 
     struct Internal {};
@@ -164,8 +164,6 @@ private:
     void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
 
     void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
-
-    void supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const final;
 
     void linkExternalMethods(BuilderRef b) final;
 

@@ -241,10 +241,6 @@ public:
         return mKernelName;
     }
 
-    LLVM_READNONE virtual unsigned getNumOfNestedKernelFamilyCalls() const {
-        return 0;
-    }
-
     LLVM_READNONE virtual std::string getFamilyName() const;
 
     virtual bool isCachable() const { return true; }
@@ -422,14 +418,10 @@ public:
 
     virtual std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const;
 
-    virtual ~Kernel() ;
+    virtual ~Kernel();
 
-    void enablePipelineDebugMessages(const bool value = true) {
-        mEnablePipelineDebugMessages = value;
-    }
-
-    bool hasEnabledPipelineDebugMessages() const {
-        return mEnablePipelineDebugMessages;
+    LLVM_READNONE virtual unsigned getNumOfNestedKernelFamilyCalls() const {
+        return 0;
     }
 
 protected:
@@ -493,8 +485,6 @@ protected:
     virtual void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
 
     virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
-
-    virtual void supplyAdditionalInitializationArgTypes(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const;
 
 protected:
 
@@ -563,7 +553,6 @@ protected:
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
     bool                        mGenerated = false;
-    bool                        mEnablePipelineDebugMessages = false;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;

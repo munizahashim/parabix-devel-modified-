@@ -252,22 +252,6 @@ Kernel * PipelineBuilder::makeKernel() {
         if (mExternallySynchronized) {
             out << 'E';
         }
-
-//        const auto m = obj->getNumOfNestedKernelFamilyCalls();
-//        if (LLVM_UNLIKELY(m > 0)) {
-//            out << m;
-//        }
-//        if (obj->isStateful()) {
-//            out << 's';
-//        }
-//        if (obj->hasThreadLocal()) {
-//            out << 't';
-//        }
-//        if (obj->allocatesInternalStreamSets()) {
-//            out << 'a';
-//        }
-
-
         for (unsigned i = 0; i < numOfKernels; ++i) {
             out << '_';
             const auto & K = kernels[i];
@@ -444,58 +428,55 @@ Kernel * PipelineBuilder::makeKernel() {
 
             out << typeCode[(unsigned)r->getClassTypeId()];
 
-            if (r->isStreamSet()) {
-                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
-                    const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
-                    if (rs->isUnaligned()) {
-                        out << 'U';
-                    }
-                    if (LLVM_LIKELY(rs->isDynamic())) {
-                        const auto j = addAndMapInternallyGenerated(r);
-                        add_edge(j, pipelineInput, --numInternallyGenerated, G);
-                    } else {
-                        const auto numElements = rs->getNumElements();
-                        const auto fieldWidth = rs->getFieldWidth();
-                        const auto width = fieldWidth / 4UL;
-                        SmallVector<char, 16> tmp(width + 1);
-                        for (unsigned i = 0;;) {
-                            assert (i < numElements);
-                            const auto & vec = rs->getPattern(i);
-                            out << ':';
-                            // write to hex code
-                            for (auto v : vec) {
-                                unsigned j = 0;
-                                while (v) {
-                                    const auto c = (v & 15);
-                                    v >>= 4;
-                                    if (c < 10) {
-                                        tmp[j] = '0' + c;
-                                    } else {
-                                        tmp[j] = 'A' + (c - 10U);
-                                    }
-                                    ++j;
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
+                const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
+                if (rs->isUnaligned()) {
+                    out << 'U';
+                }
+                if (LLVM_LIKELY(rs->isDynamic())) {
+                    const auto j = addAndMapInternallyGenerated(r);
+                    add_edge(j, pipelineInput, --numInternallyGenerated, G);
+                } else {
+                    const auto numElements = rs->getNumElements();
+                    const auto fieldWidth = rs->getFieldWidth();
+                    const auto width = fieldWidth / 4UL;
+                    SmallVector<char, 16> tmp(width + 1);
+                    for (unsigned i = 0;;) {
+                        assert (i < numElements);
+                        const auto & vec = rs->getPattern(i);
+                        out << ':';
+                        // write to hex code
+                        for (auto v : vec) {
+                            unsigned j = 0;
+                            while (v) {
+                                const auto c = (v & 15);
+                                v >>= 4;
+                                if (c < 10) {
+                                    tmp[j] = '0' + c;
+                                } else {
+                                    tmp[j] = 'A' + (c - 10U);
                                 }
-                                for (auto k = j; k < width; ++k) {
-                                    out << '0';
-                                }
-                                while (j) {
-                                    out << tmp[--j];
-                                }
+                                ++j;
                             }
-                            if ((++i) == numElements) {
-                                break;
+                            for (auto k = j; k < width; ++k) {
+                                out << '0';
+                            }
+                            while (j) {
+                                out << tmp[--j];
                             }
                         }
+                        if ((++i) == numElements) {
+                            break;
+                        }
                     }
-                } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
-                    auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
-                    if (LLVM_UNLIKELY(f == M.end())) {
-                        report_fatal_error("Truncated streamset data has no producer");
-                    }
-                    out << '.' << f->second;
                 }
-
                 out << ':';
+            } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
+                if (LLVM_UNLIKELY(f == M.end())) {
+                    report_fatal_error("Truncated streamset data has no producer");
+                }
+                out << f->second << ':';
             }
 
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
