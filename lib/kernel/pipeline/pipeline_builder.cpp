@@ -83,6 +83,7 @@ PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * cons
     // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
     // this gives me a safe workaround for the problem.
     PipelineBuilder nested(mDriver, pk);
+    nested.setExternallySynchronized(true);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();

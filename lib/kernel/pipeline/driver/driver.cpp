@@ -98,7 +98,10 @@ Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcep
         case CommandLineScalarType::PAPIEventList:
             scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
         #endif
-        default: scalarTy = mBuilder->getSizeTy(); break;
+        case CommandLineScalarType::DynamicMultithreadingSynchronizationThreshold:
+            scalarTy = mBuilder->getFloatTy(); break;
+        default:
+            scalarTy = mBuilder->getSizeTy(); break;
     }
 
 

@@ -164,6 +164,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         Value * const start = b->CreateICmpULT(nextThreadIndex, minimumNumOfThreads);
 
         b->CreateCondBr(start, startThread, constructNextThread);
+
+        b->SetInsertPoint(startThread);
     }
     FixedArray<Value *, 4> pthreadCreateArgs;
     FunctionType * const pthreadCreateFnTy = pthreadCreateFn->getFunctionType();
@@ -280,36 +282,30 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // MAKE PIPELINE THREAD
     // -------------------------------------------------------------------------------------------------------------------------
     auto makeThreadFunction = [&](Function * const threadFunc, const bool processThreadForDynamicScheduling) {
+        assert (threadFunc);
         threadFunc->setCallingConv(CallingConv::C);
         auto arg = threadFunc->arg_begin();
         arg->setName("threadStruct");
 
         b->SetInsertPoint(BasicBlock::Create(m->getContext(), "entry", threadFunc));
 
-        Value * threadStructArray = nullptr;
-        Value * threadStruct = nullptr;
-        Value * segmentsPerCheck = nullptr;
-        Value * minimumThreads = nullptr;
-        Value * maximumThreads = nullptr;
-        Value * fSyncAddThreadThreadhold = nullptr;
-        Value * threadIds = nullptr; // pthreadsTyPtr
-
-        if (processThreadForDynamicScheduling) {
-            FixedArray<Value *, 2> offset;
-            offset[0] = i32_ZERO;
-            offset[1] = i32_ZERO;
-            threadStructArray = b->CreatePointerCast(arg++, threadStructPtrTy);
-            threadStruct = threadStructArray;
-            assert (threadStruct->getType() == threadStructPtrTy);
-            segmentsPerCheck = arg; // mDynamicMultithreadingSegmentsPerCheck
-        } else {
-            threadStruct = b->CreatePointerCast(arg, threadStructPtrTy);
-        }
-
+        Value * const threadStruct = b->CreatePointerCast(arg, threadStructPtrTy);
         readThreadStuctObject(b, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
+
+        Value * minimumThreads = nullptr;
+        Value * maximumThreads = nullptr;
+        Value * synchronizationCostCheckPeriod = nullptr;
+        Value * syncAddThreadThreadhold = nullptr;
+
+        if (processThreadForDynamicScheduling) {
+            minimumThreads = b->getScalarField(MINIMUM_NUM_OF_THREADS);
+            maximumThreads = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
+            synchronizationCostCheckPeriod = b->getScalarField(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD);
+            syncAddThreadThreadhold = b->getScalarField(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD);
+        }
 
         #ifdef ENABLE_PAPI
         createPAPIMeasurementArrays(b);
@@ -343,7 +339,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         PHINode * activeThreadsPhi = nullptr;
         if (processThreadForDynamicScheduling) {
             nextCheckSegmentPhi = b->CreatePHI(sizeTy, 2, "nextCheckPhi");
-            nextCheckSegmentPhi->addIncoming(segmentsPerCheck, entryBlock);
+            nextCheckSegmentPhi->addIncoming(synchronizationCostCheckPeriod, entryBlock);
             activeThreadsPhi = b->CreatePHI(sizeTy, 2, "activeThreadsPhi");
             activeThreadsPhi->addIncoming(minimumThreads, entryBlock);
         }
@@ -372,16 +368,16 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
         }
 
-        if (mIsNestedPipeline) {
-            b->CreateBr(mPipelineEnd);
-        } else if (processThreadForDynamicScheduling) {
+        PHINode * startOfNextPeriodPhi = nullptr;
+        PHINode * currentNumOfThreadsPhi = nullptr;
+
+        if (processThreadForDynamicScheduling) {
             assert (mUseDynamicMultithreading);
 
             BasicBlock * checkSynchronizationCostLoop = b->CreateBasicBlock("checkSynchronizationCostLoop", mPipelineEnd);
             BasicBlock * checkSynchronizationCost = b->CreateBasicBlock("checkToSynchronizationCost", mPipelineEnd);
             BasicBlock * addThread = b->CreateBasicBlock("addThread", mPipelineEnd);
             BasicBlock * nextSegment = b->CreateBasicBlock("nextSegment", mPipelineEnd);
-
             Value * const check = b->CreateICmpUGE(mSegNo, nextCheckSegmentPhi);
             BasicBlock * const loopEntry = b->GetInsertBlock();
             b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
@@ -396,17 +392,15 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             PHINode * const synchronizationTimeAccumPhi = b->CreatePHI(sizeTy, 2);
             synchronizationTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
 
-
             FixedArray<Value *, 2> indices3;
-            indices3[0] = i32_ZERO;
-            indices3[1] = indexPhi;
-            indices3[2] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-            Value * const segTimePtr = b->CreateInBoundsGEP(threadStructArray, indices3);
+            indices3[0] = indexPhi;
+            indices3[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+            Value * const segTimePtr = b->CreateInBoundsGEP(threadStruct, indices3);
             Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(segTimePtr));
             segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
-            indices3[2] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-            Value * const syncTimePtr = b->CreateInBoundsGEP(threadStructArray, indices3);
+            indices3[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+            Value * const syncTimePtr = b->CreateInBoundsGEP(threadStruct, indices3);
             Value * const nextSyncTime = b->CreateAdd(synchronizationTimeAccumPhi, b->CreateLoad(syncTimePtr));
             synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
 
@@ -416,31 +410,54 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->CreateCondBr(hasMore, checkSynchronizationCostLoop, checkSynchronizationCost);
 
             b->SetInsertPoint(checkSynchronizationCost);
-            Type * const dblTy = b->getDoubleTy();
-            Value * const fSegTime = b->CreateUIToFP(nextSegTime, dblTy);
-            Value * const fSyncTime = b->CreateUIToFP(nextSyncTime, dblTy);
+            Type * const floatTy = b->getFloatTy();
+            Value * const fSegTime = b->CreateUIToFP(nextSegTime, floatTy);
+            Value * const fSyncTime = b->CreateUIToFP(nextSyncTime, floatTy);
             Value * const fSyncOverhead = b->CreateFDiv(fSyncTime, fSegTime);
 
-            Value * const add = b->CreateFCmpULT(fSyncOverhead, fSyncAddThreadThreadhold);
+            Value * const add = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
+            Value * const startOfNextPeriod = b->CreateAdd(mSegNo, synchronizationCostCheckPeriod);
             b->CreateCondBr(add, addThread, nextSegment);
 
             b->SetInsertPoint(addThread);
-
-            FixedArray<Value *, 2> indices2;
-            indices2[0] = i32_ZERO;
-            indices2[1] = nextIndex;
-            pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadIds, indices2);
+            indices3[0] = activeThreadsPhi;
+            indices3[1] = b->getInt32(CURRENT_THREAD_ID);
+            pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadStruct, indices3);
             // pthreadCreateArgs[1] = nullVoidPtrVal; // already set
             // pthreadCreateArgs[2] = threadFunc;
-            Value * const ts = b->CreateInBoundsGEP(threadStructArray, indices2);
+            Value * const ts = b->CreateInBoundsGEP(threadStruct, activeThreadsPhi);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);
+            Value * const newNumOfThreads = b->CreateAdd(activeThreadsPhi, b->getSize(1));
+            b->CreateBr(nextSegment);
+
+            b->SetInsertPoint(nextSegment);
+            startOfNextPeriodPhi = b->CreatePHI(sizeTy, 2, "nextCheckPhi");
+            startOfNextPeriodPhi->addIncoming(nextCheckSegmentPhi, loopEntry);
+            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkSynchronizationCost);
+            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, addThread);
+
+            currentNumOfThreadsPhi = b->CreatePHI(sizeTy, 2, "nextCheckPhi");
+            currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, loopEntry);
+            currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
+            currentNumOfThreadsPhi->addIncoming(newNumOfThreads, addThread);
+        }
+
+
+
+        if (mIsNestedPipeline) {
+            b->CreateBr(mPipelineEnd);
         } else {
             BasicBlock * const exitBlock = b->GetInsertBlock();
             if (LLVM_UNLIKELY(CheckAssertions)) {
                 mMadeProgressInLastSegment->addIncoming(madeProgress, exitBlock);
             }
-            incrementCurrentSegNo(b, exitBlock);
+            if (processThreadForDynamicScheduling) {
+                nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
+                activeThreadsPhi->addIncoming(currentNumOfThreadsPhi, exitBlock);
+            } else if (!mUseDynamicMultithreading) {
+                incrementCurrentSegNo(b, exitBlock);
+            }
             assert (hasTermSignal);
             b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
         }
@@ -495,16 +512,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     Function * processThreadFunc = nullptr;
 
     if (mUseDynamicMultithreading) {
-
-        FixedArray<Type *, 2> param;
-        param[0] = threadStateArray->getType(); // thread state
-        param[1] = sizeTy; // segments per check
-
-        FunctionType * const csFuncType = FunctionType::get(b->getVoidTy(), param, false);
         const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedProcessThread", tmp);
-        Function * const csFunc = Function::Create(csFuncType, Function::InternalLinkage, outerFuncName, m);
-        csFunc->setCallingConv(CallingConv::C);
-        csFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
+        processThreadFunc = Function::Create(threadFuncType, Function::InternalLinkage, outerFuncName, m);
+        processThreadFunc->setCallingConv(CallingConv::C);
+        processThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
 
         makeThreadFunction(processThreadFunc, true);
     } else {
@@ -517,7 +528,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     b->restoreIP(resumePoint);
 
-    Value * const mainThreadRetVal = b->CreateCall(threadFunc->getFunctionType(), threadFunc, b->CreatePointerCast(processState, voidPtrTy));
+    FixedArray<Value *, 1> processArgs;
+    processArgs[0] = b->CreatePointerCast(processState, voidPtrTy);
+    Value * const mainThreadRetVal =
+        b->CreateCall(threadFuncType, processThreadFunc, processArgs);
 
     Value * firstSegNo = nullptr;
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
@@ -858,6 +872,7 @@ void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
  * @brief generateSingleThreadKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
+    assert (!mUseDynamicMultithreading);
     if (LLVM_UNLIKELY(mIsNestedPipeline)) {
         mSegNo = mExternalSegNo; assert (mExternalSegNo);
     } else {
@@ -923,7 +938,7 @@ void PipelineCompiler::end(BuilderRef b) {
     b->SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
     #endif
     Value * terminated = nullptr;
-    if (mIsNestedPipeline) {
+    if (mIsNestedPipeline || mUseDynamicMultithreading) {
         if (PipelineHasTerminationSignal) {
             terminated = hasPipelineTerminated(b);
         }

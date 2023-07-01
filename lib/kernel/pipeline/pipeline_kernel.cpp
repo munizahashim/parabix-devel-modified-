@@ -677,7 +677,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                     value = b->getSize(50);
                     break;
                 case C::DynamicMultithreadingSynchronizationThreshold:
-                    value = b->getSize(10 * 100);
+                    value = ConstantFP::get(b->getFloatTy(), 0.1);
                     break;
                 #ifdef ENABLE_PAPI
                 case C::PAPIEventSet:

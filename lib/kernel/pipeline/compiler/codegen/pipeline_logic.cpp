@@ -86,6 +86,9 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
+    if (mUseDynamicMultithreading) {
+        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineOutput));
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
