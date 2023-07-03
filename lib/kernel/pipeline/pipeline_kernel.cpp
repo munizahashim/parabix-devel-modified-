@@ -198,6 +198,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);
+        PipelineCompiler::linkDynamicThreadingReport(b);
     }
 }
 
@@ -814,8 +815,13 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             break;
     }
 
+
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
         out << "+AML";
+    }
+
+    if (codegen::EnableDynamicMultithreading) {
+        out << "+DM";
     }
 
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
@@ -826,10 +832,13 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             out << "+BIC";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
-            out << "+DB";
+            out << "+TDB";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicMultithreading))) {
+            out << "+TDM";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-            out << "+SS";
+            out << "+TSS";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
             out << "+GTH";

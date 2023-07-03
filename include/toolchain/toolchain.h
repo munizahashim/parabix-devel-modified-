@@ -35,6 +35,7 @@ enum DebugFlags {
     SerializeThreads,
     TraceCounts,
     TraceDynamicBuffers,
+    TraceDynamicMultithreading,
     TraceStridesPerSegment,
     TraceProducedItemCounts,
     TraceUnconsumedItemCounts,

@@ -88,6 +88,9 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     #endif
     if (mUseDynamicMultithreading) {
         mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineOutput));
+        if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+            addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
+        }
     }
 }
 
@@ -308,6 +311,9 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
         }
 
     }
+    if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+        initDynamicThreadingReportProperties(b);
+    }
     resetInternalBufferHandles();
 }
 
@@ -403,6 +409,9 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
         }
         if (mGenerateDeferredItemCountHistogram) {
             printHistogramReport(b, HistogramReportType::DeferredItems);
+        }
+        if (TraceDynamicMultithreading) {
+            printDynamicThreadingReport(b);
         }
     }
 

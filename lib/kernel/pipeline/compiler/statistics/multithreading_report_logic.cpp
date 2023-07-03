@@ -1,0 +1,147 @@
+#include "../pipeline_compiler.hpp"
+
+namespace kernel {
+
+#define MAX_ENTRY_GROUP_SIZE (1024 * 1024)
+
+struct DMEntry {
+    uint64_t SegNo;
+    float SyncOverhead;
+    uint32_t NumOfThreads;
+} __attribute__((packed));
+
+
+struct DMEntryGroup {
+    DMEntry Entry[MAX_ENTRY_GROUP_SIZE];
+    uint64_t Count;
+    DMEntryGroup * Next;
+};
+
+static_assert(((sizeof(DMEntryGroup) % sizeof(void*)) == 0), "unexpected data alignment issue");
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addDynamicThreadingReportProperties
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::addDynamicThreadingReportProperties(BuilderRef b, const unsigned groupId) {
+    assert (TraceDynamicMultithreading);
+
+    auto & C = b->getContext();
+
+    FixedArray<Type *, 3> DMEntryFields;
+    DMEntryFields[0] = b->getInt64Ty();
+    DMEntryFields[1] = TypeBuilder<float, false>::get(C);
+    DMEntryFields[2] = b->getInt32Ty();
+    StructType * const DMEntryTy = StructType::get(C, DMEntryFields, true);
+
+    FixedArray<Type *, 3> DMEntryGroupFields;
+    DMEntryGroupFields[0] = ArrayType::get(DMEntryTy, MAX_ENTRY_GROUP_SIZE);
+    DMEntryGroupFields[1] = b->getInt64Ty();
+    DMEntryGroupFields[2] = b->getVoidPtrTy();
+    StructType * const DMEntryGroupTy = StructType::get(C, DMEntryGroupFields, true);
+
+    mTarget->addInternalScalar(DMEntryGroupTy->getPointerTo(), STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT, groupId);
+
+    mTarget->addInternalScalar(DMEntryGroupTy, STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA, groupId);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initDynamicThreadingReportProperties
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::initDynamicThreadingReportProperties(BuilderRef b) {
+    assert (TraceDynamicMultithreading);
+    Value * data = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA);
+    b->setScalarField(STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT, data);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recordDynamicThreadingState
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, Value * currentSyncOverhead, Value * currentNumOfThreads) const {
+    assert (TraceDynamicMultithreading);
+    Value * dataPtr = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT);
+    Value * data = b->CreateLoad(dataPtr);
+    Constant * const i32_ZERO = b->getInt32(0);
+    Constant * const i32_ONE = b->getInt32(1);
+    Constant * const i32_TWO = b->getInt32(2);
+    FixedArray<Value *, 2> groupIndices;
+    groupIndices[0] = i32_ZERO;
+    groupIndices[1] = i32_ONE;
+    Value * currentCountPtr = b->CreateGEP(data, groupIndices);
+    Value * const currentCount = b->CreateLoad(currentCountPtr);
+    Value * const outOfSpace = b->CreateICmpEQ(currentCount, b->getSize(MAX_ENTRY_GROUP_SIZE));
+    BasicBlock * const mallocNewChunk = b->CreateBasicBlock("mallocNewDynamicThreadingBlock");
+    BasicBlock * const updateDynamicThreading = b->CreateBasicBlock("updateDynamicThreadingTrace");
+    BasicBlock * const entry = b->GetInsertBlock();
+    b->CreateCondBr(outOfSpace, mallocNewChunk, updateDynamicThreading);
+
+    b->SetInsertPoint(mallocNewChunk);
+    Constant * entryGroupSize = b->getSize(sizeof(DMEntryGroup));
+    Value * newChunk = b->CreateAlignedMalloc(entryGroupSize, sizeof(void*));
+    b->CreateMemZero(newChunk, entryGroupSize, sizeof(void*));
+    groupIndices[1] = i32_TWO;
+    Value * currentNextPtr = b->CreateGEP(data, groupIndices);
+    assert (newChunk->getType() == b->getVoidPtrTy());
+    b->CreateStore(newChunk, currentNextPtr);
+    newChunk = b->CreatePointerCast(newChunk, cast<PointerType>(data->getType()));
+    b->CreateStore(newChunk, dataPtr);
+    BasicBlock * const mallocExit = b->GetInsertBlock();
+    b->CreateBr(updateDynamicThreading);
+
+    b->SetInsertPoint(updateDynamicThreading);
+    PHINode * const statePhi = b->CreatePHI(data->getType(), 2);
+    statePhi->addIncoming(data, entry);
+    statePhi->addIncoming(newChunk, mallocExit);
+    PHINode * const count = b->CreatePHI(currentCount->getType(), 2);
+    count->addIncoming(currentCount, entry);
+    count->addIncoming(b->getSize(0), mallocExit);
+
+    groupIndices[1] = i32_ONE;
+    Value * const nextCount = b->CreateAdd(count, b->getSize(1));
+    b->CreateStore(nextCount, b->CreateGEP(statePhi, groupIndices));
+
+    FixedArray<Value *, 4> entryIndices;
+    entryIndices[0] = i32_ZERO;
+    entryIndices[1] = i32_ZERO;
+    entryIndices[2] = currentCount;
+    entryIndices[3] = i32_ZERO;
+    b->CreateStore(segNo, b->CreateGEP(statePhi, entryIndices));
+    entryIndices[3] = i32_ONE;
+    b->CreateStore(currentSyncOverhead, b->CreateGEP(statePhi, entryIndices));
+    entryIndices[3] = i32_TWO;
+    Value * const numThreads = b->CreateTrunc(currentNumOfThreads, b->getInt32Ty());
+    b->CreateStore(numThreads, b->CreateGEP(statePhi, entryIndices));
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief __print_dynamic_multithreading_report
+ ** ------------------------------------------------------------------------------------------------------------- */
+extern "C" {
+
+void __print_dynamic_multithreading_report(const DMEntryGroup * const root) {
+
+}
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief printDynamicThreadingReport
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::printDynamicThreadingReport(BuilderRef b) const {
+    assert (TraceDynamicMultithreading);
+    Value * dataPtr = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA);
+    Function * const printFn = b->getModule()->getFunction("__print_dynamic_multithreading_report");
+    FixedArray<Value *, 1> args;
+    args[0] = b->CreatePointerCast(dataPtr, b->getVoidPtrTy());
+    b->CreateCall(printFn->getFunctionType(), printFn, args);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief linkDynamicThreadingReport
+ ** ------------------------------------------------------------------------------------------------------------- */
+/* static */ void PipelineCompiler::linkDynamicThreadingReport(BuilderRef b) {
+    FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {b->getVoidPtrTy()}, false);
+    b->LinkFunction("__print_dynamic_multithreading_report", funcTy, (void*)__print_dynamic_multithreading_report);
+}
+
+}

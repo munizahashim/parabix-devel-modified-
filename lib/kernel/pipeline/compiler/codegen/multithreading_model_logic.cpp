@@ -378,6 +378,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             BasicBlock * checkSynchronizationCost = b->CreateBasicBlock("checkToSynchronizationCost", mPipelineEnd);
             BasicBlock * addThread = b->CreateBasicBlock("addThread", mPipelineEnd);
             BasicBlock * nextSegment = b->CreateBasicBlock("nextSegment", mPipelineEnd);
+            BasicBlock * recordBeforeNextSegment = nextSegment;
+            if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+                recordBeforeNextSegment = b->CreateBasicBlock("recordBeforeNextSegment", nextSegment);
+            }
             Value * const check = b->CreateICmpUGE(mSegNo, nextCheckSegmentPhi);
             BasicBlock * const loopEntry = b->GetInsertBlock();
             b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
@@ -415,9 +419,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             Value * const fSyncTime = b->CreateUIToFP(nextSyncTime, floatTy);
             Value * const fSyncOverhead = b->CreateFDiv(fSyncTime, fSegTime);
 
-            Value * const add = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
+            Value * const syncOverheadLow = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
+            Value * const canAddMoreThreads = b->CreateICmpULT(activeThreadsPhi, maximumThreads);
+            Value * const canAdd = b->CreateAnd(syncOverheadLow, canAddMoreThreads);
+
             Value * const startOfNextPeriod = b->CreateAdd(mSegNo, synchronizationCostCheckPeriod);
-            b->CreateCondBr(add, addThread, nextSegment);
+            b->CreateCondBr(canAdd, addThread, recordBeforeNextSegment);
 
             b->SetInsertPoint(addThread);
             indices3[0] = activeThreadsPhi;
@@ -428,22 +435,39 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             Value * const ts = b->CreateInBoundsGEP(threadStruct, activeThreadsPhi);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);
-            Value * const newNumOfThreads = b->CreateAdd(activeThreadsPhi, b->getSize(1));
-            b->CreateBr(nextSegment);
+            Value * newNumOfThreads = b->CreateAdd(activeThreadsPhi, b->getSize(1));
+            b->CreateBr(recordBeforeNextSegment);
+
+            if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+                b->SetInsertPoint(recordBeforeNextSegment);
+
+                PHINode * const numOfThreadsPhi = b->CreatePHI(sizeTy, 2);
+                numOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
+                numOfThreadsPhi->addIncoming(newNumOfThreads, addThread);
+
+                recordDynamicThreadingState(b, mSegNo, fSyncOverhead, numOfThreadsPhi);
+
+                b->CreateBr(nextSegment);
+                newNumOfThreads = numOfThreadsPhi;
+            }
+
+
+            BasicBlock * const traceExit = b->GetInsertBlock();
 
             b->SetInsertPoint(nextSegment);
-            startOfNextPeriodPhi = b->CreatePHI(sizeTy, 2, "nextCheckPhi");
+            startOfNextPeriodPhi = b->CreatePHI(sizeTy, 3, "nextCheckPhi");
             startOfNextPeriodPhi->addIncoming(nextCheckSegmentPhi, loopEntry);
-            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkSynchronizationCost);
-            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, addThread);
+            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, traceExit);
 
-            currentNumOfThreadsPhi = b->CreatePHI(sizeTy, 2, "nextCheckPhi");
+            currentNumOfThreadsPhi = b->CreatePHI(sizeTy, 3, "nextCheckPhi");
             currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, loopEntry);
-            currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
-            currentNumOfThreadsPhi->addIncoming(newNumOfThreads, addThread);
+            currentNumOfThreadsPhi->addIncoming(newNumOfThreads, traceExit);
+
+            if (LLVM_LIKELY(!TraceDynamicMultithreading)) {
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkSynchronizationCost);
+                currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
+            }
         }
-
-
 
         if (mIsNestedPipeline) {
             b->CreateBr(mPipelineEnd);

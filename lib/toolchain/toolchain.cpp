@@ -36,6 +36,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(SerializeThreads, "Force segment threads to run sequentially."),
                         clEnumVal(TraceCounts, "Trace kernel processed, consumed and produced item counts."),
                         clEnumVal(TraceDynamicBuffers, "Trace dynamic buffer allocations and deallocations."),
+                        clEnumVal(TraceDynamicMultithreading, "Trace dynamic multithreading thread count state."),
                         clEnumVal(TraceBlockedIO, "Trace kernels prevented from processing any strides "
                                                   "due to insufficient input items / output space."),
                         clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),

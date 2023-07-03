@@ -125,6 +125,9 @@ const static std::string STATISTICS_UNCONSUMED_ITEM_COUNT_SUFFIX = ".SUIC";
 const static std::string STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TICH";
 const static std::string STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDCH";
 
+const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA = "@SDMSD";
+const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDMSC";
+
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
@@ -536,6 +539,14 @@ public:
 
     static void linkHistogramFunctions(BuilderRef b);
 
+// dynamic multithreading functions
+
+    void addDynamicThreadingReportProperties(BuilderRef b, const unsigned groupId);
+    void initDynamicThreadingReportProperties(BuilderRef b);
+    void recordDynamicThreadingState(BuilderRef b, Value * segNo, Value * currentSyncOverhead, Value * currentNumOfThreads) const;
+    void printDynamicThreadingReport(BuilderRef b) const;
+    static void linkDynamicThreadingReport(BuilderRef b);
+
 // debug message functions
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -603,8 +614,6 @@ protected:
     const bool                                  mIsNestedPipeline;
     const bool                                  mUseDynamicMultithreading;
 
-//    const unsigned                              mNumOfThreads;
-
     const LengthAssertions &                    mLengthAssertions;
 
     // analysis state
@@ -636,6 +645,7 @@ protected:
     const bool                                  TraceIO;
     const bool                                  TraceUnconsumedItemCounts;
     const bool                                  TraceProducedItemCounts;
+    const bool                                  TraceDynamicMultithreading;
 
     const KernelIdVector                        KernelPartitionId;
     const KernelIdVector                        FirstKernelInPartition;
@@ -960,6 +970,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , TraceIO(DebugOptionIsSet(codegen::EnableBlockingIOCounter) || DebugOptionIsSet(codegen::TraceBlockedIO))
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
+, TraceDynamicMultithreading(mUseDynamicMultithreading && DebugOptionIsSet(codegen::TraceDynamicMultithreading))
 
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
