@@ -1,4 +1,5 @@
 #include "../pipeline_compiler.hpp"
+#include <boost/format.hpp>
 
 namespace kernel {
 
@@ -118,7 +119,41 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
  ** ------------------------------------------------------------------------------------------------------------- */
 extern "C" {
 
-void __print_dynamic_multithreading_report(const DMEntryGroup * const root) {
+void __print_dynamic_multithreading_report(const DMEntryGroup * const root, const int32_t maxThreadCount, const size_t maxSegmentNumber) {
+
+    auto ceil_log10 = [](const uint64_t v) {
+        if (v < 10) {
+            return 1U;
+        }
+        return (unsigned)std::ceil(std::log10(v));
+    };
+
+    const auto segmentLength = std::max(ceil_log10(maxSegmentNumber), 5U) + 1U;
+
+    auto & out = errs();
+
+    boost::format fixedfmt("%0.4f ");
+
+    out << left_justify("SEG #", segmentLength)
+        << "SYNC %  THREADS\n\n";
+
+    for (auto c = root; c; c = c->Next) {
+        const auto n = c->Count;
+        const auto & E = c->Entry;
+        for (size_t i = 0; i < n; ++i) {
+            const auto & I = E[i];
+            out << left_justify(std::to_string(I.SegNo), segmentLength)
+                << (fixedfmt % I.SyncOverhead).str()
+                << I.NumOfThreads
+                << "\n";
+        }
+    }
+
+    for (auto c = root->Next; c; ) {
+        auto n = c->Next;
+        free(c);
+        c = n;
+    }
 
 }
 
@@ -130,9 +165,13 @@ void __print_dynamic_multithreading_report(const DMEntryGroup * const root) {
 void PipelineCompiler::printDynamicThreadingReport(BuilderRef b) const {
     assert (TraceDynamicMultithreading);
     Value * dataPtr = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA);
+
     Function * const printFn = b->getModule()->getFunction("__print_dynamic_multithreading_report");
-    FixedArray<Value *, 1> args;
+    FixedArray<Value *, 3> args;
     args[0] = b->CreatePointerCast(dataPtr, b->getVoidPtrTy());
+    args[1] = b->CreateTrunc(b->getScalarField(MAXIMUM_NUM_OF_THREADS), b->getInt32Ty());
+    args[2] = mSegNo;
+
     b->CreateCall(printFn->getFunctionType(), printFn, args);
 }
 
@@ -140,7 +179,11 @@ void PipelineCompiler::printDynamicThreadingReport(BuilderRef b) const {
  * @brief linkDynamicThreadingReport
  ** ------------------------------------------------------------------------------------------------------------- */
 /* static */ void PipelineCompiler::linkDynamicThreadingReport(BuilderRef b) {
-    FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {b->getVoidPtrTy()}, false);
+    FixedArray<Type *, 3> params;
+    params[0] = b->getVoidPtrTy();
+    params[1] = b->getInt32Ty();
+    params[2] = b->getSizeTy();
+    FunctionType * funcTy = FunctionType::get(b->getVoidTy(), params, false);
     b->LinkFunction("__print_dynamic_multithreading_report", funcTy, (void*)__print_dynamic_multithreading_report);
 }
 

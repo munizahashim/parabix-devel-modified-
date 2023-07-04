@@ -1,5 +1,6 @@
 #include "../pipeline_compiler.hpp"
 #include <pthread.h>
+#include <llvm/IR/Verifier.h>
 
 #if BOOST_OS_LINUX
 #include <sched.h>
@@ -38,6 +39,7 @@ enum PipelineStateObjectField : unsigned {
     , ACCUMULATED_SYNCHRONIZATION_TIME
     , CURRENT_THREAD_ID
     , TERMINATION_SIGNAL
+    , CURRENT_THREAD_STATUS_FLAG
     // -------------------
     , THREAD_STRUCT_SIZE
 };
@@ -78,6 +80,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     ConstantInt * const i32_ZERO = b->getInt32(0);
     ConstantInt * const sz_ZERO = b->getSize(0);
     ConstantInt * const sz_ONE = b->getSize(1);
+    ConstantInt * const sz_TWO = b->getSize(2);
 
     SmallVector<char, 256> tmp;
     const auto threadName = concat(mTarget->getName(), "_MultithreadedDoSegment", tmp);
@@ -169,6 +172,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
     FixedArray<Value *, 4> pthreadCreateArgs;
     FunctionType * const pthreadCreateFnTy = pthreadCreateFn->getFunctionType();
+    if (mUseDynamicMultithreading) {
+        fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+        Value * initThreadStateFlagPtr = b->CreateInBoundsGEP(threadStateArray, fieldIndex);
+        b->CreateStore(sz_ONE, initThreadStateFlagPtr);
+    }
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
     pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadStateArray, fieldIndex);
     pthreadCreateArgs[1] = ConstantPointerNull::get(cast<PointerType>(pthreadCreateFnTy->getParamType(1)));
@@ -299,12 +307,21 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         Value * maximumThreads = nullptr;
         Value * synchronizationCostCheckPeriod = nullptr;
         Value * syncAddThreadThreadhold = nullptr;
+        Value * syncRemoveThreadThreadhold = nullptr;
 
         if (processThreadForDynamicScheduling) {
             minimumThreads = b->getScalarField(MINIMUM_NUM_OF_THREADS);
             maximumThreads = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
-            synchronizationCostCheckPeriod = b->getScalarField(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD);
-            syncAddThreadThreadhold = b->getScalarField(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD);
+            synchronizationCostCheckPeriod =
+                b->getScalarField(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD);
+            Type * const floatTy = b->getFloatTy();
+            Constant * const f100 = ConstantFP::get(floatTy, 100.0);
+            syncAddThreadThreadhold =
+                b->getScalarField(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD);
+            syncAddThreadThreadhold = b->CreateFDiv(syncAddThreadThreadhold, f100);
+            syncRemoveThreadThreadhold =
+                b->getScalarField(DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD);
+            syncRemoveThreadThreadhold = b->CreateFDiv(syncRemoveThreadThreadhold, f100);
         }
 
         #ifdef ENABLE_PAPI
@@ -374,98 +391,176 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         if (processThreadForDynamicScheduling) {
             assert (mUseDynamicMultithreading);
 
+            // if a thread got stalled or the period was set so low, we could reenter this check prior to
+            // the thread itself stopping,
+
             BasicBlock * checkSynchronizationCostLoop = b->CreateBasicBlock("checkSynchronizationCostLoop", mPipelineEnd);
-            BasicBlock * checkSynchronizationCost = b->CreateBasicBlock("checkToSynchronizationCost", mPipelineEnd);
+            BasicBlock * checkToAddThread = b->CreateBasicBlock("checkToAddThread", mPipelineEnd);
+            BasicBlock * selectThreadStructToUseForAddThread = b->CreateBasicBlock("selectThreadStructToUseForAddThread", mPipelineEnd);
+            BasicBlock * checkIfThreadIsCancelled = b->CreateBasicBlock("checkIfThreadIsCancelled", mPipelineEnd);
+            BasicBlock * joinCancelledThread = b->CreateBasicBlock("joinCancelledThread", mPipelineEnd);
             BasicBlock * addThread = b->CreateBasicBlock("addThread", mPipelineEnd);
+
+            BasicBlock * checkToRemoveThread = b->CreateBasicBlock("checkToRemoveThread", mPipelineEnd);
+            BasicBlock * selectThreadToRemove = b->CreateBasicBlock("selectThreadToRemove", mPipelineEnd);
+
+            BasicBlock * removeThread = b->CreateBasicBlock("removeThread", mPipelineEnd);
             BasicBlock * nextSegment = b->CreateBasicBlock("nextSegment", mPipelineEnd);
             BasicBlock * recordBeforeNextSegment = nextSegment;
             if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
                 recordBeforeNextSegment = b->CreateBasicBlock("recordBeforeNextSegment", nextSegment);
             }
             Value * const check = b->CreateICmpUGE(mSegNo, nextCheckSegmentPhi);
-            BasicBlock * const loopEntry = b->GetInsertBlock();
-            b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
+            FixedArray<Value *, 2> indices2;
 
-            Constant * const sz_ZERO = b->getSize(0);
+//            BasicBlock * const loopEntry = b->GetInsertBlock();
+//            b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
 
-            b->SetInsertPoint(checkSynchronizationCostLoop);
-            PHINode * const indexPhi = b->CreatePHI(sizeTy, 2);
-            indexPhi->addIncoming(sz_ZERO, loopEntry);
-            PHINode * const segmentTimeAccumPhi = b->CreatePHI(sizeTy, 2);
-            segmentTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
-            PHINode * const synchronizationTimeAccumPhi = b->CreatePHI(sizeTy, 2);
-            synchronizationTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
+//            b->SetInsertPoint(checkSynchronizationCostLoop);
+//            PHINode * const indexPhi = b->CreatePHI(sizeTy, 2);
+//            indexPhi->addIncoming(sz_ZERO, loopEntry);
+//            PHINode * const segmentTimeAccumPhi = b->CreatePHI(sizeTy, 2);
+//            segmentTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
+//            PHINode * const synchronizationTimeAccumPhi = b->CreatePHI(sizeTy, 2);
+//            synchronizationTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
 
-            FixedArray<Value *, 2> indices3;
-            indices3[0] = indexPhi;
-            indices3[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-            Value * const segTimePtr = b->CreateInBoundsGEP(threadStruct, indices3);
+            indices2[0] = indexPhi;
+            indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+            Value * const segTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
             Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(segTimePtr));
-            segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
+ //           segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
-            indices3[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-            Value * const syncTimePtr = b->CreateInBoundsGEP(threadStruct, indices3);
+            indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+            Value * const syncTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
             Value * const nextSyncTime = b->CreateAdd(synchronizationTimeAccumPhi, b->CreateLoad(syncTimePtr));
-            synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
+//            synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
 
-            Value * const nextIndex = b->CreateAdd(indexPhi, b->getSize(1));
-            indexPhi->addIncoming(nextIndex, checkSynchronizationCostLoop);
-            Value * const hasMore = b->CreateICmpNE(nextIndex, activeThreadsPhi);
-            b->CreateCondBr(hasMore, checkSynchronizationCostLoop, checkSynchronizationCost);
+//            Value * const nextIndex = b->CreateAdd(indexPhi, b->getSize(1));
+//            indexPhi->addIncoming(nextIndex, checkSynchronizationCostLoop);
+//            Value * const hasMore = b->getFalse(); // b->CreateICmpNE(nextIndex, activeThreadsPhi);
+//            b->CreateCondBr(hasMore, checkSynchronizationCostLoop, checkToAddThread);
 
-            b->SetInsertPoint(checkSynchronizationCost);
+//            b->SetInsertPoint(checkToAddThread);
             Type * const floatTy = b->getFloatTy();
             Value * const fSegTime = b->CreateUIToFP(nextSegTime, floatTy);
             Value * const fSyncTime = b->CreateUIToFP(nextSyncTime, floatTy);
             Value * const fSyncOverhead = b->CreateFDiv(fSyncTime, fSegTime);
+
+            // subtract out the values so that we can keep each check
+            indices2[0] = sz_ZERO;
+            indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+            Value * const baseSegTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
+//            Value * const initialSegmentTime = b->CreateLoad(baseSegTimePtr);
+//            b->CreateStore(b->CreateSub(nextSyncTime, initialSegmentTime), baseSegTimePtr);
+            b->CreateStore(sz_ZERO, baseSegTimePtr);
+            indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+            Value * const baseSyncTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
+//            Value * const initialSyncTime = b->CreateLoad(baseSyncTimePtr);
+//            b->CreateStore(b->CreateSub(nextSyncTime, initialSyncTime), baseSyncTimePtr);
+            b->CreateStore(sz_ZERO, baseSyncTimePtr);
 
             Value * const syncOverheadLow = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
             Value * const canAddMoreThreads = b->CreateICmpULT(activeThreadsPhi, maximumThreads);
             Value * const canAdd = b->CreateAnd(syncOverheadLow, canAddMoreThreads);
 
             Value * const startOfNextPeriod = b->CreateAdd(mSegNo, synchronizationCostCheckPeriod);
-            b->CreateCondBr(canAdd, addThread, recordBeforeNextSegment);
+            b->CreateCondBr(canAdd, selectThreadStructToUseForAddThread, checkToRemoveThread);
+
+            b->SetInsertPoint(selectThreadStructToUseForAddThread);
+            PHINode * const selectToAddPhi = b->CreatePHI(sizeTy, 2);
+            selectToAddPhi->addIncoming(sz_ONE, checkToAddThread);
+            indices2[0] = selectToAddPhi;
+            indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+            Value * addThreadStateFlagPtr = b->CreateInBoundsGEP(threadStruct, indices2);
+            Value * addThreadStateFlag = b->CreateLoad(addThreadStateFlagPtr);
+            Value * canUseThreadStruct = b->CreateICmpNE(addThreadStateFlag, sz_ONE);
+            Value * const nextToCheckForAdd = b->CreateAdd(selectToAddPhi, sz_ONE);
+            selectToAddPhi->addIncoming(nextToCheckForAdd, selectThreadStructToUseForAddThread);
+            b->CreateCondBr(canUseThreadStruct, checkIfThreadIsCancelled, selectThreadStructToUseForAddThread);
+
+            b->SetInsertPoint(checkIfThreadIsCancelled);
+            Value * isCancelled = b->CreateICmpEQ(addThreadStateFlag, sz_TWO);
+            indices2[1] = b->getInt32(CURRENT_THREAD_ID);
+            Value * const threadIdPtr = b->CreateInBoundsGEP(threadStruct, indices2);
+            b->CreateCondBr(isCancelled, joinCancelledThread, addThread);
+
+            b->SetInsertPoint(joinCancelledThread);
+            FixedArray<Value *, 2> pthreadJoinArgs;
+            Value * threadId = b->CreateLoad(threadIdPtr);
+            pthreadJoinArgs[0] = threadId;
+            pthreadJoinArgs[1] = b->CreateAllocaAtEntryPoint(voidPtrTy);
+            b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
+            b->CreateBr(addThread);
 
             b->SetInsertPoint(addThread);
-            indices3[0] = activeThreadsPhi;
-            indices3[1] = b->getInt32(CURRENT_THREAD_ID);
-            pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadStruct, indices3);
+            b->CreateStore(sz_ONE, addThreadStateFlagPtr);
+            pthreadCreateArgs[0] = threadIdPtr;
             // pthreadCreateArgs[1] = nullVoidPtrVal; // already set
             // pthreadCreateArgs[2] = threadFunc;
-            Value * const ts = b->CreateInBoundsGEP(threadStruct, activeThreadsPhi);
+            Value * const ts = b->CreateInBoundsGEP(threadStruct, selectToAddPhi);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);
-            Value * newNumOfThreads = b->CreateAdd(activeThreadsPhi, b->getSize(1));
+            Value * numOfThreadsAfterAdd = b->CreateAdd(activeThreadsPhi, b->getSize(1));
             b->CreateBr(recordBeforeNextSegment);
 
+            b->SetInsertPoint(checkToRemoveThread);
+            Value * const syncOverheadHigh = b->CreateFCmpUGT(fSyncOverhead, syncRemoveThreadThreadhold);
+            Value * const canRemoveMoreThreads = b->CreateICmpUGT(activeThreadsPhi, minimumThreads);
+            Value * const canRemove = b->CreateAnd(syncOverheadHigh, canRemoveMoreThreads);
+            b->CreateCondBr(canRemove, selectThreadToRemove, recordBeforeNextSegment);
+
+            b->SetInsertPoint(selectThreadToRemove);
+            PHINode * const selectedThreadPhi = b->CreatePHI(sizeTy, 2);
+            selectedThreadPhi->addIncoming(sz_ONE, checkToRemoveThread);
+            indices2[0] = selectedThreadPhi;
+            indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+            Value * const cancelFlagPtr = b->CreateInBoundsGEP(threadStruct, indices2);
+            Value * const isActive = b->CreateICmpEQ(b->CreateLoad(cancelFlagPtr), sz_ONE);
+            Value * const nextThreadToCheckForRemove = b->CreateAdd(selectedThreadPhi, sz_ONE);
+            selectedThreadPhi->addIncoming(nextThreadToCheckForRemove, selectThreadToRemove);
+            b->CreateCondBr(isActive, removeThread, selectThreadToRemove);
+
+            b->SetInsertPoint(removeThread);
+            // mark this thread to terminate when it reaches the end of a segment iteration
+            b->CreateStore(sz_TWO, cancelFlagPtr);
+            Value * const numOfThreadsAfterRemoval = b->CreateSub(activeThreadsPhi, sz_ONE);
+            b->CreateBr(recordBeforeNextSegment);
+
+            PHINode * numOfThreadsPhi = nullptr;
+            BasicBlock * recordBeforeNextSegmentExit = nullptr;
             if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
                 b->SetInsertPoint(recordBeforeNextSegment);
 
-                PHINode * const numOfThreadsPhi = b->CreatePHI(sizeTy, 2);
-                numOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
-                numOfThreadsPhi->addIncoming(newNumOfThreads, addThread);
+                numOfThreadsPhi = b->CreatePHI(sizeTy, 2);
+                numOfThreadsPhi->addIncoming(activeThreadsPhi, checkToRemoveThread);
+                numOfThreadsPhi->addIncoming(numOfThreadsAfterAdd, addThread);
+                numOfThreadsPhi->addIncoming(numOfThreadsAfterRemoval, removeThread);
 
                 recordDynamicThreadingState(b, mSegNo, fSyncOverhead, numOfThreadsPhi);
 
+                recordBeforeNextSegmentExit = b->GetInsertBlock();
+
                 b->CreateBr(nextSegment);
-                newNumOfThreads = numOfThreadsPhi;
+            }
+
+            b->SetInsertPoint(nextSegment);
+            startOfNextPeriodPhi = b->CreatePHI(sizeTy, 3, "startOfNextPeriodPhi");
+            startOfNextPeriodPhi->addIncoming(nextCheckSegmentPhi, loopEntry);
+            if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, recordBeforeNextSegmentExit);
+            } else {
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkToAddThread);
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkToRemoveThread);
             }
 
 
-            BasicBlock * const traceExit = b->GetInsertBlock();
-
-            b->SetInsertPoint(nextSegment);
-            startOfNextPeriodPhi = b->CreatePHI(sizeTy, 3, "nextCheckPhi");
-            startOfNextPeriodPhi->addIncoming(nextCheckSegmentPhi, loopEntry);
-            startOfNextPeriodPhi->addIncoming(startOfNextPeriod, traceExit);
-
-            currentNumOfThreadsPhi = b->CreatePHI(sizeTy, 3, "nextCheckPhi");
+            currentNumOfThreadsPhi = b->CreatePHI(sizeTy, 3, "currentNumOfThreadsPhi");
             currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, loopEntry);
-            currentNumOfThreadsPhi->addIncoming(newNumOfThreads, traceExit);
-
-            if (LLVM_LIKELY(!TraceDynamicMultithreading)) {
-                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkSynchronizationCost);
-                currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, checkSynchronizationCost);
+            if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
+                currentNumOfThreadsPhi->addIncoming(numOfThreadsPhi, recordBeforeNextSegmentExit);
+            } else {
+                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterAdd, checkToAddThread);
+                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterRemoval, checkToRemoveThread);
             }
         }
 
@@ -479,7 +574,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             if (processThreadForDynamicScheduling) {
                 nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
                 activeThreadsPhi->addIncoming(currentNumOfThreadsPhi, exitBlock);
-            } else if (!mUseDynamicMultithreading) {
+            } else if (mUseDynamicMultithreading) {
+                FixedArray<Value *, 2> indices2;
+                indices2[0] = sz_ZERO;
+                indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+                Value * const statusFlagPtr = b->CreateGEP(threadStruct, indices2);
+                Value * const cancelled = b->CreateLoad(statusFlagPtr);
+                done = b->CreateOr(done, b->CreateICmpEQ(cancelled, sz_TWO));
+            } else {
                 incrementCurrentSegNo(b, exitBlock);
             }
             assert (hasTermSignal);
@@ -529,6 +631,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->CreateBr(exitFunction);
         b->SetInsertPoint(exitFunction);
         b->CreateRet(retVal);
+
     };
 
     makeThreadFunction(threadFunc, false);
@@ -579,15 +682,17 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // wait for all other threads to complete
     AllocaInst * const status = b->CreateAlloca(voidPtrTy);
 
+    BasicBlock * const checkStatusOfThread = b->CreateBasicBlock("checkStatusOfThread");
     BasicBlock * const joinThread = b->CreateBasicBlock("joinThread");
+    BasicBlock * const finalizeAfterJoinThread = b->CreateBasicBlock("finalizeAfterJoinThread");
     BasicBlock * const joinedThreads = b->CreateBasicBlock("joinedThreads");
 
     BasicBlock * const joinThreadEntry = b->GetInsertBlock();
 
     // join the threads and destroy any state objects
-    b->CreateCondBr(moreThanOneThread, joinThread, joinedThreads);
+    b->CreateCondBr(moreThanOneThread, checkStatusOfThread, joinedThreads);
 
-    b->SetInsertPoint(joinThread);
+    b->SetInsertPoint(checkStatusOfThread);
     PHINode * const joinThreadIndex = b->CreatePHI(sizeTy, 2);
     joinThreadIndex->addIncoming(sz_ONE, joinThreadEntry);
     PHINode * finalTerminationSignalPhi = nullptr;
@@ -602,13 +707,20 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
 
     fieldIndex[0] = joinThreadIndex;
-    fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
+    fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+    Value * const statusFlag = b->CreateLoad(b->CreateInBoundsGEP(threadStateArray, fieldIndex));
+    b->CreateCondBr(b->CreateICmpNE(statusFlag, sz_ZERO), joinThread, finalizeAfterJoinThread);
 
+    b->SetInsertPoint(joinThread);
+    fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
     FixedArray<Value *, 2> pthreadJoinArgs;
     Value * threadId = b->CreateLoad(b->CreateInBoundsGEP(threadStateArray, fieldIndex));
     pthreadJoinArgs[0] = threadId;
     pthreadJoinArgs[1] = status;
     b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
+    b->CreateBr(finalizeAfterJoinThread);
+
+    b->SetInsertPoint(finalizeAfterJoinThread);
 
     // calculate the last segment # used by any kernel in case any reports require it.
     Value * finalSegNo = nullptr;
@@ -650,7 +762,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         finalSegNoPhi->addIncoming(finalSegNo, joinThreadExit);
     }
     Value * const joinMoreThreads = b->CreateICmpULT(nextJoinIndex, maximumNumOfThreads);
-    b->CreateCondBr(joinMoreThreads, joinThread, joinedThreads);
+    b->CreateCondBr(joinMoreThreads, checkStatusOfThread, joinedThreads);
 
     b->SetInsertPoint(joinedThreads);
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
@@ -687,7 +799,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->CreateStore(mSegNo, ptr);
         concludeStridesPerSegmentRecording(b);
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -772,6 +883,11 @@ StructType * PipelineCompiler::getThreadStuctType(BuilderRef b, const std::vecto
         fields[TERMINATION_SIGNAL] = sizeTy;
     } else {
         fields[TERMINATION_SIGNAL] = emptyTy;
+    }
+    if (mUseDynamicMultithreading) {
+        fields[CURRENT_THREAD_STATUS_FLAG] = sizeTy;
+    } else {
+        fields[CURRENT_THREAD_STATUS_FLAG] = emptyTy;
     }
 
     DataLayout dl(b->getModule());

@@ -179,7 +179,8 @@ Kernel * ProgramBuilder::makeKernel() {
         ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
         ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
         ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingSynchronizationThreshold);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingAddSynchronizationThreshold);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingRemoveSynchronizationThreshold);
     } else {
         ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
     }

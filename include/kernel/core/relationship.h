@@ -193,7 +193,8 @@ enum class CommandLineScalarType {
     MinThreadCount
     , MaxThreadCount
     , DynamicMultithreadingPeriod
-    , DynamicMultithreadingSynchronizationThreshold
+    , DynamicMultithreadingAddSynchronizationThreshold
+    , DynamicMultithreadingRemoveSynchronizationThreshold
     #ifdef ENABLE_PAPI
     , PAPIEventSet
     , PAPIEventList
