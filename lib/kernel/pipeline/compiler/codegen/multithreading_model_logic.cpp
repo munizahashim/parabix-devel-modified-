@@ -396,6 +396,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
             BasicBlock * checkSynchronizationCostLoop = b->CreateBasicBlock("checkSynchronizationCostLoop", mPipelineEnd);
             BasicBlock * checkToAddThread = b->CreateBasicBlock("checkToAddThread", mPipelineEnd);
+
             BasicBlock * selectThreadStructToUseForAddThread = b->CreateBasicBlock("selectThreadStructToUseForAddThread", mPipelineEnd);
             BasicBlock * checkIfThreadIsCancelled = b->CreateBasicBlock("checkIfThreadIsCancelled", mPipelineEnd);
             BasicBlock * joinCancelledThread = b->CreateBasicBlock("joinCancelledThread", mPipelineEnd);
@@ -410,37 +411,39 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
                 recordBeforeNextSegment = b->CreateBasicBlock("recordBeforeNextSegment", nextSegment);
             }
+
+
             Value * const check = b->CreateICmpUGE(mSegNo, nextCheckSegmentPhi);
             FixedArray<Value *, 2> indices2;
 
-//            BasicBlock * const loopEntry = b->GetInsertBlock();
-//            b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
+            BasicBlock * const loopEntry = b->GetInsertBlock();
+            b->CreateUnlikelyCondBr(check, checkSynchronizationCostLoop, nextSegment);
 
-//            b->SetInsertPoint(checkSynchronizationCostLoop);
-//            PHINode * const indexPhi = b->CreatePHI(sizeTy, 2);
-//            indexPhi->addIncoming(sz_ZERO, loopEntry);
-//            PHINode * const segmentTimeAccumPhi = b->CreatePHI(sizeTy, 2);
-//            segmentTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
-//            PHINode * const synchronizationTimeAccumPhi = b->CreatePHI(sizeTy, 2);
-//            synchronizationTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
+            b->SetInsertPoint(checkSynchronizationCostLoop);
+            PHINode * const indexPhi = b->CreatePHI(sizeTy, 2);
+            indexPhi->addIncoming(sz_ZERO, loopEntry);
+            PHINode * const segmentTimeAccumPhi = b->CreatePHI(sizeTy, 2);
+            segmentTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
+            PHINode * const synchronizationTimeAccumPhi = b->CreatePHI(sizeTy, 2);
+            synchronizationTimeAccumPhi->addIncoming(sz_ZERO, loopEntry);
 
             indices2[0] = indexPhi;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
             Value * const segTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
             Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(segTimePtr));
- //           segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
+            segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
             Value * const syncTimePtr = b->CreateInBoundsGEP(threadStruct, indices2);
             Value * const nextSyncTime = b->CreateAdd(synchronizationTimeAccumPhi, b->CreateLoad(syncTimePtr));
-//            synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
+            synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
 
-//            Value * const nextIndex = b->CreateAdd(indexPhi, b->getSize(1));
-//            indexPhi->addIncoming(nextIndex, checkSynchronizationCostLoop);
-//            Value * const hasMore = b->getFalse(); // b->CreateICmpNE(nextIndex, activeThreadsPhi);
-//            b->CreateCondBr(hasMore, checkSynchronizationCostLoop, checkToAddThread);
+            Value * const nextIndex = b->CreateAdd(indexPhi, b->getSize(1));
+            indexPhi->addIncoming(nextIndex, checkSynchronizationCostLoop);
+            Value * const hasMore = b->getFalse(); // b->CreateICmpNE(nextIndex, activeThreadsPhi);
+            b->CreateCondBr(hasMore, checkSynchronizationCostLoop, checkToAddThread);
 
-//            b->SetInsertPoint(checkToAddThread);
+            b->SetInsertPoint(checkToAddThread);
             Type * const floatTy = b->getFloatTy();
             Value * const fSegTime = b->CreateUIToFP(nextSegTime, floatTy);
             Value * const fSyncTime = b->CreateUIToFP(nextSyncTime, floatTy);
@@ -532,8 +535,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
                 b->SetInsertPoint(recordBeforeNextSegment);
 
                 numOfThreadsPhi = b->CreatePHI(sizeTy, 2);
-                numOfThreadsPhi->addIncoming(activeThreadsPhi, checkToRemoveThread);
                 numOfThreadsPhi->addIncoming(numOfThreadsAfterAdd, addThread);
+                numOfThreadsPhi->addIncoming(activeThreadsPhi, checkToRemoveThread);
                 numOfThreadsPhi->addIncoming(numOfThreadsAfterRemoval, removeThread);
 
                 recordDynamicThreadingState(b, mSegNo, fSyncOverhead, numOfThreadsPhi);
@@ -549,7 +552,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
                 startOfNextPeriodPhi->addIncoming(startOfNextPeriod, recordBeforeNextSegmentExit);
             } else {
-                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkToAddThread);
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, addThread);
+                startOfNextPeriodPhi->addIncoming(startOfNextPeriod, removeThread);
                 startOfNextPeriodPhi->addIncoming(startOfNextPeriod, checkToRemoveThread);
             }
 
@@ -559,8 +563,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
                 currentNumOfThreadsPhi->addIncoming(numOfThreadsPhi, recordBeforeNextSegmentExit);
             } else {
-                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterAdd, checkToAddThread);
-                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterRemoval, checkToRemoveThread);
+                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterAdd, addThread);
+                currentNumOfThreadsPhi->addIncoming(activeThreadsPhi, checkToRemoveThread);
+                currentNumOfThreadsPhi->addIncoming(numOfThreadsAfterRemoval, removeThread);
             }
         }
 
@@ -707,9 +712,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
 
     fieldIndex[0] = joinThreadIndex;
-    fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-    Value * const statusFlag = b->CreateLoad(b->CreateInBoundsGEP(threadStateArray, fieldIndex));
-    b->CreateCondBr(b->CreateICmpNE(statusFlag, sz_ZERO), joinThread, finalizeAfterJoinThread);
+    if (mUseDynamicMultithreading) {
+        fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
+        Value * const statusFlag = b->CreateLoad(b->CreateInBoundsGEP(threadStateArray, fieldIndex));
+        b->CreateCondBr(b->CreateICmpNE(statusFlag, sz_ZERO), joinThread, finalizeAfterJoinThread);
+    } else {
+        b->CreateBr(joinThread);
+    }
 
     b->SetInsertPoint(joinThread);
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
