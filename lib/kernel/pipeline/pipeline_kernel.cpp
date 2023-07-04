@@ -675,13 +675,13 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                     value = b->getSize(codegen::SegmentThreads);
                     break;
                 case C::DynamicMultithreadingPeriod:
-                    value = b->getSize(100);
+                    value = b->getSize(codegen::DynamicMultithreadingPeriod);
                     break;
                 case C::DynamicMultithreadingAddSynchronizationThreshold:
-                    value = ConstantFP::get(b->getFloatTy(), 10.0); // %
+                    value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
                     break;
                 case C::DynamicMultithreadingRemoveSynchronizationThreshold:
-                    value = ConstantFP::get(b->getFloatTy(), 15.0); // %
+                    value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingRemoveThreshold); // %
                     break;
                 #ifdef ENABLE_PAPI
                 case C::PAPIEventSet:

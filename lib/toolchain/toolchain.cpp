@@ -137,6 +137,18 @@ bool EnableDynamicMultithreading;
 static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
+float DynamicMultithreadingAddThreshold;
+static cl::opt<float, true> DynamicMultithreadingAddThresholdOption("dynamic-multithreading-add-threshold", cl::location(DynamicMultithreadingAddThreshold), cl::init(10.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+float DynamicMultithreadingRemoveThreshold;
+static cl::opt<float, true> DynamicMultithreadingRemoveThresholdOption("dynamic-multithreading-remove-threshold", cl::location(DynamicMultithreadingRemoveThreshold), cl::init(15.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+size_t DynamicMultithreadingPeriod;
+static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithreading-period", cl::location(DynamicMultithreadingPeriod), cl::init(100),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
 
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),
                                                     cl::desc("The number of free calls to allow in bisecting"), cl::cat(CodeGenOptions));
