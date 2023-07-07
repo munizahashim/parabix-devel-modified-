@@ -826,6 +826,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         #endif
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
+        assert (NumOfPAPIEvents > 0);
         if (EnableCycleCounter || NumOfPAPIEvents) {
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI

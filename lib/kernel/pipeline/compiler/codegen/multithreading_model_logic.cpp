@@ -246,7 +246,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     debugInit(b);
     #endif
     #ifdef ENABLE_PAPI
-    createPAPIMeasurementArrays(b);
+    ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
+    PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIKernelStart");
+    PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIBefore");
+    PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIAfter");
     getPAPIEventSet(b);
     #endif
     Value * segmentStartTime = nullptr;
@@ -325,12 +328,21 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         }
 
         #ifdef ENABLE_PAPI
-        createPAPIMeasurementArrays(b);
-        getPAPIEventSet(b);
-        registerPAPIThread(b);
+        Value * PAPIPipelineStartMeasurementArray = nullptr;
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            PAPIPipelineStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIStart");
+            PAPIReadKernelStartMeasurementArray = nullptr;
+            PAPIReadBeforeMeasurementArray = nullptr;
+            PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIAfter");
+            getPAPIEventSet(b);
+            registerPAPIThread(b);
+        }
         #endif
 
         startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+        #ifdef ENABLE_PAPI
+        readPAPIMeasurement(b, PipelineInput, PAPIPipelineStartMeasurementArray);
+        #endif
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugInit(b);
@@ -605,7 +617,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         #endif
 
         #ifdef ENABLE_PAPI
-        stopPAPI(b);
+        recordTotalPAPIMeasurement(b, PAPIPipelineStartMeasurementArray);
         #endif
 
         updateTotalCycleCounterTime(b);
@@ -1030,12 +1042,21 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     mNumOfFixedThreads = b->getSize(1);
 
     #ifdef ENABLE_PAPI
-    createPAPIMeasurementArrays(b);
-    getPAPIEventSet(b);
-    Value * const es = PAPIEventSetVal;
+    Value * PAPIReadPipelineStartMeasurementArray = nullptr;
+    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
+        PAPIReadPipelineStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        getPAPIEventSet(b);
+    }
     #endif
 
     startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+    #ifdef ENABLE_PAPI
+    readPAPIMeasurement(b, PipelineInput, PAPIReadPipelineStartMeasurementArray);
+    #endif
 
     start(b);
 
@@ -1055,8 +1076,16 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
         executeKernel(b);
     }
     end(b);
+
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
+
+    #ifdef ENABLE_PAPI
+    recordTotalPAPIMeasurement(b, PAPIReadPipelineStartMeasurementArray);
+    #endif
+
+    updateTotalCycleCounterTime(b);
+
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         // TODO: this isn't fully correct when this is a nested pipeline
         concludeStridesPerSegmentRecording(b);
@@ -1119,12 +1148,6 @@ void PipelineCompiler::end(BuilderRef b) {
         debugPrint(b, "================================================= END %" PRIx64, getHandle());
     }
     #endif
-
-    #ifdef ENABLE_PAPI
-    stopPAPI(b);
-    #endif
-
-    updateTotalCycleCounterTime(b);
 
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;

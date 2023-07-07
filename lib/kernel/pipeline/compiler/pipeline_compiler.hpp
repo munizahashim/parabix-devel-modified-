@@ -51,8 +51,8 @@ enum PAPIKernelCounter {
   , PAPI_KERNEL_TOTAL = 5
   // ------------------
   , NUM_OF_PAPI_COUNTERS = 6
-  // ------------------
-  , PAPI_FULL_PIPELINE_TIME = 0
+//  // ------------------
+//  , PAPI_FULL_PIPELINE_TIME = 0
 };
 #endif
 
@@ -522,6 +522,7 @@ public:
     void createPAPIMeasurementArrays(BuilderRef b);
     void readPAPIMeasurement(BuilderRef b, const unsigned kernelId, Value * const measurementArray) const;
     void accumPAPIMeasurementWithoutReset(BuilderRef b, Value * const beforeMeasurement, const unsigned kernelId, const PAPIKernelCounter measurementType) const;
+    void recordTotalPAPIMeasurement(BuilderRef b, Value * const beforeMeasurement) const;
     void unregisterPAPIThread(BuilderRef b) const;
     void startPAPI(BuilderRef b);
     void stopPAPI(BuilderRef b);
@@ -882,7 +883,7 @@ protected:
     //SmallVector<int, 8>                         PAPIEventList;
     Value *                                     PAPIEventSet = nullptr;
     Value *                                     PAPIEventSetVal = nullptr;
-    Value *                                     PAPIReadInitialMeasurementArray = nullptr;
+    Value *                                     PAPIReadKernelStartMeasurementArray = nullptr;
     Value *                                     PAPIReadBeforeMeasurementArray = nullptr;
     Value *                                     PAPIReadAfterMeasurementArray = nullptr;
     #endif

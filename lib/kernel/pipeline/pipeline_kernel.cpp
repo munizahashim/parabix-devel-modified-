@@ -35,6 +35,18 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         report_fatal_error(out.str());
     }
 
+    //    if (codegen::SegmentThreads > 1 || codegen::EnableDynamicMultithreading) {
+            const auto rvalThreaedInit = PAPI_thread_init(pthread_self);
+            if (rvalThreaedInit != PAPI_OK) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream out(tmp);
+                out << "PAPI Thread Init Error: ";
+                out << PAPI_strerror(rvalThreaedInit);
+                report_fatal_error(out.str());
+            }
+    //    }
+
+
     assert (!codegen::PapiCounterOptions.empty());
 
     tokenizer<escaped_list_separator<char>> events(codegen::PapiCounterOptions);
@@ -78,15 +90,13 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         report_fatal_error(out.str());
     }
 
-    if (codegen::SegmentThreads > 1 || codegen::EnableDynamicMultithreading) {
-        const auto rvalThreaedInit = PAPI_thread_init(pthread_self);
-        if (rvalThreaedInit != PAPI_OK) {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream out(tmp);
-            out << "PAPI Thread Init Error: ";
-            out << PAPI_strerror(rvalThreaedInit);
-            report_fatal_error(out.str());
-        }
+    const auto rvalStart = PAPI_start(EventSet);
+    if (rvalAddEvents != PAPI_OK) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "PAPI Start Error: ";
+        out << PAPI_strerror(rvalCreateEventSet < PAPI_OK ? rvalCreateEventSet : PAPI_EINVAL);
+        report_fatal_error(out.str());
     }
 
     return EventSet;
@@ -651,10 +661,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     #ifdef ENABLE_PAPI
     Value * eventSet = nullptr;
     Value * eventListVal = nullptr;
+
+
+
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
         SmallVector<int, 8> eventList;
         Type * const intTy = TypeBuilder<int, false>::get(b->getContext());
         eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
+        b->CallPrintInt(" --- eventSet", eventSet);
         const auto n = eventList.size();
         Constant * const initializer = ConstantDataArray::get(b->getContext(), ArrayRef<int>(eventList.data(), n));
         eventListVal = new GlobalVariable(*m, intTy, true, GlobalVariable::ExternalLinkage, initializer);

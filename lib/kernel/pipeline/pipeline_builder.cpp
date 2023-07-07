@@ -539,8 +539,6 @@ Kernel * PipelineBuilder::makeKernel() {
 
     mTarget->mKernelName = PipelineKernel::makePipelineHashName(signature);
 
-  //  errs() << mTarget->mKernelName << " -> " << signature << "\n\n";
-
     return mTarget;
 }
 
