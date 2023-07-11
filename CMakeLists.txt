@@ -122,6 +122,39 @@ message(STATUS "Report PAPI tests was not enabled")
 endif()
 endif()
 
+###   Import Dependency: LibBacktrace   ###
+
+IF (CMAKE_BUILD_TYPE MATCHES Debug)
+# MacOS stores debug info in dsym files but this information does not seem
+# to be accessible by libbacktrace.
+IF (NOT APPLE)
+    find_package(LIBBACKTRACE)
+    if (LIBBACKTRACE_FOUND)
+        find_package(Libunwind)
+        if (NOT LIBUNWIND_FOUND)
+            find_package(Backtrace)
+        endif()
+        if (LIBUNWIND_FOUND OR BACKTRACE_FOUND)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_LIBBACKTRACE -g")
+            SET (CMAKE_ENABLE_EXPORTS TRUE)
+#            if(APPLE)
+#            set(CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf")
+#            endif()
+            if (LIBUNWIND_FOUND)
+            include_directories(${LIBUNWIND_INCLUDE_DIR})
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_LIBUNWIND")
+            endif()
+            if (BACKTRACE_FOUND)
+            include_directories(${Backtrace_INCLUDE_DIRS})
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_BACKTRACE")
+            endif()
+            include_directories(${LIBBACKTRACE_INCLUDE_DIRS})
+            add_link_options("-g")
+        endif()
+    endif()
+endif()
+endif()
+
 ###   Project Configuration   ###
 
 # Require that compilers support all features of C14 and C++14.
@@ -205,24 +238,10 @@ endfunction(parabix_set_library_name)
 
 include(CMakeParseArguments)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    include(CheckIncludeFileCXX)
-    CHECK_INCLUDE_FILE_CXX(execinfo.h HAS_EXECINFO)
-    if (HAS_EXECINFO)
-        ###   Import Dependency: DWARF   ###
-        #find_package(LibDwarf) # libelf-dev libdwarf-dev
-        #if (LIBDWARF_FOUND)
-        #    include_directories(${LIBDWARF_INCLUDE_DIRS})
-        #    link_directories(${LIBDWARF_LIBRARIES})
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_ASSERTION_TRACE")
-        #endif()
-    endif()
-endif()
-
 # Release & Debug flags
 
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -g2 -ggdb -fvisibility=default -fno-omit-frame-pointer -fno-optimize-sibling-calls")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -fvisibility=default -fno-omit-frame-pointer -fno-optimize-sibling-calls")
 
 # Disable RunTime Type Information
 if(MSVC) # using Visual Studio C++
@@ -258,25 +277,29 @@ function(parabix_add_module)
             add_library(${ARG_NAME} SHARED ${ARG_SRC})
         endif()
         parabix_set_library_name(${ARG_NAME})
-        target_link_libraries(${ARG_NAME} ${ARG_DEPS})
+        target_link_libraries(${ARG_NAME} PUBLIC ${ARG_DEPS})
         if (ARG_REQUIRES_RTTI)
-            target_compile_options(${ARG_NAME} PRIVATE ${RTTI})
+            target_compile_options(${ARG_NAME} PUBLIC ${RTTI})
         else()
-            target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
+            target_compile_options(${ARG_NAME} PUBLIC ${NO_RTTI})
         endif()
         if (ARG_USES_Z3)
-            target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
-        endif()
-        if (ARG_USES_CERNROOT AND ROOT_FOUND)
-            target_link_libraries(${ARG_NAME} ${ROOT_LIBRARIES})
-            string(REPLACE " " ";" REPLACED_FLAGS ${ROOT_CXX_FLAGS})
-            target_compile_options(${ARG_NAME} PRIVATE ${REPLACED_FLAGS})
+            target_link_libraries(${ARG_NAME} PUBLIC ${Z3_LIBRARIES})
         endif()
         if (ENABLE_PAPI)
-            target_link_libraries(${ARG_NAME} ${PAPI_LIBRARIES})
+            target_link_libraries(${ARG_NAME} PUBLIC ${PAPI_LIBRARIES})
         endif()
-        if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
-            target_link_libraries(${ARG_NAME} ${CMAKE_DL_LIBS})
+        if (LIBBACKTRACE_FOUND)
+            target_link_libraries(${ARG_NAME} PUBLIC ${LIBBACKTRACE_LIBRARIES})
+            if (LIBUNWIND_FOUND)
+                target_link_libraries(${ARG_NAME} PUBLIC ${LIBUNWIND_LIBRARIES})
+            endif()
+            if (BACKTRACE_FOUND)
+                target_link_libraries(${ARG_NAME} PUBLIC ${Backtrace_LIBRARIES})
+            endif()
+        endif()
+        IF (CMAKE_BUILD_TYPE MATCHES Debug)
+            target_link_libraries(${ARG_NAME} PUBLIC ${CMAKE_DL_LIBS})
         endif()
     endif()
 endfunction(parabix_add_module)
@@ -394,7 +417,7 @@ add_subdirectory(tests)
 
 # Target definition for single library
 if(ARTIFACT_MODE STREQUAL "Single")
-    target_link_libraries(${PARABIX_MONO_TARGET} ${REQ_LLVM_LIBRARIES} ${Boost_LIBRARIES} ${Z3_LIBRARIES})
+    target_link_libraries(${PARABIX_MONO_TARGET} ${REQ_LLVM_LIBRARIES} ${Boost_LIBRARIES} ${Z3_LIBRARIES} ${LIBBACKTRACE_LIBRARIES})
 endif()
 
 ###   Test Suite   ###

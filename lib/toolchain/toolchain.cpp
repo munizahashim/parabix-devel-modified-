@@ -267,7 +267,14 @@ bool LLVM_READONLY AnyDebugOptionIsSet() {
     return DebugOptions.getBits() != 0;
 }
 
-std::string ProgramName;
+bool LLVM_READONLY AnyAssertionOptionIsSet() {
+    #ifdef FORCE_ASSERTIONS
+    return true;
+    #endif
+    return DebugOptions.isSet(DebugFlags::EnableAsserts) || DebugOptions.isSet(DebugFlags::EnablePipelineAsserts);
+}
+
+const char * ProgramName;
 
 inline bool disableObjectCacheDueToCommandLineOptions() {
     if (!TraceOption.empty()) return true;

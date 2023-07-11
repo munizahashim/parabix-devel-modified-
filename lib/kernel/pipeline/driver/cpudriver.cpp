@@ -310,7 +310,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     // better "wrapper" method for that that allows easier access to the output scalars.
 
     const auto e = true; // pk->containsKernelFamilyCalls() || pk->generatesDynamicRepeatingStreamSets();
-    const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;
+    const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;    
     Function * const main = pk->addOrDeclareMainFunction(mBuilder, method);
     mBuilder->setModule(mMainModule);
 

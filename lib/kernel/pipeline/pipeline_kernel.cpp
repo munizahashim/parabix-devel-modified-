@@ -586,6 +586,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     assert (main->empty());
 
+    #ifdef ENABLE_LIBBACKTRACE
+    b->resetAssertionTraces();
+    #endif
+
     b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
     auto arg = main->arg_begin();
     auto nextArg = [&]() -> Value * {

@@ -54,6 +54,10 @@ void KernelCompiler::generateKernel(BuilderRef b) {
     // exits without restoring the original compiler state.
     auto const oc = b->getCompiler();
     b->setCompiler(this);
+    #ifdef ENABLE_LIBBACKTRACE
+    if (LLVM_UNLIKELY(codegen::AnyAssertionOptionIsSet()))
+        b->resetAssertionTraces();
+    #endif
     constructStreamSetBuffers(b);
     #ifndef NDEBUG
     for (const auto & buffer : mStreamSetInputBuffers) {
@@ -157,7 +161,6 @@ inline void reset(Vec & vec, const size_t n) {
  * @brief callGenerateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
-    b->setCompiler(this);
     mCurrentMethod = mTarget->getInitializeFunction(b);
     mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
     b->SetInsertPoint(mEntryPoint);
@@ -211,7 +214,6 @@ void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, A
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b) {
     if (mTarget->hasThreadLocal()) {
-        b->setCompiler(this);
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getInitializeThreadLocalFunction(b);
         mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
@@ -255,7 +257,6 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(BuilderRef b) {
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets())) {
-        b->setCompiler(this);
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateSharedInternalStreamSetsFunction(b);
         mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
@@ -284,7 +285,6 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(Builder
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(BuilderRef b) {
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets() && mTarget->hasThreadLocal())) {
-        b->setCompiler(this);
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateThreadLocalInternalStreamSetsFunction(b);
         mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
@@ -744,7 +744,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
     assert (mInputStreamSets.size() == mStreamSetInputBuffers.size());
     assert (mOutputStreamSets.size() == mStreamSetOutputBuffers.size());
 
-    b->setCompiler(this);
     mCurrentMethod = mTarget->getDoSegmentFunction(b);
     mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
     b->SetInsertPoint(mEntryPoint);
@@ -817,7 +816,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) {
     if (mTarget->hasThreadLocal()) {
-        b->setCompiler(this);
         mCurrentMethod = mTarget->getFinalizeThreadLocalFunction(b);
         mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
         b->SetInsertPoint(mEntryPoint);
@@ -844,7 +842,6 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) 
  * @brief callGenerateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
-    b->setCompiler(this);
     mCurrentMethod = mTarget->getFinalizeFunction(b);
     mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
     b->SetInsertPoint(mEntryPoint);
