@@ -32,7 +32,7 @@ if (ARTIFACT_TYPE STREQUAL "Shared")
         # We also need to declare this link PRIVATE or else it won't work. I don't
         # know why as it seems very counter intuitive, but it doesn't work any other
         # way.
-        target_link_libraries(toolchain PRIVATE -all_load ${REQ_LLVM_LIBRARIES})
+        target_link_libraries(toolchain PUBLIC -all_load ${REQ_LLVM_LIBRARIES})
     else()
         # On Linux we use --whole-archive to embed the symbols from LLVMSupport into
         # this shared library so that, when other libraries need to locate the global
@@ -42,11 +42,11 @@ if (ARTIFACT_TYPE STREQUAL "Shared")
         #
         # We can't embed symbols from all LLVM libraries as the GNU linker fails with
         # multiple definition errors (this doesn't happend with the Darwin linker).
-        target_link_libraries(toolchain
+        target_link_libraries(toolchain PUBLIC
             -Wl,--whole-archive LLVMSupport -Wl,--no-whole-archive
             ${REQ_LLVM_LIBRARIES})
     endif(APPLE)
 else()
     # Build static libraries
-    target_link_libraries(toolchain ${REQ_LLVM_LIBRARIES})
+    target_link_libraries(toolchain PUBLIC ${REQ_LLVM_LIBRARIES})
 endif()

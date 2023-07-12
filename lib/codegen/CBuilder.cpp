@@ -54,14 +54,7 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 #include <backtrace-supported.h>
 #if BACKTRACE_SUPPORTED == 1
 #include <backtrace.h>
-#ifdef ENABLE_LIBUNWIND
-#define UNW_LOCAL_ONLY
-#include <libunwind.h>
-#undef ENABLE_BACKTRACE
-#endif
-#ifdef ENABLE_BACKTRACE
-#include <execinfo.h>
-#endif
+#include <unwind.h>
 #include <cxxabi.h>
 #else
 #undef ENABLE_LIBBACKTRACE
@@ -966,9 +959,9 @@ Value * CBuilder::CreateRemoveCall(Value * path) {
 }
 
 struct __backtrace_data {
-    const char * FileName;
-    const char * FunctionName;
-    uint32_t LineNo;
+    const char * FileName = nullptr;
+    const char * FunctionName = nullptr;
+    uint32_t LineNo = 0;
 } __attribute__((packed));
 
 extern "C"
@@ -1039,20 +1032,30 @@ void __report_failure(const char * name, const char * fmt, const __backtrace_dat
 #ifdef ENABLE_LIBBACKTRACE
 extern "C"
 BOOST_NOINLINE
-int __backtrace_callback(void * data, uintptr_t, const char *filename, int lineno, const char *function) {
+int __backtrace_callback(void * data, uintptr_t /* pc */, const char *filename, int lineno, const char *function) {
+    if (lineno == 0) {
+        return -1;
+    }
     auto pc_data = reinterpret_cast<__backtrace_data*>(data);
     pc_data->FileName = filename;
-    // demangle function name
-    int status;
-    char *demangled = abi::__cxa_demangle(function, nullptr, nullptr, &status);
-    if (LLVM_LIKELY(status == 0)) {
-        pc_data->FunctionName = demangled;
-    } else {
-        pc_data->FunctionName = function;
-    }
+    pc_data->FunctionName = function;
     pc_data->LineNo = lineno;
     return 0;
 }
+
+extern "C"
+BOOST_NOINLINE
+void __backtrace_syminfo_callback(void * data, uintptr_t /* pc */, const char *symname, uintptr_t symval, uintptr_t symsize) {
+    auto pc_data = reinterpret_cast<__backtrace_data*>(data);
+    pc_data->FileName = nullptr;
+    pc_data->FunctionName = symname;
+    pc_data->LineNo = 0;
+}
+
+typedef void (*backtrace_syminfo_callback) (void *data, uintptr_t pc,
+                        const char *symname,
+                        uintptr_t symval,
+                        uintptr_t symsize);
 
 extern "C"
 BOOST_NOINLINE
@@ -1063,6 +1066,25 @@ void __backtrace_error_callback(void *data, const char *msg, int errnum) {
     llvm::report_fatal_error(out.str());
 }
 #endif
+
+using CallStack = SmallVector<uintptr_t, 64>;
+
+static _Unwind_Reason_Code
+__unwind_callback (struct _Unwind_Context *context, void *data) {
+    CallStack * callstack = static_cast<CallStack *>(data);
+    uintptr_t pc;
+    #ifdef HAVE_GETIPINFO
+    int ip_before_insn = 0;
+    pc = _Unwind_GetIPInfo (context, &ip_before_insn);
+    if (!ip_before_insn) {
+      --pc;
+    }
+    #else
+    pc = _Unwind_GetIP (context);
+    #endif
+    callstack->push_back(pc);
+    return _URC_NO_REASON;
+}
 
 void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::initializer_list<Value *> params) {
 
@@ -1186,48 +1208,39 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         // TODO: implement a tree structure and traverse from the bottom up, stopping when it
         // determines the correct parent?
 
-        SmallVector<uintptr_t, 64> stack(64);
-        size_t n = 0;
-        #ifdef ENABLE_LIBUNWIND
-        unw_cursor_t cursor; unw_context_t uc;
-        unw_word_t ip;
-        unw_getcontext(&uc);
-        unw_init_local(&cursor, &uc);
-        while (unw_step(&cursor) > 0) {
-            unw_get_reg(&cursor, UNW_REG_IP, &ip);
-            if (n == stack.capacity()) {
-                stack.resize(stack.capacity() * 2);
-            }
-            stack[n++] = ip;
-        }
-        #endif
-        #ifdef ENABLE_BACKTRACE
-        for (;;) {
-            n = backtrace(reinterpret_cast<void **>(stack.data()), stack.capacity());
-            if (LLVM_LIKELY(n < stack.capacity())) {
-                break;
-            }
-            stack.resize(stack.capacity() * 2);
-        }
-        #endif
-
-        constexpr unsigned FIRST_NON_ASSERT = 2;
+        CallStack callstack;
+        _Unwind_Backtrace (__unwind_callback, &callstack);
+        const auto n = callstack.size();
 
         SmallVector<Constant *, 64> traceArray(n);
-        // assert (codegen::ProgramName);
         const auto state = reinterpret_cast<backtrace_state *>(mBacktraceState);
 
         StructType * const structTy = cast<StructType>(structPtrTy->getPointerElementType());
         for (unsigned p = 0; p < n; ++p) {
-            const auto pc = stack[p];
+            const auto pc = callstack[p];
             const auto f = mBacktraceSymbols.find(pc);
             if (f == mBacktraceSymbols.end()) {
-//              //  const auto state = reinterpret_cast<backtrace_state *>(mBacktraceState);
                 __backtrace_data data;
-                backtrace_pcinfo(state, 0, &__backtrace_callback, &__backtrace_error_callback, &data);
+                const auto r = backtrace_pcinfo(state, pc, &__backtrace_callback, &__backtrace_error_callback, &data);
+                if (LLVM_UNLIKELY(r == -1)) {
+                    backtrace_syminfo(state, pc, &__backtrace_syminfo_callback, &__backtrace_error_callback, &data);
+                }
                 FixedArray<Constant *, 3> values;
-                values[0] = GetString(data.FileName);
-                values[1] = GetString(data.FunctionName);
+                values[0] = GetString(data.FileName ? data.FileName : "");
+                Constant * funcName = nullptr;
+                if (data.FunctionName) {
+                    int status;
+                    char *demangled = abi::__cxa_demangle(data.FunctionName, nullptr, nullptr, &status);
+                    if (LLVM_LIKELY(status == 0)) {
+                        funcName = GetString(demangled);
+                        free(demangled);
+                    } else {
+                        funcName = GetString(data.FunctionName);
+                    }
+                } else {
+                    funcName = GetString("");
+                }
+                values[1] = funcName;
                 values[2] = getInt32(data.LineNo);
                 Constant * symbol = ConstantStruct::get(structTy, values);
                 Constant * symbolPtr = new GlobalVariable(*m, structTy, true, GlobalVariable::InternalLinkage, symbol);
