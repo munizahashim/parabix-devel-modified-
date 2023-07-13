@@ -3,7 +3,7 @@
 #  LIBUNWIND_FOUND       - True if libunwind was found.
 #  LIBUNWIND_LIBRARIES   - The libraries needed to use libunwind
 #  LIBUNWIND_INCLUDE_DIR - Location of unwind.h and libunwind.h
- 
+
 FIND_PATH(LIBUNWIND_INCLUDE_DIR libunwind.h)
 
 SET(LIBUNWIND_FOUND TRUE)
@@ -13,7 +13,7 @@ elseif(NOT EXISTS "${LIBUNWIND_INCLUDE_DIR}/unwind.h")
   SET(LIBUNWIND_FOUND FALSE)
   SET(LIBUNWIND_INCLUDE_DIR "")
 endif()
- 
+
 FIND_LIBRARY(LIBUNWIND_GENERIC_LIBRARY "unwind")
 
 if (NOT LIBUNWIND_GENERIC_LIBRARY)

@@ -36,8 +36,6 @@ using boost::intrusive::detail::floor_log2;
 
 static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 
-#define DBOOST_STACKTRACE_USE_ADDR2LINE
-
 #ifdef HAS_ADDRESS_SANITIZER
 #include <llvm/Analysis/AliasAnalysis.h>
 #endif
@@ -54,7 +52,12 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 #include <backtrace-supported.h>
 #if BACKTRACE_SUPPORTED == 1
 #include <backtrace.h>
+#ifdef HAS_LIBUNWIND
 #include <unwind.h>
+#endif
+#ifdef HAS_BACKTRACE
+#include <execinfo.h>
+#endif
 #include <cxxabi.h>
 #else
 #undef ENABLE_LIBBACKTRACE
@@ -1033,14 +1036,11 @@ void __report_failure(const char * name, const char * fmt, const __backtrace_dat
 extern "C"
 BOOST_NOINLINE
 int __backtrace_callback(void * data, uintptr_t /* pc */, const char *filename, int lineno, const char *function) {
-    if (lineno == 0) {
-        return -1;
-    }
     auto pc_data = reinterpret_cast<__backtrace_data*>(data);
     pc_data->FileName = filename;
     pc_data->FunctionName = function;
     pc_data->LineNo = lineno;
-    return 0;
+    return (lineno == 0) ? 0 : 1;
 }
 
 extern "C"
@@ -1052,23 +1052,19 @@ void __backtrace_syminfo_callback(void * data, uintptr_t /* pc */, const char *s
     pc_data->LineNo = 0;
 }
 
-typedef void (*backtrace_syminfo_callback) (void *data, uintptr_t pc,
-                        const char *symname,
-                        uintptr_t symval,
-                        uintptr_t symsize);
-
 extern "C"
 BOOST_NOINLINE
-void __backtrace_error_callback(void *data, const char *msg, int errnum) {
-    SmallVector<char, 256> tmp;
-    raw_svector_ostream out(tmp);
-    out << "Stacktrace error " << errnum << ": " << msg;
-    llvm::report_fatal_error(out.str());
+void __backtrace_ignored_error_callback(void *data, const char *msg, int errnum) {
+    auto pc_data = reinterpret_cast<__backtrace_data*>(data);
+    pc_data->FileName = nullptr;
+    pc_data->FunctionName = nullptr;
+    pc_data->LineNo = 0;
 }
 #endif
 
 using CallStack = SmallVector<uintptr_t, 64>;
 
+#if HAS_LIBUNWIND
 static _Unwind_Reason_Code
 __unwind_callback (struct _Unwind_Context *context, void *data) {
     CallStack * callstack = static_cast<CallStack *>(data);
@@ -1085,6 +1081,7 @@ __unwind_callback (struct _Unwind_Context *context, void *data) {
     callstack->push_back(pc);
     return _URC_NO_REASON;
 }
+#endif
 
 void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::initializer_list<Value *> params) {
 
@@ -1209,7 +1206,19 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         // determines the correct parent?
 
         CallStack callstack;
+        #ifdef HAS_LIBUNWIND
         _Unwind_Backtrace (__unwind_callback, &callstack);
+        #endif
+        #ifdef HAS_BACKTRACE
+        for (;;) {
+            const size_t n = backtrace(reinterpret_cast<void **>(callstack.data()), callstack.capacity());
+            if (LLVM_LIKELY(n < callstack.capacity())) {
+                callstack.set_size(n);
+                break;
+            }
+            callstack.resize(n * 2);
+        }
+        #endif
         const auto n = callstack.size();
 
         SmallVector<Constant *, 64> traceArray(n);
@@ -1221,11 +1230,19 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
             const auto f = mBacktraceSymbols.find(pc);
             if (f == mBacktraceSymbols.end()) {
                 __backtrace_data data;
-                const auto r = backtrace_pcinfo(state, pc, &__backtrace_callback, &__backtrace_error_callback, &data);
-                if (LLVM_UNLIKELY(r == -1)) {
-                    backtrace_syminfo(state, pc, &__backtrace_syminfo_callback, &__backtrace_error_callback, &data);
+                auto r = backtrace_pcinfo(state, pc, &__backtrace_callback, &__backtrace_ignored_error_callback, &data);
+                if (LLVM_UNLIKELY(r == 0)) {
+                    r = backtrace_syminfo(state, pc, &__backtrace_syminfo_callback, &__backtrace_ignored_error_callback, &data);
                 }
                 FixedArray<Constant *, 3> values;
+//                if (data.FileName) {
+//                    __FILE__
+
+
+
+//                }
+
+
                 values[0] = GetString(data.FileName ? data.FileName : "");
                 Constant * funcName = nullptr;
                 if (data.FunctionName) {
@@ -1919,7 +1936,6 @@ CBuilder::CBuilder(LLVMContext & C)
         auto p = boost::filesystem::absolute(codegen::ProgramName).normalize().native();
         bool error = false;
         mBacktraceState = backtrace_create_state(p.c_str(), 0, __backtrace_set_true_on_error_callback, &error);
-
         if (error) {
             mBacktraceState = nullptr;
         }
