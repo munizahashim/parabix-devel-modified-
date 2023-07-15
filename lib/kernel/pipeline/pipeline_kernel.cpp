@@ -666,8 +666,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     Value * eventSet = nullptr;
     Value * eventListVal = nullptr;
 
-
-
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
         SmallVector<int, 8> eventList;
         Type * const intTy = TypeBuilder<int, false>::get(b->getContext());

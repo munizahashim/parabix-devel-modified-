@@ -271,6 +271,7 @@ Kernel * PipelineBuilder::makeKernel() {
             out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
+            obj->ensureLoaded();
             if (K.isFamilyCall()) {
                 out << 'F' << obj->getFamilyName();
                 numOfNestedKernelFamilyCalls++;
@@ -329,7 +330,6 @@ Kernel * PipelineBuilder::makeKernel() {
         enumerateProducerBindings(pipelineInput, mTarget->mInputStreamSets);
         for (unsigned i = 0; i < numOfKernels; ++i) {
             const auto & k = kernels[i].Object;
-            k->ensureLoaded();
             enumerateProducerBindings(firstKernel + i, k->getOutputScalarBindings());
             enumerateProducerBindings(firstKernel + i, k->getOutputStreamSetBindings());
         }

@@ -85,8 +85,8 @@ public:
                 assert ("relationship is already mapped to that value" && mCommandLineMap[k] == nullptr);
                 mCommandLineMap[k] = value;
             } else {
-                const auto f = mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
-                assert ("relationship is already mapped to that value" && f.second);
+                assert ("relationship is already mapped to that value" && mRelationshipMap.count(inputScalar) == 0);
+                mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
             }
         }
 
@@ -259,6 +259,8 @@ public:
         return mThreadLocalStateType  != nullptr;
     }
 
+    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
+
     virtual bool requiresExplicitPartialFinalStride() const;
 
     unsigned getStride() const { return mStride; }
@@ -429,8 +431,6 @@ protected:
     llvm::Function * getInitializeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
 
     llvm::Function * addInitializeDeclaration(BuilderRef b) const;
-
-    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
 
     llvm::Function * getAllocateSharedInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
 
