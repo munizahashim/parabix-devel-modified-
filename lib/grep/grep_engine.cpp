@@ -59,6 +59,7 @@
 #include <re/transforms/re_contextual_simplification.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
+#include <re/transforms/remove_nullable.h>
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/name_intro.h>
@@ -310,8 +311,11 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
         }
     }
-    if (!mColoring) mRE = remove_nullable_ends(mRE);
-
+    if (mColoring) {
+        mRE = zeroBoundElimination(mRE);
+    } else {
+        mRE = remove_nullable_ends(mRE);
+    }
     mRE = regular_expression_passes(mRE);
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
