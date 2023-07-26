@@ -24,6 +24,7 @@ SRC
     replaceCC.cpp
     resolve_diffs.cpp
     to_utf8.cpp
+    variable_alt_promotion.cpp
 DEPS
     re.analysis
     re.printer

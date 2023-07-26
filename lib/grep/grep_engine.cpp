@@ -64,6 +64,7 @@
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/name_intro.h>
 #include <re/transforms/reference_transform.h>
+#include <re/transforms/variable_alt_promotion.h>
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
@@ -313,6 +314,7 @@ void GrepEngine::initRE(re::RE * re) {
     }
     if (mColoring) {
         mRE = zeroBoundElimination(mRE);
+        mRE = variableAltPromotion(mRE, mLengthAlphabet);
     } else {
         mRE = remove_nullable_ends(mRE);
     }
