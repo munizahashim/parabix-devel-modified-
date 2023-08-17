@@ -1844,7 +1844,7 @@ void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * co
         Value * const w = CreateAdd(p, CreateZExtOrTrunc(Size, intPtrTy));
         Value * const e = CreateAdd(s, sz);
         Value * const valid = CreateAnd(CreateICmpUGE(p, s), CreateICmpULE(w, e));
-        __CreateAssert(valid, "%s was given an invalid stack address", {Name});
+        __CreateAssert(valid, "%s was given an invalid stack address (%" PRIx64 ")", {Name, p});
     }
     #ifdef HAS_ADDRESS_SANITIZER
     if (LLVM_UNLIKELY(hasAddressSanitizer())) {

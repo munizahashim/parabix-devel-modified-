@@ -81,47 +81,6 @@ inline Value * apply_parallel_prefix_deletion(BuilderRef kb, const unsigned fw, 
 // Kernel inputs: stream_count data streams plus one del_mask stream
 // Outputs: the deleted streams, plus a partial sum popcount
 
-
-#ifdef USE_2017_U8U16_ALGORITHM
-
-inline Value * partial_sum_popcount(const std::unique_ptr<KernelBuilder> & iBuilder, const unsigned fw, Value * mask) {
-    Value * field = iBuilder->simd_popcount(fw, mask);
-    const auto count = iBuilder->getBitBlockWidth() / fw;
-    for (unsigned move = 1; move < count; move *= 2) {
-        field = iBuilder->simd_add(fw, field, iBuilder->mvmd_slli(fw, field, move));
-    }
-    return field;
-}
-
-void DeletionKernel::generateDoBlockMethod(const std::unique_ptr<KernelBuilder> & iBuilder) {
-    Value * delMask = iBuilder->loadInputStreamBlock("delMaskSet", iBuilder->getInt32(0));
-    const auto move_masks = parallel_prefix_deletion_masks(iBuilder, mDeletionFieldWidth, delMask);
-    for (unsigned j = 0; j < mStreamCount; ++j) {
-        Value * input = iBuilder->loadInputStreamBlock("inputStreamSet", iBuilder->getInt32(j));
-        Value * output = apply_parallel_prefix_deletion(iBuilder, mDeletionFieldWidth, delMask, move_masks, input);
-        iBuilder->storeOutputStreamBlock("outputStreamSet", iBuilder->getInt32(j), output);
-    }
-    Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
-    iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
-}
-
-void DeletionKernel::generateFinalBlockMethod(const std::unique_ptr<KernelBuilder> & iBuilder, Value * remainingBytes) {
-    IntegerType * vecTy = iBuilder->getIntNTy(iBuilder->getBitBlockWidth());
-    Value * remaining = iBuilder->CreateZExt(remainingBytes, vecTy);
-    Value * EOF_del = iBuilder->bitCast(iBuilder->CreateShl(Constant::getAllOnesValue(vecTy), remaining));
-    Value * delMask = iBuilder->CreateOr(EOF_del, iBuilder->loadInputStreamBlock("delMaskSet", iBuilder->getInt32(0)));
-    const auto move_masks = parallel_prefix_deletion_masks(iBuilder, mDeletionFieldWidth, delMask);
-    for (unsigned j = 0; j < mStreamCount; ++j) {
-        Value * input = iBuilder->loadInputStreamBlock("inputStreamSet", iBuilder->getInt32(j));
-        Value * output = apply_parallel_prefix_deletion(iBuilder, mDeletionFieldWidth, delMask, move_masks, input);
-        iBuilder->storeOutputStreamBlock("outputStreamSet", iBuilder->getInt32(j), output);
-    }
-    Value * delCount = partial_sum_popcount(iBuilder, mDeletionFieldWidth, iBuilder->simd_not(delMask));
-    iBuilder->storeOutputStreamBlock("unitCounts", iBuilder->getInt32(0), iBuilder->bitCast(delCount));
-}
-
-#else
-
 void DeletionKernel::generateDoBlockMethod(BuilderRef kb) {
     Value * delMask = kb->loadInputStreamBlock("delMaskSet", kb->getInt32(0));
     const auto move_masks = parallel_prefix_deletion_masks(kb, mDeletionFieldWidth, delMask);
@@ -148,8 +107,6 @@ void DeletionKernel::generateFinalBlockMethod(BuilderRef kb, Value * remainingBy
     Value * const unitCount = kb->simd_popcount(mDeletionFieldWidth, kb->simd_not(delMask));
     kb->storeOutputStreamBlock("unitCounts", kb->getInt32(0), kb->bitCast(unitCount));
 }
-
-#endif
 
 DeletionKernel::DeletionKernel(BuilderRef b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts)
 : BlockOrientedKernel(b, "del" + std::to_string(b->getBitBlockWidth()/output->getNumElements()) + "_" + std::to_string(output->getNumElements()),

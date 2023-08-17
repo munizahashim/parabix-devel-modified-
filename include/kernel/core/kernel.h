@@ -37,6 +37,7 @@ class Kernel : public AttributeSet {
     friend class KernelCompiler;
     friend class PipelineAnalysis;
     friend class PipelineCompiler;
+    friend class PipelineBuilder;
     friend class PipelineKernel;
     friend class OptimizationBranchCompiler;
     friend class OptimizationBranch;
@@ -45,7 +46,7 @@ public:
 
     using BuilderRef = const std::unique_ptr<KernelBuilder> &;
 
-    using KernelCompilerRef = const std::unique_ptr<KernelCompiler> &;
+    using Relationships = std::vector<const Relationship *>;
 
     enum class TypeId {
         SegmentOriented
@@ -62,7 +63,52 @@ public:
 
     using InitArgTypes = llvm::SmallVector<llvm::Type *, 32>;
 
-    using ParamMap = llvm::DenseMap<const Relationship *, llvm::Value *>;
+    struct ParamMap {
+
+        using PairEntry = std::pair<llvm::Value *, llvm::Value *>;
+
+        inline llvm::Value * get(const Relationship * inputScalar) const {
+            if (LLVM_UNLIKELY(llvm::isa<CommandLineScalar>(inputScalar))) {
+                const auto k = (unsigned)llvm::cast<CommandLineScalar>(inputScalar)->getCLType();
+                return mCommandLineMap[k];
+            }
+            const auto f = mRelationshipMap.find(inputScalar);
+            if (LLVM_UNLIKELY(f == mRelationshipMap.end())) {
+                return nullptr;
+            }
+            return f->second;
+        }
+
+        inline void set(const Relationship * inputScalar, llvm::Value * value) {
+            if (LLVM_UNLIKELY(llvm::isa<CommandLineScalar>(inputScalar))) {
+                const auto k = (unsigned)llvm::cast<CommandLineScalar>(inputScalar)->getCLType();
+                assert ("relationship is already mapped to that value" && mCommandLineMap[k] == nullptr);
+                mCommandLineMap[k] = value;
+            } else {
+                const auto f = mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
+                assert ("relationship is already mapped to that value" && f.second);
+            }
+        }
+
+        inline bool get(const Relationship * inputScalar, PairEntry & pe) const {
+            const auto f = mRelationshipPairMap.find(inputScalar);
+            if (LLVM_UNLIKELY(f == mRelationshipPairMap.end())) {
+                return false;
+            }
+            pe = f->second;
+            return true;
+        }
+
+        inline void set(const Relationship * inputScalar, PairEntry value) {
+            const auto f = mRelationshipPairMap.insert(std::pair<const Relationship *, PairEntry>(inputScalar, value));
+            assert ("relationship is already mapped to that value" && f.second);
+        }
+
+    private:
+        llvm::DenseMap<const Relationship *, llvm::Value *> mRelationshipMap;
+        llvm::DenseMap<const Relationship *, PairEntry> mRelationshipPairMap;
+        std::array<llvm::Value *, (unsigned)CommandLineScalarType::CommandLineScalarCount> mCommandLineMap{};
+    };
 
     struct LinkedFunction {
         const std::string  Name;
@@ -193,14 +239,6 @@ public:
 
     LLVM_READNONE const std::string & getName() const {
         return mKernelName;
-    }
-
-    LLVM_READNONE virtual bool containsKernelFamilyCalls() const {
-        return false;
-    }
-
-    LLVM_READNONE virtual bool generatesDynamicRepeatingStreamSets() const {
-        return false;
     }
 
     LLVM_READNONE virtual std::string getFamilyName() const;
@@ -380,14 +418,10 @@ public:
 
     virtual std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const;
 
-    virtual ~Kernel() ;
+    virtual ~Kernel();
 
-    void enablePipelineDebugMessages(const bool value = true) {
-        mEnablePipelineDebugMessages = value;
-    }
-
-    bool hasEnabledPipelineDebugMessages() const {
-        return mEnablePipelineDebugMessages;
+    LLVM_READNONE virtual unsigned getNumOfNestedKernelFamilyCalls() const {
+        return 0;
     }
 
 protected:
@@ -426,6 +460,20 @@ protected:
 
     virtual void runOptimizationPasses(BuilderRef b) const;
 
+protected:
+
+    virtual bool hasInternallyGeneratedStreamSets() const { return false; }
+
+    virtual const Relationships & getInternallyGeneratedStreamSets() const {
+        llvm_unreachable("not supported");
+    }
+
+    using MetadataScaleVector = llvm::SmallVector<size_t, 8>;
+
+    virtual void writeInternallyGeneratedStreamSetScaleVector(const Relationships & R, MetadataScaleVector & V, const size_t scale) const {
+        llvm_unreachable("not supported");
+    }
+
 public:
 
     virtual llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const;
@@ -436,9 +484,7 @@ protected:
 
     virtual void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
 
-    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap &params, NestedStateObjs & toFree) const;
-
-    virtual void recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const;
+    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
 
 protected:
 
@@ -491,6 +537,14 @@ protected:
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
+    // Constructor used by pipeline
+    Kernel(BuilderRef b,
+           const TypeId typeId,
+           Bindings &&stream_inputs, Bindings &&stream_outputs,
+           Bindings &&scalar_inputs, Bindings &&scalar_outputs);
+
+    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
+
 protected:
 
     const TypeId                mTypeId;
@@ -499,13 +553,12 @@ protected:
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
     bool                        mGenerated = false;
-    bool                        mEnablePipelineDebugMessages = false;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;
     Bindings                    mOutputScalars;
     InternalScalars             mInternalScalars;
-    const std::string           mKernelName;
+    std::string                 mKernelName;
     LinkedFunctions             mLinkedFunctions;
 };
 

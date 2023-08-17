@@ -24,15 +24,10 @@ public:
 
     void doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum);
 
-    void setNumOfThreads(unsigned numOfThreads) {
-        mNumOfThreads = numOfThreads;
-    }
-
 private:
     GrepRecordBreakKind mGrepRecordBreak;
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
-    unsigned mNumOfThreads;
     re::CC * mBreakCC;
     kernel::StreamSet * mBasisBits;
     kernel::StreamSet * mU8index;

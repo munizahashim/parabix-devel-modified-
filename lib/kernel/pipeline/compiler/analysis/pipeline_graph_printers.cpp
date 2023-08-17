@@ -88,6 +88,8 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
             case RelationshipNode::IsScalar:
                 if (LLVM_UNLIKELY(isa<ScalarConstant>(rn.Relationship))) {
                     out << "Constant: ";
+                } else if (isa<CommandLineScalar>(rn.Relationship)) {
+                    out << "CommandLineScalar: ";
                 } else if (isa<Scalar>(rn.Relationship)) {
                     out << "Scalar: ";
                 } else {
@@ -236,6 +238,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (bn.isExternal()) {
             out << 'X';
         }
+        if (bn.isThreadLocal()) {
+            out << 'T';
+        }
+        if (bn.isUnowned()) {
+            out << 'U';
+        }
         if (buffer == nullptr) {
             out << '?';
         } else {
@@ -245,14 +253,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 case BufferId::DynamicBuffer:
                     out << 'D'; break;
                 case BufferId::ExternalBuffer:
-                    out << 'E'; break;
+                    assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
+                    break;
                 case BufferId::RepeatingBuffer:
                     out << 'R'; break;
                 default: llvm_unreachable("unknown streamset type");
             }
-        }
-        if (bn.isUnowned()) {
-            out << 'U';
         }
         if (bn.IsLinear) {
             out << 'L';

@@ -15,14 +15,22 @@ using RelationshipAllocator = Relationship::Allocator;
  * @brief makePipelineWithIO
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, std::move(stream_inputs), std::move(stream_outputs), std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           std::move(stream_inputs), std::move(stream_outputs),
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipeline
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, Bindings{}, Bindings{}, std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           {}, {},
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -77,6 +85,31 @@ Scalar * BaseDriver::CreateConstant(not_null<llvm::Constant *> value) noexcept {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateCommandLineScalar
+ ** ------------------------------------------------------------------------------------------------------------- */
+Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcept {
+    RelationshipAllocator A(mAllocator);
+    llvm::Type * scalarTy = nullptr;
+    switch (type) {
+
+        #ifdef ENABLE_PAPI
+        case CommandLineScalarType::PAPIEventSet:
+            scalarTy = mBuilder->getInt32Ty(); break;
+        case CommandLineScalarType::PAPIEventList:
+            scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
+        #endif
+        case CommandLineScalarType::DynamicMultithreadingAddSynchronizationThreshold:
+        case CommandLineScalarType::DynamicMultithreadingRemoveSynchronizationThreshold:
+            scalarTy = mBuilder->getFloatTy(); break;
+        default:
+            scalarTy = mBuilder->getSizeTy(); break;
+    }
+
+
+    return new (A) CommandLineScalar(type, scalarTy);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void BaseDriver::addKernel(not_null<Kernel *> kernel) {
@@ -126,13 +159,6 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         mUncachedKernel.emplace_back(kernel.get());
     }
 
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief __CreateRepeatingStreamSet8
- ** ------------------------------------------------------------------------------------------------------------- */
-kernel::RepeatingStreamSet * BaseDriver::__CreateRepeatingStreamSet8(const uint8_t * string, size_t length) {
-    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

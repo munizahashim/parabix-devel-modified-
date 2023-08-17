@@ -35,6 +35,7 @@ enum DebugFlags {
     SerializeThreads,
     TraceCounts,
     TraceDynamicBuffers,
+    TraceDynamicMultithreading,
     TraceStridesPerSegment,
     TraceProducedItemCounts,
     TraceUnconsumedItemCounts,
@@ -99,6 +100,7 @@ extern unsigned SegmentThreads;
 extern unsigned ScanBlocks;
 extern bool EnableObjectCache;
 extern bool EnablePipelineObjectCache;
+extern bool EnableDynamicMultithreading;
 extern bool TraceObjectCache;
 extern unsigned GroupNum;
 extern std::string ProgramName;
@@ -106,6 +108,9 @@ extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
 extern unsigned Z3_Timeout;
 extern int IllustratorDisplay;
+extern float DynamicMultithreadingAddThreshold;
+extern float DynamicMultithreadingRemoveThreshold;
+extern size_t DynamicMultithreadingPeriod;
 
 void ParseCommandLineOptions(int argc, const char *const *argv, std::initializer_list<const llvm::cl::OptionCategory *> hiding = {});
 

@@ -409,6 +409,16 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief freeZeroedInputBuffers
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::freeZeroedInputBuffers(BuilderRef b) {
+    // free any truncated input buffers
+    for (unsigned i = 0; i < mNumOfTruncatedInputBuffers; ++i) {
+        b->CreateFree(b->CreateLoad(mTruncatedInputBuffer[i]));
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief clearUnwrittenOutputData
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
@@ -508,10 +518,10 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, ITEM_WIDTH);
             Value * const endInt = b->CreatePtrToInt(end, intPtrTy);
             Value * const remainingPackBytes = b->CreateSub(endInt, startInt);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
-            debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
-            #endif
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
+//            debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
+//            #endif
             b->CreateMemZero(start, remainingPackBytes, blockWidth / 8);
         }
         BasicBlock * const maskLoopExit = b->GetInsertBlock();
@@ -550,10 +560,10 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
             Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b->CreateSub(endPtrInt, startPtrInt);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b->CreateSub(startPtrInt, epochInt));
-            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
-            #endif
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b->CreateSub(startPtrInt, epochInt));
+//            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
+//            #endif
             b->CreateMemZero(startPtr, remainingBytes, blockWidth / 8);
         }
     }

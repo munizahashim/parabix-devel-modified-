@@ -32,6 +32,8 @@ constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
 
 constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
+using Vertex = unsigned;
+
 //    PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
 //    MAX_INIT_PROGRAM_POPULATION_SIZE,
     //    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength

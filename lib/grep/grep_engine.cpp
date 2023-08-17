@@ -819,11 +819,7 @@ public:
                          , [&]() -> std::string {
                              return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
                          }()
-                         // num of threads
-                         , 1
                          // contains kernel family calls
-                         , false
-                         // has repeating streamset
                          , false
                          // kernel list
                          , {}
@@ -838,6 +834,8 @@ public:
                          // input scalars
                          , {Binding{b->getIntAddrTy(), "callbackObject", callbackObject}}
                          // output scalars
+                         , {}
+                         // internally generated streamsets
                          , {}
                          // length assertions
                          , {}) {
@@ -1350,11 +1348,12 @@ void * GrepEngine::DoGrepThreadMethod() {
 }
 
 InternalSearchEngine::InternalSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto & idb = mGrepDriver.getBuilder();
@@ -1375,7 +1374,6 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
                                        Binding{idb->getSizeTy(), "length"},
                                        Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
@@ -1430,11 +1428,12 @@ void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLengt
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine) :
     InternalMultiSearchEngine(engine->mGrepDriver) {}
@@ -1452,7 +1451,6 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
         Binding{idb->getSizeTy(), "length"},
         Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
