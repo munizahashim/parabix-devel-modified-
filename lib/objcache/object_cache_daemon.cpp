@@ -35,9 +35,6 @@ inline void setLowestPriority() {
     assert (nicesetting != -1);
 }
 
-inline void writeTime() {
-}
-
 inline int runCacheCleanUp(const fs::path cachePath) noexcept {
 
     // Iteratively delete any files in "cachePath" that haven't been touched in

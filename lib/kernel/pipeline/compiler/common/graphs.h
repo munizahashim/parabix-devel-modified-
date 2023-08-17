@@ -51,8 +51,6 @@ using BuilderRef = KernelCompiler::BuilderRef;
 using ArgIterator = KernelCompiler::ArgIterator;
 using InitArgTypes = KernelCompiler::InitArgTypes;
 
-using Vertex = unsigned;
-
 using StreamSetId = unsigned;
 
 enum RelationshipNodeFlag {
@@ -557,6 +555,48 @@ struct SchedulingNode {
 };
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
+
+struct InternallyGeneratedStreamSetGraphNode {
+    mutable Value * StreamSet = nullptr;
+    mutable Value * RunLength = nullptr;
+};
+
+using InternallyGeneratedStreamSetGraph = adjacency_list<vecS, vecS, bidirectionalS, InternallyGeneratedStreamSetGraphNode, unsigned>;
+
+struct FamilyScalarData {
+    mutable Value * SharedStateObject = nullptr;
+    mutable Value * allocateSharedInternalStreamSetsFuncPointer = nullptr;
+    mutable Value * initializeThreadLocalFuncPointer = nullptr;
+    mutable Value * allocateThreadLocalFuncPointer = nullptr;
+    mutable Value * doSegmentFuncPointer = nullptr;
+    mutable Value * finalizeThreadLocalFuncPointer = nullptr;
+    mutable Value * finalizeFuncPointer = nullptr;
+
+    unsigned CaptureFlags = 0;
+    unsigned InputNum = 0;
+    unsigned PassedParamNum = 0;
+
+
+    enum {
+        CaptureSharedStateObject = 1
+        , CaptureThreadLocal = 2
+        , CaptureAllocateInternal = 4
+        , CaptureStoreInKernelState = 8
+    };
+
+    FamilyScalarData(unsigned inputNum, unsigned passedParam, unsigned flags)
+    : CaptureFlags(flags)
+    , InputNum(inputNum)
+    , PassedParamNum(passedParam)
+    {
+
+    }
+
+    FamilyScalarData() = default;
+};
+
+using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, FamilyScalarData>;
+
 
 }
 

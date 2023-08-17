@@ -36,6 +36,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(SerializeThreads, "Force segment threads to run sequentially."),
                         clEnumVal(TraceCounts, "Trace kernel processed, consumed and produced item counts."),
                         clEnumVal(TraceDynamicBuffers, "Trace dynamic buffer allocations and deallocations."),
+                        clEnumVal(TraceDynamicMultithreading, "Trace dynamic multithreading thread count state."),
                         clEnumVal(TraceBlockedIO, "Trace kernels prevented from processing any strides "
                                                   "due to insufficient input items / output space."),
                         clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
@@ -130,6 +131,23 @@ static cl::opt<bool, true> TraceObjectCacheOption("trace-object-cache", cl::loca
 
 static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""),
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
+
+
+bool EnableDynamicMultithreading;
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+float DynamicMultithreadingAddThreshold;
+static cl::opt<float, true> DynamicMultithreadingAddThresholdOption("dynamic-multithreading-add-threshold", cl::location(DynamicMultithreadingAddThreshold), cl::init(10.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+float DynamicMultithreadingRemoveThreshold;
+static cl::opt<float, true> DynamicMultithreadingRemoveThresholdOption("dynamic-multithreading-remove-threshold", cl::location(DynamicMultithreadingRemoveThreshold), cl::init(15.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+size_t DynamicMultithreadingPeriod;
+static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithreading-period", cl::location(DynamicMultithreadingPeriod), cl::init(100),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
 
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),

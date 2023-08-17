@@ -11,6 +11,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Constants.h>
 #include <toolchain/toolchain.h>
+#include "compiler/pipeline_compiler.hpp"
 
 // TODO: the builders should detect if there is only one kernel in a pipeline / both branches are equivalent and return the single kernel. Modify addOrDeclareMainFunction.
 
@@ -20,14 +21,24 @@ using namespace llvm;
 using namespace boost;
 using namespace boost::container;
 
+template <typename IntTy>
+inline IntTy round_up_to(const IntTy x, const IntTy y) {
+    return (x + y - 1) & -y;
+}
+
 namespace kernel {
 
 using Scalars = PipelineKernel::Scalars;
+
+#define ADD_CL_SCALAR(Id,Type) \
+    mTarget->mInputScalars.emplace_back(Id, mDriver.CreateCommandLineScalar(CommandLineScalarType::Type))
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief compile()
  ** ------------------------------------------------------------------------------------------------------------- */
 void * ProgramBuilder::compile() {
+
+
     Kernel * const kernel = makeKernel();
     if (LLVM_UNLIKELY(kernel == nullptr)) {
         report_fatal_error("Main pipeline contains no kernels nor function calls.");
@@ -61,24 +72,22 @@ void * ProgramBuilder::compileKernel(Kernel * const kernel) {
  ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned flags) {
     mDriver.addKernel(kernel);
-    mKernels.emplace_back(kernel, flags);
+    mTarget->mKernels.emplace_back(kernel, flags);
     return kernel;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializePipeline
+ * @brief initializeNestedPipeline
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializePipeline(PipelineKernel * const pk, const unsigned flags) {
+PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * const pk, const unsigned flags) {
     // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
     // this gives me a safe workaround for the problem.
-    PipelineBuilder nested(Internal{}, mDriver, pk->mInputStreamSets, pk->mOutputStreamSets, pk->mInputScalars, pk->mOutputScalars);
+    PipelineBuilder nested(mDriver, pk);
+    nested.setExternallySynchronized(true);
     std::unique_ptr<PipelineBuilder> tmp(&nested);
     pk->instantiateInternalKernels(tmp);
     tmp.release();
-    initializeKernel(pk, flags);
-    pk->mKernels.swap(nested.mKernels);
-    pk->mCallBindings.swap(nested.mCallBindings);
-    pk->mLengthAssertions.swap(nested.mLengthAssertions);
+    initializeKernel(nested.makeKernel(), flags);
     return pk;
 }
 
@@ -104,18 +113,10 @@ using AttrId = Attribute::KindId;
 
 using TypeId = Relationship::ClassTypeId;
 
-using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, const Relationship *, unsigned>;
+using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, const Relationship *, int>;
 
 using Vertex = Graph::vertex_descriptor;
 using Map = flat_map<const Relationship *, Vertex>;
-
-template <typename Graph>
-inline typename graph_traits<Graph>::edge_descriptor out_edge(const typename graph_traits<Graph>::vertex_descriptor u, const Graph & G) {
-    assert (out_degree(u, G) == 1);
-    return *out_edges(u, G).first;
-}
-
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAttributesFrom
@@ -123,7 +124,7 @@ inline typename graph_traits<Graph>::edge_descriptor out_edge(const typename gra
  * Add any attributes from a set of kernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void addKernelProperties(const Kernels & kernels, Kernel * const output) {
-    unsigned mustTerminate = 0;
+    bool mustTerminate = false;
     bool canTerminate = false;
     bool sideEffecting = false;
     bool fatalTermination = false;
@@ -133,7 +134,7 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
         for (const Attribute & attr : kernel->getAttributes()) {
             switch (attr.getKind()) {
                 case AttrId::MustExplicitlyTerminate:
-                    mustTerminate++;
+                    mustTerminate = true;
                     break;
                 case AttrId::MayFatallyTerminate:
                     fatalTermination = true;
@@ -158,7 +159,7 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     if (fatalTermination) {
         output->addAttribute(MayFatallyTerminate());
     }
-    if (LLVM_UNLIKELY(mustTerminate == kernels.size())) {
+    if (mustTerminate) {
         output->addAttribute(MustExplicitlyTerminate());
     } else if (canTerminate && !fatalTermination) {
         output->addAttribute(CanTerminateEarly());
@@ -172,12 +173,34 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
+Kernel * ProgramBuilder::makeKernel() {
+
+    if (codegen::EnableDynamicMultithreading) {
+        ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
+        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingAddSynchronizationThreshold);
+        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingRemoveSynchronizationThreshold);
+    } else {
+        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
+    }
+
+    return PipelineBuilder::makeKernel();
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * PipelineBuilder::makeKernel() {
 
     mDriver.generateUncachedKernels();
 
-    const auto numOfKernels = mKernels.size();
-    const auto numOfCalls = mCallBindings.size();
+    const auto & kernels = mTarget->mKernels;
+    const auto & calls = mTarget->mCallBindings;
+
+    const auto numOfKernels = kernels.size();
+    const auto numOfCalls = calls.size();
 
     // TODO: optimization must be able to synchronize non-InternallySynchronized kernels to
     // allow the following.
@@ -190,68 +213,31 @@ Kernel * PipelineBuilder::makeKernel() {
 //        }
 //    }
 
-    std::string signature;
-    signature.reserve(1024);
-    raw_string_ostream out(signature);
+    auto & signature = mTarget->mSignature;
 
-    out << 'P' << mNumOfThreads << 'B' << codegen::BufferSegments;
-    if (mExternallySynchronized) {
-        out << 'E';
-    }
+    unsigned numOfNestedKernelFamilyCalls = 0;
 
-    switch (codegen::PipelineCompilationMode) {
-        case codegen::PipelineCompilationModeOptions::DefaultFast:
-            out << 'F';
-            break;
-        case codegen::PipelineCompilationModeOptions::Expensive:
-            out << 'X';
-            break;
-    }
+    auto & internallyGeneratedStreamSets = mTarget->mInternallyGeneratedStreamSets;
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-        out << "+AML";
-    }
+    auto addInternallyGenerated = [&](const Relationship * r) {
+        assert (isa<RepeatingStreamSet>(r));
+        for (unsigned i = 0; i < internallyGeneratedStreamSets.size(); ++i) {
+            if (internallyGeneratedStreamSets[i] == r) {
+                return;
+            }
+        }
+        internallyGeneratedStreamSets.push_back(r);
+    };
 
-    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
-            out << "+CYC";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
-            out << "+BIC";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
-            out << "+DB";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-            out << "+SS";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
-            out << "+GTH";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
-            out << "+GDH";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
-            out << "-TL";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-            out << "+AML";
-        }
-    }
     #ifdef ENABLE_PAPI
-    if (LLVM_UNLIKELY(codegen::PapiCounterOptions != codegen::OmittedOption)) {
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            out << "+PPO:" << codegen::PapiCounterOptions;
-        } else {
-            out << "+PPA:" << codegen::PapiCounterOptions;
-        }
+    const auto & S = codegen::PapiCounterOptions;
+    if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
+        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_CODE, PAPIEventSet);
+        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_LIST, PAPIEventList);
     }
     #endif
 
-    bool hasRepeatingStreamSet = false;
-    bool containsKernelFamilyCalls = false;
-
-    if (mUniqueName.empty()) {
+    if (LLVM_LIKELY(signature.empty())) {
 
         constexpr auto pipelineInput = 0U;
         constexpr auto firstKernel = 1U;
@@ -260,6 +246,52 @@ Kernel * PipelineBuilder::makeKernel() {
 
         Graph G(pipelineOutput + 1);
         Map M;
+
+        auto addAndMapInternallyGenerated = [&](const Relationship * r) -> unsigned {
+            assert (isa<RepeatingStreamSet>(r));
+            const auto f = M.find(r);
+            if (LLVM_LIKELY(f == M.end())) {
+                const auto v = add_vertex(r, G);
+                M.emplace(r, v);
+                addInternallyGenerated(r);
+                return v;
+            } else {
+                return f->second;
+            }
+        };
+
+        signature.reserve(4096);
+        raw_string_ostream out(signature);
+
+        out << 'P';
+        if (mExternallySynchronized) {
+            out << 'E';
+        }
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+            out << '_';
+            const auto & K = kernels[i];
+            auto obj = K.Object;
+            if (K.isFamilyCall()) {
+                out << 'F' << obj->getFamilyName();
+                numOfNestedKernelFamilyCalls++;
+            } else {
+                out << 'K';
+                const auto m = obj->getNumOfNestedKernelFamilyCalls();
+                numOfNestedKernelFamilyCalls += m;
+                if (obj->hasSignature()) {
+                    out << obj->getSignature();
+                } else {
+                    out << obj->getName();
+                }
+            }
+            if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
+                const auto & S = obj->getInternallyGeneratedStreamSets();
+                for (int k = 0; k < S.size(); ++k) {
+                    const auto j = addAndMapInternallyGenerated(S[k]);
+                    add_edge((firstKernel + i), j, -(k + 1), G);
+                }
+            }
+        }
 
         auto enumerateProducerBindings = [&](const Vertex producer, const Bindings & bindings) {
             const auto n = bindings.size();
@@ -274,14 +306,14 @@ Kernel * PipelineBuilder::makeKernel() {
                     if (LLVM_UNLIKELY(existingProducer == pipelineInput)) {
                         out << "an input to the pipeline";
                     } else {
-                        const auto & K = mKernels[existingProducer - firstKernel];
+                        const auto & K = kernels[existingProducer - firstKernel];
                         out << "produced by " << K.Object->getName();
                     }
                     out << " and ";
                     if (LLVM_UNLIKELY(producer == pipelineOutput)) {
                         out << "an output of the pipeline";
                     } else {
-                        const auto & K = mKernels[producer - firstKernel];
+                        const auto & K = kernels[producer - firstKernel];
                         out << "produced by " << K.Object->getName();
                     }
                     out << ".";
@@ -293,10 +325,10 @@ Kernel * PipelineBuilder::makeKernel() {
             }
         };
 
-        enumerateProducerBindings(pipelineInput, mInputScalars);
-        enumerateProducerBindings(pipelineInput, mInputStreamSets);
+        enumerateProducerBindings(pipelineInput, mTarget->mInputScalars);
+        enumerateProducerBindings(pipelineInput, mTarget->mInputStreamSets);
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            const auto & k = mKernels[i].Object;
+            const auto & k = kernels[i].Object;
             k->ensureLoaded();
             enumerateProducerBindings(firstKernel + i, k->getOutputScalarBindings());
             enumerateProducerBindings(firstKernel + i, k->getOutputStreamSetBindings());
@@ -346,16 +378,14 @@ Kernel * PipelineBuilder::makeKernel() {
                 assert ("relationship cannot be null!" && rel);
                 auto f = M.find(rel);
                 if (LLVM_UNLIKELY(f == M.end())) {
-                    // TODO: should we record the consumers of a repeating streamset or is knowing
-                    // their count sufficient?
-                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel) || isa<ScalarConstant>(rel))) {
+                    if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel))) {
                         const auto bufferVertex = add_vertex(rel, G);
                         f = M.emplace(rel, bufferVertex).first;
                     } else {
                         SmallVector<char, 256> tmp;
                         raw_svector_ostream out(tmp);
                         if (consumerVertex < firstCall) {
-                            const auto & K = mKernels[consumerVertex - firstKernel];
+                            const auto & K = kernels[consumerVertex - firstKernel];
                             const Kernel * const consumer = K.Object;
                             const Binding & input = ((rel->getClassTypeId() == TypeId::Scalar)
                                                        ? consumer->getInputScalarBinding(i)
@@ -364,7 +394,7 @@ Kernel * PipelineBuilder::makeKernel() {
                             out << "kernel " << consumer->getName();
                         } else { // TODO: function calls should retain name
                             out << "argument " << i << " of ";
-                            out << "function call " << (consumerVertex - mKernels.size() + 1);
+                            out << "function call " << (consumerVertex - kernels.size() + 1);
                         }
                         out << " is not a constant, produced by a kernel or an input to the pipeline";
                         report_fatal_error(out.str());
@@ -377,50 +407,53 @@ Kernel * PipelineBuilder::makeKernel() {
         };
 
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            Kernel * const k = mKernels[i].Object;
+            Kernel * const k = kernels[i].Object;
             enumerateConsumerBindings(firstKernel + i, k->getInputScalarBindings());
             enumerateConsumerBindings(firstKernel + i, k->getInputStreamSetBindings());
         }
         for (unsigned i = 0; i < numOfCalls; ++i) {
-            enumerateConsumerBindings(firstCall + i, mCallBindings[i].Args);
+            enumerateConsumerBindings(firstCall + i, calls[i].Args);
         }
-        enumerateConsumerBindings(pipelineOutput, mOutputScalars);
-        enumerateConsumerBindings(pipelineOutput, mOutputStreamSets);
+        enumerateConsumerBindings(pipelineOutput, mTarget->mOutputScalars);
+        enumerateConsumerBindings(pipelineOutput, mTarget->mOutputStreamSets);
 
-        for (unsigned i = 0; i < numOfKernels; ++i) {
-            out << "_K";
-            const auto & K = mKernels[i];
-            if (K.isFamilyCall()) {
-                out << K.Object->getFamilyName();
-                containsKernelFamilyCalls = true;
-            } else {
-                out << K.Object->getName();
-                if (K.Object->containsKernelFamilyCalls()) {
-                    containsKernelFamilyCalls = true;
-                }
-            }
-        }
         for (unsigned i = 0; i < numOfCalls; ++i) {
-            out << "_C" << mCallBindings[i].Name;
+            out << "_C" << calls[i].Name;
         }
         out << '@';
 
         const auto firstRelationship = pipelineOutput + 1;
         const auto lastRelationship = num_vertices(G);
+        int numInternallyGenerated = 0;
+
+        using TypeId = Relationship::ClassTypeId;
+
+        std::array<char, (unsigned)TypeId::__Count> typeCode;
+        typeCode[(unsigned)TypeId::StreamSet] = 'S';
+        typeCode[(unsigned)TypeId::RepeatingStreamSet] = 'R';
+        typeCode[(unsigned)TypeId::TruncatedStreamSet] = 'T';
+        typeCode[(unsigned)TypeId::Scalar] = 'v';
+        typeCode[(unsigned)TypeId::CommandLineScalar] = 'l';
+        typeCode[(unsigned)TypeId::ScalarConstant] = 'c';
 
         for (auto i = firstRelationship; i != lastRelationship; ++i) {
             const Relationship * const r = G[i]; assert (r);
+
+            assert ((unsigned)r->getClassTypeId() < (unsigned)TypeId::__Count);
+
+            out << typeCode[(unsigned)r->getClassTypeId()];
+
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
                 const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
-                const auto numElements = rs->getNumElements();
-                const auto fieldWidth = rs->getNumElements();
-                out << 'R' << numElements << 'x' << fieldWidth;
                 if (rs->isUnaligned()) {
                     out << 'U';
                 }
-                if (rs->isDynamic()) {
-                    hasRepeatingStreamSet = true;
+                if (LLVM_LIKELY(rs->isDynamic())) {
+                    const auto j = addAndMapInternallyGenerated(r);
+                    add_edge(j, pipelineInput, --numInternallyGenerated, G);
                 } else {
+                    const auto numElements = rs->getNumElements();
+                    const auto fieldWidth = rs->getFieldWidth();
                     const auto width = fieldWidth / 4UL;
                     SmallVector<char, 16> tmp(width + 1);
                     for (unsigned i = 0;;) {
@@ -452,27 +485,13 @@ Kernel * PipelineBuilder::makeKernel() {
                         }
                     }
                 }
+                out << ':';
             } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
                 auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
                 if (LLVM_UNLIKELY(f == M.end())) {
                     report_fatal_error("Truncated streamset data has no producer");
                 }
-                out << 'T' << f->second;
-            } else {
-                char typeCode;
-                switch (r->getClassTypeId()) {
-                    case TypeId::StreamSet:
-                        typeCode = 'S';
-                        break;
-                    case TypeId::ScalarConstant:
-                        typeCode = 'C';
-                        break;
-                    case TypeId::Scalar:
-                        typeCode = 'V';
-                        break;
-                    default: llvm_unreachable("unknown relationship type");
-                }
-                out << typeCode;
+                out << f->second << ':';
             }
 
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
@@ -486,50 +505,41 @@ Kernel * PipelineBuilder::makeKernel() {
                 out << '_' << k << '.' << G[e];
             }
         }
+
+        out.flush();
+
     } else { // the programmer provided a unique name
-        out << mUniqueName;
+
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            const auto & K = mKernels[i];
+            const auto & K = kernels[i];
+            Kernel * const obj = K.Object;
+            obj->ensureLoaded();
             if (K.isFamilyCall()) {
-                containsKernelFamilyCalls = true;
+                numOfNestedKernelFamilyCalls++;
+            } else {
+                numOfNestedKernelFamilyCalls += obj->getNumOfNestedKernelFamilyCalls();
             }
-            Kernel * const k = K.Object;
-            k->ensureLoaded();
-            if (k->generatesDynamicRepeatingStreamSets()) {
-                hasRepeatingStreamSet = true;
-            }
-            if (k->containsKernelFamilyCalls()) {
-                containsKernelFamilyCalls = true;
-            }
-            for (unsigned i = 0; i < k->getNumOfStreamInputs(); ++i) {
-                const StreamSet * const in = k->getInputStreamSet(i);
-                if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(in))) {
-                    if (cast<RepeatingStreamSet>(in)->isDynamic()) {
-                        hasRepeatingStreamSet = true;
-                        break;
-                    }
+            if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
+                for (const auto r : obj->getInternallyGeneratedStreamSets()) {
+                    addInternallyGenerated(r);
                 }
             }
         }
     }
 
-    out.flush();
+    mTarget->mNumOfKernelFamilyCalls = numOfNestedKernelFamilyCalls;
 
-    PipelineKernel * const pipeline =
-        new PipelineKernel(mDriver.getBuilder(), std::move(signature),
-                           mNumOfThreads,
-                           containsKernelFamilyCalls, hasRepeatingStreamSet,
-                           std::move(mKernels), std::move(mCallBindings),
-                           std::move(mInputStreamSets), std::move(mOutputStreamSets),
-                           std::move(mInputScalars), std::move(mOutputScalars),
-                           std::move(mLengthAssertions));
     if (mExternallySynchronized) {
-        pipeline->addAttribute(InternallySynchronized());
+        mTarget->addAttribute(InternallySynchronized());
     }
 
-    addKernelProperties(pipeline->getKernels(), pipeline);
+    addKernelProperties(kernels, mTarget);
 
-    return pipeline;
+    signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
+
+    mTarget->mKernelName = PipelineKernel::makePipelineHashName(signature);
+
+    return mTarget;
 }
 
 
@@ -554,7 +564,8 @@ void combineAttributes(const Binding & S, AttributeCombineSet & C) {
  * @brief makeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * OptimizationBranchBuilder::makeKernel() {
-
+    llvm_unreachable("todo");
+#if 0
     // TODO: the rates of the optimization branches should be determined by
     // the actual kernels within the branches.
 
@@ -592,10 +603,11 @@ Kernel * OptimizationBranchBuilder::makeKernel() {
     addKernelProperties({{nonZero, PipelineKernel::Family}, {allZero, PipelineKernel::Family}}, br);
     br->addAttribute(InternallySynchronized());
     return br;
+#endif
 }
 
 Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
-    for (Binding & input : mInputScalars) {
+    for (Binding & input : mTarget->mInputScalars) {
         if (name.equals(input.getName())) {
             if (input.getRelationship() == nullptr) {
                 input.setRelationship(mDriver.CreateScalar(input.getType()));
@@ -607,7 +619,7 @@ Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
 }
 
 void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
-    for (Binding & input : mInputScalars) {
+    for (Binding & input : mTarget->mInputScalars) {
         if (name.equals(input.getName())) {
             input.setRelationship(value);
             return;
@@ -617,7 +629,7 @@ void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
 }
 
 Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
-    for (Binding & output : mOutputScalars) {
+    for (Binding & output : mTarget->mOutputScalars) {
         if (name.equals(output.getName())) {
             if (output.getRelationship() == nullptr) {
                 output.setRelationship(mDriver.CreateScalar(output.getType()));
@@ -629,7 +641,7 @@ Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
 }
 
 void PipelineBuilder::setOutputScalar(const StringRef name, Scalar * value) {
-    for (Binding & output : mOutputScalars) {
+    for (Binding & output : mTarget->mOutputScalars) {
         if (name.equals(output.getName())) {
             output.setRelationship(value);
             return;
@@ -638,38 +650,34 @@ void PipelineBuilder::setOutputScalar(const StringRef name, Scalar * value) {
     report_fatal_error("no scalar named " + name);
 }
 
-
-PipelineBuilder::PipelineBuilder(BaseDriver & driver,
-    Bindings && stream_inputs, Bindings && stream_outputs,
-    Bindings && scalar_inputs, Bindings && scalar_outputs,
-    const unsigned numOfThreads)
+PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel)
 : mDriver(driver)
-, mNumOfThreads(numOfThreads)
-, mInputStreamSets(stream_inputs)
-, mOutputStreamSets(stream_outputs)
-, mInputScalars(scalar_inputs)
-, mOutputScalars(scalar_outputs) {
+, mTarget(kernel) {
 
-    for (unsigned i = 0; i < mInputScalars.size(); i++) {
-        Binding & input = mInputScalars[i];
+    auto & A = mTarget->mInputScalars;
+    for (unsigned i = 0; i < A.size(); i++) {
+        Binding & input = A[i];
         if (input.getRelationship() == nullptr) {
             input.setRelationship(driver.CreateScalar(input.getType()));
         }
     }
-    for (unsigned i = 0; i < mInputStreamSets.size(); i++) {
-        Binding & input = mInputStreamSets[i];
+    auto & B = mTarget->mInputStreamSets;
+    for (unsigned i = 0; i < B.size(); i++) {
+        Binding & input = B[i];
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
             report_fatal_error(input.getName() + " must be set upon construction");
         }
     }
-    for (unsigned i = 0; i < mOutputStreamSets.size(); i++) {
-        Binding & output = mOutputStreamSets[i];
+    auto & C = mTarget->mOutputStreamSets;
+    for (unsigned i = 0; i < C.size(); i++) {
+        Binding & output = C[i];
         if (LLVM_UNLIKELY(output.getRelationship() == nullptr)) {
             report_fatal_error(output.getName() + " must be set upon construction");
         }
     }
-    for (unsigned i = 0; i < mOutputScalars.size(); i++) {
-        Binding & output = mOutputScalars[i];
+    auto & D = mTarget->mOutputScalars;
+    for (unsigned i = 0; i < D.size(); i++) {
+        Binding & output = D[i];
         if (output.getRelationship() == nullptr) {
             output.setRelationship(driver.CreateScalar(output.getType()));
         }
@@ -677,25 +685,8 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver,
 
 }
 
-PipelineBuilder::PipelineBuilder(Internal, BaseDriver & driver,
-    Bindings stream_inputs, Bindings stream_outputs,
-    Bindings scalar_inputs, Bindings scalar_outputs)
-: PipelineBuilder(driver,
-                  std::move(stream_inputs), std::move(stream_outputs),
-                  std::move(scalar_inputs), std::move(scalar_outputs),
-                  1) {
-
-}
-
-ProgramBuilder::ProgramBuilder(
-    BaseDriver & driver,
-    Bindings && stream_inputs, Bindings && stream_outputs,
-    Bindings && scalar_inputs, Bindings && scalar_outputs)
-: PipelineBuilder(
-      driver,
-      std::move(stream_inputs), std::move(stream_outputs),
-      std::move(scalar_inputs), std::move(scalar_outputs),
-      codegen::SegmentThreads) {
+ProgramBuilder::ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel)
+: PipelineBuilder(driver, kernel) {
 
 }
 
@@ -716,26 +707,55 @@ Bindings replaceManagedWithSharedManagedBuffers(const Bindings & bindings) {
     return replaced;
 }
 
+std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimizationBranch (
+        Relationship * const condition,
+        Bindings && stream_inputs, Bindings && stream_outputs,
+        Bindings && scalar_inputs, Bindings && scalar_outputs) {
+
+
+    auto nonZeroStreamInputs = stream_inputs;
+    auto nonZeroStreamOutputs = replaceManagedWithSharedManagedBuffers(stream_outputs);
+    auto nonZeroScalarInputs = scalar_inputs;
+    auto nonZeroScalarOutputs = scalar_outputs;
+
+    auto allZeroStreamInputs = nonZeroStreamInputs;
+    auto allZeroStreamOutputs = nonZeroStreamOutputs;
+    auto allZeroScalarInputs = nonZeroScalarInputs;
+    auto allZeroScalarOutputs = nonZeroScalarOutputs;
+
+    PipelineKernel * const allZero =
+        new PipelineKernel(mDriver.getBuilder(),
+                           std::move(allZeroStreamInputs), std::move(allZeroStreamOutputs),
+                           std::move(allZeroScalarInputs), std::move(allZeroScalarOutputs));
+
+    PipelineKernel * const nonZero =
+        new PipelineKernel(mDriver.getBuilder(),
+                           std::move(nonZeroStreamInputs), std::move(nonZeroStreamOutputs),
+                           std::move(nonZeroScalarInputs), std::move(nonZeroScalarOutputs));
+
+    PipelineKernel * const branch =
+        new PipelineKernel(mDriver.getBuilder(),
+                           std::move(stream_inputs), std::move(stream_outputs),
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+
+
+    std::shared_ptr<OptimizationBranchBuilder> obb(
+        new OptimizationBranchBuilder(mDriver, condition, branch, allZero, nonZero));
+    return obb;
+}
+
+
+
 OptimizationBranchBuilder::OptimizationBranchBuilder(
       BaseDriver & driver,
       Relationship * const condition,
-      Bindings && stream_inputs, Bindings && stream_outputs,
-      Bindings && scalar_inputs, Bindings && scalar_outputs)
-: PipelineBuilder(PipelineBuilder::Internal{},
-      driver,
-      std::move(stream_inputs), std::move(stream_outputs),
-      std::move(scalar_inputs), std::move(scalar_outputs))
+      PipelineKernel * const allZero,
+      PipelineKernel * const nonZero,
+      PipelineKernel * const branch)
+: PipelineBuilder(driver, branch)
 , mCondition(condition)
-, mNonZeroBranch(std::unique_ptr<PipelineBuilder>(
-                    new PipelineBuilder(
-                    PipelineBuilder::Internal{}, mDriver,
-                    mInputStreamSets, replaceManagedWithSharedManagedBuffers(mOutputStreamSets),
-                    mInputScalars, mOutputScalars)))
-, mAllZeroBranch(std::unique_ptr<PipelineBuilder>(
-                    new PipelineBuilder(
-                    PipelineBuilder::Internal{}, mDriver,
-                    mInputStreamSets, replaceManagedWithSharedManagedBuffers(mOutputStreamSets),
-                    mInputScalars, mOutputScalars))) {
+, mNonZeroBranch(std::unique_ptr<PipelineBuilder>(new PipelineBuilder(mDriver, nonZero)))
+, mAllZeroBranch(std::unique_ptr<PipelineBuilder>(new PipelineBuilder(mDriver, allZero))) {
 
 }
 

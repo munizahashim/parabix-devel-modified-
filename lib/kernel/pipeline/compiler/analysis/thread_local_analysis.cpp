@@ -30,6 +30,7 @@ using IntervalSet = interval_set<unsigned>;
 
 using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
 
+using Vertex = unsigned;
 
 struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
 

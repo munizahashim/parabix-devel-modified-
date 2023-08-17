@@ -246,6 +246,10 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
     if (LLVM_LIKELY(out_degree(PipelineInput, mBufferGraph) > 0)) {
         for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
+            if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
+                assert ("non-constant streamset without a producer?" && mBufferGraph[streamSet].isConstant());
+                continue;
+            }
             const auto producer = parent(streamSet, mBufferGraph);
             if (LLVM_UNLIKELY(producer == PipelineInput)) {
                 const BufferPort & br = mBufferGraph[e];
@@ -253,21 +257,6 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
             }
         }
     }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasExternalIO
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::hasExternalIO(const size_t kernel) const {
-    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-        const auto streamSet = source(input, mBufferGraph);
-        const BufferNode & node = mBufferGraph[streamSet];
-        if (node.isExternal()) {
-            return true;
-        }
-    }
-    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -419,7 +408,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     assert (mKernelId <= LastKernel);
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
-    reset(mAccessibleInputItems, numOfInputs);
+    reset(mInternalAccessibleInputItems, numOfInputs);
     mInitiallyProcessedItemCount.reset(numOfInputs);
     mInitiallyProcessedDeferredItemCount.reset(numOfInputs);
     mAlreadyProcessedPhi.reset(numOfInputs);
@@ -444,7 +433,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mFullyProcessedItemCount.reset(numOfInputs);
 
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
-    reset(mWritableOutputItems, numOfOutputs);
+    reset(mInternalWritableOutputItems, numOfOutputs);
     mAlreadyProducedPhi.reset(numOfOutputs);
     mAlreadyProducedDelayedPhi.reset(numOfOutputs);
     mAlreadyProducedDeferredPhi.reset(numOfOutputs);

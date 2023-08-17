@@ -237,6 +237,13 @@ struct Attribute {
         // for the kernel. Internally, this stores a scalar in the kernel state and loads
         // it once at the start of each segment.
 
+        /** ANY INPUT SCALAR OR STREAMSET **/
+
+        InternallyGenerated,
+
+        // Some input scalars or streamsets are provided by pipeline "main" function to
+        // the program instead of being passed in by the user.
+
         /** KERNEL ATTRIBUTES **/
 
         CanTerminateEarly,
@@ -532,6 +539,9 @@ inline Attribute Statefree() {
     return Attribute(Attribute::KindId::Statefree, 0);
 }
 
+inline Attribute InternallyGenerated() {
+    return Attribute(Attribute::KindId::InternallyGenerated, 0);
+}
 
 }
 #endif // ATTRIBUTES_H

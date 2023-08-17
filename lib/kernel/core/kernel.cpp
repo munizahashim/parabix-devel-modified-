@@ -32,7 +32,6 @@ using AttrId = Attribute::KindId;
 using Rational = ProcessingRate::Rational;
 using RateId = ProcessingRate::KindId;
 using StreamSetPort = Kernel::StreamSetPort;
-using KernelCompilerRef = Kernel::KernelCompilerRef;
 using PortType = Kernel::PortType;
 
 const static auto INITIALIZE_SUFFIX = "_Initialize";
@@ -42,6 +41,9 @@ const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateT
 const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
 const static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
 const static auto FINALIZE_SUFFIX = "_Finalize";
+#ifdef ENABLE_PAPI
+const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
+#endif
 
 const static auto SHARED_SUFFIX = "_shared_state";
 const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
@@ -470,7 +472,6 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
     Module * const m = b->getModule();
     Function * initFunc = m->getFunction(funcName);
     if (LLVM_LIKELY(initFunc == nullptr)) {
-
         InitArgTypes params;
         if (LLVM_LIKELY(isStateful())) {
             params.push_back(getSharedStateType()->getPointerTo());
@@ -497,7 +498,7 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         for (const Binding & binding : mInputScalars) {
             setNextArgName(binding.getName());
         }
-        // TODO: name family args?
+
     }
     return initFunc;
 }
@@ -878,7 +879,9 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             }
 
         }
-        assert (arg == doSegment->arg_end());
+
+
+        //assert (arg == doSegment->arg_end());
     }
     return doSegment;
 }
@@ -1086,14 +1089,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
 
     // TODO: need to test for termination on init call
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
-    auto addHostArg = [&](Value * ptr) {
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-            b->CreateAssert(ptr, "constructFamilyKernels cannot pass a null value to pipeline");
-        }
-        hostArgs.push_back(b->CreatePointerCast(ptr, voidPtrTy));
-    };
-
     Value * handle = nullptr;
     BEGIN_SCOPED_REGION
     InitArgs initArgs;
@@ -1101,46 +1096,105 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         handle = createInstance(b);
         initArgs.push_back(handle);
         toFree.push_back(handle);
-        addHostArg(handle);
     }
     for (const Binding & input : mInputScalars) {
-        const auto f = params.find(cast<Scalar>(input.getRelationship()));
-        if (LLVM_UNLIKELY(f == params.end())) {
+        const auto val = params.get(input.getRelationship());
+        if (LLVM_UNLIKELY(val == nullptr)) {
             SmallVector<char, 512> tmp;
             raw_svector_ostream out(tmp);
             out << "Could not find paramater for " << getName() << ':' << input.getName()
-                << " from the provided program parameters (i.e., unknown input scalar.)";
+                << " from the provided program parameters";
             report_fatal_error(out.str());
         }
-        initArgs.push_back(f->second); assert (initArgs.back());
+        initArgs.push_back(val);
     }
-    recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
-    if (LLVM_UNLIKELY(generatesDynamicRepeatingStreamSets())) {
-        ParamMap repeatingStreamSets;
-        recursivelyConstructRepeatingStreamSets(b, initArgs, repeatingStreamSets, 1U);
-    }
+
     Function * const init = getInitializeFunction(b);
+
+    // If we're calling this with a family call, then the family kernels associated with it
+    // must be passed into the function itself.
+
+    recursivelyConstructFamilyKernels(b, initArgs, params, toFree);
+
+    if (hasInternallyGeneratedStreamSets()) {
+        for (const auto & rs : getInternallyGeneratedStreamSets()) {
+            ParamMap::PairEntry entry;
+            if (LLVM_UNLIKELY(!params.get(rs, entry))) {
+                SmallVector<char, 512> tmp;
+                raw_svector_ostream out(tmp);
+                out << "Could not find paramater for "
+                    << "internally generated streamset"
+                    << " from the provided program parameters";
+                report_fatal_error(out.str());
+            }
+            initArgs.push_back(entry.first);
+            initArgs.push_back(entry.second);
+        }
+    }
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b->CreateCall(init->getFunctionType(), init, initArgs);
-
     END_SCOPED_REGION
 
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    Value * const voidPtr = ConstantPointerNull::get(voidPtrTy);
+
+    hostArgs.reserve(7);
+
+    auto addHostArg = [&](Value * ptr) {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            b->CreateAssert(ptr, "constructFamilyKernels cannot pass a null value to pipeline");
+        }
+
+//        b->CallPrintInt(" > " + getName() + ".arg" +
+//                        std::to_string(hostArgs.size()), ptr);
+
+        hostArgs.push_back(b->CreatePointerCast(ptr, voidPtrTy));
+    };
+
+    auto addHostVoidArg = [&]() {
+
+//        b->CallPrintInt(" > " + getName() + ".arg" +
+//                        std::to_string(hostArgs.size()), voidPtr);
+
+        hostArgs.push_back(voidPtr);
+    };
+
+    const auto k = hostArgs.size();
+
+    if (LLVM_LIKELY(isStateful())) {
+        addHostArg(handle);
+    } else {
+        hostArgs.push_back(voidPtr);
+    }
     const auto tl = hasThreadLocal();
     const auto ai = allocatesInternalStreamSets();
     if (ai) {
         addHostArg(getAllocateSharedInternalStreamSetsFunction(b));
+    } else {
+        addHostVoidArg();
     }
     if (tl) {
         addHostArg(getInitializeThreadLocalFunction(b));
         if (ai) {
             addHostArg(getAllocateThreadLocalInternalStreamSetsFunction(b));
+        } else {
+            addHostVoidArg();
         }
+    } else {
+        addHostVoidArg();
+        addHostVoidArg();
     }
     addHostArg(getDoSegmentFunction(b));
-    if (hasThreadLocal()) {
+    if (tl) {
         addHostArg(getFinalizeThreadLocalFunction(b));
+    } else {
+        addHostVoidArg();
     }
+
+    // TODO: queue these in a list of termination functions to add to main?
     addHostArg(getFinalizeFunction(b));
+
+    assert (hostArgs.size() == (k + 7));
 
     return handle;
 }
@@ -1149,13 +1203,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief recursivelyConstructRepeatingStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::recursivelyConstructRepeatingStreamSets(BuilderRef b, InitArgs & args, ParamMap & params, const unsigned scale) const {
 
 }
 
@@ -1256,7 +1303,7 @@ std::string Kernel::getFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-inline std::string annotateKernelNameWithDebugFlags(Kernel::TypeId id, std::string && name) {
+/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(TypeId id, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
@@ -1286,10 +1333,10 @@ inline std::string annotateKernelNameWithDebugFlags(Kernel::TypeId id, std::stri
 Kernel::Kernel(BuilderRef b,
                const TypeId typeId,
                std::string && kernelName,
-               Bindings &&stream_inputs,
-               Bindings &&stream_outputs,
-               Bindings &&scalar_inputs,
-               Bindings &&scalar_outputs,
+               Bindings && stream_inputs,
+               Bindings && stream_outputs,
+               Bindings && scalar_inputs,
+               Bindings && scalar_outputs,
                InternalScalars && internal_scalars)
 : mTypeId(typeId)
 , mStride(b->getBitBlockWidth())
@@ -1299,6 +1346,23 @@ Kernel::Kernel(BuilderRef b,
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
 , mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
+
+}
+
+Kernel::Kernel(BuilderRef b,
+               const TypeId typeId,
+               Bindings && stream_inputs,
+               Bindings && stream_outputs,
+               Bindings && scalar_inputs,
+               Bindings && scalar_outputs)
+: mTypeId(typeId)
+, mStride(b->getBitBlockWidth())
+, mInputStreamSets(std::move(stream_inputs))
+, mOutputStreamSets(std::move(stream_outputs))
+, mInputScalars(std::move(scalar_inputs))
+, mOutputScalars(std::move(scalar_outputs))
+, mInternalScalars()
+, mKernelName() {
 
 }
 

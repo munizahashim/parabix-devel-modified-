@@ -7,6 +7,7 @@
 #include <kernel/core/idisa_target.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <llvm/Support/CommandLine.h>
@@ -32,6 +33,12 @@ static cl::opt<unsigned> optPatternLength("pattern-length", cl::desc("Length of 
 static cl::opt<unsigned> optRepetitionLength("repetition-length", cl::desc("Total length of repeating data"), cl::init(0));
 
 static cl::opt<bool> optAllowUnaligned("allow-unaligned", cl::desc("Allow unaligned access to single stream streamsets"), cl::init(true));
+
+static cl::opt<unsigned> optUseNestedPipeline("nested", cl::desc("Depth of nested pipeline before repeating streamset comparison (0, 1 or 2)"), cl::init(0));
+
+static cl::opt<bool> optUseFamilyCall("family", cl::desc("Execute nested pipeline using family kernel call"), cl::init(false));
+
+static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
@@ -595,7 +602,148 @@ void StreamEq::generateFinalizeMethod(BuilderRef b) {
 
 typedef void (*TestFunctionType)(uint32_t * output);
 
-const static bool verbose = false;
+using PatternVec = std::vector<std::vector<uint64_t>>;
+
+using BuilderRef = Kernel::BuilderRef;
+
+class NestedRepeatingStreamSetTest : public PipelineKernel {
+public:
+    NestedRepeatingStreamSetTest(BuilderRef b,
+                                const PatternVec & pattern,
+                                const bool unaligned,
+                                StreamSet * const Output,
+                                Scalar * const invalid)
+        : PipelineKernel(b
+                         // signature
+                         , "NestedRepeatingStreamSetTest"
+                           + std::to_string(Output->getNumElements())
+                           + "x"
+                           + std::to_string(Output->getFieldWidth())
+                         // contains kernel family calls
+                         , 0
+                         // kernel list
+                         , {}
+                         // called functions
+                         , {}
+                         // stream inputs
+                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
+                         // stream outputs
+                         , {}
+                         // input scalars
+                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         // output scalars
+                         , {}
+                         // internally generated streamsets
+                         , {}
+                         // length assertions
+                         , {})
+    , mPattern(pattern)
+    , mAllowUnaligned(unaligned) {
+        addAttribute(InternallySynchronized());
+        addAttribute(SideEffecting());
+
+    }
+
+protected:
+
+    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+
+        StreamSet * Output = E->getInputStreamSet(0);
+
+        RepeatingStreamSet * RepeatingStream = nullptr;
+        if (mAllowUnaligned) {
+            RepeatingStream = E->CreateUnalignedRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+        } else {
+            RepeatingStream = E->CreateRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+        }
+
+        assert (mInternallyGeneratedStreamSets.size() == 1);
+
+        Scalar * invalid = E->getInputScalar(0);
+
+        E->CreateKernelCall<StreamEq>(RepeatingStream, mAllowUnaligned, Output, false, invalid);
+
+        E->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, mAllowUnaligned, invalid);
+
+    }
+
+const PatternVec & mPattern;
+const bool mAllowUnaligned;
+
+};
+
+
+class MultiLevelNestingTest : public PipelineKernel {
+public:
+    MultiLevelNestingTest(BuilderRef b,
+                          const PatternVec & pattern,
+                          const bool unaligned,
+                          const bool familyCall,
+                          StreamSet * const Output,
+                          Scalar * const invalid)
+        : PipelineKernel(b
+                         // signature
+                         , [&]() -> std::string {
+                            std::string tmp;
+                            raw_string_ostream out(tmp);
+                            out << "MultiLevelNestedRepeatingStreamSetTest"
+                                << Output->getNumElements()
+                                << "x"
+                                << Output->getFieldWidth();
+                            if (familyCall) {
+                                out << "F";
+                            }
+                            out.flush();
+                            return tmp;
+                         }()
+                         // contains kernel family calls
+                         , 0
+                         // kernel list
+                         , {}
+                         // called functions
+                         , {}
+                         // stream inputs
+                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
+                         // stream outputs
+                         , {}
+                         // input scalars
+                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         // output scalars
+                         , {}
+                         // internally generated streamsets
+                         , {}
+                         // length assertions
+                         , {})
+  , mPattern(pattern)
+  , mAllowUnaligned(unaligned)
+  , mFamilyCall(familyCall) {
+        addAttribute(InternallySynchronized());
+        addAttribute(SideEffecting());
+
+    }
+
+protected:
+
+    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+
+        StreamSet * Output = E->getInputStreamSet(0);
+
+        Scalar * invalid = E->getInputScalar(0);
+
+        if (mFamilyCall) {
+            E->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+        } else {
+            E->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+        }
+
+    }
+
+const PatternVec & mPattern;
+const bool mAllowUnaligned;
+const bool mFamilyCall;
+
+};
+
 
 bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
 
@@ -628,6 +776,25 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         repetitionLength = std::max(v, 4567U);
     }
 
+    unsigned useNestedTest = optUseNestedPipeline;
+    if (optUseNestedPipeline.getNumOccurrences() == 0) {
+        std::uniform_int_distribution<unsigned> nestedPipeDist(0, 2);
+        useNestedTest = nestedPipeDist(rng);
+    }
+
+    std::array<bool, 2> useFamilyCall;
+
+    if (optUseFamilyCall.getNumOccurrences() == 0) {
+        for (unsigned i = 0; i < useNestedTest; ++i) {
+            std::uniform_int_distribution<unsigned> familyCallDist(0, 1);
+            useFamilyCall[i] = (familyCallDist(rng) != 0);
+        }
+    } else {
+        for (unsigned i = 0; i < useNestedTest; ++i) {
+            useFamilyCall[i] = optUseFamilyCall;
+        }
+    }
+
     const bool allowUnaligned = optAllowUnaligned && numElements == 1;
 
     std::uniform_int_distribution<uint64_t> dist(0ULL, (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL);
@@ -641,31 +808,62 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         }
     }
 
-    RepeatingStreamSet * RepeatingStream = nullptr;
-    if (allowUnaligned) {
-        RepeatingStream = P->CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
-    } else {
-        RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
-    }
-
     StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
 
     Scalar *  const repLength = P->CreateConstant(b->getSize(repetitionLength));
 
     P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
 
-    Scalar * output = P->getInputScalar("output");
+    Scalar * invalid = P->getInputScalar("output");
 
-    P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, output);
+    if (useNestedTest == 2) {
+        if (useFamilyCall[0]) {
+            P->CreateNestedPipelineFamilyCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+        } else {
+            P->CreateNestedPipelineCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+        }
+    } else if (useNestedTest == 1) {
+        if (useFamilyCall[0]) {
+            P->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+        } else {
+            P->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+        }
+    } else {
+        RepeatingStreamSet * RepeatingStream = nullptr;
+        if (allowUnaligned) {
+            RepeatingStream = P->CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
+        } else {
+            RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+        }
 
-    P->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, output);
+        P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
+
+        P->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
+    }
 
     const auto f = reinterpret_cast<TestFunctionType>(P->compile());
 
     uint32_t result = 0;
     f(&result);
 
-    if (result != 0 || verbose) {
+    if (result != 0 || optVerbose) {
+
+        if (useNestedTest) {
+
+            llvm::errs() << "NESTED ";
+            bool called = false;
+            if (useFamilyCall[0]) {
+                llvm::errs() << "OUTER ";
+                called = true;
+            }
+            if (useNestedTest > 1 && useFamilyCall[1]) {
+                llvm::errs() << "INNER ";
+                called = true;
+            }
+            if (called) {
+                llvm::errs() << "FAMILY CALL ";
+            }
+        }
 
         llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength << " : ";
 

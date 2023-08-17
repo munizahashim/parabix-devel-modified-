@@ -44,15 +44,6 @@ void PipelineCompiler::initializeFlowControl(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadCurrentThreadLocalMemoryRequired
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadCurrentThreadLocalMemoryAddress(BuilderRef b) {
-    if (RequiredThreadLocalStreamSetMemory > 0) {
-        mThreadLocalStreamSetBaseAddress = b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief detemineMaximumNumberOfStrides
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {

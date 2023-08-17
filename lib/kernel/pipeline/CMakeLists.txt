@@ -23,6 +23,8 @@ SRC
     compiler/analysis/consumer_analysis.cpp
     compiler/analysis/dataflow_analysis.cpp
     compiler/analysis/evolutionary_algorithm.cpp
+    compiler/analysis/family_analysis.cpp
+    compiler/analysis/internallygeneratedstreamset_analysis.cpp
     compiler/analysis/partitioning_analysis.cpp
     compiler/analysis/pipeline_graph_printers.cpp
     compiler/analysis/relationship_analysis.cpp
@@ -42,6 +44,7 @@ SRC
     compiler/codegen/kernel_family_logic.cpp
     compiler/codegen/kernel_io_calculation_logic.cpp
     compiler/codegen/kernel_logic.cpp
+    compiler/codegen/multithreading_model_logic.cpp
     compiler/codegen/kernel_segment_processing_logic.cpp
     compiler/codegen/optimization_branch_logic.cpp
     compiler/codegen/partition_processing_logic.cpp
@@ -55,6 +58,7 @@ SRC
     compiler/internal/regionselectionkernel.cpp
     compiler/statistics/cycle_counter_logic.cpp
     compiler/statistics/histogram_generation_logic.cpp
+    compiler/statistics/multithreading_report_logic.cpp
     ${PAPI_CPP}
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp

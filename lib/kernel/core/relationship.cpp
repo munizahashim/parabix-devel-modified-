@@ -55,4 +55,10 @@ ScalarConstant::ScalarConstant(not_null<Constant *> constant) noexcept
 
 }
 
+CommandLineScalar::CommandLineScalar(const CommandLineScalarType clType, llvm::Type * type) noexcept
+: Scalar(Relationship::ClassTypeId::CommandLineScalar, type)
+, mCLType(clType) {
+
+}
+
 }

@@ -141,8 +141,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                const auto scale = MaximumNumOfStrides[i] * Rational{mNumOfThreads};
-                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, scale));
+                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
 
                 FunctionType * const funcType = cast<FunctionType>(func->getType()->getPointerElementType());
 
@@ -227,9 +226,9 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateExternalPipelineIO
+ * @brief updateExternalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
+void PipelineCompiler::updateExternalProducedItemCounts(BuilderRef b) {
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -753,7 +752,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     #ifdef ENABLE_PAPI
     readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
     #endif
-    Value * const beforeCopy = startCycleCounter(b);
+    startCycleCounter(b, CycleCounter::BUFFER_COPY);
 
     Value * source = buffer->getOverflowAddress(b);
     Value * target = buffer->getMallocAddress(b);
@@ -783,7 +782,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     if (copyLoop) {
 
         BasicBlock * recordCopyCycleCount = nullptr;
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             recordCopyCycleCount = b->CreateBasicBlock(prefix + "RecordCycleCount", copyExit);
         }
 
@@ -809,9 +808,9 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         BasicBlock * const loopExit = EnableCycleCounter ? recordCopyCycleCount : copyExit;
         b->CreateCondBr(done, loopExit, copyLoop);
 
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             b->SetInsertPoint(recordCopyCycleCount);
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
@@ -827,8 +826,9 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         #endif
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
-        if (EnableCycleCounter || EnablePAPICounters) {
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+        assert (NumOfPAPIEvents > 0);
+        if (EnableCycleCounter || NumOfPAPIEvents) {
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
             accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
@@ -907,9 +907,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
 
-
     Value * const baseAddress = buffer->getBaseAddress(b);
-
     if (bufferNode.isUnowned()) {
         assert (bufferNode.isNonThreadLocal());
         assert (!bufferNode.isConstant());
