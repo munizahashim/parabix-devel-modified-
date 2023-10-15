@@ -609,6 +609,7 @@ RE * RE_Parser::parse_bracketed_items () {
             if (accept('=')) items.push_back(parse_equivalence_class());
             else if (accept('.')) items.push_back(range_extend(parse_collation_element()));
             else if (accept(':')) items.push_back(parse_Posix_class());
+            else if (accept('|')) items.push_back(parse_permute_class());
             else items.push_back(parse_extended_bracket_expression());
         } else if (accept('\\')) {
             if (at('N') || !isSetEscapeChar(*mCursor)) items.push_back(range_extend(parse_escaped_char_item()));
@@ -665,6 +666,16 @@ RE * RE_Parser::parse_Posix_class() {
     require(":]");
     if (negated) return makeComplement(posixSet);
     else return posixSet;
+}
+
+RE * RE_Parser::parse_permute_class() {
+    std::vector<RE *> elems;
+    while (mCursor.more() && !at('|')) {
+        auto cp = parse_literal_codepoint();
+        elems.push_back(makeCC(cp));
+    }
+    require("|]");
+    return makePermute(elems.begin(), elems.end());
 }
 
 RE * RE_Parser::parse_escaped_char_item() {

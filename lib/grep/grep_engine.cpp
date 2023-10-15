@@ -62,6 +62,7 @@
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
+#include <re/transforms/expand_permutes.h>
 #include <re/transforms/name_intro.h>
 #include <re/transforms/reference_transform.h>
 #include <re/transforms/variable_alt_promotion.h>
@@ -270,7 +271,8 @@ void GrepEngine::initRE(re::RE * re) {
     if ((mEngineKind != EngineKind::EmitMatches) || mInvertMatches) {
         mColoring = false;
     }
-    mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
+    mRE = expandPermutes(re);
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     // Determine the unit of length for the RE.  If the RE involves
     // fixed length UTF-8 sequences only, then UTF-8 can be used
     // for most efficient processing.   Otherwise we must use full

@@ -21,6 +21,7 @@
 #include <re/adt/re_intersect.h>
 #include <re/adt/re_assertion.h>
 #include <re/adt/re_group.h>
+#include <re/adt/re_permute.h>
 #include <re/alphabet/alphabet.h>
 #include <unicode/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
@@ -151,6 +152,17 @@ void REStringBuilder::buildString(const RE * re) {
         out << "(Seq[";
         bool comma = false;
         for (const RE * re : *re_seq) {
+            if (comma) {
+                out << ',';
+            }
+            buildString(re);
+            comma = true;
+        }
+        out << "])";
+    } else if (const Permute* p = dyn_cast<const Permute>(re)) {
+        out << "(Permute[";
+        bool comma = false;
+        for (const RE * re : *p) {
             if (comma) {
                 out << ',';
             }

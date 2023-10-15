@@ -52,6 +52,7 @@ protected:
     virtual bool validateAssertion(const Assertion * a);
     virtual bool validateCapture(const Capture * c);
     virtual bool validateReference(const Reference * r);
+    virtual bool validatePermute(const Permute * pe);
     virtual bool validatePropertyExpression(const PropertyExpression * pe);
 private:
     std::string mValidatorName;

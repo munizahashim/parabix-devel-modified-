@@ -39,6 +39,7 @@ public:
         , Rep
         , Seq
         , Start
+        , Permute
     };
     inline ClassTypeId getClassTypeId() const {
         return mClassTypeId;

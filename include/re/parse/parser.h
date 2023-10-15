@@ -213,6 +213,7 @@ protected:
     RE * parse_equivalence_class();
     RE * parse_collation_element();
     RE * parse_Posix_class();
+    RE * parse_permute_class();
     RE * parse_escaped_char_item();
     
     RE * makeAtomicGroup(RE * r);

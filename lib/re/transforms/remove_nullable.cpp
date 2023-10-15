@@ -130,6 +130,9 @@ protected:
         if (r->getLB() > 0) return r;
         return makeAlt({makeSeq(), makeRep(r->getRE(), 1, r->getUB())});
     }
+    RE * transformAssertion(Assertion * a) override {
+        return a;
+    }
 };
 
 RE * zeroBoundElimination(RE * re,

@@ -596,7 +596,12 @@ unsigned grepOffset(const RE * re) {
         return altOffset;
     } else if (const Seq * seq = dyn_cast<Seq>(re)) {
         if (seq->empty()) return 1;
-        return grepOffset(seq->back());
+        for (auto i = seq->rbegin(); i != seq->rend(); ++i) {
+            unsigned o = grepOffset(*i);
+            if (!isa<Assertion>(*i)) return o;
+            if (o == 1) return o;
+        }
+        return 1;
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
         if (rep->getUB() == Rep::UNBOUNDED_REP) return 1;
         return grepOffset(rep->getRE());
@@ -604,7 +609,10 @@ unsigned grepOffset(const RE * re) {
         return 1;
     } else if (isa<End>(re)) {
         return 1;
-    } else if (isa<Assertion>(re)) {
+    } else if (const Assertion * a = dyn_cast<Assertion>(re)) {
+        if (a->getKind() == Assertion::Kind::LookBehind) {
+            return grepOffset(a->getAsserted());
+        }
         return 1;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return grepOffset(diff->getLH());
