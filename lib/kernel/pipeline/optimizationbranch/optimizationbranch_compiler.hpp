@@ -498,13 +498,6 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
 
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    Constant * const ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-
-    BasicBlock * const entry = b->GetInsertBlock();
-
     Value * const selectedBranch = b->getScalarField(CONTROL_CODE);
 
     BasicBlock * const optimizationBranch = b->CreateBasicBlock("optimizationBranch");
@@ -600,8 +593,6 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
             addNextArg(getAccessibleInputItems(host.Index));
         }
     }
-
-    PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
 
     const auto canTerminate = kernel->canSetTerminateSignal();
 

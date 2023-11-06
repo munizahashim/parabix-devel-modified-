@@ -169,11 +169,14 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 out << joiner << "color=blue";
                 break;
             case ReasonType::Reference:
+            case ReasonType::ImplicitTruncatedSource:
                 out << joiner << "color=gray";
                 break;
             case ReasonType::OrderingConstraint:
                 out << joiner << "color=red";
                 break;
+            default:
+                llvm_unreachable("unexpected reason code");
         }
         out << "];\n";
         out.flush();

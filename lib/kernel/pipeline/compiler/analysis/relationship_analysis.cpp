@@ -242,7 +242,6 @@ void addTruncatedStreamSetContraints() {
 
         // TODO: if we take this as an input with an equivalent rate, do not add it as a check?
         // Or make general check to prevent that for any port drawing from the same streamset?
-        #warning not completely finished yet
 
         Binding * const trunc = new Binding("#trunc", c.SourceData, output.getRate());
         mInternalBindings.emplace_back(trunc);

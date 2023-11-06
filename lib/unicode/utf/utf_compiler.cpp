@@ -465,8 +465,8 @@ void UTF_Compiler::compile(IfHierarchy h) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
-: mPb(pb), mLookAhead(lookAhead), mMask(mask) {
+UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned /* lookAhead */, PabloAST * mask)
+: mPb(pb), mMask(mask) { // , mLookAhead(lookAhead)
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
     if (streamCount == 1) {

@@ -300,12 +300,12 @@ public:
     }
     FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
         ExternalStreamObject(Kind::FilterByMask, e->getLengthRange(), e->getOffset()),
-            mBase(base), mParamNames(paramNames), mBaseExternal(e) {}
+            mBase(base), mParamNames(paramNames) {} // , mBaseExternal(e)
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     const StreamIndexCode mBase;
     const std::vector<std::string> mParamNames;
-    ExternalStreamObject * const mBaseExternal;
+//    ExternalStreamObject * const mBaseExternal;
 };
 
 class FixedSpanExternal final : public ExternalStreamObject {

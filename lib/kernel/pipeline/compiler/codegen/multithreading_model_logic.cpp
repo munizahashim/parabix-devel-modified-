@@ -71,7 +71,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     PointerType * const voidPtrTy = b->getVoidPtrTy();
     IntegerType * const boolTy = b->getInt1Ty();
     IntegerType * const sizeTy = b->getSizeTy();
-    Type * const emptyTy = StructType::get(m->getContext());
 
     const auto storedState = storeDoSegmentState();
 
@@ -196,7 +195,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     b->SetInsertPoint(constructedThreads);
 
     // execute the process thread
-    Value * const pty_ZERO = Constant::getNullValue(pThreadTy);
     Value * const processState = threadStateArray;
     writeThreadStructObject(b, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maximumNumOfThreads);
     fieldIndex[0] = i32_ZERO;

@@ -295,8 +295,6 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
         report_fatal_error("RepeatingStreamSet fieldwidth must be a power of 2 and no more than " + std::to_string(laneWidth));
     }
 
-    const auto maxVal = (1ULL << static_cast<size_t>(fieldWidth)) - 1ULL;
-
     size_t patternLength = 0;
     if (numElements == 1 && ss->isUnaligned()) {
         if (fieldWidth < 8) {
@@ -319,6 +317,7 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
         patternLength = boost::lcm<size_t>(patternLength, L);
 
         #ifndef NDEBUG
+        const auto maxVal = (1ULL << static_cast<size_t>(fieldWidth)) - 1ULL;
         for (auto v : vec) {
             if (LLVM_UNLIKELY(v > maxVal)) {
                 SmallVector<char, 256> tmp;

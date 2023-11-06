@@ -20,9 +20,6 @@ constexpr static unsigned BUFFER_SIZE_GA_MAX_TIME_SECONDS = 15;
 constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
 
 // Intel spatial prefetcher pulls cache line pairs, aligned to 128 bytes.
-constexpr static unsigned SPATIAL_PREFETCHER_ALIGNMENT = 128;
-
-constexpr static unsigned NON_HUGE_PAGE_SIZE = 4096;
 
 using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
 

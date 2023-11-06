@@ -85,8 +85,8 @@ public:
                 assert ("relationship is already mapped to that value" && mCommandLineMap[k] == nullptr);
                 mCommandLineMap[k] = value;
             } else {
-                const auto f = mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
-                assert ("relationship is already mapped to that value" && f.second);
+                assert ("relationship is already mapped to that value" && mRelationshipMap.count(inputScalar) == 0);
+                mRelationshipMap.insert(std::pair<const Relationship *, llvm::Value *>(inputScalar, value));
             }
         }
 
@@ -100,8 +100,8 @@ public:
         }
 
         inline void set(const Relationship * inputScalar, PairEntry value) {
-            const auto f = mRelationshipPairMap.insert(std::pair<const Relationship *, PairEntry>(inputScalar, value));
-            assert ("relationship is already mapped to that value" && f.second);
+            assert ("relationship is already mapped to that value" && mRelationshipPairMap.count(inputScalar) == 0);
+            mRelationshipPairMap.insert(std::pair<const Relationship *, PairEntry>(inputScalar, value));
         }
 
     private:
