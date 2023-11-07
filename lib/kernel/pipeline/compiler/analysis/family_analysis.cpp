@@ -33,8 +33,6 @@ void PipelineAnalysis::scanFamilyKernelBindings() {
                 const auto & ref = N[i];
                 Kernel * const obj = ref.Object;
 
-                size_t k = 0;
-
                 const auto m = obj->getNumOfNestedKernelFamilyCalls();
 
                 if (ref.isFamilyCall() || m > 0) {
@@ -70,8 +68,6 @@ void PipelineAnalysis::scanFamilyKernelBindings() {
 
             const auto & ref = V[i];
             Kernel * const obj = ref.Object;
-
-            size_t k = 0;
 
             const auto m = obj->getNumOfNestedKernelFamilyCalls();
 

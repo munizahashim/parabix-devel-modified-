@@ -2476,7 +2476,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
             node.Size = Rational{0};
         } else {
             const RelationshipNode & rn = Relationships[producer];
-            assert (node.Type == RelationshipNode::IsKernel);
+            assert (rn.Type == RelationshipNode::IsKernel);
             const PartitionData & N = P[producerPartitionId];
             const auto & K = N.Kernels;
             const auto h = std::find(K.begin(), K.end(), producer);

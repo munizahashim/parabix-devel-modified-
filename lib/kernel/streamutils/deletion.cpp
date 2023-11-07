@@ -136,7 +136,6 @@ void FieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * c
 
     if (BMI2_available()) {
         Type * fieldTy = kb->getIntNTy(mFW);
-        Type * fieldPtrTy = PointerType::get(fieldTy, 0);
         const unsigned fieldsPerBlock = kb->getBitBlockWidth()/mFW;
         Value * extractionMask = kb->fwCast(mFW, maskVec[0]);
         std::vector<Value *> mask(fieldsPerBlock);

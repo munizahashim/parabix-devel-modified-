@@ -82,7 +82,7 @@ protected:
 private:
     UTF_Encoder             mEncoder;
     pablo::PabloBuilder &   mPb;
-    unsigned                mLookAhead;
+//    unsigned                mLookAhead;
     PabloAST *              mMask;
     std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
     TargetMap               mTarget;

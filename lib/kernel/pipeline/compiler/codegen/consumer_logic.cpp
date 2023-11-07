@@ -155,9 +155,9 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         }
         itemCount = produced;
     } else {
-        const auto e = in_edge(streamSet, mConsumerGraph);
-        const ConsumerEdge & c = mConsumerGraph[e];
-        const auto producer = source(e, mConsumerGraph);
+//        const auto e = in_edge(streamSet, mConsumerGraph);
+//        const ConsumerEdge & c = mConsumerGraph[e];
+//        const auto producer = source(e, mConsumerGraph);
 //        if (LLVM_LIKELY(producer != PipelineInput || mTraceIndividualConsumedItemCounts)) {
             const auto id = getTruncatedStreamSetSourceId(streamSet);
             Value * ptr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));

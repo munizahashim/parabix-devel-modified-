@@ -264,7 +264,10 @@ void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
 
 void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
     StreamSet * reStrm  = b->CreateStreamSet(1);
-    const auto offset = mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, reStrm);
+    #ifndef NDEBUG
+    const auto offset =
+    #endif
+    mGrepEngine->RunGrep(b, mIndexAlphabet, mRE, reStrm);
     assert(offset == static_cast<unsigned>(mOffset));
     installStreamSet(reStrm);
 }

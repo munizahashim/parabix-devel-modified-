@@ -1158,9 +1158,9 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
 
         hostArgs.push_back(voidPtr);
     };
-
-    const auto k = hostArgs.size();
-
+    #ifndef NDEBUG
+    const auto originalNumOfHoseArgs = hostArgs.size();
+    #endif
     if (LLVM_LIKELY(isStateful())) {
         addHostArg(handle);
     } else {
@@ -1194,7 +1194,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
     // TODO: queue these in a list of termination functions to add to main?
     addHostArg(getFinalizeFunction(b));
 
-    assert (hostArgs.size() == (k + 7));
+    assert (hostArgs.size() == (originalNumOfHoseArgs + 7));
 
     return handle;
 }

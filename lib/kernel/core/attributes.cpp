@@ -42,6 +42,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(SideEffecting);
         NAME(Family);
         NAME(InternallySynchronized);
+        NAME(InternallyGenerated);
         NAME(InfrequentlyUsed);
         NAME(Linear);
         NAME(None);
@@ -52,6 +53,8 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
     }
     #undef NAME
     #undef NAME_AMOUNT
+
+
 }
 
 void AttributeSet::print(llvm::raw_ostream & out) const noexcept {

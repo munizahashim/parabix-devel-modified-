@@ -417,8 +417,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = source(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
@@ -454,8 +453,7 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = target(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
@@ -845,18 +843,6 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
 
-    DataLayout DL(b->getModule());
-
-    IntegerType * const int8Ty = b->getInt8Ty();
-
-    auto getTypeSize = [&](Type * const type) -> uint64_t {
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return DL.getTypeAllocSize(type);
-        #else
-        return DL.getTypeAllocSize(type).getFixedSize();
-        #endif
-    };
-
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -866,7 +852,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             assert (!bn.isTruncated());
             assert (RequiredThreadLocalStreamSetMemory > 0);
             assert (mThreadLocalStreamSetBaseAddress);
-            assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == int8Ty);
+            assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == b->getInt8Ty());
             auto start = bn.BufferStart;
             assert ((start % b->getCacheAlignment()) == 0);
             #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
