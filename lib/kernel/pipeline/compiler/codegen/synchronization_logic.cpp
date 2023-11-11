@@ -156,8 +156,15 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(1));
         if (LLVM_UNLIKELY(CheckAssertions)) {
+            DataLayout DL(b->getModule());
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+            llvm::MaybeAlign align = Align(DL.getTypeStoreSize(nextSegNo->getType()));
+#endif
             Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, segNo, nextSegNo,
-                                          AtomicOrdering::Release, AtomicOrdering::Acquire);
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+                                                           *align,
+#endif
+                                                           AtomicOrdering::Release, AtomicOrdering::Acquire);
             Value * const observed = b->CreateExtractValue(updated, { 0 });
             Value * const success = b->CreateExtractValue(updated, { 1 });
             SmallVector<char, 256> tmp;

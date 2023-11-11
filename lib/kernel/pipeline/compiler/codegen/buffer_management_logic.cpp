@@ -765,8 +765,8 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
     if (mode == CopyMode::LookBehind || mode == CopyMode::Delay) {
         Value * const offset = b->CreateNeg(totalBytesPerStreamSetBlock);
-        source = b->CreateInBoundsGEP(source, offset);
-        target = b->CreateInBoundsGEP(target, offset);
+        source = b->CreateInBoundsGEP0(source, offset);
+        target = b->CreateInBoundsGEP0(target, offset);
     }
 
     if (mode == CopyMode::LookAhead || mode == CopyMode::Delay) {
@@ -790,8 +790,8 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         PHINode * const idx = b->CreatePHI(b->getSizeTy(), 2);
         idx->addIncoming(b->getSize(0), copyStart);
         Value * const offset = b->CreateMul(idx, bytesPerStream);
-        Value * const sourcePtr = b->CreateGEP(source, offset);
-        Value * const targetPtr = b->CreateGEP(target, offset);
+        Value * const sourcePtr = b->CreateGEP0(source, offset);
+        Value * const targetPtr = b->CreateGEP0(target, offset);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_copying %" PRIu64 " bytes from %" PRIx64 " to %" PRIx64 " (align=%" PRIu64 ")", bytesToCopy, sourcePtr, targetPtr, b->getSize(align));
@@ -869,7 +869,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
 
             Value * const offset = b->CreateSub(startOffset, producedBytes);
-            Value * ba = b->CreateGEP(mThreadLocalStreamSetBaseAddress, offset);
+            Value * ba = b->CreateGEP0(mThreadLocalStreamSetBaseAddress, offset);
             ba = b->CreatePointerCast(ba, ptrTy);
             buffer->setBaseAddress(b, ba);
 
@@ -951,7 +951,7 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
     const auto toFetch = round_up_to<unsigned>(cl * 3, typeSize);
     Value * const baseAddr = b->CreatePointerCast(addr, b->getInt8PtrTy());
     for (unsigned i = 0; i < toFetch; i += cl) {
-        args[0] = b->CreateGEP(baseAddr, b->getSize(i));
+        args[0] = b->CreateGEP0(baseAddr, b->getSize(i));
         b->CreateCall(prefetchFunc->getFunctionType(), prefetchFunc, args);
     }
 #endif

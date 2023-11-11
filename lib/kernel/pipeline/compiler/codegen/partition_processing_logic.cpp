@@ -740,7 +740,7 @@ void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(Bui
                         if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
                             FixedArray<Value *, 1> indices;
                             indices[0] = b->getInt32(0);
-                            alreadyConsumedPtr = b->CreateGEP(ptr, indices);
+                            alreadyConsumedPtr = b->CreateGEP0(ptr, indices);
                         }
                         Value * const alreadyConsumed = b->CreateLoad(alreadyConsumedPtr);
                         assert (ptr->getType()->getPointerElementType() == alreadyConsumed->getType());

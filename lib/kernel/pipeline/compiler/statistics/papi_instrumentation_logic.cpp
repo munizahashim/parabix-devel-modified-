@@ -172,14 +172,14 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, Value * co
         for (unsigned i = 0; i < n; ++i) {
             from[1] = b->getInt32(i);
             assert (beforeMeasurement->getType() == PAPIReadAfterMeasurementArray->getType());
-            Value * const beforeVal = b->CreateLoad(b->CreateGEP(beforeMeasurement, from));
+            Value * const beforeVal = b->CreateLoad(b->CreateGEP0(beforeMeasurement, from));
          //   b->CallPrintInt("beforeVal", beforeVal);
-            Value * const afterVal = b->CreateLoad(b->CreateGEP(PAPIReadAfterMeasurementArray, from));
+            Value * const afterVal = b->CreateLoad(b->CreateGEP0(PAPIReadAfterMeasurementArray, from));
          //   b->CallPrintInt("afterVal", afterVal);
             Value * const diff = b->CreateSub(afterVal, beforeVal);
          //   b->CallPrintInt("diff", diff);
             update[2] = from[1];
-            Value * const ptr = b->CreateGEP(evenCounterSumArray, update);
+            Value * const ptr = b->CreateGEP0(evenCounterSumArray, update);
             Value * const curr = b->CreateLoad(ptr);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b->CreateAdd(curr, diff);
@@ -212,10 +212,10 @@ void PipelineCompiler::recordTotalPAPIMeasurement(BuilderRef b, Value * const be
         for (unsigned i = 0; i < n; ++i) {
             from[1] = b->getInt32(i);
             assert (beforeMeasurement->getType() == PAPIReadAfterMeasurementArray->getType());
-            Value * const beforeVal = b->CreateLoad(b->CreateGEP(beforeMeasurement, from));
-            Value * const afterVal = b->CreateLoad(b->CreateGEP(PAPIReadAfterMeasurementArray, from));
+            Value * const beforeVal = b->CreateLoad(b->CreateGEP0(beforeMeasurement, from));
+            Value * const afterVal = b->CreateLoad(b->CreateGEP0(PAPIReadAfterMeasurementArray, from));
             Value * const diff = b->CreateSub(afterVal, beforeVal);
-            Value * const ptr = b->CreateGEP(evenCounterSumArray, from);
+            Value * const ptr = b->CreateGEP0(evenCounterSumArray, from);
             Value * const curr = b->CreateLoad(ptr);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b->CreateAdd(curr, diff);
@@ -641,7 +641,7 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             for (size_t i = FirstKernel; i <= LastKernel; ++i) {
                 Value * const base = b->getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
                 indices[1] = b->getInt32(i - FirstKernel);
-                b->CreateStore(b->CreatePointerCast(base, counterPtrTy), b->CreateGEP(pointerArray, indices));
+                b->CreateStore(b->CreatePointerCast(base, counterPtrTy), b->CreateGEP0(pointerArray, indices));
 
             }
 

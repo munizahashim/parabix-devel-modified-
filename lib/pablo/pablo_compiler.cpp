@@ -182,7 +182,7 @@ void PabloCompiler::addBranchCounter(BuilderRef b) {
     if (CompileOptionIsSet(PabloCompilationFlags::EnableProfiling)) {
         Value * ptr = b->getScalarFieldPtr("profile");
         assert (mBasicBlock.size() < ptr->getType()->getPointerElementType()->getArrayNumElements());
-        ptr = b->CreateGEP(ptr, {b->getInt32(0), b->getInt32(mBasicBlock.size())});
+        ptr = b->CreateGEP0(ptr, {b->getInt32(0), b->getInt32(mBasicBlock.size())});
         const auto alignment = getPointerElementAlignment(ptr);
         Value * value = b->CreateAlignedLoad(ptr, alignment, false, "branchCounter");
         value = b->CreateAdd(value, ConstantInt::get(cast<IntegerType>(value->getType()), 1));
@@ -667,14 +667,14 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             }
             Constant * const ZERO = b->getInt32(0);
             for (unsigned i = 0; i < result_packs; ++i) {
-                Value * A = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2)}));
-                Value * B = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2 + 1)}));
+                Value * A = b->CreateLoad(b->CreateGEP0(base, {ZERO, b->getInt32(i * 2)}));
+                Value * B = b->CreateLoad(b->CreateGEP0(base, {ZERO, b->getInt32(i * 2 + 1)}));
                 Value * P = b->bitCast(b->hsimd_packh(packWidth, A, B));
                 if (LLVM_UNLIKELY(result_packs == 1)) {
                     value = P;
                     break;
                 }
-                b->CreateStore(P, b->CreateGEP(value, {ZERO, b->getInt32(i)}));
+                b->CreateStore(P, b->CreateGEP0(value, {ZERO, b->getInt32(i)}));
             }
         } else if (const PackL * const p = dyn_cast<PackL>(stmt)) {
             const auto sourceWidth = cast<FixedVectorType>(p->getValue()->getType())->getElementType()->getIntegerBitWidth();
@@ -687,14 +687,14 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             }
             Constant * const ZERO = b->getInt32(0);
             for (unsigned i = 0; i < result_packs; ++i) {
-                Value * A = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2)}));
-                Value * B = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2 + 1)}));
+                Value * A = b->CreateLoad(b->CreateGEP0(base, {ZERO, b->getInt32(i * 2)}));
+                Value * B = b->CreateLoad(b->CreateGEP0(base, {ZERO, b->getInt32(i * 2 + 1)}));
                 Value * P = b->bitCast(b->hsimd_packl(packWidth, A, B));
                 if (LLVM_UNLIKELY(result_packs == 1)) {
                     value = P;
                     break;
                 }
-                b->CreateStore(P, b->CreateGEP(value, {ZERO, b->getInt32(i)}));
+                b->CreateStore(P, b->CreateGEP0(value, {ZERO, b->getInt32(i)}));
             }
         } else if (const DebugPrint * const d = dyn_cast<DebugPrint>(stmt)) {
           SmallVector<char, 64> tmp;
@@ -908,7 +908,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                         } else { // if (typeId == TypeId::Subtract) {
                             result = b->CreateSub(lhv, rhv);
                         }
-                        b->CreateAlignedStore(result, b->CreateGEP(value, {b->getInt32(0), b->getInt32(i)}), getAlignment(result));
+                        b->CreateAlignedStore(result, b->CreateGEP0(value, {b->getInt32(0), b->getInt32(i)}), getAlignment(result));
                     }
 
                 } else {
@@ -1050,7 +1050,7 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
         offsets.push_back(ConstantInt::getNullValue(index1->getType()));
         offsets.push_back(index1);
         if (index2) offsets.push_back(index2);
-        return b->CreateGEP(ptr, offsets);
+        return b->CreateGEP0(ptr, offsets);
     }
 }
 

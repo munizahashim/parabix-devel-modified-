@@ -130,7 +130,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     optAddr = b->CreatePointerCast(optAddr, bitBlockTy->getPointerTo());
     Value * optCondVal = b->CreateLoad(optAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(b->CreateGEP(optAddr, b->getInt32(i)));
+        Value * const val = b->CreateLoad(b->CreateGEP0(optAddr, b->getInt32(i)));
         optCondVal = b->CreateOr(optCondVal, val);
     }
     Value * const foundNonOpt = b->bitblock_any(optCondVal);
@@ -153,7 +153,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     regAddr = b->CreatePointerCast(regAddr, bitBlockTy->getPointerTo());
     Value * regCondVal = b->CreateLoad(regAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(b->CreateGEP(regAddr, b->getInt32(i)));
+        Value * const val = b->CreateLoad(b->CreateGEP0(regAddr, b->getInt32(i)));
         regCondVal = b->CreateOr(regCondVal, val);
     }
     regCondVal = b->bitblock_any(regCondVal);

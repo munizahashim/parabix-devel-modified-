@@ -67,7 +67,7 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
     FixedArray<Value *, 2> groupIndices;
     groupIndices[0] = i32_ZERO;
     groupIndices[1] = i32_ONE;
-    Value * currentCountPtr = b->CreateGEP(data, groupIndices);
+    Value * currentCountPtr = b->CreateGEP0(data, groupIndices);
     Value * const currentCount = b->CreateLoad(currentCountPtr);
     Value * const outOfSpace = b->CreateICmpEQ(currentCount, b->getSize(MAX_ENTRY_GROUP_SIZE));
     BasicBlock * const mallocNewChunk = b->CreateBasicBlock("mallocNewDynamicThreadingBlock");
@@ -80,7 +80,7 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
     Value * newChunk = b->CreateAlignedMalloc(entryGroupSize, sizeof(void*));
     b->CreateMemZero(newChunk, entryGroupSize, sizeof(void*));
     groupIndices[1] = i32_TWO;
-    Value * currentNextPtr = b->CreateGEP(data, groupIndices);
+    Value * currentNextPtr = b->CreateGEP0(data, groupIndices);
     assert (newChunk->getType() == b->getVoidPtrTy());
     b->CreateStore(newChunk, currentNextPtr);
     newChunk = b->CreatePointerCast(newChunk, cast<PointerType>(data->getType()));
@@ -98,19 +98,19 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
 
     groupIndices[1] = i32_ONE;
     Value * const nextCount = b->CreateAdd(count, b->getSize(1));
-    b->CreateStore(nextCount, b->CreateGEP(statePhi, groupIndices));
+    b->CreateStore(nextCount, b->CreateGEP0(statePhi, groupIndices));
 
     FixedArray<Value *, 4> entryIndices;
     entryIndices[0] = i32_ZERO;
     entryIndices[1] = i32_ZERO;
     entryIndices[2] = currentCount;
     entryIndices[3] = i32_ZERO;
-    b->CreateStore(segNo, b->CreateGEP(statePhi, entryIndices));
+    b->CreateStore(segNo, b->CreateGEP0(statePhi, entryIndices));
     entryIndices[3] = i32_ONE;
-    b->CreateStore(currentSyncOverhead, b->CreateGEP(statePhi, entryIndices));
+    b->CreateStore(currentSyncOverhead, b->CreateGEP0(statePhi, entryIndices));
     entryIndices[3] = i32_TWO;
     Value * const numThreads = b->CreateTrunc(currentNumOfThreads, b->getInt32Ty());
-    b->CreateStore(numThreads, b->CreateGEP(statePhi, entryIndices));
+    b->CreateStore(numThreads, b->CreateGEP0(statePhi, entryIndices));
 }
 
 

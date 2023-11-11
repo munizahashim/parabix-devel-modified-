@@ -396,7 +396,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             offset[0] = i32_ZERO;
             offset[1] = i32_ZERO;
             offset[2] = i32_ZERO;
-            Value * const branchTypePtr = b->CreateGEP(mKernelThreadLocalHandle, offset);
+            Value * const branchTypePtr = b->CreateGEP0(mKernelThreadLocalHandle, offset);
             assert (branchTypePtr->getType()->getPointerElementType() == mOptimizationBranchSelectedBranch->getType());
             b->CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
         }

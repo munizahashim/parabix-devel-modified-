@@ -612,7 +612,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             assert (streamSetArg->getType() == streamSetPtrTy);
             // virtual base input address
             fields[1] = i32_ZERO;
-            Value * const vbaPtr = b->CreateGEP(streamSetArg, fields);
+            Value * const vbaPtr = b->CreateGEP0(streamSetArg, fields);
             segmentArgs[argCount++] = b->CreateLoad(vbaPtr);
             // processed input items
             fields[1] = i32_ONE;
@@ -620,7 +620,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             b->CreateStore(sz_ZERO, processedPtr);
             segmentArgs[argCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[argCount++] = b->CreateLoad(b->CreateGEP(streamSetArg, fields));
+            segmentArgs[argCount++] = b->CreateLoad(b->CreateGEP0(streamSetArg, fields));
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
@@ -629,12 +629,12 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
-            segmentArgs[argCount++] = b->CreateGEP(streamSetArg, fields);
+            segmentArgs[argCount++] = b->CreateGEP0(streamSetArg, fields);
 
             // produced output items
             fields[1] = i32_ONE;
-            Value * const itemPtr = b->CreateGEP(streamSetArg, fields);
-            segmentArgs[argCount++] = b->CreateGEP(streamSetArg, fields);
+            Value * const itemPtr = b->CreateGEP0(streamSetArg, fields);
+            segmentArgs[argCount++] = b->CreateGEP0(streamSetArg, fields);
             segmentArgs[argCount++] = b->CreateLoad(itemPtr);
         }
 

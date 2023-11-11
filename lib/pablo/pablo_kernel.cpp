@@ -230,7 +230,7 @@ void PabloKernel::generateFinalizeMethod(BuilderRef b) {
             str << bb->getName();
             str << "\n";
 
-            Value * taken = b->CreateLoad(b->CreateGEP(profile, {b->getInt32(0), b->getInt32(branchCount++)}));
+            Value * taken = b->CreateLoad(b->CreateGEP0(profile, {b->getInt32(0), b->getInt32(branchCount++)}));
             b->CreateCall(dprintf, {fd, b->GetString(str.str()), taken});
 
         }

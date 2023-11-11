@@ -14,7 +14,7 @@ using BuilderRef = Kernel::BuilderRef;
 
 void bitblock_advance_ci_co(BuilderRef iBuilder, Value * val, unsigned shift, Value * stideCarryArr, unsigned carryIdx, std::vector<std::vector<Value *>> & adv, std::vector<std::vector<int>> & calculated, int i, int j){
     if (!calculated[i][j]) {
-        Value * ptr = iBuilder->CreateGEP(stideCarryArr, {iBuilder->getInt32(0), iBuilder->getInt32(carryIdx)});
+        Value * ptr = iBuilder->CreateGEP0(stideCarryArr, {iBuilder->getInt32(0), iBuilder->getInt32(carryIdx)});
         Value * ci = iBuilder->CreateLoad(ptr);
         std::pair<Value *, Value *> rslt = iBuilder->bitblock_advance(val, ci, shift);
         iBuilder->CreateStore(std::get<0>(rslt), ptr);
@@ -48,7 +48,7 @@ void editdGPUKernel::generateDoBlockMethod(BuilderRef idb) {
     FunctionType * bidTy = FunctionType::get(int32ty, false);
     Function * const bidFunc = Function::Create(bidTy, Function::ExternalLinkage, "llvm.nvvm.read.ptx.sreg.ctaid.x", m);
     Value * bid = idb->CreateCall(bidTy, bidFunc, {});
-    Value * pattStartPtr = idb->CreateGEP(pattBuf, idb->CreateMul(groupLen, bid));
+    Value * pattStartPtr = idb->CreateGEP0(pattBuf, idb->CreateMul(groupLen, bid));
 
     for(unsigned j = 0; j <= mEditDistance; j++){
         e[mPatternLen][j] = idb->allZeroes();
@@ -59,13 +59,13 @@ void editdGPUKernel::generateDoBlockMethod(BuilderRef idb) {
     }
 
     for(unsigned g = 0; g < mGroupSize; g++){
-        Value * pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+        Value * pattCh = idb->CreateLoad(idb->CreateGEP0(pattStartPtr, pattPos));
         Value * pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
         Value * pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
         pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
         e[0][0] = pattStream;
         for(unsigned i = 1; i < mPatternLen; i++){
-            Value * pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+            Value * pattCh = idb->CreateLoad(idb->CreateGEP0(pattStartPtr, pattPos));
             pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
             pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
             pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));

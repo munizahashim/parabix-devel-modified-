@@ -16,7 +16,7 @@ void editdCPUKernel::bitblock_advance_ci_co(BuilderRef idb,
                                             std::vector<std::vector<Value *>> & adv,
                                             std::vector<std::vector<int>> & calculated, int i, int j) const {
     if (calculated[i][j] == 0) {
-        Value * ptr = idb->CreateGEP(stideCarryArr, {idb->getInt32(0), idb->getInt32(carryIdx)});
+        Value * ptr = idb->CreateGEP0(stideCarryArr, {idb->getInt32(0), idb->getInt32(carryIdx)});
         Value * ci = idb->CreateLoad(ptr);
         std::pair<Value *, Value *> rslt = idb->bitblock_advance(val, ci, shift);
         idb->CreateStore(std::get<0>(rslt), ptr);
@@ -54,14 +54,14 @@ void editdCPUKernel::generateDoBlockMethod(BuilderRef idb) {
     }
 
     for(unsigned g = 0; g < mGroupSize; g++){
-        Value * pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+        Value * pattCh = idb->CreateLoad(idb->CreateGEP0(pattStartPtr, pattPos));
         Value * pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
         Value * pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
         pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
 
         e[0][0] = pattStream;
         for(unsigned i = 1; i < mPatternLen; i++){
-            pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+            pattCh = idb->CreateLoad(idb->CreateGEP0(pattStartPtr, pattPos));
             pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
             pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
             pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));

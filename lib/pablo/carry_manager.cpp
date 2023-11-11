@@ -166,10 +166,10 @@ void freeDynamicallyAllocatedMemory(BuilderRef b, Value * const frame) {
             indices[1] = b->getInt32(i);
             indices[2] = intNestedCarryState;
 
-            Value * const innerFrame = b->CreateLoad(b->CreateGEP(frame, indices));
+            Value * const innerFrame = b->CreateLoad(b->CreateGEP0(frame, indices));
             if (containsDynamicallyAllocatedType(innerFrame->getType())) {
                 indices[2] = intNestedCapacity;
-                Value *  const count = b->CreateLoad(b->CreateGEP(frame, indices));
+                Value *  const count = b->CreateLoad(b->CreateGEP0(frame, indices));
                 BasicBlock * const entry = b->GetInsertBlock();
                 BasicBlock * const cond = b->CreateBasicBlock("freeCarryDataCond");
                 BasicBlock * const body = b->CreateBasicBlock("freeCarryDataLoop");
@@ -182,7 +182,7 @@ void freeDynamicallyAllocatedMemory(BuilderRef b, Value * const frame) {
                 b->CreateCondBr(b->CreateICmpNE(index, count), body, exit);
 
                 b->SetInsertPoint(body);
-                freeDynamicallyAllocatedMemory(b, b->CreateGEP(innerFrame, index));
+                freeDynamicallyAllocatedMemory(b, b->CreateGEP0(innerFrame, index));
                 index->addIncoming(b->CreateAdd(index, ConstantInt::get(count->getType(), 1)), body);
                 b->CreateBr(cond);
 
@@ -268,11 +268,11 @@ void CarryManager::enterLoopScope(BuilderRef b) {
         FixedArray<Value *, 2> indices;
         indices[0] = b->getInt32(mCurrentFrameIndex);
         indices[1] = b->getInt32(NestedCapacity);
-        Value * const capacityPtr = b->CreateGEP(mCurrentFrame, indices);
+        Value * const capacityPtr = b->CreateGEP0(mCurrentFrame, indices);
         indices[1] = b->getInt32(NestedCarryState);
-        Value * const arrayPtr = b->CreateGEP(mCurrentFrame, indices);
+        Value * const arrayPtr = b->CreateGEP0(mCurrentFrame, indices);
         indices[1] = b->getInt32(LastIncomingCarryLoopIteration);
-        Value * const lastIncomingCarryIterationPtr = b->CreateGEP(mCurrentFrame, indices);
+        Value * const lastIncomingCarryIterationPtr = b->CreateGEP0(mCurrentFrame, indices);
         Value * const lastIncomingCarryIteration = b->CreateLoad(lastIncomingCarryIterationPtr);
         mNonCarryCollapsingModeStack.push_back(lastIncomingCarryIterationPtr);
         mNonCarryCollapsingModeStack.push_back(lastIncomingCarryIteration);
@@ -422,7 +422,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
 
         // NOTE: the 3 here is only to pass the assertion later. It refers to the number of elements in the carry data struct.
         mCarryFrameStack.emplace_back(mCurrentFrame, 3);
-        mCurrentFrame = b->CreateGEP(updatedCarryStateArrayPhi, indexPhi);
+        mCurrentFrame = b->CreateGEP0(updatedCarryStateArrayPhi, indexPhi);
         mCurrentFrameIndex = 0;
     }
 }
@@ -584,7 +584,7 @@ void CarryManager::enterScope(BuilderRef b) {
     // Check whether we're still within our struct bounds; if this fails, either the Pablo program changed during
     // compilation or a memory corruption has occured.
     assert (mCurrentFrameIndex < mCurrentFrame->getType()->getPointerElementType()->getStructNumElements());
-    mCurrentFrame = b->CreateGEP(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex)});
+    mCurrentFrame = b->CreateGEP0(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex)});
     // Verify we're pointing to a carry frame struct
     assert(mCurrentFrame->getType()->getPointerElementType()->isStructTy());
     mCurrentFrameIndex = 0;
@@ -735,7 +735,7 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
     if (LLVM_LIKELY(shiftAmount < LONG_ADVANCE_BREAKPOINT)) {
         return shortIndexedAdvanceCarryInCarryOut(b, shiftAmount, strm, index_strm);
     } else if (shiftAmount <= b->getBitBlockWidth()) {
-        Value * carryPtr = b->CreateGEP(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex++), b->getInt32(0)});
+        Value * carryPtr = b->CreateGEP0(mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex++), b->getInt32(0)});
         Value * carryIn = b->CreateLoad(carryPtr);
         Value * carryOut, * result;
         std::tie(carryOut, result) = b->bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
@@ -761,8 +761,8 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
         Value * carryEndBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryBlockEndPos, blockWidth), carryQueueBlocks), b->getInt32Ty());
         Constant * const ZERO = b->getInt32(0);
         Constant * const CFI = b->getInt32(mCurrentFrameIndex);
-        Value * lo_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryBlock});
-        Value * hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
+        Value * lo_GEP = b->CreateGEP0(mCurrentFrame, {ZERO, CFI, carryBlock});
+        Value * hi_GEP = b->CreateGEP0(mCurrentFrame, {ZERO, CFI, carryEndBlock});
         Value * c_lo = b->CreateBitCast(b->CreateLoad(lo_GEP), iBitBlock);
         Value * c_hi = b->CreateBitCast(b->CreateLoad(hi_GEP), iBitBlock);
         Value * lo_shift = b->CreateZExt(b->CreateURem(carryPosition, blockWidth), iBitBlock);
@@ -777,8 +777,8 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
         Value * carryOutEndPos = b->CreateAdd(carryOutPosition, blockWidth_1);
         carryBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryOutPosition, blockWidth), carryQueueBlocks), b->getInt32Ty());
         carryEndBlock = b->CreateTrunc(b->CreateURem(b->CreateUDiv(carryOutEndPos, blockWidth), carryQueueBlocks), b->getInt32Ty());
-        lo_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryBlock});
-        hi_GEP = b->CreateGEP(mCurrentFrame, {ZERO, CFI, carryEndBlock});
+        lo_GEP = b->CreateGEP0(mCurrentFrame, {ZERO, CFI, carryBlock});
+        hi_GEP = b->CreateGEP0(mCurrentFrame, {ZERO, CFI, carryEndBlock});
         lo_shift = b->CreateZExt(b->CreateURem(carryOutPosition, blockWidth), iBitBlock);
         hi_shift = b->CreateZExt(b->CreateSub(blockWidth_1, b->CreateURem(carryOutEndPos, blockWidth)), iBitBlock);
         c_lo = b->CreateOr(b->CreateBitCast(b->CreateLoad(lo_GEP), iBitBlock), b->CreateShl(carryOut, lo_shift));
@@ -794,7 +794,7 @@ Value * CarryManager::indexedAdvanceCarryInCarryOut(BuilderRef b, const IndexedA
             Constant * const SF = b->getInt32(summaryFrame);
             for (unsigned i = 0; i < summarySize; i++) {
                 // All ones summary for now.
-                b->CreateStore(b->allOnes(), b->CreateGEP(mCurrentFrame, {ZERO, SF, b->getInt32(i)}));
+                b->CreateStore(b->allOnes(), b->CreateGEP0(mCurrentFrame, {ZERO, SF, b->getInt32(i)}));
             }
         }
         return result;
@@ -852,7 +852,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
 
                 indices[2] = b->getInt32(i - 1);
 
-                Value * const ptr = b->CreateGEP(mCurrentFrame, indices);
+                Value * const ptr = b->CreateGEP0(mCurrentFrame, indices);
                 Value * const prior = b->CreateBitCast(b->CreateLoad(ptr), streamTy);
 
                 Value * advanced = nullptr;
@@ -895,7 +895,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
 
         indices[2] = ZERO;
 
-        Value * const buffer = b->CreateGEP(mCurrentFrame, indices);
+        Value * const buffer = b->CreateGEP0(mCurrentFrame, indices);
         assert (buffer->getType()->getPointerElementType() == b->getBitBlockType());
         Value * const carryIn = b->CreateLoad(buffer);
         b->CreateStore(value, buffer);
@@ -916,10 +916,10 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
         assert (blockIndex->getType() == indexMask->getType());
         Value * const carryIndex0 = b->CreateSub(blockIndex, b->getInt32(summaryBlocks));
         indices[2] = b->CreateAnd(carryIndex0, indexMask);
-        Value * const carryInPtr = b->CreateGEP(mCurrentFrame, indices);
+        Value * const carryInPtr = b->CreateGEP0(mCurrentFrame, indices);
         Value * const carryIn = b->CreateLoad(carryInPtr);
         indices[2] = b->CreateAnd(blockIndex, indexMask);
-        Value * const carryOutPtr = b->CreateGEP(mCurrentFrame, indices);
+        Value * const carryOutPtr = b->CreateGEP0(mCurrentFrame, indices);
         assert (carryIn->getType() == b->getBitBlockType());
 
         // If the long advance is an exact multiple of BitBlockWidth, we simply return the oldest
@@ -931,7 +931,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
             Value * const carryIndex1 = b->CreateSub(blockIndex, b->getInt32(summaryBlocks - 1));
             indices[2] = b->CreateAnd(carryIndex1, indexMask);
 
-            Value * const carryInPtr2 = b->CreateGEP(mCurrentFrame, indices);
+            Value * const carryInPtr2 = b->CreateGEP0(mCurrentFrame, indices);
             Value * const carryIn2 = b->CreateLoad(carryInPtr2);
             assert (carryOutPtr->getType()->getPointerElementType() == value->getType());
             b->CreateStore(value, carryOutPtr);
@@ -953,7 +953,7 @@ Value * CarryManager::getNextCarryIn(BuilderRef b) {
     indices[0] = ZERO;
     indices[1] = b->getInt32(mCurrentFrameIndex);
     indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
-    mCarryPackPtr = b->CreateGEP(mCurrentFrame, indices);
+    mCarryPackPtr = b->CreateGEP0(mCurrentFrame, indices);
     Value * const carryIn = b->CreateLoad(mCarryPackPtr);
     if (mLoopDepth > 0) {
         b->CreateStore(Constant::getNullValue(carryIn->getType()), mCarryPackPtr);
@@ -975,7 +975,7 @@ void CarryManager::setNextCarryOut(BuilderRef b, Value * carryOut) {
         indices[0] = b->getInt32(0);
         indices[1] = b->getInt32(mCurrentFrameIndex);
         indices[2] =  mNextLoopSelector;
-        mCarryPackPtr = b->CreateGEP(mCurrentFrame, indices);
+        mCarryPackPtr = b->CreateGEP0(mCurrentFrame, indices);
         assert("carry out type does not match carry location type" && carryOut->getType() == mCarryPackPtr->getType()->getPointerElementType());
         if (LLVM_LIKELY(!mCarryInfo->nonCarryCollapsingMode())) {
             Value * accum = b->CreateLoad(mCarryPackPtr);
@@ -1007,7 +1007,7 @@ Value * CarryManager::readCarryInSummary(BuilderRef b) const {
     if (mLoopDepth != 0) {
         indices[count] = mLoopSelector;
     }
-    Value * const ptr = b->CreateGEP(mCurrentFrame, indices);
+    Value * const ptr = b->CreateGEP0(mCurrentFrame, indices);
     assert (ptr->getType()->getPointerElementType() == b->getBitBlockType());
     Value * summary = b->CreateLoad(ptr);
     if (mNestedLoopCarryInMaskPhi) {
@@ -1026,7 +1026,7 @@ void CarryManager::writeCarryOutSummary(BuilderRef b, Value * const summary) con
     indices[0] = ZERO;
     indices[1] = ZERO;
     indices[2] = mLoopDepth == 0 ? ZERO : mNextLoopSelector;
-    Value * ptr = b->CreateGEP(mCurrentFrame, indices);
+    Value * ptr = b->CreateGEP0(mCurrentFrame, indices);
     assert ("summary type does not match defined type in frame" && ptr->getType()->getPointerElementType() == summary->getType());
     b->CreateStore(summary, ptr);
 }

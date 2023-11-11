@@ -178,7 +178,7 @@ Value * CompressedCarryManager::readCarryInSummary(BuilderRef b) const {
         indices[0] = ZERO;
         indices[1] = ZERO;
         indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
-        ptr = b->CreateGEP(mCurrentFrame, indices);
+        ptr = b->CreateGEP0(mCurrentFrame, indices);
         summary = b->CreateLoad(ptr);
         if (mNestedLoopCarryInMaskPhi) {
             summary = b->CreateAnd(summary, mNestedLoopCarryInMaskPhi);

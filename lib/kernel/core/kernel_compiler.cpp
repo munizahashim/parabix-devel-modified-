@@ -1,4 +1,4 @@
-﻿#include <kernel/core/kernel_compiler.h>
+#include <kernel/core/kernel_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -1080,9 +1080,9 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
                                 if (idx == depth) {
                                     assert (elemTy->isIntOrIntVectorTy());
-
-                                    Value * const scalarVal = b->CreateLoad(b->CreateGEP(scalar, indices));
-                                    Value * const mainScalarPtr = b->CreateGEP(mainScalar, indices);
+                                    Type * scalarTy = scalar->getType()->getPointerElementType();
+                                    Value * const scalarVal = b->CreateLoad(b->CreateGEP(scalarTy, scalar, indices));
+                                    Value * const mainScalarPtr = b->CreateGEP(ty, mainScalar, indices);
                                     Value * mainScalarVal = b->CreateLoad(mainScalarPtr);
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {

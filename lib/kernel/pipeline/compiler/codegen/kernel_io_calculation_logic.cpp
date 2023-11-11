@@ -1671,7 +1671,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
         for (unsigned k = 1; k <= spanLength; ++k) {
-            Value * const ptr = b->CreateGEP(vecAddr, b->getSize(k));
+            Value * const ptr = b->CreateGEP0(vecAddr, b->getSize(k));
             b->CreateBlockAlignedStore(splat, ptr);
         }
 
