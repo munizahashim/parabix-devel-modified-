@@ -199,7 +199,8 @@ void IStreamSelect::generateMultiBlockLogic(BuilderRef b, Value * const numOfStr
     for (auto const & binding : mOperation.bindings) {
         auto const & name = binding.first;
         for (auto const & idx : binding.second) {
-            Value * const val = b->CreateLoad(b->getRawInputPointer(name, b->getInt32(idx), absPos));
+            Value * const ptr = b->getRawInputPointer(name, b->getInt32(idx), absPos);
+            Value * const val = b->CreateLoad(ptr->getType()->getPointerElementType(), ptr);
             b->CreateStore(val, b->getRawOutputPointer("output", b->getInt32(outIdx), absPos));
             outIdx++;
         }

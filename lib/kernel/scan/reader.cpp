@@ -34,7 +34,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * maxScanIndex = nullptr;
     Value * const index = b->CreateAdd(strideNo, initialStride);
     for (uint32_t i = 0; i < mNumScanStreams; ++i) {
-        Value * const scanItem = b->CreateLoad(b->getRawInputPointer("scan", b->getInt32(i), index));
+        Value * const scanItem = b->CreateLoad(sizeTy, b->getRawInputPointer("scan", b->getInt32(i), index));
         if (maxScanIndex != nullptr) {
             maxScanIndex = b->CreateUMax(maxScanIndex, scanItem);
         } else {
@@ -48,7 +48,8 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const nextIndex = b->CreateAdd(nextStrideNo, initialStride);
     b->setProcessedItemCount("scan", nextIndex);
     for (auto const & name : mAdditionalStreamNames) {
-        Value * const item = b->CreateLoad(b->getRawInputPointer(name, b->getInt32(0), index));
+        Value * const ptr = b->getRawInputPointer(name, b->getInt32(0), index);
+        Value * const item = b->CreateLoad(ptr->getType()->getPointerElementType(), ptr);
         callbackParams.push_back(item);
         b->setProcessedItemCount(name, nextIndex);
     }

@@ -85,7 +85,7 @@ void DebugDisplayKernel::generateMultiBlockLogic(BuilderRef b, Value * const num
     } else {
         for (uint32_t i = 0; i < mSCount; ++i) {
             Value * const ptr = b->getRawInputPointer("s", b->getInt32(i), b->CreateAdd(strideNum, initialStride));
-            Value * const val = b->CreateLoad(ptr);
+            Value * const val = b->CreateLoad(ptr->getType()->getPointerElementType(), ptr);
             b->CallPrintInt(getRegName(i), val);
         }
     }

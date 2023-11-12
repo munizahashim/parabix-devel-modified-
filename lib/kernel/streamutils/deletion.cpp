@@ -222,7 +222,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     Value * extractionMaskPtr = kb->getInputStreamBlockPtr("extractionMask", ZERO, blockOffsetPhi);
     extractionMaskPtr = kb->CreatePointerCast(extractionMaskPtr, fieldPtrTy);
     for (unsigned i = 0; i < fieldsPerBlock; i++) {
-        mask[i] = kb->CreateLoad(kb->CreateGEP(fieldTy, extractionMaskPtr, kb->getInt32(i)));
+        mask[i] = kb->CreateLoad(fieldTy, kb->CreateGEP(fieldTy, extractionMaskPtr, kb->getInt32(i)));
     }
     for (unsigned j = 0; j < mStreamCount; ++j) {
         Value * inputPtr = kb->getInputStreamBlockPtr("inputStreamSet", kb->getInt32(j), blockOffsetPhi);
@@ -230,7 +230,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
         Value * outputPtr = kb->getOutputStreamBlockPtr("outputStreamSet", kb->getInt32(j), blockOffsetPhi);
         outputPtr = kb->CreatePointerCast(outputPtr, fieldPtrTy);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
-            Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
+            Value * field = kb->CreateLoad(fieldTy, kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
             Value * compressed = kb->CreatePextract(field, mask[i]);
             kb->CreateStore(compressed, kb->CreateGEP(fieldTy, outputPtr, kb->getInt32(i)));
         }
@@ -1167,7 +1167,7 @@ void SwizzledBitstreamCompressByCount::generateDoBlockMethod(BuilderRef kb) {
     // Generate code for each of the mSwizzleFactor fields making up a block.
     // We load the count for the field and process all swizzle groups accordingly.
     for (unsigned i = 0; i < mSwizzleFactor; i++) {
-        Value * newItemCount = kb->CreateLoad(kb->CreateGEP(fieldTy, countStreamPtr, kb->getInt32(i)));
+        Value * newItemCount = kb->CreateLoad(fieldTy, kb->CreateGEP(fieldTy, countStreamPtr, kb->getInt32(i)));
         Value * pendingSpace = kb->CreateSub(kb->getSize(mFieldWidth), pendingOffset);
         Value * pendingSpaceFilled = kb->CreateICmpUGE(newItemCount, pendingSpace);
 
@@ -1245,16 +1245,15 @@ FilterByMaskKernel::FilterByMaskKernel(BuilderRef b,
     }
     mOutputStreamSets.push_back(Bind("filteredOutput", filteredOutput, PopcountOf("extractionMask"), insertionProbabilityDistribution));
     assert (mOutputStreamSets.back().getDistribution().getTypeId() == insertionProbabilityDistribution.getTypeId());
-    Type * pendingType;
     if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
-        pendingType = b->getBitBlockType();
+        mPendingType = b->getBitBlockType();
         mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;
     } else {
-        pendingType = b->getIntNTy(mFW);
+        mPendingType = b->getIntNTy(mFW);
         mPendingSetCount = mStreamCount;
     }
     for (unsigned i = 0; i < mPendingSetCount; i++) {
-        addInternalScalar(pendingType, "pendingData" + std::to_string(i));
+        addInternalScalar(mPendingType, "pendingData" + std::to_string(i));
     }
     addInternalScalar(b->getSizeTy(), "pendingOffset");
     setStride(16 * b->getBitBlockWidth());
@@ -1341,10 +1340,10 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
     //kb->CallPrintRegister("extractionMask", extractionMask);
     // For each swizzle containing mFieldsPerBlock fields.
     for (unsigned i = 0; i < mFieldsPerBlock; i++) {
-        Value * producedOffset = kb->CreateLoad(produceOffsetPtr);
+        Value * producedOffset = kb->CreateLoad(sizeTy, produceOffsetPtr);
         std::vector<Value *> pendingData(mPendingSetCount);
         for (unsigned i = 0; i < mPendingSetCount; i++) {
-            pendingData[i] = kb->CreateLoad(pendingDataPtr[i]);
+            pendingData[i] = kb->CreateLoad(mPendingType, pendingDataPtr[i]);
         }
         Value * const pendingOffset = kb->CreateAnd(producedOffset, FIELD_WIDTH_MASK);
         Value * const newItemCount = kb->CreateExtractElement(newItemCounts, i);
@@ -1427,14 +1426,14 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
 
     kb->SetInsertPoint(finalizeFilter);
     for (unsigned i = 0; i < mPendingSetCount; i++) {
-        kb->setScalarField("pendingData" + std::to_string(i), kb->CreateLoad(pendingDataPtr[i]));
+        kb->setScalarField("pendingData" + std::to_string(i), kb->CreateLoad(mPendingType, pendingDataPtr[i]));
     }
     // If we are in the final stride of the input stream, we must write
     // out any pending data.   However, if the producedOffset ends on
     // a field boundary, there is no data to write.   We avoid the
     // write in this case to ensure that we do not write past the end
     // of the allocated buffer.
-    Value * producedOffset = kb->CreateLoad(produceOffsetPtr);
+    Value * producedOffset = kb->CreateLoad(sizeTy, produceOffsetPtr);
     Value * havePendingFieldData = kb->CreateIsNotNull(kb->CreateAnd(producedOffset, FIELD_WIDTH_MASK));
     kb->CreateCondBr(kb->CreateAnd(kb->isFinal(), havePendingFieldData), writeFinal, done);
     kb->SetInsertPoint(writeFinal);
@@ -1445,7 +1444,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
             Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(j), finalBlock);
             outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
             outputPtr = kb->CreateGEP(fieldTy, outputPtr, finalField);
-            kb->CreateStore(kb->CreateLoad(pendingDataPtr[j]), outputPtr);
+            kb->CreateStore(kb->CreateLoad(mPendingType, pendingDataPtr[j]), outputPtr);
         }
     } else {
         for (unsigned j = 0; j < mPendingSetCount; j++) {
@@ -1454,7 +1453,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * co
                 Value * outputPtr = kb->getOutputStreamBlockPtr("filteredOutput", kb->getInt32(strmIdx), finalBlock);
                 outputPtr = kb->CreatePointerCast(outputPtr, FieldPtrTy);
                 outputPtr = kb->CreateGEP(fieldTy, outputPtr, finalField);
-                kb->CreateStore(kb->CreateExtractElement(kb->CreateLoad(pendingDataPtr[j]), kb->getInt32(k)), outputPtr);
+                kb->CreateStore(kb->CreateExtractElement(kb->CreateLoad(mPendingType, pendingDataPtr[j]), kb->getInt32(k)), outputPtr);
             }
         }
     }

@@ -92,7 +92,7 @@ void SingleStreamScanKernelTemplate::generateMultiBlockLogic(BuilderRef b, Value
     Value * const processingBlockIndex = b->CreateAdd(strideOffset, blockNumOfWord);
     Value * const stridePtr = b->CreateBitCast(b->getInputStreamBlockPtr("scan", b->getInt32(0), processingBlockIndex), mSW.PointerTy);
     Value * const wordPtr = b->CreateGEP(mSW.Ty, stridePtr, blockOffset);
-    Value * const word = b->CreateLoad(wordPtr);
+    Value * const word = b->CreateLoad(mSW.Ty, wordPtr);
     willProcessWord(b, word);
     b->CreateBr(mProcessWord);
 

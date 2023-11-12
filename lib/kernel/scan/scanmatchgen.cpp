@@ -1286,6 +1286,7 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
     Value * matchesAvail = b->getAvailableItemCount("Coordinates");
 
     Constant * const sz_ONE = b->getSize(1);
+    Type * const sizeTy = b->getSizeTy();
 
     b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, coordinatesDone);
 
@@ -1295,9 +1296,9 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Value * nextMatchNum = b->CreateAdd(phiMatchNum, sz_ONE);
 
-    Value * matchRecordStart = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
-    Value * matchRecordEnd = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
-    Value * matchRecordNum = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_NUMBERS), phiMatchNum), "matchNumLoad");
+    Value * matchRecordStart = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
+    Value * matchRecordEnd = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
+    Value * matchRecordNum = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_NUMBERS), phiMatchNum), "matchNumLoad");
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
     // to access past EOF.
@@ -1591,6 +1592,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     Value * matchesAvail = b->getAvailableItemCount("SourceCoords");
 
     Constant * const sz_ONE = b->getSize(1);
+    Type * const sizeTy = b->getSizeTy();
 
     b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, checkFinal);
 
@@ -1600,12 +1602,12 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Value * nextMatchNum = b->CreateAdd(phiMatchNum, sz_ONE);
 
-    Value * matchRecordStart = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
-    Value * matchRecordEnd = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
+    Value * matchRecordStart = b->CreateLoad(sizeTy, b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
+    Value * matchRecordEnd = b->CreateLoad(sizeTy, b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
     #ifdef WRITE_FILE_NUMBERS
-    Value * matchFileNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(BATCH_FILE_NUMBERS), phiMatchNum), "matchFileNumLoad");
+    Value * matchFileNum = b->CreateLoad(sizeTy, b->getRawInputPointer("SourceCoords", b->getInt32(BATCH_FILE_NUMBERS), phiMatchNum), "matchFileNumLoad");
     #endif
-    Value * matchRecordNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(mColorizedLineNumberIndex), phiMatchNum), "matchNumLoad");
+    Value * matchRecordNum = b->CreateLoad(sizeTy, b->getRawInputPointer("SourceCoords", b->getInt32(mColorizedLineNumberIndex), phiMatchNum), "matchNumLoad");
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
     // to access past EOF.
