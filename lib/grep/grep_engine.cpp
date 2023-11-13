@@ -1181,7 +1181,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
 
         accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
         if (accum.mBatchBuffer == nullptr) {
-            llvm::report_fatal_error("Unable to allocate batch buffer of size: " + std::to_string(aligned_size));
+            llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
         }
         char * current_base = accum.mBatchBuffer;
 
@@ -1281,7 +1281,7 @@ bool GrepEngine::searchAllFiles() {
     for(unsigned long i = 1; i < codegen::TaskThreads; ++i) {
         const int rc = pthread_create(&threads[i], nullptr, DoGrepThreadFunction, (void *)this);
         if (rc) {
-            llvm::report_fatal_error("Failed to create thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to create thread: code ") + std::to_string(rc));
         }
     }
     // Main thread also does the work;
@@ -1290,7 +1290,7 @@ bool GrepEngine::searchAllFiles() {
         void * status = nullptr;
         const int rc = pthread_join(threads[i], &status);
         if (rc) {
-            llvm::report_fatal_error("Failed to join thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to join thread: code ") + std::to_string(rc));
         }
     }
     return grepMatchFound;

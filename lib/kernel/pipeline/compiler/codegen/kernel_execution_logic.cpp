@@ -352,7 +352,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             argTy->print(out);
             out << " but got ";
             arg->getType()->print(out);
-            report_fatal_error(out.str().str());
+            report_fatal_error(StringRef(out.str()).str());
         }
         #endif
         args.push_back(arg);
@@ -572,7 +572,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             raw_svector_ostream out(tmp);
             out << "Kernel " << mKernel->getName() << ":" << input.getName()
                 << " has an " << "input" << " rate that is not properly handled by the PipelineKernel";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         mProcessedItemCount[inputPort] = processed; assert (processed);
@@ -637,7 +637,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             raw_svector_ostream out(tmp);
             out << "Kernel " << mKernel->getName() << ":" << output.getName()
                 << " has an " << "output" << " rate that is not properly handled by the PipelineKernel";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         #ifdef PRINT_DEBUG_MESSAGES

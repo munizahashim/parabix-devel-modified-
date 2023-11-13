@@ -317,7 +317,7 @@ Kernel * PipelineBuilder::makeKernel() {
                         out << "produced by " << K.Object->getName();
                     }
                     out << ".";
-                    report_fatal_error(out.str());
+                    report_fatal_error(StringRef(out.str()));
                 }
                 const auto bufferVertex = add_vertex(rel, G);
                 M.emplace(rel, bufferVertex);
@@ -397,7 +397,7 @@ Kernel * PipelineBuilder::makeKernel() {
                             out << "function call " << (consumerVertex - kernels.size() + 1);
                         }
                         out << " is not a constant, produced by a kernel or an input to the pipeline";
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                 }
                 const auto bufferVertex = f->second;
@@ -615,7 +615,7 @@ Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
             return cast<Scalar>(input.getRelationship());
         }
     }
-    report_fatal_error("no scalar named " + name);
+    report_fatal_error(StringRef("no scalar named ") + name);
 }
 
 void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
@@ -625,7 +625,7 @@ void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
             return;
         }
     }
-    report_fatal_error("no scalar named " + name);
+    report_fatal_error(StringRef("no scalar named ") + name);
 }
 
 Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
@@ -637,7 +637,7 @@ Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
             return cast<Scalar>(output.getRelationship());
         }
     }
-    report_fatal_error("no scalar named " + name);
+    report_fatal_error(StringRef("no scalar named ") + name);
 }
 
 void PipelineBuilder::setOutputScalar(const StringRef name, Scalar * value) {
@@ -647,7 +647,7 @@ void PipelineBuilder::setOutputScalar(const StringRef name, Scalar * value) {
             return;
         }
     }
-    report_fatal_error("no scalar named " + name);
+    report_fatal_error(StringRef("no scalar named ") + name);
 }
 
 PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel)
@@ -665,14 +665,14 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     for (unsigned i = 0; i < B.size(); i++) {
         Binding & input = B[i];
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
-            report_fatal_error(input.getName() + " must be set upon construction");
+            report_fatal_error(StringRef(input.getName()) + " must be set upon construction");
         }
     }
     auto & C = mTarget->mOutputStreamSets;
     for (unsigned i = 0; i < C.size(); i++) {
         Binding & output = C[i];
         if (LLVM_UNLIKELY(output.getRelationship() == nullptr)) {
-            report_fatal_error(output.getName() + " must be set upon construction");
+            report_fatal_error(StringRef(output.getName()) + " must be set upon construction");
         }
     }
     auto & D = mTarget->mOutputScalars;

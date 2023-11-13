@@ -58,14 +58,14 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but must do so to support " << kernelObj->getName() << ".";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
         if (LLVM_UNLIKELY(kernelObj->allocatesInternalStreamSets())) {
             SmallVector<char, 1024> tmp;
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but " << kernelObj->getName() << " must do so to be correctly initialized.";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
     }
 }

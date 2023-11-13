@@ -65,7 +65,7 @@ Var * PabloKernel::getOutputScalarVar(const std::string & name) {
             return out;
         }
     }
-    report_fatal_error("Kernel does not contain scalar " + name);
+    report_fatal_error("Kernel does not contain scalar " + StringRef(name));
 }
 
 Var * PabloKernel::makeVariable(const String * const name, Type * const type) {

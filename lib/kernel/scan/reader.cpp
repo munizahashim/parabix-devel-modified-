@@ -56,7 +56,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Function * const callback = module->getFunction(mCallbackName);
     FunctionType * fTy = callback->getFunctionType();
     if (callback == nullptr) {
-        llvm::report_fatal_error(mKernelName + ": failed to get function: " + mCallbackName);
+        llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mCallbackName);
     }
     b->CreateCall(fTy, callback, ArrayRef<Value *>(callbackParams));
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, exitBlock);
@@ -66,7 +66,7 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         Function * const callback = module->getFunction(mDoneCallbackName);
         FunctionType * fTy = callback->getFunctionType();
         if (callback == nullptr) {
-            llvm::report_fatal_error(mKernelName + ": failed to get function: " + mDoneCallbackName);
+            llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mDoneCallbackName);
         }
         b->CreateCall(fTy, callback, ArrayRef<Value *>({}));
         b->CreateBr(exitBlock);

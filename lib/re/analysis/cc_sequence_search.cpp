@@ -89,7 +89,7 @@ stateVector_t ccSequenceSearchObject::search_from_state(RE * re, stateVector_t v
         }
         return ((CC_matches & v) << 1) | mInitState;
     }
-    llvm::report_fatal_error("failed to process " + Printer_RE::PrintRE(re));
+    llvm::report_fatal_error(llvm::StringRef("failed to process ") + Printer_RE::PrintRE(re));
     return 0;
 }
 

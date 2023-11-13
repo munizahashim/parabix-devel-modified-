@@ -77,7 +77,7 @@ void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
         m->print(errs(), nullptr);
 //        pm->add(createCFGOnlyPrinterLegacyPassPass());
 //        pm->run(*m);
-        report_fatal_error(msg.str());
+        report_fatal_error(StringRef(msg.str()));
     }
     #endif
     simplifyPhiNodes(m);

@@ -194,10 +194,10 @@ void Kernel::generateKernel(BuilderRef b) {
     assert (!mGenerated);
     mGenerated = true;
     if (LLVM_UNLIKELY(mModule == nullptr)) {
-        report_fatal_error(getName() + " does not have a module");
+        report_fatal_error(StringRef(getName()) + " does not have a module");
     }
     if (LLVM_UNLIKELY(mStride == 0)) {
-        report_fatal_error(getName() + ": stride cannot be 0");
+        report_fatal_error(StringRef(getName()) + ": stride cannot be 0");
     }
     b->setModule(mModule);
     assert (mSharedStateType == nullptr && mThreadLocalStateType == nullptr);
@@ -1104,7 +1104,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
             raw_svector_ostream out(tmp);
             out << "Could not find paramater for " << getName() << ':' << input.getName()
                 << " from the provided program parameters";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         initArgs.push_back(val);
     }
@@ -1125,7 +1125,7 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
                 out << "Could not find paramater for "
                     << "internally generated streamset"
                     << " from the provided program parameters";
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
             initArgs.push_back(entry.first);
             initArgs.push_back(entry.second);

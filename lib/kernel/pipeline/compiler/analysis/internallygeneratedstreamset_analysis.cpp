@@ -44,7 +44,7 @@ found_streamset:
                         out << "Compile error: " << kernel->getName() << " required an internally generated streamset "
                                " that was not provided to it by its outer pipeline, " <<
                                mPipelineKernel->getName() << ".";
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                     const auto streamSet = f->second;
                     add_edge(streamSet, k, j, G);
@@ -62,7 +62,7 @@ found_streamset:
                 out << "Compile error: " << kernel->getName() << " is marked as having internally"
                        " generated streamsets but its outer pipeline " <<
                        mPipelineKernel->getName() << " is not flagged as having any.";
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
         }
 

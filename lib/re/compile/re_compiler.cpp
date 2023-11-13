@@ -182,7 +182,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
-    llvm::report_fatal_error("Alphabet " + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
+    llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
 }
 
 inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
@@ -194,7 +194,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         // sequences (e.g., sequences of UTF-8 CCs).
         RE * defn = name->getDefinition();
         if (!defn) {
-            llvm::report_fatal_error("RE compiler cannot find name as external or definition: " + nameString);
+            llvm::report_fatal_error(llvm::StringRef("RE compiler cannot find name as external or definition: ") + nameString);
         }
         if (mMain.mIndexingAlphabet) {
             // If we have an indexing alphabet, then the marker may be aligned
@@ -217,11 +217,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     }
     auto externalLength = f->second.minLength();
     if (externalLength != f->second.maxLength()) {
-        llvm::report_fatal_error("Variable length external not in initial position:  "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
     auto external_adv = externalLength + externalMarker.offset();
     if (external_adv < marker.offset()) {
-        llvm::report_fatal_error("Negative advance amount in processing "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Negative advance amount in processing ")  + nameString);
     }
     auto adv = external_adv - marker.offset();
     PabloAST * nextPos = marker.stream();

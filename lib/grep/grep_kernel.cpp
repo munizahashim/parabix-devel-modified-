@@ -75,26 +75,26 @@ StreamIndexCode ExternalStreamTable::getStreamIndex(std::string indexName) {
     for (unsigned i = 0; i < mStreamIndices.size(); i++) {
         if (mStreamIndices[i].name == indexName) return i;
     }
-    llvm::report_fatal_error("Undeclared stream index" + indexName);
+    report_fatal_error(StringRef("Undeclared stream index") + indexName);
 }
 
 void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext) {
     if (grep::ShowExternals) {
-        llvm::errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << "(";
+        errs() << "declareExternal: " << mStreamIndices[c].name << "_" << externalName << "(";
         auto parms = ext->getParameters();
         bool at_start = true;
         for (auto & p : parms) {
-            llvm::errs() << (!at_start ? ", " : "") << p;
+            errs() << (!at_start ? ", " : "") << p;
             at_start = false;
         }
-        llvm::errs() << ")\n";
+        errs() << ")\n";
     }
 
     auto & E = mExternalMap[c];
     auto f = E.find(externalName);
     if (LLVM_UNLIKELY(f != E.end())) {
         if (grep::ShowExternals) {
-            llvm::errs() << "  redeclaration!  Discarding previous declaration.\n";
+            errs() << "  redeclaration!  Discarding previous declaration.\n";
         }
         const auto curr = f->second;
         if (LLVM_LIKELY(curr != ext)) {
@@ -109,7 +109,7 @@ void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externa
 ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::string ssname) {
     auto f = mExternalMap[c].find(ssname);
     if (f == mExternalMap[c].end()) {
-        report_fatal_error("Cannot get external stream object " +
+        report_fatal_error(StringRef("Cannot get external stream object ") +
                            mStreamIndices[c].name + "_" + ssname);
     }
     return f->second;
@@ -134,19 +134,19 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
     if (!ext->isResolved()) {
         auto paramNames = ext->getParameters();
         if (grep::ShowExternals) {
-            llvm::errs() << "resolving External: " << mStreamIndices[c].name << "_" << ssname << "(";
+            errs() << "resolving External: " << mStreamIndices[c].name << "_" << ssname << "(";
             bool at_start = true;
             for (auto & p : paramNames) {
-                llvm::errs() << (!at_start ? ", " : "") << p;
+                errs() << (!at_start ? ", " : "") << p;
                 at_start = false;
             }
-            llvm::errs() << ")\n";
+            errs() << ")\n";
         }
         StreamIndexCode code = isa<FilterByMaskExternal>(ext) ? mStreamIndices[c].base : c;
         bool all_found = true;
         for (auto & p : paramNames) {
             if ((code == c) && (p == ssname)) {
-                llvm::report_fatal_error("Recursion in external resolution: " + ssname);
+                report_fatal_error(StringRef("Recursion in external resolution: ") + ssname);
             }
             auto f = mExternalMap[code].find(p);
             if (f == mExternalMap[code].end()) {
@@ -162,7 +162,7 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
         } else {
             auto base = mStreamIndices[c].base;
             if (base == c) {
-                llvm::report_fatal_error("Cannot resolve " + mStreamIndices[c].name + "_" + ssname);
+                report_fatal_error(StringRef("Cannot resolve ") + mStreamIndices[c].name + "_" + ssname);
             }
             mExternalMap[base].emplace(ssname, ext);
             StreamSet * baseSet = getStreamSet(b, base, ssname);
@@ -642,8 +642,8 @@ mSignature(mOptions->makeSignature()) {
     addAttribute(InfrequentlyUsed());
     mOffset = grepOffset(mOptions->mRE);
     if (grep::ShowExternals) {
-        llvm::errs() << "ICGrep signature: " << mSignature << "\n";
-        llvm::errs() << "signature hash:" << getStringHash(mSignature) << "\n";
+        errs() << "ICGrep signature: " << mSignature << "\n";
+        errs() << "signature hash:" << getStringHash(mSignature) << "\n";
     }
 }
 
@@ -678,8 +678,8 @@ void ICGrepKernel::generatePabloMethod() {
     RE_Compiler::Marker matches = re_compiler.compileRE(mOptions->mRE);
     PabloAST * matchResult = matches.stream();
     if (matches.offset() != mOffset) {
-        //llvm::errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
-        //llvm::report_fatal_error("matches.offset() != mOffset");
+        //errs() << Printer_RE::PrintRE(mOptions->mRE) <<"\n mOffset = " << mOffset << "\n";
+        //report_fatal_error("matches.offset() != mOffset");
     }
     pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
@@ -866,7 +866,7 @@ FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (BuilderRef b, unsigned d
     }
 }
 
-void AbortOnNull::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
+void AbortOnNull::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
     Module * const m = b->getModule();
     DataLayout DL(m);
     IntegerType * const intPtrTy = DL.getIntPtrType(m->getContext());

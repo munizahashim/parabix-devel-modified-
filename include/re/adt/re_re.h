@@ -77,7 +77,7 @@ protected:
 // do match an empty string.
 bool matchesEmptyString(const RE * re);
 
-[[noreturn]] void UnsupportedRE(std::string errmsg);
+[[noreturn]] void UnsupportedRE(const std::string & errmsg);
 
 }
 

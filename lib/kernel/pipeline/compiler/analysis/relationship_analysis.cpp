@@ -167,7 +167,7 @@ StreamSetPort getReferencePort(const Kernel * const kernel, const StringRef ref)
         << kernel->getName()
         << " does not contain a StreamSet called "
         << ref;
-    report_fatal_error(msg.str());
+    report_fatal_error(StringRef(msg.str()));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -204,7 +204,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
                     << "."
                     << item.getName()
                     << " cannot refer to an output stream";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
             const Binding & ref = getReferenceBinding(kernel, refPort);
             assert (ref.getRelationship()->isStreamSet());
@@ -216,7 +216,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
                     << "."
                     << item.getName()
                     << " cannot refer to a Fixed-rate stream";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
             // To preserve acyclicity, reference bindings always point to the binding that refers to it.
             // To simplify later I/O lookup, the edge stores the info of the reference port.
@@ -313,7 +313,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
                                 msg << ": pop count reference ";
                                 msg << refBinding.getName();
                                 msg << " must refer to a non-deferred Fixed rate stream";
-                                report_fatal_error(msg.str());
+                                report_fatal_error(StringRef(msg.str()));
                             }
                             refVertex = add_vertex(refStream, H);
                             M.emplace(refStream, refVertex);
@@ -326,7 +326,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
                             msg << ": pop count reference ";
                             msg << refBinding.getName();
                             msg << " cannot have a rational rate";
-                            report_fatal_error(msg.str());
+                            report_fatal_error(StringRef(msg.str()));
                         }
                         const auto type = rate.isPopCount() ? CountingType::Positive : CountingType::Negative;
                         add_edge(refVertex, i, Edge{type, port, strideLength.numerator()}, H);
@@ -655,7 +655,7 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                     }
 
                     if (LLVM_UNLIKELY(error)) {
-                        report_fatal_error(kernel->getName() + " is ambiguous: multiple I/O layouts have the same signature");
+                        report_fatal_error(StringRef(kernel->getName()) + " is ambiguous: multiple I/O layouts have the same signature");
                     }
                 }
             }
@@ -796,7 +796,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
             raw_string_ostream msg(tmp);
             msg << mPipelineKernel->getName()
                 << " contains itself in its pipeline";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
 
         const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
@@ -1240,7 +1240,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
                             out << "Error: input reference for binding " <<
                                    kernelObj->getName() << "." << rn.Binding.get().getName() <<
                                    " refers to an output stream.";
-                            report_fatal_error(out.str());
+                            report_fatal_error(StringRef(out.str()));
                         }
                         add_edge(ref.Number, port.Number, E);
                         break;

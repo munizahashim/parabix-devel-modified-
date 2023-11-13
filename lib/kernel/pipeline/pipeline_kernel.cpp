@@ -32,7 +32,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         raw_svector_ostream out(tmp);
         out << "PAPI Library Init Error: ";
         out << PAPI_strerror(rvalInit);
-        report_fatal_error(out.str());
+        report_fatal_error(StringRef(out.str()));
     }
 
     //    if (codegen::SegmentThreads > 1 || codegen::EnableDynamicMultithreading) {
@@ -42,7 +42,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
                 raw_svector_ostream out(tmp);
                 out << "PAPI Thread Init Error: ";
                 out << PAPI_strerror(rvalThreaedInit);
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
     //    }
 
@@ -62,7 +62,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
             out << event.c_str();
             out << "\n";
             out << PAPI_strerror(rvalEventNameToCode);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
     }
 
@@ -74,7 +74,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         raw_svector_ostream out(tmp);
         out << "PAPI Create Event Set Error: ";
         out << PAPI_strerror(rvalCreateEventSet);
-        report_fatal_error(out.str());
+        report_fatal_error(StringRef(out.str()));
     }
 
     const auto rvalAddEvents = PAPI_add_events(EventSet, PAPIEventList.data(), (int)PAPIEventList.size());
@@ -87,7 +87,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         out << "\n"
                "Check papi_avail for available options or enter sysctl -w kernel.perf_event_paranoid=0\n"
                "to reenable cpu event tracing at the kernel level.";
-        report_fatal_error(out.str());
+        report_fatal_error(StringRef(out.str()));
     }
 
     const auto rvalStart = PAPI_start(EventSet);
@@ -96,7 +96,7 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         raw_svector_ostream out(tmp);
         out << "PAPI Start Error: ";
         out << PAPI_strerror(rvalCreateEventSet < PAPI_OK ? rvalCreateEventSet : PAPI_EINVAL);
-        report_fatal_error(out.str());
+        report_fatal_error(StringRef(out.str()));
     }
 
     return EventSet;
@@ -292,7 +292,7 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
     const auto laneWidth = intTy->getIntegerBitWidth();
 
     if (LLVM_UNLIKELY(!is_pow2(fieldWidth) || fieldWidth > laneWidth)) {
-        report_fatal_error("RepeatingStreamSet fieldwidth must be a power of 2 and no more than " + std::to_string(laneWidth));
+        report_fatal_error(StringRef("RepeatingStreamSet fieldwidth must be a power of 2 and no more than ") + std::to_string(laneWidth));
     }
 
     size_t patternLength = 0;
@@ -323,7 +323,7 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Repeating streamset value " << v << " exceeds a " << fieldWidth << "-bit value";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
         }
         #endif
@@ -736,7 +736,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     assert (argCount == suppliedArgs);
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
-        report_fatal_error(doSegment->getName() + " cannot be externally synchronized");
+        report_fatal_error(StringRef(doSegment->getName()) + " cannot be externally synchronized");
     }
 
     // allocate any internal stream sets

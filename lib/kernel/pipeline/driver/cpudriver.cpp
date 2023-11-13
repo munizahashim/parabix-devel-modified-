@@ -267,7 +267,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     for (const auto & kernel : mCachedKernel) {
         if (LLVM_UNLIKELY(kernel->getModule() == nullptr)) {
-            report_fatal_error(kernel->getName() + " was neither loaded from cache nor generated prior to finalizeObject");
+            report_fatal_error(llvm::StringRef(kernel->getName()) + " was neither loaded from cache nor generated prior to finalizeObject");
         }
         Module * const m = kernel->getModule();
         assert ("cached kernel has no module?" && m);

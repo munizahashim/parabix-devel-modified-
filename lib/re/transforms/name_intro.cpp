@@ -190,7 +190,7 @@ unsigned fixedCodepointCount(RE * re, CC * variableCC) {
         return countSoFar;
     } else if (Rep * rep = dyn_cast<Rep>(re)) {
         return (rep->getLB()) * fixedCodepointCount(rep->getRE(), variableCC);
-    } else if (Alt * alt = dyn_cast<Alt>(re)) {
+    } else if (isa<Alt>(re)) {
         // rule that all matchable codepoints are variable
         return 0;
     } else if (Name * n = dyn_cast<Name>(re)) {

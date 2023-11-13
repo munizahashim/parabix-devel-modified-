@@ -840,7 +840,7 @@ RE_Parser::RE_Parser(const std::string & regular_expression)
     out.write(mCursor.base() + 1, mEnd - mCursor - 1);
     out << "\n\n";
 #endif
-    llvm::report_fatal_error(errmsg);
+    llvm::report_fatal_error(llvm::StringRef(errmsg));
 }
 
 }

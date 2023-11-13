@@ -10,6 +10,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
 #include <llvm/IR/Dominators.h>
+#include <llvm/ADT/Twine.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_set.hpp>
 #include <kernel/core/streamsetptr.h>
@@ -411,7 +412,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         raw_svector_ostream out(tmp);
         out << "StreamSet " << getName() << ":" << binding.getName();
 
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
+        DataLayout DL(b->getModule());
+        Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
 
         ConstantInt * const ZERO = b->getSize(0);
         ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
@@ -419,20 +421,20 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         Value * const fromIndex = b->CreateUDiv(startItemCount, BLOCK_WIDTH);
         Value * const baseAddress = buffer->getBaseAddress(b);
         Value * const startPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, fromIndex);
-        Value * const start = b->CreatePointerCast(startPtr, int8PtrTy);
+        Value * const start = b->CreatePtrToInt(startPtr, intPtrTy);
 
         Value * const endPos = b->CreateAdd(startItemCount, buffer->getCapacity(b));
         Value * const toIndex = b->CreateCeilUDiv(endPos, BLOCK_WIDTH);
         Value * const endPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, toIndex);
-        Value * const end = b->CreatePointerCast(endPtr, int8PtrTy);
+        Value * const end = b->CreatePtrToInt(endPtr, intPtrTy);
 
-        Value * const length = b->CreatePtrDiff(end, start);
+        Value * const length = b->CreateSub(end, start);
 
         b->CreateAssert(b->CreateICmpULE(start, end),
                         "%s: illegal kernel I/O address range [0x%" PRIx64 ", 0x%" PRIx64 ")",
                         b->GetString(out.str()), start, end);
 
-        b->CheckAddress(start, length, out.str());
+        b->CheckAddress(startPtr, length, out.str());
 
 
     };
@@ -934,7 +936,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
             out << "Kernel " << getName() << " contains two scalar or alias fields named " << bindingName;
-            report_fatal_error(out.str());
+            report_fatal_error(Twine(out.str()));
         }
         if (expectedType) {
             Type * const actualType = scalar->getType()->getPointerElementType();
@@ -945,7 +947,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 expectedType->print(out);
                 out << " but was stored as a ";
                 actualType->print(out);
-                report_fatal_error(out.str());
+                report_fatal_error(Twine(out.str()));
             }
         }
     };
@@ -1113,7 +1115,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
                                     const auto m = cast<ArrayType>(elemTy)->getNumElements();
                                     if (LLVM_UNLIKELY(m == 0)) {
-                                        report_fatal_error(getName() + ": cannot automatically accumulate a 0-element scalar");
+                                        report_fatal_error(Twine(getName()) + ": cannot automatically accumulate a 0-element scalar");
                                     }
 
                                     b->CreateCondBr(b->CreateICmpNE(nextIdx, b->getInt32(m)), loop, exit);
@@ -1281,7 +1283,7 @@ const BindingMapEntry & KernelCompiler::getBinding(const BindingType type, const
             listAvailableBindings(mOutputStreamSets); break;
     }
 
-    report_fatal_error(out.str());
+    report_fatal_error(Twine(out.str()));
 }
 
 
@@ -1310,7 +1312,7 @@ StreamSetPort KernelCompiler::getStreamPort(const StringRef name) const {
     SmallVector<char, 256> tmp;
     raw_svector_ostream out(tmp);
     out << "Kernel " << getName() << " does not contain a streamset named: \"" << name << "\"";
-    report_fatal_error(out.str());
+    report_fatal_error(Twine(out.str()));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1322,7 +1324,7 @@ Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * const b, const StringR
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);
         out << "Scalar map for " << getName() << " was not initialized prior to calling getScalarFieldPtr";
-        report_fatal_error(out.str());
+        report_fatal_error(Twine(out.str()));
     } else {
         const auto f = mScalarFieldMap.find(name);
         if (LLVM_UNLIKELY(f == mScalarFieldMap.end())) {
@@ -1340,7 +1342,7 @@ Value * KernelCompiler::getScalarFieldPtr(KernelBuilder * const b, const StringR
                 spacer = ',';
             }
             #ifdef NDEBUG
-            report_fatal_error(out.str());
+            report_fatal_error(Twine(out.str()));
             #else
             out << "\n";
             assert (false);

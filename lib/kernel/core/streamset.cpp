@@ -12,6 +12,7 @@
 #include <toolchain/toolchain.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Format.h>
+#include <llvm/ADT/Twine.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <llvm/Analysis/ConstantFolding.h>
 
@@ -249,7 +250,7 @@ Type * StreamSetBuffer::resolveType(BuilderPtr b, Type * const streamSetType) {
     raw_string_ostream out(tmp);
     streamSetType->print(out);
     out << " is an unvalid stream set buffer type.";
-    report_fatal_error(out.str());
+    report_fatal_error(Twine(out.str()));
 }
 
 // External Buffer

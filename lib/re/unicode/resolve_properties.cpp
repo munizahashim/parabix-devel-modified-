@@ -26,8 +26,8 @@ using namespace llvm;
 
 namespace UCD {
     
-void UnicodePropertyExpressionError(std::string errmsg) {
-    llvm::report_fatal_error(errmsg);
+void UnicodePropertyExpressionError(const std::string & errmsg) {
+    llvm::report_fatal_error(llvm::StringRef(errmsg));
 }
 
 struct PropertyResolver : public RE_Transformer {

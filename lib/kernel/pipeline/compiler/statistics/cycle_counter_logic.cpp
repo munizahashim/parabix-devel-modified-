@@ -441,7 +441,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
             FixedArray<Value *, 2> tmp;
             tmp[0] = ZERO;
             tmp[1] = ZERO;
-            return b->CreateInBoundsGEP(gv, tmp);
+            return b->CreateInBoundsGEP(type, gv, tmp);
         };
 
         std::vector<Constant *> kernelNames;

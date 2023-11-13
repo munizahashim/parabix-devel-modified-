@@ -57,8 +57,8 @@ Value * IDISA_Builder::fwCast(const unsigned fw, Value * const a) {
     return CreateBitCast(a, vecTy);
 }
 
-void IDISA_Builder::UnsupportedFieldWidthError(const unsigned fw, std::string op_name) {
-    report_fatal_error(op_name + ": Unsupported field width: " +  std::to_string(fw));
+[[noreturn]] void IDISA_Builder::UnsupportedFieldWidthError(const unsigned fw, std::string op_name) {
+    report_fatal_error(StringRef(op_name) + ": Unsupported field width: " +  std::to_string(fw));
 }
 
 CallInst * IDISA_Builder::CallPrintRegister(StringRef name, Value * const value, const STD_FD fd) {

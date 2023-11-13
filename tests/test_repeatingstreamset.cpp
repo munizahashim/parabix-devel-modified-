@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  Copyright (c) 2018 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
@@ -149,7 +149,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Value " << v << " exceeds a " << fieldWidth << "-bit value";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
         }
         maxPatternSize = std::max(maxPatternSize, vec.size());
@@ -164,10 +164,10 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     }
 
     if (fieldWidth > blockWidth) {
-        report_fatal_error("does not support field width sizes above " + std::to_string(blockWidth));
+        report_fatal_error(StringRef("does not support field width sizes above ") + std::to_string(blockWidth));
     }
     if ((maxFillSize % blockWidth) != 0) {
-        report_fatal_error("output rate should be a multiple of " + std::to_string(blockWidth)
+        report_fatal_error(StringRef("output rate should be a multiple of ") + std::to_string(blockWidth)
                            + " to ensure proper streamset construction");
     }
 
@@ -342,7 +342,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
-        Value * const src = b->CreateGEP(streamVal[i], offset);
+        Value * const src = b->CreateGEP(streamVal[i]->getType()->getPointerElementType(), streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
         b->CreateMemCpy(dst, src, elementSize, 1U);
     }

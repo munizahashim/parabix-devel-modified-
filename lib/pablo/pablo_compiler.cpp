@@ -157,7 +157,7 @@ void PabloCompiler::examineBlock(BuilderRef b, const PabloBlock * const block) {
                         raw_string_ostream out(tmp);
                         array->print(out);
                         out << " must have a lookahead attribute of at least " << la->getAmount();
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                     notFound = false;
                     break;
@@ -250,7 +250,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
                 var->print(out);
                 out << " is uninitialized prior to entering ";
                 ifStatement->print(out);
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
             incoming.emplace_back(var, f->second);
         }
@@ -295,7 +295,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
             out << "PHINode creation error: ";
             var->print(out);
             out << " was not assigned an outgoing value.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         Value * const outgoing = f->second;
@@ -314,7 +314,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
             outgoing->getType()->print(out);
             out << ") within ";
             ifStatement->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         SmallVector<char, 64> tmp;
         raw_svector_ostream name(tmp);
@@ -384,7 +384,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
                 var->print(out);
                 out << " is uninitialized prior to entering ";
                 whileStatement->print(out);
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
             Value * entryValue = f->second;
             SmallVector<char, 64> tmp;
@@ -435,7 +435,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
             out << "PHINode creation error: ";
             var->print(out);
             out << " is no longer assigned a value.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         Value * const outgoingValue = f->second;
@@ -451,7 +451,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
             outgoingValue->getType()->print(out);
             out << ") within ";
             whileStatement->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         // update the final outgoing value for the loop
@@ -729,7 +729,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
                         << "invlaid number of arguments, "
                         << "expected " << expectedArgCount << ","
                         << "got " << argv.size();
-                    report_fatal_error(out.str());
+                    report_fatal_error(StringRef(out.str()));
                 }
             };
 
@@ -763,7 +763,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
                         out << "PabloCompiler: intrinsic id "
                             << (uint32_t) call->getIntrinsic()
                             << " was not recognized by the compiler";
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                     break;
             }
@@ -774,7 +774,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             out << "PabloCompiler: ";
             stmt->print(out);
             out << " was not recognized by the compiler";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         assert (expr);
         assert (value);
@@ -838,7 +838,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                 out << "PabloCompiler: ";
                 expr->print(out);
                 out << " is not a scalar value or was used before definition";
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
         } else if (LLVM_UNLIKELY(isa<Operator>(expr))) {
             const Operator * const op = cast<Operator>(expr);
@@ -992,7 +992,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
             out << "PabloCompiler: ";
             expr->print(out);
             out << " was used before definition";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         assert (value);
         // mMarker.insert({expr, value});
@@ -1018,7 +1018,7 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
             out << mKernel->getName();
             out << ": cannot index scalar value ";
             var->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         } else if (var->isReadOnly()) {
             if (index2) {
                 ptr = b->getInputStreamPackPtr(var->getName(), index1, index2);
@@ -1038,7 +1038,7 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
             out << ": stream ";
             var->print(out);
             out << " cannot be read from or written to";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         if (inst) {
             b->restoreIP(ip);

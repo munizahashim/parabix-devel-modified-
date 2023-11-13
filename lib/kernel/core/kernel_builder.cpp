@@ -107,7 +107,7 @@ Value * KernelBuilder::getTerminationSignal() {
 void KernelBuilder::setTerminationSignal(Value * const value) {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (LLVM_UNLIKELY(ptr == nullptr)) {
-        report_fatal_error(COMPILER->getName() + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
+        report_fatal_error(StringRef(COMPILER->getName()) + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
     }
     CreateStore(value, ptr);    
 }

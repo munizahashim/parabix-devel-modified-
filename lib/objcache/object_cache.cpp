@@ -5,6 +5,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
@@ -219,7 +220,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 << "\" in object cache directory.\n\n"
                 "Reason: " << EC.message() << "\n\n"
                 "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-            report_fatal_error(msg.str());
+            report_fatal_error(Twine(msg.str()));
         }
         objFile.write(Obj.getBufferStart(), Obj.getBufferSize());
         objFile.close();
@@ -235,7 +236,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 << "\" in object cache directory.\n\n"
                 "Reason: " << EC.message() << "\n\n"
                 "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-            report_fatal_error(msg.str());
+            report_fatal_error(Twine(msg.str()));
         }
 
         // Clone the function prototypes and metadata to minimize the size of the stored .kernel file.
@@ -290,7 +291,7 @@ std::unique_ptr<MemoryBuffer> ParabixObjectCache::getObject(const Module * modul
         msg << "getObject called multiple times for \""
             << moduleId
             << "\".\n\n";
-        report_fatal_error(msg.str());
+        report_fatal_error(Twine(msg.str()));
     }
     #else
     mCachedObject.erase(f);
@@ -433,7 +434,7 @@ inline void ParabixObjectCache::loadCacheSettings() noexcept {
             << mCachePath.str() << "\" with read/write permissions.\n\n"
             "Reason: " << err.message() << "\n\n"
             "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-        report_fatal_error(msg.str());
+        report_fatal_error(Twine(msg.str()));
     }
 
 }

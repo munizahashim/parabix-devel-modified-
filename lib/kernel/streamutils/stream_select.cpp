@@ -255,7 +255,7 @@ uint32_t resultStreamFieldWidth(SelectOperation const & selop) {
 
         uint32_t x = binding.first->getFieldWidth();
         if (x != fw) {
-            llvm::report_fatal_error("StreamSelect: mismatched field widths: " + std::to_string(x) + " vs " + std::to_string(fw));
+            llvm::report_fatal_error(llvm::StringRef("StreamSelect: mismatched field widths: ") + std::to_string(x) + " vs " + std::to_string(fw));
         }
     }
     return fw;

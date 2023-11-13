@@ -272,7 +272,7 @@ RelationshipGraph OptimizationBranchCompiler::makeRelationshipGraph(const Relati
                         << kernel->getName()
                         << '.'
                         << binding.getName();
-                    report_fatal_error(msg.str());
+                    report_fatal_error(StringRef(msg.str()));
                 }
             }
             return f->second;
@@ -865,7 +865,7 @@ inline std::array<const Kernel *, 4> makeBranches(const OptimizationBranch * con
             out << "Branch " << kernel->getName() << " of "
                    "OptimizationBranch " << branch->getName() <<
                    " must be InternallySynchronized.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
     }
 

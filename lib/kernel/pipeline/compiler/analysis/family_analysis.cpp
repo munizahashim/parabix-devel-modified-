@@ -129,7 +129,7 @@ found_kernel_in_graph:
             << " invokes a kernel with a family call but getNumOfNestedKernelFamilyCalls()"
                " returns 0. This flag cannot be reliably set by the PipelineCompiler"
                " since it is instantiated only for non-cached pipelines.";
-        report_fatal_error(out.str());
+        report_fatal_error(StringRef(out.str()));
     }
 #endif
 

@@ -193,7 +193,7 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
                 }
             }
             out << " is not explicitly marked as allowing unaligned access";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
     }
 
