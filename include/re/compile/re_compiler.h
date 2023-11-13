@@ -146,8 +146,6 @@ class RE_Compiler {
     Marker compileRE(RE * re);
     
     Marker compileRE(RE * re, Marker initialMarkers);
-        
-    static LLVM_ATTRIBUTE_NORETURN void UnsupportedRE(std::string errmsg);
 
 private:
     using ExternalNameMap = std::map<std::string, ExternalStream>;

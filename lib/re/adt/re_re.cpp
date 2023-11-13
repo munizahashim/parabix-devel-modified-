@@ -48,5 +48,8 @@ bool matchesEmptyString(const RE * re) {
     return false; // otherwise
 }
 
+[[noreturn]] void UnsupportedRE(std::string errmsg) {
+    llvm::report_fatal_error(errmsg);
+}
 
 }

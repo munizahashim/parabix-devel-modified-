@@ -260,7 +260,7 @@ public:
     llvm::CallInst * CallPrintRegister(llvm::StringRef regName, llvm::Value * const value, const STD_FD fd = STD_FD::STD_ERR);
 
 protected:
-    LLVM_ATTRIBUTE_NORETURN void UnsupportedFieldWidthError(const unsigned FieldWidth, std::string op_name);
+    [[noreturn]] void UnsupportedFieldWidthError(const unsigned FieldWidth, std::string op_name);
 
     llvm::Constant * bit_interleave_byteshuffle_table(unsigned fw);  // support function for merge using shuffles.
 

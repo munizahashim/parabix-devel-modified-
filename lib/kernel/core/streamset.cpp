@@ -47,7 +47,7 @@ using Rational = KernelBuilder::Rational;
 
 using BuilderPtr = StreamSetBuffer::BuilderPtr;
 
-LLVM_ATTRIBUTE_NORETURN void unsupported(const char * const function, const char * const bufferType) {
+[[noreturn]] void unsupported(const char * const function, const char * const bufferType) {
     report_fatal_error(StringRef{function} + " is not supported by " + bufferType + "Buffers");
 }
 

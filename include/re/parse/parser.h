@@ -95,8 +95,8 @@ protected:
             return *this;
         }
     private:        
-        LLVM_ATTRIBUTE_NORETURN void IncompleteRegularExpression();
-        LLVM_ATTRIBUTE_NORETURN void ParseFailure(const std::string & errmsg);
+        [[noreturn]] void IncompleteRegularExpression();
+        [[noreturn]] void ParseFailure(const std::string & errmsg);
     private:
         cursor_t    mCursor;
         cursor_t    mEnd;
@@ -231,9 +231,9 @@ protected:
 
     static std::string canonicalize(const cursor_t begin, const cursor_t end);
 
-    LLVM_ATTRIBUTE_NORETURN void InvalidUTF8Encoding();
+    [[noreturn]] void InvalidUTF8Encoding();
 
-    LLVM_ATTRIBUTE_NORETURN void ParseFailure(const std::string & errmsg) {
+    [[noreturn]] void ParseFailure(const std::string & errmsg) {
         mCursor.ParseFailure(errmsg);
     }
 public:

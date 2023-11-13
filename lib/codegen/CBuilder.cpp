@@ -199,7 +199,11 @@ Value * CBuilder::CreateWriteCall(Value * fileDescriptor, Value * buf, Value * n
     Function * write = m->getFunction("write");
     if (write == nullptr) {
         write = Function::Create(writeTy, Function::ExternalLinkage, "write", m);
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
         write->addAttribute(2U, Attribute::NoAlias);
+#else
+    //TODO: update for LLVM14+
+#endif
     }
     buf = CreatePointerCast(buf, voidPtrTy);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -217,7 +221,11 @@ Value * CBuilder::CreateReadCall(Value * fileDescriptor, Value * buf, Value * nb
     Function * readFn = m->getFunction("read");
     if (readFn == nullptr) {
         readFn = Function::Create(readTy, Function::ExternalLinkage, "read", m);
-        readFn->addAttribute(2U, Attribute::NoAlias);
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
+       readFn->addAttribute(2U, Attribute::NoAlias);
+#else
+    //TODO: update for LLVM14+
+#endif
     }
     buf = CreatePointerCast(buf, voidPtrTy);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -302,7 +310,11 @@ Function * CBuilder::GetPrintf() {
     if (LLVM_UNLIKELY(printf == nullptr)) {
         FunctionType * const fty = FunctionType::get(getInt32Ty(), {getInt8PtrTy()}, true);
         printf = Function::Create(fty, Function::ExternalLinkage, "printf", m);
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
         printf->addAttribute(1, Attribute::NoAlias);
+#else
+    //TODO: update for LLVM14+
+#endif
     }
     return printf;
 }
@@ -1405,18 +1417,20 @@ Function * CBuilder::LinkFunction(StringRef name, FunctionType * type, void * fu
     return mDriver->addLinkFunction(getModule(), name, type, functionPtr);
 }
 
-LoadInst * CBuilder::CreateLoad(Value *Ptr, const char * Name) {
+LoadInst * CBuilder::CreateLoad(Value * Ptr, const char * Name) {
+    Type * ptrTy = Ptr->getType()->getPointerElementType();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        CheckAddress(Ptr, ConstantExpr::getSizeOf(Ptr->getType()->getPointerElementType()), "CreateLoad");
+        CheckAddress(Ptr, ConstantExpr::getSizeOf(ptrTy), "CreateLoad");
     }
-    return IRBuilder<>::CreateLoad(Ptr, Name);
+    return IRBuilder<>::CreateLoad(ptrTy, Ptr, Name);
 }
 
 LoadInst * CBuilder::CreateLoad(Value * Ptr, const Twine Name) {
+    Type * ptrTy = Ptr->getType()->getPointerElementType();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        CheckAddress(Ptr, ConstantExpr::getSizeOf(Ptr->getType()->getPointerElementType()), "CreateLoad");
+        CheckAddress(Ptr, ConstantExpr::getSizeOf(ptrTy), "CreateLoad");
     }
-    return IRBuilder<>::CreateLoad(Ptr, Name);
+    return IRBuilder<>::CreateLoad(ptrTy, Ptr, Name);
 }
 
 LoadInst * CBuilder::CreateLoad(Type * Ty, Value *Ptr, const Twine Name) {
@@ -1427,10 +1441,11 @@ LoadInst * CBuilder::CreateLoad(Type * Ty, Value *Ptr, const Twine Name) {
 }
 
 LoadInst * CBuilder::CreateLoad(Value * Ptr, bool isVolatile, const Twine Name) {
+    Type * ptrTy = Ptr->getType()->getPointerElementType();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        CheckAddress(Ptr, ConstantExpr::getSizeOf(Ptr->getType()->getPointerElementType()), "CreateLoad");
+        CheckAddress(Ptr, ConstantExpr::getSizeOf(ptrTy), "CreateLoad");
     }
-    return IRBuilder<>::CreateLoad(Ptr, isVolatile, Name);
+    return IRBuilder<>::CreateLoad(ptrTy, Ptr, isVolatile, Name);
 }
 
 StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
@@ -1703,10 +1718,14 @@ BasicBlock * CBuilder::WriteDefaultRethrowBlock() {
     FunctionType * catchTy = catchFn->getFunctionType();
     CallInst * beginCatch = CreateCall(catchTy, catchFn, {exception});
     beginCatch->setTailCall(true);
-    beginCatch->addAttribute(-1, Attribute::NoUnwind);
-
     InvokeInst * const rethrowInst = CreateInvoke(getRethrow(), handleUnreachable, handleRethrow);
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
+    beginCatch->addAttribute(-1, Attribute::NoUnwind);
     rethrowInst->addAttribute(-1, Attribute::NoReturn);
+#else
+    beginCatch->setDoesNotThrow();
+    rethrowInst->setDoesNotReturn();
+#endif
 
     SetInsertPoint(handleRethrow);
     LandingPadInst * const caughtResult2 = CreateLandingPad(caughtResultType, 1);
@@ -1722,7 +1741,11 @@ BasicBlock * CBuilder::WriteDefaultRethrowBlock() {
     Value * const exception3 = CreateExtractValue(caughtResult3, 0);
     CallInst * beginCatch2 = CreateCall(catchTy, catchFn, {exception3});
     beginCatch2->setTailCall(true);
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
     beginCatch2->addAttribute(-1, Attribute::NoUnwind);
+#else
+    beginCatch2->setDoesNotThrow();
+#endif
     // should call std::terminate
     CreateExit(-1);
     CreateBr(handleUnreachable);
@@ -2020,7 +2043,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                 // since we may not necessarily be able to statically evaluate every varadic param,
                                 // attempt to fill in what constants we can and report <any> for all others.
                                 boost::format fmt(msg);
-                                for (unsigned i = 5; i < ci.getNumArgOperands(); ++i) {
+                                for (unsigned i = 5; i < ci.getNumOperands(); ++i) {
                                     Value * const arg = ci.getOperand(i); assert (arg);
                                     if (LLVM_LIKELY(isa<Constant>(arg))) {
                                         if (LLVM_LIKELY(isa<ConstantInt>(arg))) {
@@ -2125,7 +2148,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
 
         for (CallInst * ci : assertList) {
             BasicBlock * const bb = ci->getParent();
-            const auto n = ci->getNumArgOperands();
+            const auto n = ci->getNumOperands();
             assert (n >= 5);
             args.clear();
             for (unsigned i = 0; i < n; ++i) {

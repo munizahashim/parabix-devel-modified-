@@ -820,15 +820,15 @@ RE_Parser::RE_Parser(const std::string & regular_expression)
 
 }
 
-LLVM_ATTRIBUTE_NORETURN void RE_Parser::InvalidUTF8Encoding() {
+[[noreturn]] void RE_Parser::InvalidUTF8Encoding() {
     ParseFailure("Invalid UTF-8 encoding!");
 }
 
-LLVM_ATTRIBUTE_NORETURN void RE_Parser::Cursor::IncompleteRegularExpression() {
+[[noreturn]] void RE_Parser::Cursor::IncompleteRegularExpression() {
     ParseFailure("Incomplete regular expression!");
 }
 
-LLVM_ATTRIBUTE_NORETURN void RE_Parser::Cursor::ParseFailure(const std::string & errmsg) {
+[[noreturn]] void RE_Parser::Cursor::ParseFailure(const std::string & errmsg) {
 #if 0
     // TODO: this ought to check if the cursor position is on a UTF-8 character
     raw_fd_ostream out(STDERR_FILENO, false);
