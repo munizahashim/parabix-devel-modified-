@@ -2152,7 +2152,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
             assert (n >= 5);
             args.clear();
             for (unsigned i = 0; i < n; ++i) {
-                args.push_back(ci->getArgOperand(i));
+                args.push_back(ci->getOperand(i));
             }
             auto next = ci->eraseFromParent();
             // note: split automatically inserts an unconditional branch to the new block

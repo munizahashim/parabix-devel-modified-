@@ -1326,7 +1326,7 @@ std::string Kernel::getFamilyName() const {
         buffer << "_FreeLimit";
     }
     buffer.flush();
-    return std::move(name);
+    return name;
 }
 
 // CONSTRUCTOR
