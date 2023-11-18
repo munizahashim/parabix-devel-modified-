@@ -539,7 +539,7 @@ Kernel * PipelineBuilder::makeKernel() {
 
     mTarget->mKernelName =
         Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline,
-            std::move(PipelineKernel::makePipelineHashName(signature)));
+            PipelineKernel::makePipelineHashName(signature));
 
     return mTarget;
 }

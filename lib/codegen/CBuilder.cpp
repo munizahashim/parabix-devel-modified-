@@ -1049,6 +1049,7 @@ void __report_failure(const char * name, const char * fmt, const uintptr_t * tra
     va_start(args, traceLength);
     __report_failure_v(name, fmt, trace, traceLength, args);
     va_end(args);
+    exit (-1);
 }
 
 #if 0

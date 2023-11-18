@@ -382,6 +382,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mExecuteStridesIndividually = false;
     mCurrentKernelIsStateFree = false;
     mAllowDataParallelExecution = false;
+    mHasPrincipalInput = false;
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;

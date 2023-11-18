@@ -348,10 +348,10 @@ public:
 
 // intra-kernel codegen functions
 
-    Value * getInputStrideLength(BuilderRef b, const BufferPort &inputPort);
-    Value * getOutputStrideLength(BuilderRef b, const BufferPort &outputPort);
-    Value * calculateStrideLength(BuilderRef b, const BufferPort & port, Value * const previouslyTransferred, Value * const strideIndex);
-    Value * calculateNumOfLinearItems(BuilderRef b, const BufferPort &port, Value * const adjustment);
+    Value * getInputStrideLength(BuilderRef b, const BufferPort &inputPort, const StringRef location);
+    Value * getOutputStrideLength(BuilderRef b, const BufferPort &outputPort, const StringRef location);
+    Value * calculateStrideLength(BuilderRef b, const BufferPort & port, Value * const previouslyTransferred, Value * const strideIndex, StringRef location);
+    Value * calculateNumOfLinearItems(BuilderRef b, const BufferPort &port, Value * const adjustment, StringRef location);
     Value * getAccessibleInputItems(BuilderRef b, const BufferPort & inputPort, const bool useOverflow = true);
     Value * getNumOfAccessibleStrides(BuilderRef b, const BufferPort & inputPort, Value * const numOfLinearStrides);
     Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool useOverflow = true);
@@ -360,7 +360,7 @@ public:
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
 
     unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
-    Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset) const;
+    Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset, StringRef location) const;
     Value * getMaximumNumOfPartialSumStrides(BuilderRef b, const BufferPort &port, Value * const numOfLinearStrides);
     void splatMultiStepPartialSumValues(BuilderRef b);
 
@@ -802,6 +802,7 @@ protected:
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
     bool                                        mHasExplicitFinalPartialStride = false;
+    bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
     bool                                        mIsOptimizationBranch = false;
@@ -1032,7 +1033,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mCurrentProcessedItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentProcessedDeferredItemCountPhi(P.MaxNumOfInputPorts, mAllocator)
 , mCurrentLinearInputItems(P.MaxNumOfInputPorts, mAllocator)
-
 , mConsumedItemCountsAtLoopExitPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedPhi(P.MaxNumOfInputPorts, mAllocator)
 , mUpdatedProcessedDeferredPhi(P.MaxNumOfInputPorts, mAllocator)

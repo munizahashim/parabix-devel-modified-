@@ -410,8 +410,8 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
                     maxStepFactor = std::max(maxStepFactor, k);
                 }
                 maxStepFactor = round_up_to(maxStepFactor, stepsPerBlock);
-                add_edge(kernel, streamSet, maxStepFactor, G);
                 const auto spanLength = maxStepFactor / stepsPerBlock;
+                add_edge(kernel, streamSet, spanLength, G);
                 assert (spanLength > 0);
                 BufferNode & bn = mBufferGraph[streamSet];
                 bn.OverflowCapacity = std::max(bn.OverflowCapacity, spanLength + 1);

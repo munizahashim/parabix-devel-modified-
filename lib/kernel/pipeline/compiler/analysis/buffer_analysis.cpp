@@ -110,6 +110,13 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         break;
                     case AttrId::Principal:
                         bp.Flags |= BufferPortType::IsPrincipal;
+                        if (LLVM_UNLIKELY(!rate.isFixed() || port.Type == PortType::Output)) {
+                            SmallVector<char, 0> tmp;
+                            raw_svector_ostream out(tmp);
+                            out << "Principal attribute may only be applied to a Fixed rate input port: "
+                                << kernelObj->getName() << "." << binding.getName();
+                            report_fatal_error(out.str());
+                        }
                         break;
                     case AttrId::Deferred:
                         bp.Flags |= BufferPortType::IsDeferred;
