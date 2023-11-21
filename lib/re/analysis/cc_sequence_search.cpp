@@ -1,5 +1,6 @@
 #include <re/adt/adt.h>
 #include <re/printer/re_printer.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 namespace re {
@@ -31,7 +32,8 @@ stateVector_t ccSequenceSearchObject::search_from_state(RE * re, stateVector_t v
     } else if (Capture * c = dyn_cast<Capture>(re)) {
         return search_from_state(c->getCapturedRE(), v);
     } else if (LLVM_UNLIKELY(isa<Reference>(re))) {
-        llvm::report_fatal_error("back references not supported in icgrep.");
+        llvm::errs() << "back references not supported in CC_sequence_search.\n";
+        return 0;
     } else if (const Seq * seq = dyn_cast<Seq>(re)) {
         stateVector_t rslt = v;
         for (RE * s : *seq) {
@@ -70,8 +72,16 @@ stateVector_t ccSequenceSearchObject::search_from_state(RE * re, stateVector_t v
             }
             return (v & next) | mInitState;
         } else {
-            llvm::report_fatal_error("Unsupported assertion.");
+            llvm::errs() << "assertion not supported in CC_sequence_search.\n";
+            return 0;
         }
+    } else if (const PropertyExpression * pe = dyn_cast<const PropertyExpression>(re)) {
+        RE * resolved = pe->getResolvedRE();
+        if (LLVM_LIKELY(resolved != nullptr)) {
+            return search_from_state(resolved, v);
+        }
+        llvm::errs() << "unresolved property expression in CC_sequence_search.\n";
+        return 0;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return (search_from_state(diff->getLH(), v) &~ search_from_state(diff->getRH(), v)) | mInitState;
     } else if (const Intersect * ix = dyn_cast<Intersect>(re)) {
@@ -89,7 +99,7 @@ stateVector_t ccSequenceSearchObject::search_from_state(RE * re, stateVector_t v
         }
         return ((CC_matches & v) << 1) | mInitState;
     }
-    llvm::report_fatal_error(llvm::StringRef("failed to process ") + Printer_RE::PrintRE(re));
+    llvm::errs() << "CC sequence search failed to process " << Printer_RE::PrintRE(re) << "\n";
     return 0;
 }
 
