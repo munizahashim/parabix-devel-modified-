@@ -471,6 +471,7 @@ abcdefghijklmno</datafile>
 <grepcase regexp="fodder|simple" datafile="simple1" greplines="3 4"/>
 <grepcase regexp="(?g)fodder|simple" datafile="simple1" greplines="3 4"/>
 <grepcase regexp="\w{4}\s+\w{4}\s+\w{4}" datafile="simple1" greplines="3"/>
+<grepcase regexp="t(-?| ?)t" datafile="StartEndAlt" greplines="9 11 13"/>
 
 <grepcase regexp="[cde]{3}" datafile="bounded_charclass" greplines="5 6 7"/>
 <grepcase regexp="[f-h]{5}" datafile="bounded_charclass" greplines="8 9 10"/>
