@@ -89,7 +89,7 @@ RE * RE_Parser::parse_alt() {
         alt.push_back(parse_seq());
     }
     while (accept('|'));
-    return makeAlt(alt.begin(), alt.end());
+    return Alt::Create(alt.begin(), alt.end());
 }
     
 RE * RE_Parser::parse_seq() {
@@ -106,33 +106,12 @@ RE * RE_Parser::parse_seq() {
     return makeSeq(seq.begin(), seq.end());
 }
 
-RE * createStart(ModeFlagSet flags) {
-    // FIXME: deal with single-line mode properly 
-    //if ((flags & ModeFlagType::MULTILINE_MODE_FLAG) == 0) return makeZeroWidth("^s");  //single-line mode
-    if ((flags & ModeFlagType::UNIX_LINES_MODE_FLAG) != 0) {
-        return makeAlt({makeNegativeLookBehindAssertion(makeByte(0, 0xFF)), makeLookBehindAssertion(makeCC(0x0A, &cc::Unicode))});
-    }
-    return makeStart();
-}
-RE * createEnd(ModeFlagSet flags) {
-    // FIXME: deal with single-line mode properly
-    //if ((flags & ModeFlagType::MULTILINE_MODE_FLAG) == 0) return makeZeroWidth("$s");  //single-line mode
-    if ((flags & ModeFlagType::UNIX_LINES_MODE_FLAG) != 0) {
-        return makeAlt({makeNegativeLookAheadAssertion(makeByte(0, 0xFF)), makeLookAheadAssertion(makeCC(0x0A, &cc::Unicode))});
-    }
-    return makeEnd();
-}
-RE * createAny(ModeFlagSet flags) {
-    return makeAny();
-}
-    
-    
 RE * RE_Parser::parse_next_item() {
     if (mCursor.noMore() || atany("*?+{|")) return nullptr;
     else if (((mGroupsOpen > 0) && at(')')) || (fNested && at('}'))) return nullptr;
-    else if (accept('^')) return createStart(fModeFlagSet);
-    else if (accept('$')) return createEnd(fModeFlagSet);
-    else if (accept('.')) return createAny(fModeFlagSet);
+    else if (accept('^')) return Start::Create();
+    else if (accept('$')) return End::Create();
+    else if (accept('.')) return makeAny();
     else if (accept('(')) return parse_group();
     else if (accept('[')) return parse_extended_bracket_expression();
     else if (accept('\\')) return parse_escaped();
@@ -143,8 +122,7 @@ RE * RE_Parser::parse_next_item() {
         return makeCC(*radicalSet);
     }
 }
-    
-    
+
 RE * RE_Parser::parse_mode_group(bool & closing_paren_parsed) {
     const ModeFlagSet savedModeFlagSet = fModeFlagSet;
     while (mCursor.more() && !atany(":)")) {
