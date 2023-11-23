@@ -271,6 +271,7 @@ Kernel * PipelineBuilder::makeKernel() {
             out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
+            obj->ensureLoaded();
             if (K.isFamilyCall()) {
                 out << 'F' << obj->getFamilyName();
                 numOfNestedKernelFamilyCalls++;

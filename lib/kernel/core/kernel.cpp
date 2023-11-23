@@ -427,7 +427,7 @@ found_non_empty_type:
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateOrLoadKernel(BuilderRef b) {
     if (LLVM_LIKELY(isGenerated())) {
-        ensureLoaded();
+        /* do nothing */
     } else if (getInitializeFunction(b, false)) {
         loadCachedKernel(b);
     } else {
@@ -1144,27 +1144,22 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
             b->CreateAssert(ptr, "constructFamilyKernels cannot pass a null value to pipeline");
         }
-
-//        b->CallPrintInt(" > " + getName() + ".arg" +
-//                        std::to_string(hostArgs.size()), ptr);
-
         hostArgs.push_back(b->CreatePointerCast(ptr, voidPtrTy));
     };
 
     auto addHostVoidArg = [&]() {
-
-//        b->CallPrintInt(" > " + getName() + ".arg" +
-//                        std::to_string(hostArgs.size()), voidPtr);
-
         hostArgs.push_back(voidPtr);
     };
     #ifndef NDEBUG
     const auto originalNumOfHoseArgs = hostArgs.size();
     #endif
+
+    const auto k = hostArgs.size();
+
     if (LLVM_LIKELY(isStateful())) {
         addHostArg(handle);
     } else {
-        hostArgs.push_back(voidPtr);
+        addHostVoidArg();
     }
     const auto tl = hasThreadLocal();
     const auto ai = allocatesInternalStreamSets();
@@ -1277,12 +1272,17 @@ void SegmentOrientedKernel::generateKernelMethod(BuilderRef b) {
 std::string Kernel::getFamilyName() const {
     std::string tmp;
     raw_string_ostream out(tmp);
+    char flags = 0;
     if (LLVM_LIKELY(isStateful())) {
-        out << "F";
-    } else {
-        out << "L";
+        flags |= 1;
     }
-    out << getStride();
+    if (LLVM_UNLIKELY(hasThreadLocal())) {
+        flags |= 2;
+    }
+    if (LLVM_UNLIKELY(allocatesInternalStreamSets())) {
+        flags |= 4;
+    }
+    out << 'F' << ('0' + flags) << getStride();
     AttributeSet::print(out);
     for (const Binding & input : mInputScalars) {
         out << ",IV("; input.print(this, out); out << ')';

@@ -54,20 +54,19 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
             assert (arg != arg_end);
             Value * v = &*arg;
             assert (v->getType() == b->getVoidPtrTy());
-
-
-//            b->CallPrintInt(" < " + getName() + "." +
-//                            getKernel(kernelId)->getName() + ".arg" +
-//                            std::to_string(arg->getArgNo()), v);
-
             if ((D.CaptureFlags & flags) == flags) {
-//                v = &*arg;
-//                assert (v->getType() == b->getVoidPtrTy());
-                b->CreateAssert(v, "invalid family param %" PRIu64, b->getSize(arg->getArgNo()));
+                v = &*arg;
+                assert (v->getType() == b->getVoidPtrTy());
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    // TODO: make these assertions more informative
+                    b->CreateAssert(v, "invalid family param %" PRIu64, b->getSize(arg->getArgNo()));
+                }
             } else {
-//                v = &*arg;
-//                assert (v->getType() == b->getVoidPtrTy());
-                b->CreateAssertZero(v, "invalid non-zero family param %" PRIu64, b->getSize(arg->getArgNo()));
+                v = &*arg;
+                assert (v->getType() == b->getVoidPtrTy());
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    b->CreateAssertZero(v, "invalid non-zero family param %" PRIu64, b->getSize(arg->getArgNo()));
+                }
                 v = voidPtr;
             }
             std::advance(arg, 1);

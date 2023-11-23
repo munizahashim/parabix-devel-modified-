@@ -90,6 +90,8 @@ public:
 
     bool isCachable() const override;
 
+    LLVM_READNONE bool allocatesInternalStreamSets() const final;
+
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
     void setOutputStreamSetAt(const unsigned i, StreamSet * const value) final;
@@ -166,8 +168,6 @@ private:
     void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
 
     void linkExternalMethods(BuilderRef b) final;
-
-    LLVM_READNONE bool allocatesInternalStreamSets() const final;
 
     void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides) final;
 

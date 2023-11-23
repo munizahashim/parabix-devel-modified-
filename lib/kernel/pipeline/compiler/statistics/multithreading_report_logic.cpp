@@ -68,6 +68,7 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
     groupIndices[0] = i32_ZERO;
     groupIndices[1] = i32_ONE;
     Value * currentCountPtr = b->CreateGEP0(data, groupIndices);
+
     Value * const currentCount = b->CreateLoad(currentCountPtr);
     Value * const outOfSpace = b->CreateICmpEQ(currentCount, b->getSize(MAX_ENTRY_GROUP_SIZE));
     BasicBlock * const mallocNewChunk = b->CreateBasicBlock("mallocNewDynamicThreadingBlock");

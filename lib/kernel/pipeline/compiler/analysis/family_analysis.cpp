@@ -84,16 +84,19 @@ void PipelineAnalysis::scanFamilyKernelBindings() {
                 BEGIN_SCOPED_REGION
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream out(tmp);
-                out << "Warning: ";
-                out << obj->getName();
-                out << " was added to the pipeline " << mPipelineKernel->getName();
+
+                out << "Warning: " << obj->getName()
+                    << " is explicitly called "
+                    << mPipelineKernel->getName();
+
                 if (ref.isFamilyCall()) {
                     out << " as a family kernel";
                 } else {
                     out << " and contains family kernel calls";
                 }
-                out << " but it was removed due to having no returned or internally read"
-                       " outputs nor being marked as side effecting.\n";
+
+                out << " but it was removed from the pipeline due to having no returned or"
+                       " internally read outputs nor being marked as side effecting.\n";
                 errs() << out.str();
                 END_SCOPED_REGION
 found_kernel_in_graph:

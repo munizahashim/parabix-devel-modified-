@@ -585,6 +585,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     assert (main->empty());
 
+    #ifdef ENABLE_LIBBACKTRACE
+    b->resetAssertionTraces();
+    #endif
+
     b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
     auto arg = main->arg_begin();
     auto nextArg = [&]() -> Value * {
@@ -660,8 +664,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     #ifdef ENABLE_PAPI
     Value * eventSet = nullptr;
     Value * eventListVal = nullptr;
-
-
 
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
         SmallVector<int, 8> eventList;

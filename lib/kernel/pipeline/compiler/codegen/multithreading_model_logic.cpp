@@ -157,6 +157,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         }
     }
     Value * const cThreadState = b->CreateGEP0(threadStateArray, threadIndex);
+
     writeThreadStructObject(b, cThreadState, initialSharedState, cThreadLocal, storedState, threadIndex, maximumNumOfThreads);
     Value * const nextThreadIndex = b->CreateAdd(threadIndex, sz_ONE);
     BasicBlock * constructNextThread = nullptr;
@@ -173,7 +174,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     FunctionType * const pthreadCreateFnTy = pthreadCreateFn->getFunctionType();
     if (mUseDynamicMultithreading) {
         fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-        Value * initThreadStateFlagPtr = b->CreateInBoundsGEP0(threadStateArray, fieldIndex);
+        Value * initThreadStateFlagPtr = b->CreateInBoundsGEP(threadStateArray, fieldIndex);
         b->CreateStore(sz_ONE, initThreadStateFlagPtr);
     }
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
@@ -195,11 +196,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     b->SetInsertPoint(constructedThreads);
 
     // execute the process thread
+    Value * const pty_ZERO = Constant::getNullValue(pThreadTy);
     Value * const processState = threadStateArray;
     writeThreadStructObject(b, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maximumNumOfThreads);
     fieldIndex[0] = i32_ZERO;
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
     b->CreateStore(Constant::getNullValue(pThreadTy), b->CreateInBoundsGEP0(threadStateArray, fieldIndex));
+
     PointerType * const threadStructPtrTy = cast<PointerType>(processState->getType());
 
     // store where we'll resume compiling the DoSegment method
@@ -440,6 +443,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             indices2[0] = indexPhi;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
             Value * const segTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
+
             Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(segTimePtr));
             segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
@@ -463,13 +467,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             indices2[0] = sz_ZERO;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
             Value * const baseSegTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-//            Value * const initialSegmentTime = b->CreateLoad(baseSegTimePtr);
-//            b->CreateStore(b->CreateSub(nextSyncTime, initialSegmentTime), baseSegTimePtr);
             b->CreateStore(sz_ZERO, baseSegTimePtr);
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
             Value * const baseSyncTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-//            Value * const initialSyncTime = b->CreateLoad(baseSyncTimePtr);
-//            b->CreateStore(b->CreateSub(nextSyncTime, initialSyncTime), baseSyncTimePtr);
             b->CreateStore(sz_ZERO, baseSyncTimePtr);
 
             Value * const syncOverheadLow = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
@@ -508,8 +508,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->SetInsertPoint(addThread);
             b->CreateStore(sz_ONE, addThreadStateFlagPtr);
             pthreadCreateArgs[0] = threadIdPtr;
-            // pthreadCreateArgs[1] = nullVoidPtrVal; // already set
-            // pthreadCreateArgs[2] = threadFunc;
             Value * const ts = b->CreateInBoundsGEP0(threadStruct, selectToAddPhi);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);

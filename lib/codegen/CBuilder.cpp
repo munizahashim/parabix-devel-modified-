@@ -27,6 +27,7 @@
 #include <boost/format.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/intrusive/detail/math.hpp>
+#include <boost/filesystem.hpp>
 #include <cxxabi.h>
 using boost::intrusive::detail::floor_log2;
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
@@ -34,8 +35,6 @@ using boost::intrusive::detail::floor_log2;
 #endif
 
 static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
-
-#define DBOOST_STACKTRACE_USE_ADDR2LINE
 
 #ifdef HAS_ADDRESS_SANITIZER
 #include <llvm/Analysis/AliasAnalysis.h>
@@ -49,14 +48,20 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 #define PRIxsz PRIx64
 #endif
 
-#ifdef ENABLE_ASSERTION_TRACE
-//#include <dwarf.h>
-//#include <libdwarf.h>
-//#include <libelf.h>
-//#include <link.h>
-//#include <dlfcn.h>
+#ifdef ENABLE_LIBBACKTRACE
+#include <backtrace-supported.h>
+#if BACKTRACE_SUPPORTED == 1
+#include <backtrace.h>
+#ifdef HAS_LIBUNWIND
+#include <unwind.h>
+#endif
+#ifdef HAS_BACKTRACE
 #include <execinfo.h>
+#endif
 #include <cxxabi.h>
+#else
+#undef ENABLE_LIBBACKTRACE
+#endif
 #endif
 
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(5, 0, 0)
@@ -968,11 +973,15 @@ Value * CBuilder::CreateRemoveCall(Value * path) {
     return CreateCall(fty, removeFunc, {path});
 }
 
+struct __backtrace_data {
+    const char * FileName = nullptr;
+    const char * FunctionName = nullptr;
+    uint32_t LineNo = 0;
+} __attribute__((packed));
+
 extern "C"
 BOOST_NOINLINE
-void __report_failure_v(const char * name, const char * fmt, const uintptr_t * trace, const uint32_t traceLength, va_list & args) {
-    // TODO: look into boost stacktrace, available from version 1.65
-
+void __report_failure_v(const char * name, const char * fmt, const __backtrace_data * trace, const uint32_t traceLength, va_list & args) {
     // colourize the output if and only if stderr is piped to the terminal
     const auto colourize = isatty(STDERR_FILENO) == 1;
     raw_fd_ostream out(STDERR_FILENO, false);
@@ -980,25 +989,15 @@ void __report_failure_v(const char * name, const char * fmt, const uintptr_t * t
         SmallVector<char, 4096> tmp;
         raw_svector_ostream trace_string(tmp);
         for (uint32_t i = 0; i < traceLength; ++i) {
-            const auto pc = trace[i];
-            trace_string << format_hex(pc, 16) << "   ";
-            #ifdef __APPLE__
-            const auto translator = "atos -o %s %p";
-            #else
-            const auto translator = "addr2line -fpCe %s %p";
-            #endif
-            const auto cmd = boost::format(translator) % codegen::ProgramName.data() % pc;
-            FILE * const f = popen(cmd.str().data(), "r");
-            if (f) {
-                char buffer[1024] = {0};
-                while(fgets(buffer, sizeof(buffer), f)) {
-                    trace_string << buffer;
-                }
-                pclose(f);
-            } else { // TODO: internal default
+            const auto & T = trace[i];
+//            if (T.FunctionName) {
+//                trace_string << T.FunctionName;
+//            }
+//            if (T.FileName) {
+//                trace_string << '(' << T.FileName << ':' << T.LineNo << ")";
+//            }
+            trace_string << '\n';
 
-
-            }
         }
         if (colourize) {
             out.changeColor(raw_fd_ostream::WHITE, true);
@@ -1044,7 +1043,7 @@ void __report_failure_v(const char * name, const char * fmt, const uintptr_t * t
 
 extern "C"
 BOOST_NOINLINE
-void __report_failure(const char * name, const char * fmt, const uintptr_t * trace, const uint32_t traceLength, ...) {
+void __report_failure(const char * name, const char * fmt, const __backtrace_data * trace, const uint32_t traceLength, ...) {
     va_list args;
     va_start(args, traceLength);
     __report_failure_v(name, fmt, trace, traceLength, args);
@@ -1052,36 +1051,55 @@ void __report_failure(const char * name, const char * fmt, const uintptr_t * tra
     exit (-1);
 }
 
-#if 0
-
-Constant * resolve(CBuilder & b, void * addr) {
-
-    Dl_info symbol_info;
-    link_map * linkmap;
-
-    const auto r = dladdr1(addr, &symbol_info, reinterpret_cast<void **>(&linkmap), RTLD_DL_LINKMAP);
-
-    if (r == 0) {
-        return nullptr;
-    }
-
-    Constant * functionName = nullptr;
-
-    if (symbol_info.dli_sname) {
-        char * buffer = malloc(256);
-        buffer = abi::__cxa_demangle(symbol_info.dli_sname, buffer, 256, nullptr);
-        functionName = b.GetString(buffer);
-        free(buffer);
-    }
-
-    if (symbol_info.dli_fname) {
-
-
-    }
-
-
+#ifdef ENABLE_LIBBACKTRACE
+extern "C"
+BOOST_NOINLINE
+int __backtrace_callback(void * data, uintptr_t /* pc */, const char *filename, int lineno, const char *function) {
+    auto pc_data = reinterpret_cast<__backtrace_data*>(data);
+    pc_data->FileName = filename;
+    pc_data->FunctionName = function;
+    pc_data->LineNo = lineno;
+    return (lineno == 0) ? 0 : 1;
 }
 
+extern "C"
+BOOST_NOINLINE
+void __backtrace_syminfo_callback(void * data, uintptr_t /* pc */, const char *symname, uintptr_t symval, uintptr_t symsize) {
+    auto pc_data = reinterpret_cast<__backtrace_data*>(data);
+    pc_data->FileName = nullptr;
+    pc_data->FunctionName = symname;
+    pc_data->LineNo = 0;
+}
+
+extern "C"
+BOOST_NOINLINE
+void __backtrace_ignored_error_callback(void *data, const char *msg, int errnum) {
+    auto pc_data = reinterpret_cast<__backtrace_data*>(data);
+    pc_data->FileName = nullptr;
+    pc_data->FunctionName = nullptr;
+    pc_data->LineNo = 0;
+}
+#endif
+
+using CallStack = SmallVector<uintptr_t, 64>;
+
+#ifdef HAS_LIBUNWIND
+static _Unwind_Reason_Code
+__unwind_callback (struct _Unwind_Context *context, void *data) {
+    CallStack * callstack = static_cast<CallStack *>(data);
+    uintptr_t pc;
+    #ifdef HAVE_GETIPINFO
+    int ip_before_insn = 0;
+    pc = _Unwind_GetIPInfo (context, &ip_before_insn);
+    if (!ip_before_insn) {
+      --pc;
+    }
+    #else
+    pc = _Unwind_GetIP (context);
+    #endif
+    callstack->push_back(pc);
+    return _URC_NO_REASON;
+}
 #endif
 
 void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::initializer_list<Value *> params) {
@@ -1094,18 +1112,6 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
 
     Module * const m = getModule();
     LLVMContext & C = getContext();
-    Type * const stackTy = IntegerType::get(C, sizeof(uintptr_t) * 8);
-
-//    IntegerType * const int32Ty = getInt32Ty();
-
-    PointerType * const stackPtrTy = stackTy->getPointerTo();
-    PointerType * const int8PtrTy = getInt8PtrTy();
-
-//    FixedArray<Type *, 3> fields;
-//    fields[0] = int8PtrTy;
-//    fields[1] = int8PtrTy;
-//    fields[2] = int32Ty;
-//    StructType * const structTy = StructType::create(C, fields);
 
     Function * assertFunc = m->getFunction("assert");
     if (LLVM_UNLIKELY(assertFunc == nullptr)) {
@@ -1113,13 +1119,28 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         auto ip = saveIP();
         IntegerType * const int1Ty = getInt1Ty();
         IntegerType * const int32Ty = getInt32Ty();
+        PointerType * const int8PtrTy = getInt8PtrTy();
         PointerType * const int8PtrPtrTy = int8PtrTy->getPointerTo();
         // va_list is platform specific but since we are not directly modifying
         // any use of this type in LLVM code, just ensure it is large enough.
         ArrayType * const vaListTy = ArrayType::get(getInt8Ty(), sizeof(va_list));
         Type * const voidTy = getVoidTy();
 
-        FunctionType * fty = FunctionType::get(voidTy, { int1Ty, int8PtrTy, int8PtrTy, stackPtrTy, int32Ty }, true);
+        FixedArray<Type *, 3> fields;
+        fields[0] = int8PtrTy;
+        fields[1] = int8PtrTy;
+        fields[2] = int32Ty;
+        StructType * const structTy = StructType::create(C, fields);
+        PointerType * const structPtrTy = structTy->getPointerTo();
+
+        FixedArray<Type *, 5> params;
+        params[0] = int1Ty;
+        params[1] = int8PtrTy;
+        params[2] = int8PtrTy;
+        params[3] = structPtrTy;
+        params[4] = int32Ty;
+
+        FunctionType * fty = FunctionType::get(voidTy, params, true);
         assertFunc = Function::Create(fty, Function::PrivateLinkage, "assert", m);
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(5, 0, 0)
         assertFunc->setDoesNotAlias(2);
@@ -1151,7 +1172,14 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         CreateCondBr(assertion, success, failure);
 
         SetInsertPoint(failure);
-        FunctionType * const rfTy = FunctionType::get(voidTy, { int8PtrTy, int8PtrTy, stackPtrTy, int32Ty, int8PtrTy }, false);
+
+        params[0] = int8PtrTy;
+        params[1] = int8PtrTy;
+        params[2] = structPtrTy;
+        params[3] = int32Ty;
+        params[4] = int8PtrTy;
+
+        FunctionType * const rfTy = FunctionType::get(voidTy, params, false);
         Function * const reportFn = mDriver->addLinkFunction(m, "__report_failure_v", rfTy,
                                                              reinterpret_cast<void *>(&__report_failure_v));
         reportFn->setCallingConv(CallingConv::C);
@@ -1185,102 +1213,127 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
 
         restoreIP(ip);
     }
-    #ifdef ENABLE_ASSERTION_TRACE
-    SmallVector<uintptr_t, 64> stack(64);
-    for (;;) {
-        const size_t n = backtrace(reinterpret_cast<void **>(stack.data()), stack.capacity());
-        if (LLVM_LIKELY(n < stack.capacity())) {
-            stack.set_size(n);
-            break;
-        }
-        stack.resize(n * 2);
-    }
-    constexpr unsigned FIRST_NON_ASSERT = 2;
+
+    PointerType * const structPtrTy = cast<PointerType>(assertFunc->getArg(3)->getType());
+
     Constant * trace = nullptr;
     ConstantInt * depth = nullptr;
-    if (LLVM_UNLIKELY(stack.size() < FIRST_NON_ASSERT)) {
-        trace = ConstantPointerNull::get(stackPtrTy);
-        depth = getInt32(0);
-    } else {
-        const auto n = stack.size() - FIRST_NON_ASSERT;
 
-        #if 0
+    #ifdef ENABLE_LIBBACKTRACE
+    if (mBacktraceState) {
+        // TODO: implement a tree structure and traverse from the bottom up, stopping when it
+        // determines the correct parent?
 
-        SmallVector<Constant *, 32> symbols(n);
-
-        for (size_t i = 0; i != n; ++i) {
-            const auto pc = stack[i];
-            const auto f = mBacktraceSymbols.find(pc);
-            Constant * symbol = nullptr;
-            if (f == mBacktraceSymbols.end()) {
-
-
-
-//                backtrace_state * const state = ::backtrace_create_state(nullptr, 0,&libbacktrace_error_callback, nullptr);
-//                pc_data data;
-//                ::backtrace_pcinfo(state, pc, &libbacktrace_full_callback, &libbacktrace_error_callback, &data);
-//                FixedArray<Constant *, 3> values;
-//                values[0] = GetString(data.Filename);
-//                values[1] = GetString(data.Function);
-//                values[2] = getSize(data.LineNo);
-//                symbol = ConstantStruct::get(structTy, values);
-//                mBacktraceSymbols.insert(std::make_pair(pc, symbol));
-            } else {
-                symbol = f->second;
-            }
-            symbols[i] = nullptr;
-        }
-
-
-
-
-
+        CallStack callstack;
+        #ifdef HAS_LIBUNWIND
+        _Unwind_Backtrace (__unwind_callback, &callstack);
         #endif
-
-        // search for a duplicate within the known globals
-        for (GlobalVariable & gv : m->getGlobalList()) {
-            Type * const ty = gv.getValueType();
-            if (ty->isArrayTy() && ty->getArrayElementType() == stackTy && ty->getArrayNumElements() == n) {
-                const ConstantDataArray * const array = cast<ConstantDataArray>(gv.getOperand(0));
-                bool found = true;
-                for (size_t i = 0; i < n; ++i) {
-                    if (LLVM_LIKELY(array->getElementAsInteger(i) != stack[i + FIRST_NON_ASSERT])) {
-                        found = false;
-                        break;
-                    }
-                }
-                if (LLVM_UNLIKELY(found)) {
-                    trace = &gv;
-                    break;
-                }
+        #ifdef HAS_BACKTRACE
+        for (;;) {
+            const size_t n = backtrace(reinterpret_cast<void **>(callstack.data()), callstack.capacity());
+            if (LLVM_LIKELY(n < callstack.capacity())) {
+                callstack.set_size(n);
+                break;
             }
+            callstack.resize(n * 2);
         }
-        if (LLVM_LIKELY(trace == nullptr)) {
-            Constant * const initializer = ConstantDataArray::get(getContext(), ArrayRef<uintptr_t>(stack.data() + FIRST_NON_ASSERT, n));
-            trace = new GlobalVariable(*m, initializer->getType(), true, GlobalVariable::InternalLinkage, initializer);
+        #endif
+        const auto n = callstack.size();
+
+        SmallVector<Constant *, 64> traceArray(n);
+        const auto state = reinterpret_cast<backtrace_state *>(mBacktraceState);
+
+        StructType * const structTy = cast<StructType>(structPtrTy->getPointerElementType());
+
+        char * demangled = nullptr;
+        size_t length = 0;
+
+        for (unsigned i = 0; i < n; ++i) {
+            const auto pc = callstack[i];
+//            const auto f = mBacktraceSymbols.find(pc);
+//            if (f == mBacktraceSymbols.end()) {
+//                remake:
+                __backtrace_data data;
+                auto r = backtrace_pcinfo(state, pc, &__backtrace_callback, &__backtrace_ignored_error_callback, &data);
+                if (LLVM_UNLIKELY(r == 0)) {
+                    r = backtrace_syminfo(state, pc, &__backtrace_syminfo_callback, &__backtrace_ignored_error_callback, &data);
+                }
+                FixedArray<Constant *, 3> values;
+                values[0] = GetString(data.FileName ? data.FileName : "");
+                Constant * funcName = nullptr;
+                if (data.FunctionName) {
+                    int status;
+                    demangled = abi::__cxa_demangle(data.FunctionName, demangled, &length, &status);
+                    if (LLVM_LIKELY(status == 0)) {
+                        funcName = GetString(demangled);                        
+                    } else {
+                        funcName = GetString(data.FunctionName);
+                    }
+                } else {
+                    funcName = GetString("");
+                }
+                values[1] = funcName;
+                values[2] = getInt32(data.LineNo);
+                Constant * symbol = ConstantStruct::get(structTy, values);
+                Constant * symbolPtr = new GlobalVariable(*m, structTy, true, GlobalVariable::InternalLinkage, symbol);
+                assert (symbolPtr->getType() == structPtrTy);
+//                mBacktraceSymbols.insert(std::make_pair(pc, symbolPtr));
+                traceArray[i] = symbolPtr;
+//            } else {
+//                Constant * const symbolPtr = f->second;
+//                assert (symbolPtr);
+//                assert (symbolPtr->getType() == structPtrTy);
+//                bool found = false;
+//                for (const GlobalVariable & gv : getModule()->getGlobalList()) {
+//                    if (gv.getInitializer() == symbolPtr) {
+//                        found = true;
+//                        break;
+//                    }
+//                }
+//                assert (found);
+//                if (found) {
+//                    traceArray[i] = symbolPtr;
+//                } else {
+//                    goto remake;
+//                }
+//            }
         }
-        trace = ConstantExpr::getPointerCast(trace, stackPtrTy);
+
+        ArrayType * traceTy = ArrayType::get(structPtrTy, n);
+        trace = ConstantArray::get(traceTy, traceArray);
+        trace = new GlobalVariable(*m, trace->getType(), true, GlobalVariable::InternalLinkage, trace);
+        trace = ConstantExpr::getPointerCast(trace, structPtrTy);
         depth = getInt32(n);
-    }
-    #else
-    Value * trace = ConstantPointerNull::get(stackPtrTy);
-    Value * depth = getInt32(0);
+        free(demangled);
+    } else {
     #endif
+        trace = ConstantPointerNull::get(structPtrTy);
+        depth = getInt32(0);
+    #ifdef ENABLE_LIBBACKTRACE
+    }
+    #endif
+
+
+
     Value * const name = GetString(getKernelName());
     SmallVector<char, 1024> tmp;
     const StringRef fmt = format.toStringRef(tmp);
     // TODO: add a check that the number of var_args == number of message args?
-
-
     SmallVector<Value *, 12> args(5);
-    args[0] = assertion;
-    args[1] = name;
+    args[0] = assertion; assert (assertion);
+    args[1] = name; assert (name);
     args[2] = GetString(fmt);
-    args[3] = trace;
-    args[4] = depth;
+    args[3] = trace; assert (trace);
+    args[4] = depth; assert (depth);
     args.append(params);
     IRBuilder<>::CreateCall(assertFunc->getFunctionType(), assertFunc, args);
 }
+
+#ifdef ENABLE_LIBBACKTRACE
+void CBuilder::resetAssertionTraces() {
+    mBacktraceSymbols.clear();
+}
+#endif
 
 void CBuilder::CreateExit(const int exitCode) {
     Module * const m = getModule();
@@ -1897,6 +1950,22 @@ void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * co
     #endif
 }
 
+#ifdef ENABLE_LIBBACKTRACE
+extern "C"
+BOOST_NOINLINE
+int __backtrace_check_valid_return_callback(void * data, uintptr_t, const char *filename, int lineno, const char *function) {
+    if (lineno == 0 || *filename == '\0') {
+        *reinterpret_cast<bool*>(data) = true;
+    }
+    return 0;
+}
+
+extern "C"
+BOOST_NOINLINE
+void __backtrace_set_true_on_error_callback(void *data, const char *msg, int errnum) {
+    *reinterpret_cast<bool*>(data) = true;
+}
+#endif
 
 CBuilder::CBuilder(LLVMContext & C)
 : IRBuilder<>(C)
@@ -1904,7 +1973,18 @@ CBuilder::CBuilder(LLVMContext & C)
 , mSizeType(IntegerType::get(getContext(), sizeof(size_t) * 8))
 , mFILEtype(nullptr)
 , mDriver(nullptr) {
-
+    #ifdef ENABLE_LIBBACKTRACE
+    if (LLVM_UNLIKELY(codegen::AnyAssertionOptionIsSet())) {
+        auto p = boost::filesystem::absolute(codegen::ProgramName).lexically_normal().native();
+        bool error = false;
+        mBacktraceState = backtrace_create_state(p.c_str(), 0, __backtrace_set_true_on_error_callback, &error);
+        if (error) {
+            mBacktraceState = nullptr;
+        }
+    } else {
+        mBacktraceState = nullptr;
+    }
+    #endif
 }
 
 struct RemoveRedundantAssertionsPass : public ModulePass {
@@ -2038,7 +2118,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                 };
                                 const char * const name = extract(ci.getOperand(1)); assert (name);
                                 const char * const msg = extract(ci.getOperand(2)); assert (msg);
-                                const uintptr_t * const trace = reinterpret_cast<const uintptr_t *>(extract(ci.getOperand(3))); assert (trace);
+                                const auto trace = reinterpret_cast<const __backtrace_data *>(extract(ci.getOperand(3))); assert (trace);
                                 const uint32_t n = cast<ConstantInt>(ci.getOperand(4))->getLimitedValue();
 
                                 // since we may not necessarily be able to statically evaluate every varadic param,
