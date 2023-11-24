@@ -976,26 +976,28 @@ Value * CBuilder::CreateRemoveCall(Value * path) {
 struct __backtrace_data {
     const char * FileName = nullptr;
     const char * FunctionName = nullptr;
-    uint32_t LineNo = 0;
+    size_t LineNo = 0;
 } __attribute__((packed));
 
 extern "C"
 BOOST_NOINLINE
-void __report_failure_v(const char * name, const char * fmt, const __backtrace_data * trace, const uint32_t traceLength, va_list & args) {
+void __report_failure_v(const char * name, const char * fmt, const __backtrace_data * const trace[], const uint32_t traceLength, va_list & args) {
     // colourize the output if and only if stderr is piped to the terminal
     const auto colourize = isatty(STDERR_FILENO) == 1;
     raw_fd_ostream out(STDERR_FILENO, false);
+
     if (trace) {
+
         SmallVector<char, 4096> tmp;
         raw_svector_ostream trace_string(tmp);
         for (uint32_t i = 0; i < traceLength; ++i) {
-            const auto & T = trace[i];
-//            if (T.FunctionName) {
-//                trace_string << T.FunctionName;
-//            }
-//            if (T.FileName) {
-//                trace_string << '(' << T.FileName << ':' << T.LineNo << ")";
-//            }
+            const __backtrace_data * const T = trace[i];
+            if (T->FunctionName) {
+                trace_string << StringRef{T->FunctionName} << ' ';
+            }
+            if (T->FileName) {
+                trace_string << '(' << StringRef{T->FileName} << ':' << T->LineNo << ")";
+            }
             trace_string << '\n';
 
         }
@@ -1043,7 +1045,7 @@ void __report_failure_v(const char * name, const char * fmt, const __backtrace_d
 
 extern "C"
 BOOST_NOINLINE
-void __report_failure(const char * name, const char * fmt, const __backtrace_data * trace, const uint32_t traceLength, ...) {
+void __report_failure(const char * name, const char * fmt, const __backtrace_data * const trace[], const uint32_t traceLength, ...) {
     va_list args;
     va_start(args, traceLength);
     __report_failure_v(name, fmt, trace, traceLength, args);
@@ -1113,6 +1115,20 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
     Module * const m = getModule();
     LLVMContext & C = getContext();
 
+    #ifndef NDEBUG
+    DataLayout dl(m);
+    auto getTypeSize = [&](Type * const type) -> uint64_t {
+        if (type == nullptr) {
+            return 0UL;
+        }
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+        return dl.getTypeAllocSize(type);
+        #else
+        return dl.getTypeAllocSize(type).getFixedSize();
+        #endif
+    };
+    #endif
+
     Function * assertFunc = m->getFunction("assert");
     if (LLVM_UNLIKELY(assertFunc == nullptr)) {
 
@@ -1129,8 +1145,10 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         FixedArray<Type *, 3> fields;
         fields[0] = int8PtrTy;
         fields[1] = int8PtrTy;
-        fields[2] = int32Ty;
-        StructType * const structTy = StructType::create(C, fields);
+        fields[2] = getSizeTy();
+        StructType * const structTy = StructType::create(C, fields, "__bkstruct", true);
+        assert (getTypeSize(structTy) == sizeof(__backtrace_data));
+
         PointerType * const structPtrTy = structTy->getPointerTo();
 
         FixedArray<Type *, 5> params;
@@ -1214,6 +1232,9 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         restoreIP(ip);
     }
 
+
+
+
     PointerType * const structPtrTy = cast<PointerType>(assertFunc->getArg(3)->getType());
 
     Constant * trace = nullptr;
@@ -1244,15 +1265,22 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         const auto state = reinterpret_cast<backtrace_state *>(mBacktraceState);
 
         StructType * const structTy = cast<StructType>(structPtrTy->getPointerElementType());
+        assert (getTypeSize(structTy) == sizeof(__backtrace_data));
 
         char * demangled = nullptr;
         size_t length = 0;
 
         for (unsigned i = 0; i < n; ++i) {
             const auto pc = callstack[i];
-//            const auto f = mBacktraceSymbols.find(pc);
-//            if (f == mBacktraceSymbols.end()) {
-//                remake:
+
+            SmallVector<char, 16> tmp;
+            raw_svector_ostream nm(tmp);
+            nm << "__bksym" << pc;
+
+            GlobalVariable * symbol = m->getGlobalVariable(nm.str(), true);
+
+            if (symbol == nullptr) {
+
                 __backtrace_data data;
                 auto r = backtrace_pcinfo(state, pc, &__backtrace_callback, &__backtrace_ignored_error_callback, &data);
                 if (LLVM_UNLIKELY(r == 0)) {
@@ -1265,7 +1293,7 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
                     int status;
                     demangled = abi::__cxa_demangle(data.FunctionName, demangled, &length, &status);
                     if (LLVM_LIKELY(status == 0)) {
-                        funcName = GetString(demangled);                        
+                        funcName = GetString(demangled);
                     } else {
                         funcName = GetString(data.FunctionName);
                     }
@@ -1273,35 +1301,17 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
                     funcName = GetString("");
                 }
                 values[1] = funcName;
-                values[2] = getInt32(data.LineNo);
-                Constant * symbol = ConstantStruct::get(structTy, values);
-                Constant * symbolPtr = new GlobalVariable(*m, structTy, true, GlobalVariable::InternalLinkage, symbol);
-                assert (symbolPtr->getType() == structPtrTy);
-//                mBacktraceSymbols.insert(std::make_pair(pc, symbolPtr));
-                traceArray[i] = symbolPtr;
-//            } else {
-//                Constant * const symbolPtr = f->second;
-//                assert (symbolPtr);
-//                assert (symbolPtr->getType() == structPtrTy);
-//                bool found = false;
-//                for (const GlobalVariable & gv : getModule()->getGlobalList()) {
-//                    if (gv.getInitializer() == symbolPtr) {
-//                        found = true;
-//                        break;
-//                    }
-//                }
-//                assert (found);
-//                if (found) {
-//                    traceArray[i] = symbolPtr;
-//                } else {
-//                    goto remake;
-//                }
-//            }
+                values[2] = getSize(data.LineNo);
+                Constant * const symbolStruct = ConstantStruct::get(structTy, values);
+                assert (getTypeSize(symbolStruct->getType()) == sizeof(__backtrace_data));
+                symbol = new GlobalVariable(*m, structTy, true, GlobalVariable::PrivateLinkage, symbolStruct, nm.str());
+            }
+            traceArray[i] = symbol;
         }
 
         ArrayType * traceTy = ArrayType::get(structPtrTy, n);
         trace = ConstantArray::get(traceTy, traceArray);
-        trace = new GlobalVariable(*m, trace->getType(), true, GlobalVariable::InternalLinkage, trace);
+        trace = new GlobalVariable(*m, trace->getType(), true, GlobalVariable::PrivateLinkage, trace);
         trace = ConstantExpr::getPointerCast(trace, structPtrTy);
         depth = getInt32(n);
         free(demangled);
@@ -2118,7 +2128,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                 };
                                 const char * const name = extract(ci.getOperand(1)); assert (name);
                                 const char * const msg = extract(ci.getOperand(2)); assert (msg);
-                                const auto trace = reinterpret_cast<const __backtrace_data *>(extract(ci.getOperand(3))); assert (trace);
+                                const auto trace = reinterpret_cast<const __backtrace_data * const *>(extract(ci.getOperand(3))); assert (trace);
                                 const uint32_t n = cast<ConstantInt>(ci.getOperand(4))->getLimitedValue();
 
                                 // since we may not necessarily be able to statically evaluate every varadic param,

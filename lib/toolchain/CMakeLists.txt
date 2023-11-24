@@ -42,7 +42,7 @@ if (ARTIFACT_TYPE STREQUAL "Shared")
         #
         # We can't embed symbols from all LLVM libraries as the GNU linker fails with
         # multiple definition errors (this doesn't happend with the Darwin linker).
-        target_link_libraries(toolchain PRIVATE
+        target_link_libraries(toolchain PUBLIC
             -Wl,--whole-archive LLVMSupport -Wl,--no-whole-archive
             ${REQ_LLVM_LIBRARIES})
     endif(APPLE)
