@@ -1287,7 +1287,11 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
                     r = backtrace_syminfo(state, pc, &__backtrace_syminfo_callback, &__backtrace_ignored_error_callback, &data);
                 }
                 FixedArray<Constant *, 3> values;
-                values[0] = GetString(data.FileName ? data.FileName : "");
+                if (data.FileName) {
+                    values[0] = GetString(data.FileName);
+                } else {
+                    values[0] = ConstantPointerNull::get(getInt8PtrTy());
+                }
                 Constant * funcName = nullptr;
                 if (data.FunctionName) {
                     int status;
@@ -1298,7 +1302,7 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
                         funcName = GetString(data.FunctionName);
                     }
                 } else {
-                    funcName = GetString("");
+                    funcName = ConstantPointerNull::get(getInt8PtrTy());
                 }
                 values[1] = funcName;
                 values[2] = getSize(data.LineNo);

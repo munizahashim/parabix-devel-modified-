@@ -1484,6 +1484,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * initialItemCount = nullptr;
     Value * sourceItemCount = nullptr;
+    Value * currentItemCount = nullptr;
     Value * peekableItemCount = nullptr;
     Value * minimumItemCount = MAX_INT;
     Value * nonOverflowItems = nullptr;
@@ -1493,6 +1494,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     if (port.Type == PortType::Input) {
         initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
+        currentItemCount = accessible;
         const auto streamSet = getInputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyForwards) {
@@ -1507,17 +1509,17 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
         Value * const writable = getWritableOutputItems(b, partialSumPort, true);
+        currentItemCount = writable;
         const auto streamSet = getOutputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyBack) {
             nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
             peekableItemCount = b->CreateAdd(initialItemCount, writable);
-
         } else {
             sourceItemCount = b->CreateAdd(initialItemCount, writable);
         }
-         minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
+        minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
     const auto ref = getReference(port);
@@ -1538,7 +1540,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
 //    if (peekableItemCount) {
-        cond = b->CreateAnd(cond, b->CreateICmpUGE(sourceItemCount, minimumItemCount));
+        cond = b->CreateAnd(cond, b->CreateICmpUGE(currentItemCount, minimumItemCount));
 //    }
 
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
