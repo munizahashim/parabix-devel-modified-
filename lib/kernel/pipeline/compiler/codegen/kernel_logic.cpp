@@ -145,6 +145,9 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
     Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            b->CreateAssert(handle, "null handle load");
+        }
         handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
     }
     assert (handle->getType()->isPointerTy());
@@ -161,6 +164,9 @@ Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsi
     Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            b->CreateAssert(handle, "null handle load");
+        }
         handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
     }
     assert (handle->getType()->isPointerTy());

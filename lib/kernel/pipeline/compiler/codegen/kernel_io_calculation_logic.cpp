@@ -213,7 +213,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
 
         BasicBlock * const enteringNonFinalSegment = b->CreateBasicBlock(prefix + "_nonFinalSegment", mKernelCheckOutputSpace);
 
-
         Vec<Value *> zeroExtendedInputVirtualBaseAddress(numOfInputs, nullptr);
 
         /// -------------------------------------------------------------------------------------
@@ -242,6 +241,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
             getZeroExtendedInputVirtualBaseAddresses(b, inputVirtualBaseAddress, zeroExtendSpace, zeroExtendedInputVirtualBaseAddress);
             afterNonFinalZeroExtendExit = b->GetInsertBlock();
         }
+
         b->CreateUnlikelyCondBr(isFinalSegment, enteringFinalSegment, enteringNonFinalSegment);
 
         /// -------------------------------------------------------------------------------------
@@ -495,6 +495,8 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
     debugPrint(b, prefix + "_checkRequired = %" PRIu64, required);
     #endif
     Value * hasEnough = b->CreateICmpULE(required, writable, prefix + "_hasEnough");
+
+
 
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
@@ -1488,26 +1490,19 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     const auto port = partialSumPort.Port;
 
-//    const StreamSetBuffer * sourceBuffer = nullptr;
-
-//    unsigned numOfPeekableItems = 0;
-
     if (port.Type == PortType::Input) {
         initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
         const auto streamSet = getInputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyForwards) {
-//            sourceBuffer = bn.Buffer;
-//            numOfPeekableItems = bn.CopyForwards;
-
             nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
             peekableItemCount = subtractLookahead(b, partialSumPort, b->CreateAdd(initialItemCount, accessible));
-            minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         } else {
             sourceItemCount = b->CreateAdd(initialItemCount, accessible);
         }
+        minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
@@ -1515,16 +1510,14 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         const auto streamSet = getOutputBufferVertex(port);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyBack) {
-//            sourceBuffer = bn.Buffer;
-//            numOfPeekableItems = bn.CopyBack;
-
             nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
             sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
             peekableItemCount = b->CreateAdd(initialItemCount, writable);
-            minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
+
         } else {
             sourceItemCount = b->CreateAdd(initialItemCount, writable);
         }
+         minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
     const auto ref = getReference(port);
@@ -1544,9 +1537,9 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     BasicBlock * const popCountEntry = b->GetInsertBlock();
 
     Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
-    if (peekableItemCount) {
+//    if (peekableItemCount) {
         cond = b->CreateAnd(cond, b->CreateICmpUGE(sourceItemCount, minimumItemCount));
-    }
+//    }
 
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 
@@ -1561,15 +1554,13 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * const strideIndex = b->CreateSub(numOfStrides, sz_ONE);
 
-
-
     if (LLVM_UNLIKELY(CheckAssertions)) {
 
         const Binding & binding = partialSumPort.Binding;
         Constant * bindingName = b->GetString(binding.getName());
 
         b->CreateAssert(b->CreateICmpUGE(numOfStrides, sz_ONE),
-                        "%s.%s: partial sum reference offset is zero (%" PRIu64 " vs. %" PRIu64 ")",
+                        "%s.%s: partial sum reference offset is zero",
                         mCurrentKernelName,
                         bindingName);
 
@@ -1588,8 +1579,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     Value * const pos = b->CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
     Value * const requiredItems = b->CreateLoad(ptr);
-
     Value * const notEnough = b->CreateICmpUGT(requiredItems, sourceItemCount);
+
     Value * const notDone = b->CreateICmpNE(strideIndex, sz_ZERO);
     Value * const repeat = b->CreateAnd(notDone, notEnough);
 

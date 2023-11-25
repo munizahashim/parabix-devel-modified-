@@ -455,7 +455,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
             args.push_back(mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
             if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
-                b->CreateFree(mKernelThreadLocalHandle);
+              //  b->CreateFree(mKernelThreadLocalHandle);
             }
         }
     }
