@@ -89,7 +89,7 @@ static std::string ScanReader_GenerateName(StreamSet * scan, std::string const &
 
 ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName)
 : MultiBlockKernel(b, ScanReader_GenerateName(scanIndices, callbackName), {
-    {"scan", scanIndices, BoundedRate(0, 1), Principal()},
+    {"scan", scanIndices, BoundedRate(0, 1)},
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
 , mCallbackName(callbackName)
@@ -110,7 +110,7 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
 
 ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::initializer_list<StreamSet *> additionalStreams)
 : MultiBlockKernel(b, ScanReader_GenerateName(scanIndices, callbackName, additionalStreams), {
-    {"scan", scanIndices, BoundedRate(0, 1), Principal()},
+    {"scan", scanIndices, BoundedRate(0, 1)},
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
 , mCallbackName(callbackName)

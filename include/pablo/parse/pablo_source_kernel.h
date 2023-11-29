@@ -20,8 +20,8 @@ namespace parse {
 class PabloSourceKernel final : public PabloKernel {
 public:
     PabloSourceKernel(BuilderRef builder,
-                      std::shared_ptr<parse::PabloParser> parser,
-                      std::shared_ptr<parse::SourceFile> sourceFile,
+                      std::shared_ptr<parse::PabloParser> & parser,
+                      std::shared_ptr<parse::SourceFile> & sourceFile,
                       std::string const & kernelName,
                       kernel::Bindings inputStreamBindings = {},
                       kernel::Bindings outputStreamBindings = {},
@@ -29,7 +29,7 @@ public:
                       kernel::Bindings outputScalarBindings = {});
 
     PabloSourceKernel(BuilderRef builder,
-                      std::shared_ptr<parse::PabloParser> parser,
+                      std::shared_ptr<parse::PabloParser> & parser,
                       std::string const & sourceFile,
                       std::string const & kernelName,
                       kernel::Bindings inputStreamBindings,

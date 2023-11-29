@@ -259,6 +259,8 @@ public:
         return mThreadLocalStateType  != nullptr;
     }
 
+    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
+
     virtual bool requiresExplicitPartialFinalStride() const;
 
     unsigned getStride() const { return mStride; }
@@ -429,8 +431,6 @@ protected:
     llvm::Function * getInitializeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
 
     llvm::Function * addInitializeDeclaration(BuilderRef b) const;
-
-    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
 
     llvm::Function * getAllocateSharedInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
 

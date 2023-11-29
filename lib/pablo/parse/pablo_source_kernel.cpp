@@ -24,8 +24,8 @@ void PabloSourceKernel::generatePabloMethod() {
 }
 
 PabloSourceKernel::PabloSourceKernel(std::unique_ptr<kernel::KernelBuilder> const & builder,
-                                     std::shared_ptr<parse::PabloParser> parser,
-                                     std::shared_ptr<parse::SourceFile> sourceFile,
+                                     std::shared_ptr<parse::PabloParser> & parser,
+                                     std::shared_ptr<parse::SourceFile> & sourceFile,
                                      std::string const & kernelName,
                                      kernel::Bindings inputStreamBindings,
                                      kernel::Bindings outputStreamBindings,
@@ -38,7 +38,7 @@ PabloSourceKernel::PabloSourceKernel(std::unique_ptr<kernel::KernelBuilder> cons
 {}
 
 PabloSourceKernel::PabloSourceKernel(std::unique_ptr<kernel::KernelBuilder> const & builder,
-                                     std::shared_ptr<parse::PabloParser> parser,
+                                     std::shared_ptr<parse::PabloParser>  & parser,
                                      std::string const & sourceFile,
                                      std::string const & kernelName,
                                      kernel::Bindings inputStreamBindings,

@@ -1276,6 +1276,7 @@ void * DoGrepThreadFunction(void *args) {
 }
 
 bool GrepEngine::searchAllFiles() {
+
     std::vector<pthread_t> threads(codegen::TaskThreads);
 
     for(unsigned long i = 1; i < codegen::TaskThreads; ++i) {
@@ -1301,6 +1302,7 @@ void * GrepEngine::DoGrepThreadMethod() {
 
     unsigned fileIdx = mNextFileToGrep++;
     while (fileIdx < mFileGroups.size()) {
+
         const auto grepResult = doGrep(mFileGroups[fileIdx], mResultStrs[fileIdx]);
         mFileStatus[fileIdx] = FileStatus::GrepComplete;
         if (grepResult > 0) {

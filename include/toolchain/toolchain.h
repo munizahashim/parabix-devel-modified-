@@ -73,6 +73,8 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
 
 bool LLVM_READONLY AnyDebugOptionIsSet();
 
+bool LLVM_READONLY AnyAssertionOptionIsSet();
+
 // Options for generating IR or ASM to files
 const std::string OmittedOption = ".";
 extern std::string ShowUnoptimizedIROption;
@@ -103,7 +105,7 @@ extern bool EnablePipelineObjectCache;
 extern bool EnableDynamicMultithreading;
 extern bool TraceObjectCache;
 extern unsigned GroupNum;
-extern std::string ProgramName;
+extern const char * ProgramName;
 extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
 extern unsigned Z3_Timeout;

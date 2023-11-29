@@ -15,7 +15,7 @@
 #include <llvm/IR/Function.h>
 #endif
 #include <unistd.h>
-#ifdef ENABLE_ASSERTION_TRACE
+#ifdef ENABLE_LIBBACKTRACE
 #include <llvm/ADT/DenseMap.h>
 #endif
 #include <util/not_null.h>
@@ -60,8 +60,8 @@ public:
     void setModule(llvm::Module * module) {
         mModule = module;
         ClearInsertionPoint();
-        #ifdef ENABLE_ASSERTION_TRACE
-        mBacktraceSymbols.clear();
+        #ifdef ENABLE_LIBBACKTRACE
+        resetAssertionTraces();
         #endif
     }
 
@@ -479,6 +479,10 @@ protected:
 
     void __CreateAssert(llvm::Value * assertion, const llvm::Twine failureMessage, std::initializer_list<llvm::Value *> args);
 
+    #ifdef ENABLE_LIBBACKTRACE
+    void resetAssertionTraces();
+    #endif
+
 protected:
 
     llvm::Module *                  mModule;
@@ -488,7 +492,8 @@ protected:
     codegen::VirtualDriver *        mDriver;
     llvm::LLVMContext               mContext;
     const std::string               mTriple;
-    #ifdef ENABLE_ASSERTION_TRACE
+    #ifdef ENABLE_LIBBACKTRACE
+    void *                          mBacktraceState = nullptr;
     llvm::DenseMap<uintptr_t, llvm::Constant *> mBacktraceSymbols;
     #endif
 };

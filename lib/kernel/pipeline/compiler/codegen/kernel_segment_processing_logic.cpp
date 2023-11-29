@@ -38,10 +38,8 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
-        if (port.canModifySegmentLength()) {
-            checkInputChannels = true;
-            break;
-        }
+        checkInputChannels |= port.canModifySegmentLength();
+        mHasPrincipalInput |= port.isPrincipal();
     }
 
     bool checkOutputChannels = false;
@@ -208,6 +206,11 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+//    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+//        const BufferPort & port = mBufferGraph[e];
+//        assert (port.Port.Type == PortType::Input);
+//        mAvailableInputItemCount[port.Port] = mAvailableInputItemCountPhi[port.Port];
+//    }
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
@@ -332,6 +335,7 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
             assert (mProcessedDeferredItemCount[port]);
             mAlreadyProcessedDeferredPhi[port]->addIncoming(mProcessedDeferredItemCount[port], exitBlockAfterLoopAgainTest);
         }
+//        mAvailableInputItemCountPhi[port]->addIncoming(mAvailableInputItemCount[port], exitBlockAfterLoopAgainTest);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -384,7 +388,8 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     // update KernelTerminated phi nodes
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;
-        Value * const itemCount = mProcessedItemCount[inputPort]; assert (itemCount);
+        const auto streamSet = source(e, mBufferGraph);
+        Value * const itemCount = mLocallyAvailableItems[streamSet]; assert (itemCount);
         mProcessedItemCountAtTerminationPhi[inputPort]->addIncoming(itemCount, exitBlock);
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -463,6 +468,11 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
             mAlreadyProcessedDeferredPhi[port] = phi;
             mCurrentProcessedDeferredItemCountPhi[port] = phi;
         }
+//        PHINode * const availPhi = b->CreatePHI(sizeTy, 2, prefix + "_availableInputPhi");
+//        mAvailableInputItemCountPhi[port] = availPhi;
+//        mAvailableInputItemCount[port] = availPhi;
+//        const auto streamSet = source(e, mBufferGraph);
+//        availPhi->addIncoming(mLocallyAvailableItems[streamSet], mKernelLoopStart);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {

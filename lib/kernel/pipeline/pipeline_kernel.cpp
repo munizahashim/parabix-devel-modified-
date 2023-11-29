@@ -585,6 +585,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     assert (main->empty());
 
+    #ifdef ENABLE_LIBBACKTRACE
+    b->resetAssertionTraces();
+    #endif
+
     b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
     auto arg = main->arg_begin();
     auto nextArg = [&]() -> Value * {
@@ -661,13 +665,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     Value * eventSet = nullptr;
     Value * eventListVal = nullptr;
 
-
-
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
         SmallVector<int, 8> eventList;
         Type * const intTy = TypeBuilder<int, false>::get(b->getContext());
         eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
-        b->CallPrintInt(" --- eventSet", eventSet);
         const auto n = eventList.size();
         Constant * const initializer = ConstantDataArray::get(b->getContext(), ArrayRef<int>(eventList.data(), n));
         eventListVal = new GlobalVariable(*m, intTy, true, GlobalVariable::ExternalLinkage, initializer);
