@@ -39,6 +39,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
         auto makeBufferPort = [&](const RelationshipType port,
                                   const RelationshipNode & bindingNode,
+                                  const bool noThreadLocal,
                                   const unsigned streamSet) -> BufferPort {
             assert (bindingNode.Type == RelationshipNode::IsBinding);
             const Binding & binding = bindingNode.Binding;
@@ -79,7 +80,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
             BufferPort bp(port, binding, lb, ub);
 
-            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory;
+            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory || noThreadLocal;
 
             if (LLVM_UNLIKELY(rate.getKind() == RateId::Unknown)) {
                 bp.Flags |= BufferPortType::IsManaged;
@@ -110,6 +111,13 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         break;
                     case AttrId::Principal:
                         bp.Flags |= BufferPortType::IsPrincipal;
+                        if (LLVM_UNLIKELY(!rate.isFixed() || port.Type == PortType::Output)) {
+                            SmallVector<char, 0> tmp;
+                            raw_svector_ostream out(tmp);
+                            out << "Principal attribute may only be applied to a Fixed rate input port: "
+                                << kernelObj->getName() << "." << binding.getName();
+                            report_fatal_error(out.str());
+                        }
                         break;
                     case AttrId::Deferred:
                         bp.Flags |= BufferPortType::IsDeferred;
@@ -166,6 +174,9 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         #ifndef NDEBUG
         RelationshipType prior_in{};
         #endif
+
+        bool nonGuaranteedInputRate = false;
+
         for (auto e : make_iterator_range(in_edges(kernel, mStreamGraph))) {
             const RelationshipType & port = mStreamGraph[e];
             #ifndef NDEBUG
@@ -175,6 +186,27 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             const auto binding = source(e, mStreamGraph);
             const RelationshipNode & rn = mStreamGraph[binding];
             assert (rn.Type == RelationshipNode::IsBinding);
+            const Binding & bd = rn.Binding;
+            const ProcessingRate & rate = bd.getRate();
+
+            // The following targets a StreamCompress/StreamExpand edge case in icgrep. StreamExpand
+            // has a popcount input, fixed input and fixed output. StreamCompress produces data at a
+            // popcount rate (C) and StreamExpand consumes it with its popcount rate (E) but the
+            // reference stream of each is not always equal. If E >>> C, this can lead to StreamExpand
+            // suddenly producing an unpredictable amount of output (equal to its input fixed rate)
+            // during the final stride.
+
+            switch (rate.getKind()) {
+                case RateId::Fixed:
+                    break;
+                case RateId::Greedy:
+                    if (rate.getLowerBound() == Rational{0}) {
+                        break;
+                    }
+                default:
+                    nonGuaranteedInputRate = true;
+            }
+
             E[port.Number] = e;
             if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {
                 for (const auto f : make_iterator_range(in_edges(binding, mStreamGraph))) {
@@ -279,7 +311,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
-                add_edge(streamSet, kernel, makeBufferPort(port, rn, streamSet), mBufferGraph);
+                add_edge(streamSet, kernel, makeBufferPort(port, rn, false, streamSet), mBufferGraph);
             } else {
                 const auto binding = target(e, mStreamGraph);
                 const RelationshipNode & rn = mStreamGraph[binding];
@@ -288,7 +320,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
-                add_edge(kernel, streamSet, makeBufferPort(port, rn, streamSet), mBufferGraph);
+                add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
             }
         }
 

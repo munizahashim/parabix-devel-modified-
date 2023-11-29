@@ -271,6 +271,7 @@ Kernel * PipelineBuilder::makeKernel() {
             out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
+            obj->ensureLoaded();
             if (K.isFamilyCall()) {
                 out << 'F' << obj->getFamilyName();
                 numOfNestedKernelFamilyCalls++;
@@ -537,7 +538,9 @@ Kernel * PipelineBuilder::makeKernel() {
 
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
-    mTarget->mKernelName = PipelineKernel::makePipelineHashName(signature);
+    mTarget->mKernelName =
+        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline,
+            PipelineKernel::makePipelineHashName(signature));
 
     return mTarget;
 }
