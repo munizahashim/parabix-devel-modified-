@@ -570,8 +570,16 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             value = compileExpression(b, cast<Assign>(stmt)->getValue());
             if (cast<Var>(expr)->isKernelParameter()) {
                 Value * const ptr = compileExpression(b, expr, false);
-                Type * const elemTy = expr->getType();
-                b->CreateAlignedStore(b->CreateZExt(value, elemTy), ptr, getAlignment(elemTy));
+
+                size_t align = 0;
+                Type * type = expr->getType();
+                if (type->isIntegerTy()) {
+                    align = cast<IntegerType>(type)->getBitWidth() / 8;
+                } else {
+                    type = b->getBitBlockType();
+                    align = b->getBitBlockWidth() / 8;
+                }
+                b->CreateAlignedStore(b->CreateZExt(value, type), ptr, align);
                 value = ptr;
             }
         } else if (const InFile * e = dyn_cast<InFile>(stmt)) {

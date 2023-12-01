@@ -52,22 +52,6 @@ using BuilderPtr = StreamSetBuffer::BuilderPtr;
     report_fatal_error(StringRef{function} + " is not supported by " + bufferType + "Buffers");
 }
 
-LLVM_READNONE inline Constant * nullPointerFor(BuilderPtr & b, Type * type, const unsigned underflow) {
-    if (LLVM_LIKELY(underflow == 0)) {
-        return ConstantPointerNull::get(cast<PointerType>(type));
-    } else {
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(type);
-        Constant * const U = ConstantInt::get(intPtrTy, underflow);
-        ConstantInt * const P = b->getTypeSize(type->getPointerElementType());
-        return ConstantExpr::getIntToPtr(ConstantExpr::getMul(U, P), type);
-    }
-}
-
-LLVM_READNONE inline Constant * nullPointerFor(BuilderPtr & b, Value * ptr, const unsigned underflow) {
-    return nullPointerFor(b, ptr->getType(), underflow);
-}
-
 LLVM_READNONE inline unsigned getItemWidth(const Type * ty ) {
     if (LLVM_LIKELY(isa<ArrayType>(ty))) {
         ty = ty->getArrayElementType();
@@ -505,7 +489,7 @@ void StaticBuffer::releaseBuffer(BuilderPtr b) const {
     Value * const addressField = b->CreateInBoundsGEP(mHandleType, getHandle(), indices);
     Value * buffer = b->CreateLoad(mType, addressField);
     b->CreateFree(subtractUnderflow(b, buffer, mUnderflow));
-    b->CreateStore(nullPointerFor(b, buffer, mUnderflow), addressField);
+    b->CreateStore(ConstantPointerNull::get(cast<PointerType>(mType)), addressField);
 }
 
 Value * StaticBuffer::modByCapacity(BuilderPtr b, Value * const offset) const {
@@ -969,7 +953,6 @@ Value * DynamicBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value *
         indices[1] = b->getInt32(BaseAddress);
         Value * const virtualBaseField = b->CreateInBoundsGEP(mHandleType, mHandle, indices);
         Value * const virtualBase = b->CreateLoad(getPointerType(), virtualBaseField);
-        assert (virtualBase->getType()->getPointerElementType() == mType);
         Value * startOfUsedBuffer = b->CreateInBoundsGEP(mType, virtualBase, consumedChunks);
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
@@ -978,7 +961,6 @@ Value * DynamicBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value *
         indices[1] = b->getInt32(MallocedAddress);
         Value * const mallocedAddressField = b->CreateInBoundsGEP(mHandleType, mHandle, indices);
         Value * const mallocedAddress = b->CreateLoad(getPointerType(), mallocedAddressField);
-        assert (virtualBase->getType()->getPointerElementType() == mType);
         Value * const newPos = b->CreateAdd(produced, required);
         Value * const newChunks = b->CreateCeilUDiv(newPos, BLOCK_WIDTH);
         Value * const requiredChunks = b->CreateSub(newChunks, consumedChunks);
@@ -1075,11 +1057,11 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             indices[1] = b->getInt32(BaseAddress);
             Value * const virtualBaseField = b->CreateInBoundsGEP(mHandleType, handle, indices);
             Value * const virtualBase = b->CreateLoad(getPointerType(), virtualBaseField);
-            assert (virtualBase->getType()->getPointerElementType() == mType);
+
             indices[1] = b->getInt32(MallocedAddress);
             Value * const mallocedAddressField = b->CreateInBoundsGEP(mHandleType, handle, indices);
             Value * const mallocedAddress = b->CreateAlignedLoad(getPointerType(), mallocedAddressField, sizeTyWidth);
-            assert (virtualBase->getType()->getPointerElementType() == mType);
+
             Value * const unreadDataPtr = b->CreateInBoundsGEP(mType, virtualBase, consumedChunks);
             b->CreateMemCpy(mallocedAddress, unreadDataPtr, bytesToCopy, blockSize);
             Value * const newVirtualAddress = b->CreateGEP(mType, mallocedAddress, b->CreateNeg(consumedChunks));
@@ -1200,7 +1182,6 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
 
         Value * const virtualBaseField = b->CreateInBoundsGEP(handleTy, handle, indices);
         Value * const virtualBase = b->CreateLoad(getPointerType(), virtualBaseField);
-        assert (virtualBase->getType()->getPointerElementType() == mType);
 
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(virtualBase->getType());
@@ -1232,7 +1213,6 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             indices[1] = b->getInt32(MallocedAddress);
             Value * const mallocedAddressField = b->CreateInBoundsGEP(handleTy, handle, indices);
             Value * const mallocedAddress = b->CreateAlignedLoad(getPointerType(), mallocedAddressField, sizeTyWidth);
-            assert (virtualBase->getType()->getPointerElementType() == mType);
 
             b->CreateAlignedStore(expandedBuffer, mallocedAddressField, sizeTyWidth);
 
@@ -1498,7 +1478,6 @@ Value * MMapedBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * 
     indices[1] = b->getInt32(BaseAddress);
     Value * const virtualBaseField = b->CreateInBoundsGEP(mHandleType, mHandle, indices);
     Value * const virtualBase = b->CreateLoad(getPointerType(), virtualBaseField);
-    assert (virtualBase->getType()->getPointerElementType() == mType);
     Value * const consumedChunks = b->CreateUDiv(consumed, BLOCK_WIDTH);
 
     DataLayout DL(b->getModule());
