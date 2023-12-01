@@ -1078,8 +1078,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                                     assert (elemTy->isIntOrIntVectorTy());
                                     Value * const scalarVal = b->CreateLoad(elemTy, b->CreateGEP(threadLocalTy, scalar, indices));
                                     Value * const mainScalarPtr = b->CreateGEP(threadLocalTy, mainScalar, indices);
-
                                     Value * mainScalarVal = b->CreateLoad(elemTy, mainScalarPtr);
+
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {
                                         case AccumRule::Sum:

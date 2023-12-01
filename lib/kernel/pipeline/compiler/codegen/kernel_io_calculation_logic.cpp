@@ -1682,11 +1682,8 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         ConstantInt * const sz_ZERO = b->getSize(0);
 
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
-
         Value * const vecAddr = b->CreatePointerCast(addr, vecPtrTy);
-
-        Value * const baseValue = b->CreateBlockAlignedLoad(b->getBitBlockType(), vecAddr);
-
+        Value * const baseValue = b->CreateBlockAlignedLoad(vecTy, vecAddr);
 
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
         Value * const total = b->CreateExtractElement(baseValue, offset);

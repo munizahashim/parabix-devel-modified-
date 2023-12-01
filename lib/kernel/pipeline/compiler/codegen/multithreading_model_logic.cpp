@@ -444,8 +444,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             indices2[0] = indexPhi;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
             Value * const segTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
-
             Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(sizeTy, segTimePtr));
+
             segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
@@ -467,10 +467,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             // subtract out the values so that we can keep each check
             indices2[0] = sz_ZERO;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
+
             Value * const baseSegTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
             b->CreateStore(sz_ZERO, baseSegTimePtr);
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
             Value * const baseSyncTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
+
             b->CreateStore(sz_ZERO, baseSyncTimePtr);
 
             Value * const syncOverheadLow = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);

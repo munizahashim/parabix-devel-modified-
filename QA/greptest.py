@@ -51,7 +51,7 @@ def start_element_open_file(name, attrs):
                 dataFileName = attrs[a]
                 idFound = True
         if not idFound:
-            print("Expecting id attribute for datafile, but none found.")
+            print("Expecting id attribute for datafile, but none found.", file=sys.stderr)
             exit(-1)
         outfpath = os.path.join(options.datafile_dir, dataFileName)
         if options.utf16: outf = codecs.open(outfpath, encoding='utf-16BE', mode='w')
@@ -140,7 +140,7 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
         else: flag_string += f + "=" + flags[f]
     grep_cmd = u"%s %s '%s' %s" % (grep_program_under_test, flag_string, escape_quotes(regexp), os.path.join(options.datafile_dir, datafile))
     if options.verbose:
-        print("Doing: " + grep_cmd)
+        print("Doing: " + grep_cmd, file=sys.stderr)
     try:
         raw_output = subprocess.check_output(grep_cmd.encode('utf-8'), cwd=options.exec_dir, shell=True)
         grep_out = codecs.decode(raw_output, 'utf-8')
@@ -148,19 +148,19 @@ def execute_grep_test(flags, regexp, datafile, expected_result):
         grep_out = codecs.decode(e.output, 'utf-8')
     except UnicodeDecodeError:
         msg = u"Test failure: {%s} expecting {%s} got malformed UTF-8" % (grep_cmd, expected_result)
-        print(msg.encode('utf-8'))
+        print(msg.encode('utf-8'), file=sys.stderr)
         failure_count += 1
         return
     if len(grep_out) > 0 and grep_out[-1] == '\n': grep_out = grep_out[:-1]
     filtered_out = filter_colorization(grep_out)
     if filtered_out != expected_result:
         msg = u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out)
-        print(msg)
+        print(msg, file=sys.stderr)
         failure_count += 1
     else:
         if options.verbose:
             msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
-            print(msg)
+            print(msg, file=sys.stderr)
 
 flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             'counting_choices' : ["-c", "-l", "-L"],
@@ -213,7 +213,7 @@ def parse_flag_string(flag_string):
 def start_element_do_test(name, attrs):
     if name == 'grepcase':
         if not 'regexp' in attrs or not 'datafile' in attrs:
-            print("Bad grepcase: missing regexp and/or datafile attributes.")
+            print("Bad grepcase: missing regexp and/or datafile attributes.", file=sys.stderr)
             return
         grep_case_flags = {}
         if 'flags' in attrs:
@@ -249,7 +249,7 @@ def run_tests(greptest_xml):
     p = xml.parsers.expat.ParserCreate()
     p.StartElementHandler = start_element_do_test
     p.Parse(greptest_xml, 1)
-    print("%i tests executed, %i failures\n"  % (test_count, failure_count))
+    print("%i tests executed, %i failures\n"  % (test_count, failure_count), file=sys.stderr)
     if failure_count > 0: exit(1)
 
 if __name__ == '__main__':
@@ -289,11 +289,11 @@ if __name__ == '__main__':
     if not os.path.exists(options.datafile_dir):
         os.mkdir(options.datafile_dir)
     if not os.path.isdir(options.datafile_dir):
-        print("Cannot use %s as working test file directory.\n" % options.datafile_dir)
+        print("Cannot use %s as working test file directory.\n" % options.datafile_dir, file=sys.stderr)
         sys.exit(1)
     random.seed(options.random_seed)
     grep_program_under_test = args[0]
-    print("grep_program: %s" % grep_program_under_test)
+    print("grep_program: %s" % grep_program_under_test, file=sys.stderr)
     grep_test_file = open(os.path.join(QA_dir,options.testcases), 'r')
     grep_test_spec = grep_test_file.read()
     grep_test_file.close()
