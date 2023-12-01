@@ -1237,19 +1237,21 @@ void CBuilder::__CreateAssert(Value * const assertion, const Twine format, std::
         // TODO: implement a tree structure and traverse from the bottom up, stopping when it
         // determines the correct parent?
 
-        CallStack callstack;
+
         #ifdef HAS_LIBUNWIND
+        CallStack callstack;
         _Unwind_Backtrace (__unwind_callback, &callstack);
         const auto n = callstack.size();
         #endif
         #ifdef HAS_BACKTRACE
+        CallStack callstack(64);
         size_t n = 0;
         for (;;) {
-            n = backtrace(reinterpret_cast<void **>(callstack.data()), callstack.capacity());
+            n = backtrace(reinterpret_cast<void **>(callstack.data()), callstack.size());
             if (LLVM_LIKELY(n < callstack.capacity())) {
                 break;
             }
-            callstack.reserve(n * 2);
+            callstack.resize(n * 2);
         }
         #endif
 

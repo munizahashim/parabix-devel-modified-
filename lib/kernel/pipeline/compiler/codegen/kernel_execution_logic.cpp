@@ -389,7 +389,6 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
     }
     assert (mKernelThreadLocalHandle == nullptr || !mKernelThreadLocalHandle->getType()->isEmptyTy());
     if (LLVM_UNLIKELY(mKernelThreadLocalHandle)) {
-        assert (mKernelThreadLocalHandle->getType()->getPointerElementType() == mKernel->getThreadLocalStateType());
         if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
             ConstantInt * i32_ZERO = b->getInt32(0);
             FixedArray<Value *, 3> offset;
@@ -397,7 +396,6 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             offset[1] = i32_ZERO;
             offset[2] = i32_ZERO;
             Value * const branchTypePtr = b->CreateGEP(mKernel->getThreadLocalStateType(), mKernelThreadLocalHandle, offset);
-            assert (branchTypePtr->getType()->getPointerElementType() == mOptimizationBranchSelectedBranch->getType());
             b->CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
         }
         addNextArg(mKernelThreadLocalHandle);

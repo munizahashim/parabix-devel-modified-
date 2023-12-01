@@ -261,6 +261,13 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
                 FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
                 maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                    maskInput->setHasUWTable();
+                    #else
+                    maskInput->setUWTableKind(UWTableKind::Default);
+                    #endif
+                }
                 b->SetInsertPoint(BasicBlock::Create(C, "entry", maskInput));
 
                 auto arg = maskInput->arg_begin();
@@ -484,13 +491,13 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
 
         b->SetInsertPoint(maskLoop);
-        PHINode * const streamIndex = b->CreatePHI(b->getSizeTy(), 2);
-        streamIndex->addIncoming(sz_ZERO, entry);
+        PHINode * const streamIndexPhi = b->CreatePHI(b->getSizeTy(), 2, "streamIndex");
+        streamIndexPhi->addIncoming(sz_ZERO, entry);
         Value * inputPtr = nullptr;
         if (itemWidth > 1) {
-            inputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
+            inputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, packIndex);
         } else {
-            inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
+            inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
         }
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
@@ -502,9 +509,9 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * outputPtr = inputPtr;
         if (LLVM_UNLIKELY(bn.isTruncated())) {
             if (itemWidth > 1) {
-                outputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
+                outputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, packIndex);
             } else {
-                outputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
+                outputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
             }
 
         }
@@ -513,30 +520,21 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
             // Since packs are laid out sequentially in memory, it will hopefully be cheaper to zero them out here
             // because they may be within the same cache line.
             Value * const nextPackIndex = b->CreateAdd(packIndex, ONE);
-            Value * const start = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, nextPackIndex);
+            Value * const start = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, nextPackIndex);
             Value * const startInt = b->CreatePtrToInt(start, intPtrTy);
-            Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, ITEM_WIDTH);
+            Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, ITEM_WIDTH);
             Value * const endInt = b->CreatePtrToInt(end, intPtrTy);
             Value * const remainingPackBytes = b->CreateSub(endInt, startInt);
-//            #ifdef PRINT_DEBUG_MESSAGES
-//            debugPrint(b, prefix + "_zeroUnwritten_packStart = 0x%" PRIx64, startInt);
-//            debugPrint(b, prefix + "_zeroUnwritten_remainingPackBytes = %" PRIu64, remainingPackBytes);
-//            #endif
             b->CreateMemZero(start, remainingPackBytes, blockWidth / 8);
         }
         BasicBlock * const maskLoopExit = b->GetInsertBlock();
-        Value * const nextStreamIndex = b->CreateAdd(streamIndex, ONE);
-        streamIndex->addIncoming(nextStreamIndex, maskLoopExit);
+        Value * const nextStreamIndex = b->CreateAdd(streamIndexPhi, ONE);
+        streamIndexPhi->addIncoming(nextStreamIndex, maskLoopExit);
         Value * const notDone = b->CreateICmpNE(nextStreamIndex, numOfStreams);
         b->CreateCondBr(notDone, maskLoop, maskExit);
 
         b->SetInsertPoint(maskExit);
         // Zero out any blocks we could potentially touch
-
-
-   //     const auto blocksToZero = buffer->getOverflow();
-
-
         Rational strideLength{0};
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];

@@ -213,22 +213,6 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
-#if 0
-    Type * const storeTy = toStore->getType();
-    Type * const ptrElemTy = ptr->getType()->getPointerElementType();
-    if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
-        if (LLVM_LIKELY(storeTy->canLosslesslyBitCastTo(ptrElemTy))) {
-            toStore = CreateBitCast(toStore, ptrElemTy);
-        } else {
-            std::string tmp;
-            raw_string_ostream out(tmp);
-            out << "invalid type conversion when calling storeOutputStreamBlock on " <<  name << ": ";
-            ptrElemTy->print(out);
-            out << " vs. ";
-            storeTy->print(out);
-        }
-    }
-#endif
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     const auto bw = getBitBlockWidth();
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
@@ -252,22 +236,6 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
-
-    Type * const storeTy = toStore->getType();
-    Type * const ptrElemTy = ptr->getType()->getPointerElementType();
-    if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
-        if (LLVM_LIKELY(storeTy->canLosslesslyBitCastTo(ptrElemTy))) {
-            toStore = CreateBitCast(toStore, ptrElemTy);
-        } else {
-            std::string tmp;
-            raw_string_ostream out(tmp);
-            out << "invalid type conversion when calling storeOutputStreamPack on " <<  name << ": ";
-            ptrElemTy->print(out);
-            out << " vs. ";
-            storeTy->print(out);
-        }
-    }
-
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     const auto bw = getBitBlockWidth();
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));

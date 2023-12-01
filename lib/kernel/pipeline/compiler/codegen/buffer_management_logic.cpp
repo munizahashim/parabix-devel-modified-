@@ -132,18 +132,17 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     params.push_back(mKernelSharedHandle);
                 }
                 Value * func = nullptr;
+                FunctionType * funcTy;
                 if (nonLocal) {
-                    func = getKernelAllocateSharedInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateSharedInternalStreamSetsFunction(b);
                 } else {
-                    func = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
                 params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
 
-                FunctionType * const funcType = cast<FunctionType>(func->getType()->getPointerElementType());
-
-                b->CreateCall(funcType, func, params);
+                b->CreateCall(funcTy, func, params);
             }
         }
     }

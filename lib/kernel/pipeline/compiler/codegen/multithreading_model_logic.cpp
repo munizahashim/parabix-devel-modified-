@@ -86,7 +86,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     FunctionType * const threadFuncType = FunctionType::get(voidPtrTy, {voidPtrTy}, false);
     Function * const threadFunc = Function::Create(threadFuncType, Function::InternalLinkage, threadName, m);
-
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+        threadFunc->setHasUWTable();
+        #else
+        threadFunc->setUWTableKind(UWTableKind::Default);
+        #endif
+    }
     Value * const initialSharedState = getHandle();
     Value * const initialThreadLocal = getThreadLocalHandle();
     Value * const initialTerminationSignalPtr = getTerminationSignalPtr();
@@ -234,7 +240,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     if (!mUseDynamicMultithreading) {
         csFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
     }
-
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+        csFunc->setHasUWTable();
+        #else
+        csFunc->setUWTableKind(UWTableKind::Default);
+        #endif
+    }
     b->SetInsertPoint(BasicBlock::Create(m->getContext(), "entry", csFunc));
     auto args = csFunc->arg_begin();
     Value * const threadStruct = &*args++;

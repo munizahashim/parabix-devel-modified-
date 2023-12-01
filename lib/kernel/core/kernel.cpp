@@ -484,6 +484,13 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
         initFunc->setCallingConv(CallingConv::C);
         initFunc->setDoesNotRecurse();
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            initFunc->setHasUWTable();
+            #else
+            initFunc->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
 
         auto arg = initFunc->arg_begin();
         auto setNextArgName = [&](const StringRef name) {
@@ -552,6 +559,13 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -615,6 +629,13 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) 
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -677,6 +698,13 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(BuilderRe
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -820,7 +848,13 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         doSegment = Function::Create(doSegmentType, GlobalValue::ExternalLinkage, funcName, m);
         doSegment->setCallingConv(CallingConv::C);
         doSegment->setDoesNotRecurse();
-
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            doSegment->setHasUWTable();
+            #else
+            doSegment->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
         auto arg = doSegment->arg_begin();
         auto setNextArgName = [&](const StringRef name) {
             assert (arg);
@@ -936,6 +970,13 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(BuilderRef b) const {
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -1003,6 +1044,13 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
         terminateFunc = Function::Create(terminateType, GlobalValue::ExternalLinkage, funcName, m);
         terminateFunc->setCallingConv(CallingConv::C);
         terminateFunc->setDoesNotRecurse();
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            terminateFunc->setHasUWTable();
+            #else
+            terminateFunc->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
 
         auto args = terminateFunc->arg_begin();
         if (LLVM_LIKELY(isStateful())) {
@@ -1033,17 +1081,6 @@ Value * Kernel::createInstance(BuilderRef b) const {
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeInstance
- ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
-    assert (args.size() == getNumOfScalarInputs() + 1);
-    assert (args[0] && "cannot initialize before creation");
-    assert (args[0]->getType()->getPointerElementType() == getSharedStateType());
-    Function * const init = getInitializeFunction(b);
-    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

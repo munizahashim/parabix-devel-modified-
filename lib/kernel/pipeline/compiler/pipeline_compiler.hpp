@@ -561,9 +561,9 @@ public:
 
     Value * getFamilyFunctionFromKernelState(BuilderRef b, Type * const type, const std::string &suffix) const;
     Value * callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const;
-    Value * getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
     void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
-    Value * getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
     std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(BuilderRef b) const;
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;

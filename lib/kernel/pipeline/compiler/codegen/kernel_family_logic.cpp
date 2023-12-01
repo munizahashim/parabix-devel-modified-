@@ -188,23 +188,27 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelAllocateSharedInternalStreamSetsFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateSharedInternalStreamSetsFunction(b, false);
+    FunctionType * funcTy = term->getFunctionType();
+    Value * func = term;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
-    return term;
+    return std::make_pair(func, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelAllocateThreadLocalInternalStreamSetsFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
+    FunctionType * funcTy = term->getFunctionType();
+    Value * func = term;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
-    return term;
+    return std::make_pair(func, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

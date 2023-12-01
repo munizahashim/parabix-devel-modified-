@@ -648,7 +648,13 @@ Value * StaticBuffer::expandBuffer(BuilderPtr b, Value * produced, Value * consu
 
             LLVMContext & C = m->getContext();
             func = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
             b->SetInsertPoint(BasicBlock::Create(C, "entry", func));
 
             auto arg = func->arg_begin();
@@ -1014,7 +1020,13 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
 
             LLVMContext & C = m->getContext();
             func = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
             b->SetInsertPoint(BasicBlock::Create(C, "entry", func));
 
             auto arg = func->arg_begin();
@@ -1129,7 +1141,13 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
 
         LLVMContext & C = m->getContext();
         func = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            func->setHasUWTable();
+            #else
+            func->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
         b->SetInsertPoint(BasicBlock::Create(C, "entry", func));
 
         auto arg = func->arg_begin();

@@ -210,6 +210,9 @@ inline void CPUDriver::preparePassManager() {
             report_fatal_error("LLVM error: could not add emit assembly pass");
         }
     }
+    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
+        mPassManager->add(createVerifierPass());
+    }
     #endif
 }
 
