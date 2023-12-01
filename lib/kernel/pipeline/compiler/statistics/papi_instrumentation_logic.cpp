@@ -627,8 +627,8 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
 
             Value * const arrayOfKernelNames = toGlobal(kernelNames, int8PtrTy, numOfKernels);
 
-            Constant * const c = ConstantExpr::getSizeOf(totals->getType()->getPointerElementType());
-            Constant * const fields = ConstantExpr::getUDiv(c, ConstantExpr::getSizeOf(papiCounterTy));
+            Constant * const c = b->getTypeSize(totals->getType()->getPointerElementType());
+            Constant * const fields = ConstantExpr::getUDiv(c, b->getTypeSize(papiCounterTy));
 
             ArrayType * const arTy = ArrayType::get(counterPtrTy, LastKernel - FirstKernel + 1);
 

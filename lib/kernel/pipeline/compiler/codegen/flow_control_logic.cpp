@@ -39,7 +39,7 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(BuilderRef b
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeFlowControl(BuilderRef b) {
     if (RequiredThreadLocalStreamSetMemory > 0) {
-        mThreadLocalMemorySizePtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES);
+        mThreadLocalMemorySizePtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES).first;
     }
 }
 
@@ -78,8 +78,9 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
         }
 
         Value * threadLocalPtr = nullptr;
+        Type * threadLocalTy = nullptr;
         if (maxMemory) {
-            threadLocalPtr = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
+            std::tie(threadLocalPtr, threadLocalTy) = b->getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
         }
 
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
@@ -104,13 +105,13 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
                 Value * const memoryForSegment = b->CreateMul(mThreadLocalScalingFactor, b->getSize(maxMemory));
                 BasicBlock * const expandThreadLocalMemory = b->CreateBasicBlock();
                 BasicBlock * const afterExpansion = b->CreateBasicBlock();
-                Value * const currentMem = b->CreateLoad(mThreadLocalMemorySizePtr);
+                Value * const currentMem = b->CreateLoad(b->getSizeTy(), mThreadLocalMemorySizePtr);
                 Value * const needsExpansion = b->CreateICmpUGT(memoryForSegment, currentMem);
                 b->CreateCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
 
                 b->SetInsertPoint(expandThreadLocalMemory);
 
-                b->CreateFree(b->CreateLoad(threadLocalPtr));
+                b->CreateFree(b->CreateLoad(threadLocalTy, threadLocalPtr));
                 // At minimum, we want to double the required space to minimize future reallocs
                 Value * expanded = b->CreateRoundUp(memoryForSegment, currentMem);
                 b->CreateStore(expanded, mThreadLocalMemorySizePtr);
@@ -132,7 +133,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(BuilderRef b) {
             mThreadLocalScalingFactor = mExpectedNumOfStridesMultiplier;
         }
         if (maxMemory > 0) {
-            mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalPtr);
+            mThreadLocalStreamSetBaseAddress = b->CreateLoad(threadLocalTy, threadLocalPtr);
         } else {
             mThreadLocalStreamSetBaseAddress = nullptr;
             mThreadLocalScalingFactor = nullptr;

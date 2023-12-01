@@ -143,9 +143,12 @@ protected:
     const PabloKernel *                             mKernel;
 
     llvm::Value *                                   mCurrentFrame;
+    llvm::Type *                                    mCurrentFrameType;
     unsigned                                        mCurrentFrameIndex;
 
     const CarryData *                               mCarryInfo;
+
+    llvm::StructType *                              mCarryFrameType;
 
     llvm::Value *                                   mNextSummaryTest;
 
@@ -165,7 +168,16 @@ protected:
 
     Vec<CarryData>                                  mCarryMetadata;
 
-    Vec<std::pair<llvm::Value *, unsigned>>         mCarryFrameStack;
+    struct CarryFrame {
+        llvm::Value *   Frame = nullptr;
+        llvm::Type *    Type = nullptr;
+        unsigned        Index = 0;
+
+        CarryFrame() = default;
+        CarryFrame(llvm::Value * frame, llvm::Type * type, unsigned index) : Frame(frame), Type(type), Index(index) {}
+    };
+
+    Vec<CarryFrame>                                 mCarryFrameStack;
 
     unsigned                                        mCarryScopes;
     Vec<unsigned>                                   mCarryScopeIndex;

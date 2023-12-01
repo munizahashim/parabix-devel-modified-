@@ -15,9 +15,6 @@
 #include <llvm/IR/Function.h>
 #endif
 #include <unistd.h>
-#ifdef ENABLE_LIBBACKTRACE
-#include <llvm/ADT/DenseMap.h>
-#endif
 #include <util/not_null.h>
 
 namespace kernel { class KernelBuilder; }
@@ -25,6 +22,7 @@ namespace kernel { class PipelineKernel; }
 namespace llvm { class Function; }
 namespace llvm { class IntegerType; }
 namespace llvm { class Module; }
+namespace llvm { class ModulePass; }
 namespace llvm { class PointerType; }
 namespace llvm { class Type; }
 namespace llvm { class Value; }
@@ -60,9 +58,6 @@ public:
     void setModule(llvm::Module * module) {
         mModule = module;
         ClearInsertionPoint();
-        #ifdef ENABLE_LIBBACKTRACE
-        resetAssertionTraces();
-        #endif
     }
 
     // UDiv and URem with optimization for division by power-of-2 constants
@@ -240,8 +235,8 @@ public:
         , EXEC = 4
     };
 
-    llvm::Value * CreateMProtect(llvm::Value * addr, const Protect protect) {
-        return CreateMProtect(addr, llvm::ConstantExpr::getSizeOf(addr->getType()->getPointerElementType()), protect);
+    llvm::Value * CreateMProtect(llvm::Type * type, llvm::Value * addr, const Protect protect) {
+        return CreateMProtect(addr, getTypeSize(type), protect);
     }
 
     llvm::Value * CreateMProtect(llvm::Value * addr, llvm::Value * size, const Protect protect);
@@ -273,13 +268,15 @@ public:
 
     llvm::PointerType * LLVM_READNONE getFILEptrTy();
 
+    llvm::ConstantInt * LLVM_READNONE getTypeSize(llvm::Type * type, llvm::IntegerType * valType = nullptr) const;
+
     inline unsigned getCacheAlignment() const {
         return mCacheLineAlignment;
     }
 
     static LLVM_READNONE unsigned getPageSize();
 
-    virtual llvm::LoadInst* CreateAtomicLoadAcquire(llvm::Value * ptr);
+    virtual llvm::LoadInst* CreateAtomicLoadAcquire(llvm::Type * type, llvm::Value * ptr);
 
     virtual llvm::StoreInst *  CreateAtomicStoreRelease(llvm::Value * val, llvm::Value * ptr);
 
@@ -360,21 +357,19 @@ public:
     enum class CacheType {Instruction, Data};
     llvm::Value * CreatePrefetch(llvm::Value * ptr, PrefetchRW mode, unsigned locality, CacheType c);
 
-    virtual llvm::LoadInst * CreateLoad(llvm::Value * Ptr, const char * Name);
+    virtual llvm::LoadInst * CreateLoad(llvm::Type * type, llvm::Value * Ptr, const char * Name);
 
-    virtual llvm::LoadInst * CreateLoad(llvm::Value * Ptr, const llvm::Twine Name = "");
+    virtual llvm::LoadInst * CreateLoad(llvm::Type * type, llvm::Value * Ptr, const llvm::Twine Name = "");
 
-    virtual llvm::LoadInst * CreateLoad(llvm::Type * Ty, llvm::Value * Ptr, const llvm::Twine Name = "");
-
-    virtual llvm::LoadInst * CreateLoad(llvm::Value * Ptr, bool isVolatile, const llvm::Twine Name = "");
+    virtual llvm::LoadInst * CreateLoad(llvm::Type * type, llvm::Value * Ptr, bool isVolatile, const llvm::Twine Name = "");
 
     virtual llvm::StoreInst * CreateStore(llvm::Value * Val, llvm::Value * Ptr, bool isVolatile = false);
 
-    llvm::LoadInst * CreateAlignedLoad(llvm::Value * Ptr, const unsigned Align, const char * Name);
+    llvm::LoadInst * CreateAlignedLoad(llvm::Type * type, llvm::Value * Ptr, const unsigned Align, const char * Name);
 
-    llvm::LoadInst * CreateAlignedLoad(llvm::Value * Ptr, const unsigned Align, const llvm::Twine Name = "");
+    llvm::LoadInst * CreateAlignedLoad(llvm::Type * type, llvm::Value * Ptr, const unsigned Align, const llvm::Twine Name = "");
 
-    llvm::LoadInst * CreateAlignedLoad(llvm::Value * Ptr, const unsigned Align, bool isVolatile, const llvm::Twine Name = "");
+    llvm::LoadInst * CreateAlignedLoad(llvm::Type * type, llvm::Value * Ptr, const unsigned Align, bool isVolatile, const llvm::Twine Name = "");
 
     llvm::StoreInst * CreateAlignedStore(llvm::Value * Val, llvm::Value * Ptr, const unsigned Align, bool isVolatile = false);
 
@@ -479,10 +474,6 @@ protected:
 
     void __CreateAssert(llvm::Value * assertion, const llvm::Twine failureMessage, std::initializer_list<llvm::Value *> args);
 
-    #ifdef ENABLE_LIBBACKTRACE
-    void resetAssertionTraces();
-    #endif
-
 protected:
 
     llvm::Module *                  mModule;
@@ -494,7 +485,6 @@ protected:
     const std::string               mTriple;
     #ifdef ENABLE_LIBBACKTRACE
     void *                          mBacktraceState = nullptr;
-    llvm::DenseMap<uintptr_t, llvm::Constant *> mBacktraceSymbols;
     #endif
 };
 

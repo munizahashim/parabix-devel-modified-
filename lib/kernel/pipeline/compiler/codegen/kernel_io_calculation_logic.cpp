@@ -847,10 +847,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     Value * priorBufferPtr = nullptr;
     if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
-        priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
-        Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
+        Type * bufTy;
+        std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
+        Value * const priorBuffer = b->CreateLoad(bufTy, priorBufferPtr); // <- threadlocal
         b->CreateFree(priorBuffer);
-        b->CreateStore(ConstantPointerNull::get(cast<PointerType>(priorBuffer->getType())), priorBufferPtr);
+        b->CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -1444,7 +1445,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
-    Value * current = b->CreateLoad(currentPtr);
+    Value * current = b->CreateLoad(b->getSizeTy(), currentPtr);
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
     debugPrint(b, "  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
@@ -1580,7 +1581,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * const pos = b->CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
-    Value * const requiredItems = b->CreateLoad(ptr);
+    Value * const requiredItems = b->CreateLoad(b->getSizeTy(), ptr);
     Value * const notEnough = b->CreateICmpUGT(requiredItems, sourceItemCount);
 
     Value * const notDone = b->CreateICmpNE(strideIndex, sz_ZERO);
@@ -1684,7 +1685,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
 
         Value * const vecAddr = b->CreatePointerCast(addr, vecPtrTy);
 
-        Value * const baseValue = b->CreateBlockAlignedLoad(vecAddr);
+        Value * const baseValue = b->CreateBlockAlignedLoad(b->getBitBlockType(), vecAddr);
 
 
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
@@ -1697,7 +1698,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
         for (unsigned k = 1; k <= spanLength; ++k) {
-            Value * const ptr = b->CreateGEP0(vecAddr, b->getSize(k));
+            Value * const ptr = b->CreateGEP(b->getBitBlockType()->getPointerTo(), vecAddr, b->getSize(k));
             b->CreateBlockAlignedStore(splat, ptr);
         }
 

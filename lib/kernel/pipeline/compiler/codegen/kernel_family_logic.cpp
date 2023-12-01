@@ -96,11 +96,11 @@ void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterat
             const auto prefix = makeKernelName(kernelId);
 
             auto storeNextScalar = [&](const StringRef name, Value * value) {
-                auto ptr = getScalarFieldPtr(b.get(), name); assert (ptr);
+                auto ptr = getScalarFieldPtr(b.get(), name);
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     b->CreateAssert(value, "family parameter (%s) was given a null value", b->GetString(name));
                 }
-                b->CreateStore(value, ptr);
+                b->CreateStore(value, ptr.first);
             };
 
             if (LLVM_LIKELY((D.CaptureFlags & FamilyScalarData::CaptureSharedStateObject) != 0)) {
@@ -172,8 +172,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
         args.push_back(mKernelSharedHandle);
     }
     const auto prefix = makeKernelName(mKernelId);
-    Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-
+    Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     if (isKernelFamilyCall(mKernelId)) {
         PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
         args.push_back(ConstantPointerNull::getNullValue(ptrTy));
@@ -211,12 +210,14 @@ Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getDoSegmentFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
     Function * const doSegment = mKernel->getDoSegmentFunction(b);
+    FunctionType * const funcTy = doSegment->getFunctionType();
+    Value * funcPtr = doSegment;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
+        funcPtr = getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
     }
-    return doSegment;
+    return std::make_pair(funcPtr, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

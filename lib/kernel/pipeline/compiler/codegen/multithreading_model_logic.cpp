@@ -103,7 +103,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     Function * const pthreadExitFn = m->getFunction("pthread_exit");
     Function * const pthreadJoinFn = m->getFunction("pthread_join");
 
-    Type * const pThreadTy = pthreadSelfFn->getReturnType();
+    Type * const pThreadTy = TypeBuilder<pthread_t, false>::get(b->getContext());
+    assert (pThreadTy == pthreadSelfFn->getReturnType());
 
     Value * minimumNumOfThreads = nullptr;
     Value * const maximumNumOfThreads = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
@@ -156,9 +157,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->CreateCall(allocInternal->getFunctionType(), allocInternal, allocArgs);
         }
     }
-    Value * const cThreadState = b->CreateGEP0(threadStateArray, threadIndex);
+    Value * const cThreadState = b->CreateGEP(threadStructTy, threadStateArray, threadIndex);
 
-    writeThreadStructObject(b, cThreadState, initialSharedState, cThreadLocal, storedState, threadIndex, maximumNumOfThreads);
+    writeThreadStructObject(b, threadStructTy, cThreadState, initialSharedState, cThreadLocal, storedState, threadIndex, maximumNumOfThreads);
     Value * const nextThreadIndex = b->CreateAdd(threadIndex, sz_ONE);
     BasicBlock * constructNextThread = nullptr;
     if (mUseDynamicMultithreading) {
@@ -174,11 +175,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     FunctionType * const pthreadCreateFnTy = pthreadCreateFn->getFunctionType();
     if (mUseDynamicMultithreading) {
         fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-        Value * initThreadStateFlagPtr = b->CreateInBoundsGEP(threadStateArray, fieldIndex);
+        Value * initThreadStateFlagPtr = b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex);
         b->CreateStore(sz_ONE, initThreadStateFlagPtr);
     }
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
-    pthreadCreateArgs[0] = b->CreateInBoundsGEP0(threadStateArray, fieldIndex);
+    pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex);
     pthreadCreateArgs[1] = ConstantPointerNull::get(cast<PointerType>(pthreadCreateFnTy->getParamType(1)));
     pthreadCreateArgs[2] = threadFunc;
     pthreadCreateArgs[3] = b->CreatePointerCast(cThreadState, voidPtrTy);
@@ -198,10 +199,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // execute the process thread
     Value * const pty_ZERO = Constant::getNullValue(pThreadTy);
     Value * const processState = threadStateArray;
-    writeThreadStructObject(b, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maximumNumOfThreads);
+    writeThreadStructObject(b, threadStructTy, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maximumNumOfThreads);
     fieldIndex[0] = i32_ZERO;
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
-    b->CreateStore(Constant::getNullValue(pThreadTy), b->CreateInBoundsGEP0(threadStateArray, fieldIndex));
+    b->CreateStore(Constant::getNullValue(pThreadTy), b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex));
 
     PointerType * const threadStructPtrTy = cast<PointerType>(processState->getType());
 
@@ -238,9 +239,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     auto args = csFunc->arg_begin();
     Value * const threadStruct = &*args++;
     assert (threadStruct->getType() == threadStructPtrTy);
-    readThreadStuctObject(b, threadStruct);
+    readThreadStuctObject(b, threadStructTy, threadStruct);
     assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
-    readDoSegmentState(b, threadStruct);
+    readDoSegmentState(b, threadStructTy, threadStruct);
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     mSegNo = &*args;
     #ifdef PRINT_DEBUG_MESSAGES
@@ -275,14 +276,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         FixedArray<Value *, 2> indices2;
         indices2[0] = i32_ZERO;
         indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-        Value * const segPtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-        Value * const current = b->CreateLoad(segPtr);
+        Value * const segPtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
+        Value * const current = b->CreateLoad(b->getSizeTy(), segPtr);
         Value * const accum = b->CreateAdd(current, totalSegmentTime);
         b->CreateStore(accum, segPtr);
     }
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
     if (LLVM_LIKELY(hasTermSignal)) {
-        writeTerminationSignalToLocalState(b, threadStruct, hasPipelineTerminated(b));
+        writeTerminationSignalToLocalState(b, threadStructTy, threadStruct, hasPipelineTerminated(b));
     }
     if (LLVM_UNLIKELY(CheckAssertions)) {
         b->CreateRet(mPipelineProgress);
@@ -302,7 +303,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         b->SetInsertPoint(BasicBlock::Create(m->getContext(), "entry", threadFunc));
 
         Value * const threadStruct = b->CreatePointerCast(arg, threadStructPtrTy);
-        readThreadStuctObject(b, threadStruct);
+        readThreadStuctObject(b, threadStructTy, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
@@ -386,7 +387,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         Value * madeProgress = nullptr;
 
         if (LLVM_LIKELY(hasTermSignal)) {
-            terminated = readTerminationSignalFromLocalState(b, threadStruct);
+            terminated = readTerminationSignalFromLocalState(b, threadStructTy, threadStruct);
             done = b->CreateIsNotNull(terminated);
         }
         if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -442,14 +443,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
             indices2[0] = indexPhi;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-            Value * const segTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
+            Value * const segTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
 
-            Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(segTimePtr));
+            Value * const nextSegTime = b->CreateAdd(segmentTimeAccumPhi, b->CreateLoad(sizeTy, segTimePtr));
             segmentTimeAccumPhi->addIncoming(nextSegTime, checkSynchronizationCostLoop);
 
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-            Value * const syncTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-            Value * const nextSyncTime = b->CreateAdd(synchronizationTimeAccumPhi, b->CreateLoad(syncTimePtr));
+            Value * const syncTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
+            Value * const nextSyncTime = b->CreateAdd(synchronizationTimeAccumPhi, b->CreateLoad(sizeTy, syncTimePtr));
             synchronizationTimeAccumPhi->addIncoming(nextSyncTime, checkSynchronizationCostLoop);
 
             Value * const nextIndex = b->CreateAdd(indexPhi, b->getSize(1));
@@ -466,10 +467,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             // subtract out the values so that we can keep each check
             indices2[0] = sz_ZERO;
             indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-            Value * const baseSegTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
+            Value * const baseSegTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
             b->CreateStore(sz_ZERO, baseSegTimePtr);
             indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-            Value * const baseSyncTimePtr = b->CreateInBoundsGEP0(threadStruct, indices2);
+            Value * const baseSyncTimePtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
             b->CreateStore(sz_ZERO, baseSyncTimePtr);
 
             Value * const syncOverheadLow = b->CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
@@ -484,8 +485,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             selectToAddPhi->addIncoming(sz_ONE, checkToAddThread);
             indices2[0] = selectToAddPhi;
             indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-            Value * addThreadStateFlagPtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-            Value * addThreadStateFlag = b->CreateLoad(addThreadStateFlagPtr);
+            Value * addThreadStateFlagPtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
+            Value * addThreadStateFlag = b->CreateLoad(sizeTy, addThreadStateFlagPtr);
             Value * canUseThreadStruct = b->CreateICmpNE(addThreadStateFlag, sz_ONE);
             Value * const nextToCheckForAdd = b->CreateAdd(selectToAddPhi, sz_ONE);
             selectToAddPhi->addIncoming(nextToCheckForAdd, selectThreadStructToUseForAddThread);
@@ -494,12 +495,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->SetInsertPoint(checkIfThreadIsCancelled);
             Value * isCancelled = b->CreateICmpEQ(addThreadStateFlag, sz_TWO);
             indices2[1] = b->getInt32(CURRENT_THREAD_ID);
-            Value * const threadIdPtr = b->CreateInBoundsGEP0(threadStruct, indices2);
+            Value * const threadIdPtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
             b->CreateCondBr(isCancelled, joinCancelledThread, addThread);
 
             b->SetInsertPoint(joinCancelledThread);
             FixedArray<Value *, 2> pthreadJoinArgs;
-            Value * threadId = b->CreateLoad(threadIdPtr);
+            Value * threadId = b->CreateLoad(pThreadTy, threadIdPtr);
             pthreadJoinArgs[0] = threadId;
             pthreadJoinArgs[1] = b->CreateAllocaAtEntryPoint(voidPtrTy);
             b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
@@ -508,7 +509,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             b->SetInsertPoint(addThread);
             b->CreateStore(sz_ONE, addThreadStateFlagPtr);
             pthreadCreateArgs[0] = threadIdPtr;
-            Value * const ts = b->CreateInBoundsGEP0(threadStruct, selectToAddPhi);
+            Value * const ts = b->CreateInBoundsGEP(threadStructTy, threadStruct, selectToAddPhi);
             pthreadCreateArgs[3] = b->CreatePointerCast(ts, voidPtrTy);
             b->CreateCall(pthreadCreateFn->getFunctionType(), pthreadCreateFn, pthreadCreateArgs);
             Value * numOfThreadsAfterAdd = b->CreateAdd(activeThreadsPhi, b->getSize(1));
@@ -525,8 +526,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
             selectedThreadPhi->addIncoming(sz_ONE, checkToRemoveThread);
             indices2[0] = selectedThreadPhi;
             indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-            Value * const cancelFlagPtr = b->CreateInBoundsGEP0(threadStruct, indices2);
-            Value * const isActive = b->CreateICmpEQ(b->CreateLoad(cancelFlagPtr), sz_ONE);
+            Value * const cancelFlagPtr = b->CreateInBoundsGEP(threadStructTy, threadStruct, indices2);
+            Value * const isActive = b->CreateICmpEQ(b->CreateLoad(sizeTy, cancelFlagPtr), sz_ONE);
             Value * const nextThreadToCheckForRemove = b->CreateAdd(selectedThreadPhi, sz_ONE);
             selectedThreadPhi->addIncoming(nextThreadToCheckForRemove, selectThreadToRemove);
             b->CreateCondBr(isActive, removeThread, selectThreadToRemove);
@@ -591,8 +592,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
                 FixedArray<Value *, 2> indices2;
                 indices2[0] = sz_ZERO;
                 indices2[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-                Value * const statusFlagPtr = b->CreateGEP0(threadStruct, indices2);
-                Value * const cancelled = b->CreateLoad(statusFlagPtr);
+                Value * const statusFlagPtr = b->CreateGEP(threadStructTy, threadStruct, indices2);
+                Value * const cancelled = b->CreateLoad(sizeTy, statusFlagPtr);
                 done = b->CreateOr(done, b->CreateICmpEQ(cancelled, sz_TWO));
             } else {
                 incrementCurrentSegNo(b, exitBlock);
@@ -635,7 +636,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         } else {
             retVal = ConstantPointerNull::getNullValue(voidPtrTy);
         }
-        b->CreateCondBr(isProcessThread(b, threadStruct), exitFunction, exitThread);
+        b->CreateCondBr(isProcessThread(b, threadStructTy, threadStruct), exitFunction, exitThread);
         b->SetInsertPoint(exitThread);
         #ifdef ENABLE_PAPI
         unregisterPAPIThread(b);
@@ -688,7 +689,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     Value * firstTerminationSignal = nullptr;
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
-        firstTerminationSignal = readTerminationSignalFromLocalState(b, processState);
+        firstTerminationSignal = readTerminationSignalFromLocalState(b, threadStructTy, processState);
         assert (firstTerminationSignal);
     }
 
@@ -722,7 +723,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     fieldIndex[0] = joinThreadIndex;
     if (mUseDynamicMultithreading) {
         fieldIndex[1] = b->getInt32(CURRENT_THREAD_STATUS_FLAG);
-        Value * const statusFlag = b->CreateLoad(b->CreateInBoundsGEP0(threadStateArray, fieldIndex));
+        Value * const statusFlag = b->CreateLoad(sizeTy, b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex));
         b->CreateCondBr(b->CreateICmpNE(statusFlag, sz_ZERO), joinThread, finalizeAfterJoinThread);
     } else {
         b->CreateBr(joinThread);
@@ -731,7 +732,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     b->SetInsertPoint(joinThread);
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
     FixedArray<Value *, 2> pthreadJoinArgs;
-    Value * threadId = b->CreateLoad(b->CreateInBoundsGEP0(threadStateArray, fieldIndex));
+    Value * threadId = b->CreateLoad(pThreadTy, b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex));
     pthreadJoinArgs[0] = threadId;
     pthreadJoinArgs[1] = status;
     b->CreateCall(pthreadJoinFn->getFunctionType(), pthreadJoinFn, pthreadJoinArgs);
@@ -742,14 +743,15 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // calculate the last segment # used by any kernel in case any reports require it.
     Value * finalSegNo = nullptr;
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
-        Value * const retVal = b->CreatePointerCast(status, intPtrPtrTy);
-        finalSegNo = b->CreateUMax(finalSegNoPhi, b->CreateLoad(retVal));
+        // Value * const retVal = b->CreatePointerCast(status, intPtrPtrTy);
+        finalSegNo = b->CreateUMax(finalSegNoPhi, b->CreateLoad(intPtrTy, status));
     }
 
-    Value * const jThreadState = b->CreateGEP0(threadStateArray, joinThreadIndex);
+    Value * const jThreadState = b->CreateGEP(threadStructTy, threadStateArray, joinThreadIndex);
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         fieldIndex[1] = b->getInt32(THREAD_LOCAL_PARAM);
-        Value * const jThreadLocal = b->CreateLoad(b->CreateGEP0(threadStateArray, fieldIndex));
+        Type * const handlePtrTy = getThreadLocalHandle()->getType();
+        Value * const jThreadLocal = b->CreateLoad(handlePtrTy, b->CreateGEP(threadStructTy, threadStateArray, fieldIndex));
         SmallVector<Value *, 2> threadLocalArgs;
         if (LLVM_LIKELY(mTarget->isStateful())) {
             threadLocalArgs.push_back(initialSharedState);
@@ -764,7 +766,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     }
     Value * finalTerminationSignal = nullptr;
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
-        Value * const terminatedSignal = readTerminationSignalFromLocalState(b, jThreadState);
+        Value * const terminatedSignal = readTerminationSignalFromLocalState(b, threadStructTy, jThreadState);
         assert (terminatedSignal);
         finalTerminationSignal = b->CreateUMax(finalTerminationSignalPhi, terminatedSignal);
     }
@@ -892,9 +894,9 @@ StructType * PipelineCompiler::getThreadStuctType(BuilderRef b, const std::vecto
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
     }
 
-    Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
-    Type * const pthreadIdType = pthreadSelfFn->getReturnType();
-    fields[CURRENT_THREAD_ID] = pthreadIdType;
+    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b->getContext());
+    assert (pthreadTy == b->getModule()->getFunction("pthread_self")->getReturnType());
+    fields[CURRENT_THREAD_ID] = pthreadTy;
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
     if (LLVM_LIKELY(hasTermSignal)) {
         fields[TERMINATION_SIGNAL] = sizeTy;
@@ -931,7 +933,9 @@ StructType * PipelineCompiler::getThreadStuctType(BuilderRef b, const std::vecto
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initThreadStructObject
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeThreadStructObject(BuilderRef b, Value * const threadState,
+void PipelineCompiler::writeThreadStructObject(BuilderRef b,
+                                               StructType * const threadStateTy,
+                                               Value * const threadState,
                                                Value * const shared, Value * const threadLocal,
                                                const std::vector<Value *> & props,
                                                Value * const threadNum, Value * const numOfThreads) const {
@@ -940,73 +944,76 @@ void PipelineCompiler::writeThreadStructObject(BuilderRef b, Value * const threa
     indices2[0] = b->getInt32(0);
     if (LLVM_LIKELY(mTarget->isStateful())) {
         indices2[1] = b->getInt32(SHARED_STATE_PARAM);
-        b->CreateStore(shared, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(shared, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         indices2[1] = b->getInt32(THREAD_LOCAL_PARAM);
-        b->CreateStore(threadLocal, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(threadLocal, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
     const auto n = props.size();
-    assert (threadState->getType()->getPointerElementType()->getStructElementType(PIPELINE_PARAMS)->getStructNumElements() == n);
+    assert (threadStateTy->getStructElementType(PIPELINE_PARAMS)->getStructNumElements() == n);
     FixedArray<Value *, 3> indices3;
     indices3[0] = indices2[0];
     indices3[1] = b->getInt32(PIPELINE_PARAMS);
     for (unsigned i = 0; i < n; ++i) {
         indices3[2] = b->getInt32(i);
-        b->CreateStore(props[i], b->CreateInBoundsGEP0(threadState, indices3));
+        b->CreateStore(props[i], b->CreateInBoundsGEP(threadStateTy, threadState, indices3));
     }
 
     if (mUseDynamicMultithreading) {
         Constant * const sz_ZERO = b->getSize(0);
         indices2[1] = b->getInt32(ACCUMULATED_SEGMENT_TIME);
-        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
         indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(sz_ZERO, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
     } else {
         indices2[1] = b->getInt32(INITIAL_SEG_NO);
-        b->CreateStore(threadNum, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(threadNum, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
         indices2[1] = b->getInt32(FIXED_NUMBER_OF_THREADS);
-        b->CreateStore(numOfThreads, b->CreateInBoundsGEP0(threadState, indices2));
+        b->CreateStore(numOfThreads, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readThreadStuctObject
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readThreadStuctObject(BuilderRef b, Value * threadState) {
+void PipelineCompiler::readThreadStuctObject(BuilderRef b, StructType * const threadStateTy, Value * threadState) {
     Constant * const i32_ZERO = b->getInt32(0);
-
+    IntegerType * const sizeTy = b->getSizeTy();
     FixedArray<Value *, 2> indices2;
     indices2[0] = i32_ZERO;
     if (mTarget->isStateful()) {
         indices2[1] = b->getInt32(SHARED_STATE_PARAM);
-        setHandle(b->CreateLoad(b->CreateInBoundsGEP0(threadState, indices2)));
+        Type * ty = mTarget->getSharedStateType()->getPointerTo();
+        setHandle(b->CreateLoad(ty, b->CreateInBoundsGEP(threadStateTy, threadState, indices2)));
     }
     if (mTarget->hasThreadLocal()) {
         indices2[1] = b->getInt32(THREAD_LOCAL_PARAM);
-        setThreadLocalHandle(b->CreateLoad(b->CreateInBoundsGEP0(threadState, indices2)));
+        Type * ty = mTarget->getThreadLocalStateType()->getPointerTo();
+        setThreadLocalHandle(b->CreateLoad(ty, b->CreateInBoundsGEP(threadStateTy, threadState, indices2)));
     }
     if (mUseDynamicMultithreading) {
         indices2[1] = b->getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
-        mAccumulatedSynchronizationTimePtr = b->CreateInBoundsGEP0(threadState, indices2);
+        mAccumulatedSynchronizationTimePtr = b->CreateInBoundsGEP(threadStateTy, threadState, indices2);
     } else {
         indices2[1] = b->getInt32(INITIAL_SEG_NO);
-        mSegNo = b->CreateLoad(b->CreateInBoundsGEP0(threadState, indices2));
+        mSegNo = b->CreateLoad(sizeTy, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
         mAccumulatedSynchronizationTimePtr = nullptr;
         indices2[1] = b->getInt32(FIXED_NUMBER_OF_THREADS);
-        mNumOfFixedThreads = b->CreateLoad(b->CreateInBoundsGEP0(threadState, indices2));
+        mNumOfFixedThreads = b->CreateLoad(sizeTy, b->CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isProcessThread
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isProcessThread(BuilderRef b, Value * const threadState) const {
+Value * PipelineCompiler::isProcessThread(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b->getInt32(0);
     indices[1] = b->getInt32(CURRENT_THREAD_ID);
-    Value * const ptr = b->CreateInBoundsGEP0(threadState, indices);
-    return b->CreateIsNull(b->CreateLoad(ptr));
+    Value * const ptr = b->CreateInBoundsGEP(threadStateTy, threadState, indices);
+    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b->getContext());
+    return b->CreateIsNull(b->CreateLoad(pthreadTy, ptr));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1156,30 +1163,28 @@ void PipelineCompiler::end(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignalFromLocalState
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const {
+Value * PipelineCompiler::readTerminationSignalFromLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const {
     // TODO: generalize a OR/ADD/etc "combination" mechanism for thread-local to output scalars?
     assert (threadState);
     assert (PipelineHasTerminationSignal || !mIsNestedPipeline);
     FixedArray<Value *, 2> indices;
     indices[0] = b->getInt32(0);
     indices[1] = b->getInt32(TERMINATION_SIGNAL);
-    Value * const signal = b->CreateLoad(b->CreateInBoundsGEP0(threadState, indices));
-    assert (signal->getType()->isIntegerTy());
-    return signal;
+    return b->CreateLoad(b->getSizeTy(), b->CreateInBoundsGEP(threadStateTy, threadState, indices));
 }
 
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeTerminationSignalToLocalState
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeTerminationSignalToLocalState(BuilderRef b, Value * const threadState, Value * const terminated) const {
+void PipelineCompiler::writeTerminationSignalToLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState, Value * const terminated) const {
     // TODO: generalize a OR/ADD/etc "combination" mechanism for thread-local to output scalars?
     assert (threadState);
     assert (PipelineHasTerminationSignal || !mIsNestedPipeline);
     FixedArray<Value *, 2> indices;
     indices[0] = b->getInt32(0);
     indices[1] = b->getInt32(TERMINATION_SIGNAL);
-    b->CreateStore(terminated, b->CreateInBoundsGEP0(threadState, indices));
+    b->CreateStore(terminated, b->CreateInBoundsGEP(threadStateTy, threadState, indices));
 }
 
 
@@ -1237,21 +1242,25 @@ std::vector<Value *> PipelineCompiler::storeDoSegmentState() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief restoreInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readDoSegmentState(BuilderRef b, Value * const propertyState) {
+void PipelineCompiler::readDoSegmentState(BuilderRef b, StructType * const threadStructTy, Value * const propertyState) {
     FixedArray<Value *, 3> indices3;
     indices3[0] = b->getInt32(0);
     indices3[1] = b->getInt32(PIPELINE_PARAMS);
 
+    StructType * const paramType = cast<StructType>(threadStructTy->getStructElementType(PIPELINE_PARAMS));
+
     unsigned i = 0;
     #ifndef NDEBUG
-    const auto n = propertyState->getType()->getPointerElementType()->getStructElementType(PIPELINE_PARAMS)->getStructNumElements();
+    const auto n = paramType->getStructNumElements();
     #endif
 
     auto revertOne = [&](Value *& v, const bool accept) {
         if (accept) {
             assert (i < n);
-            indices3[2] = b->getInt32(i++);
-            v = b->CreateLoad(b->CreateInBoundsGEP0(propertyState, indices3));
+            indices3[2] = b->getInt32(i);
+            Value * ptr = b->CreateInBoundsGEP(threadStructTy, propertyState, indices3);
+            v = b->CreateLoad(paramType->getStructElementType(i), ptr);
+            ++i;
         }
     };
 

@@ -104,7 +104,7 @@ void CompressedCarryManager::writeCurrentCarryOutSummary(BuilderRef b) {
         PointerType * const pty = mCarryInfo->getSummarySizeTy()->getPointerTo();
         Value * const ptr = b->CreatePointerCast(mCurrentFrame, pty);
         const auto n = mCarrySummaryStack.size(); assert (n > 0);
-        mCarrySummaryStack[n - 1] = b->CreateLoad(ptr);
+        mCarrySummaryStack[n - 1] = b->CreateLoad(mCarryInfo->getSummarySizeTy(), ptr);
     }
 }
 
@@ -169,7 +169,7 @@ Value * CompressedCarryManager::readCarryInSummary(BuilderRef b) const {
     if (LLVM_LIKELY(mCarryInfo->hasImplicitSummary())) {
         PointerType * const pty = mCarryInfo->getSummarySizeTy()->getPointerTo();
         Value * const ptr = b->CreatePointerCast(mCurrentFrame, pty);
-        summary = b->CreateLoad(ptr);
+        summary = b->CreateLoad(mCarryInfo->getSummarySizeTy(), ptr);
     } else {
         assert (mCarryInfo->hasExplicitSummary());
         Value * ptr = nullptr;
@@ -178,8 +178,9 @@ Value * CompressedCarryManager::readCarryInSummary(BuilderRef b) const {
         indices[0] = ZERO;
         indices[1] = ZERO;
         indices[2] = mLoopDepth == 0 ? ZERO : mLoopSelector;
-        ptr = b->CreateGEP0(mCurrentFrame, indices);
-        summary = b->CreateLoad(ptr);
+        ptr = b->CreateGEP(mCurrentFrameType, mCurrentFrame, indices);
+        Type * carryTy = mCurrentFrameType->getStructElementType(0)->getArrayElementType();
+        summary = b->CreateLoad(carryTy, ptr);
         if (mNestedLoopCarryInMaskPhi) {
             summary = b->CreateAnd(summary, mNestedLoopCarryInMaskPhi);
         }

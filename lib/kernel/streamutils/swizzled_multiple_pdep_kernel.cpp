@@ -62,7 +62,7 @@ void SwizzledMultiplePDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * c
 
     // Extract the values we will use in the main processing loop
     Value * const markerStream = b->getInputStreamBlockPtr("marker", ZERO, strideIndex);
-    Value * const markerValue = b->CreateBlockAlignedLoad(markerStream);
+    Value * const markerValue = b->CreateBlockAlignedLoad(b->getBitBlockType(), markerStream);
     Value * const selectors = b->fwCast(pdepWidth, markerValue);
     Value * const numOfSelectors = b->simd_popcount(pdepWidth, selectors);
 
@@ -100,7 +100,7 @@ void SwizzledMultiplePDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * c
         Value * const swizzleOffset = b->CreateURem(updatedSourceOffset, PDEP_WIDTH);
 
         for (unsigned iStreamSetIndex = 0; iStreamSetIndex < mNumberOfStreamSet; iStreamSetIndex++) {
-            Value * const swizzle = b->CreateBlockAlignedLoad(b->getInputStreamBlockPtr("source" + std::to_string(iStreamSetIndex), swizzleIndex, blockOffset));
+            Value * const swizzle = b->CreateBlockAlignedLoad(b->getBitBlockType(), b->getInputStreamBlockPtr("source" + std::to_string(iStreamSetIndex), swizzleIndex, blockOffset));
 
             // Shift the swizzle to the right to clear off any used bits ...
             Value * const swizzleShift = b->simd_fill(pdepWidth, swizzleOffset);

@@ -141,8 +141,10 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
         Value * const start = mCycleCounters[(unsigned)type]; assert (start);
         Value * const duration = b->CreateSub(end, start);
 
+        IntegerType * sizeTy = b->getSizeTy();
+
         if (mUseDynamicMultithreading) {
-            Value * const cur = b->CreateLoad(mAccumulatedSynchronizationTimePtr);
+            Value * const cur = b->CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
             Value * const accum = b->CreateAdd(cur, duration);
             b->CreateStore(accum, mAccumulatedSynchronizationTimePtr);
         }
@@ -150,27 +152,28 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
         if (EnableCycleCounter) {
 
             const auto prefix = makeKernelName(kernelId);
-            Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
+            Value * ptr; Type * ty;
+            std::tie(ptr, ty) = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
             FixedArray<Value *, 2> index;
             index[0] = b->getInt32(0);
             index[1] = b->getInt32(type);
-            Value * const sumCounterPtr = b->CreateGEP0(ptr, index);
-            Value * const sumRunningCount = b->CreateLoad(sumCounterPtr);
+            Value * const sumCounterPtr = b->CreateGEP(sizeTy, ptr, index);
+            Value * const sumRunningCount = b->CreateLoad(b->getSizeTy(), sumCounterPtr);
             Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
             b->CreateStore(sumUpdatedCount, sumCounterPtr);
 
             if (type == CycleCounter::TOTAL_TIME) {
                 index[1] = b->getInt32(SQ_SUM_TOTAL_TIME);
-                Value * const sqSumCounterPtr = b->CreateGEP0(ptr, index);
-                Value * const sqSumRunningCount = b->CreateLoad(sqSumCounterPtr);
+                Value * const sqSumCounterPtr = b->CreateGEP(ty, ptr, index);
+                Value * const sqSumRunningCount = b->CreateLoad(sizeTy, sqSumCounterPtr);
                 Value * sqDuration = b->CreateZExt(duration, sqSumRunningCount->getType());
                 sqDuration = b->CreateMul(sqDuration, sqDuration);
                 Value * const sqSumUpdatedCount = b->CreateAdd(sqSumRunningCount, sqDuration);
                 b->CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
                 if (mIsPartitionRoot) {
                     index[1] = b->getInt32(NUM_OF_INVOCATIONS);
-                    Value * const invokePtr = b->CreateGEP0(ptr, index);
-                    Value * const invoked = b->CreateLoad(invokePtr);
+                    Value * const invokePtr = b->CreateGEP(ty, ptr, index);
+                    Value * const invoked = b->CreateLoad(sizeTy, invokePtr);
                     Value * const invoked2 = b->CreateAdd(invoked, b->getSize(1));
                     b->CreateStore(invoked2, invokePtr);
                 }
@@ -191,16 +194,17 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
         assert (mCycleCounters[(unsigned)ifFalse] == start);
         Value * const duration = b->CreateSub(end, start);
         const auto prefix = makeKernelName(kernelId);
-        Value * const ptr = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
+        Value * ptr; Type * ty;
+        std::tie(ptr, ty) = b->getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
         FixedArray<Value *, 2> index;
         index[0] = b->getInt32(0);
         index[1] = b->getInt32(ifTrue);
-        Value * const sumCounterPtrA = b->CreateGEP0(ptr, index);
+        Value * const sumCounterPtrA = b->CreateGEP(ty, ptr, index);
         index[1] = b->getInt32(ifFalse);
-        Value * const sumCounterPtrB = b->CreateGEP0(ptr, index);
+        Value * const sumCounterPtrB = b->CreateGEP(ty, ptr, index);
         Value * const sumCounterPtr = b->CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
 
-        Value * const sumRunningCount = b->CreateLoad(sumCounterPtr);
+        Value * const sumRunningCount = b->CreateLoad(b->getSizeTy(), sumCounterPtr);
         Value * const sumUpdatedCount = b->CreateAdd(sumRunningCount, duration);
         b->CreateStore(sumUpdatedCount, sumCounterPtr);
     }
@@ -215,8 +219,8 @@ void PipelineCompiler::updateTotalCycleCounterTime(BuilderRef b) const {
         Value * const duration = b->CreateSub(end, mCycleCounters[(unsigned)FULL_PIPELINE_TIME]);
         // total is thread local but gets summed at the end; no need to worry about
         // multiple threads updating it.
-        Value * const ptr = getScalarFieldPtr(b.get(), STATISTICS_CYCLE_COUNT_TOTAL);
-        Value * const updated = b->CreateAdd(b->CreateLoad(ptr), duration);
+        Value * const ptr = getScalarFieldPtr(b.get(), STATISTICS_CYCLE_COUNT_TOTAL).first;
+        Value * const updated = b->CreateAdd(b->CreateLoad(b->getSizeTy(), ptr), duration);
         b->CreateStore(updated, ptr);
     }
 }
@@ -494,9 +498,11 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
             }
 
             assert (k < REQ_INTEGERS);
-            Value * const itemsPtr = b->CreateGEP0(values, b->getInt32(k++));
+            Value * const itemsPtr = b->CreateGEP(b->getInt64Ty(), values, b->getInt32(k++));
             b->CreateStore(items, itemsPtr);
-            Value * const cycleCountPtr = b->getScalarFieldPtr(prefix + STATISTICS_CYCLE_COUNT_SUFFIX);
+            Value * cycleCountPtr; Type * ty;
+
+            std::tie(cycleCountPtr, ty) = b->getScalarFieldPtr(prefix + STATISTICS_CYCLE_COUNT_SUFFIX);
 
             FixedArray<Value *, 2> index;
             index[0] = b->getInt32(0);
@@ -504,19 +510,19 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
                 Value * sumCycles = INT64_ZERO;
                 if (isRoot || j != PARTITION_JUMP_SYNCHRONIZATION) {
                     index[1] = b->getInt32(j);
-                    sumCycles = b->CreateLoad(b->CreateGEP0(cycleCountPtr, index));
+                    sumCycles = b->CreateLoad(b->getInt64Ty(), b->CreateGEP(ty, cycleCountPtr, index));
                 }
                 assert (k < REQ_INTEGERS);
-                b->CreateStore(sumCycles, b->CreateGEP0(values, b->getInt32(k++)));
+                b->CreateStore(sumCycles, b->CreateGEP(b->getInt64Ty(), values, b->getInt32(k++)));
             }
 
             if (isRoot) {
                 index[1] = b->getInt32(NUM_OF_INVOCATIONS);
-                currentN = b->CreateLoad(b->CreateGEP0(cycleCountPtr, index));
+                currentN = b->CreateLoad(b->getInt64Ty(), b->CreateGEP(b->getInt64Ty(), cycleCountPtr, index));
             }
             assert (currentN);
             assert (k < REQ_INTEGERS);
-            b->CreateStore(currentN, b->CreateGEP0(values, b->getInt32(k++)));
+            b->CreateStore(currentN, b->CreateGEP(b->getInt64Ty(), values, b->getInt32(k++)));
         }
         assert (k == REQ_INTEGERS);
 
@@ -541,28 +547,32 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 void PipelineCompiler::recordBlockingIO(BuilderRef b, const StreamSetPort port) const {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
         const auto prefix = makeBufferName(mKernelId, port);
-        Value * const counterPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
-        Value * const runningCount = b->CreateLoad(counterPtr);
+        Value * counterPtr; Type * ty;
+        std::tie(counterPtr, ty) = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
+        Value * const runningCount = b->CreateLoad(ty, counterPtr);
         Value * const updatedCount = b->CreateAdd(runningCount, b->getSize(1));
         b->CreateStore(updatedCount, counterPtr);
     }
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
 
         const auto prefix = makeBufferName(mKernelId, port);
-        Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
+        Value * historyPtr; Type * ty;
+        std::tie(historyPtr, ty) = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
 
         Constant * const ZERO = b->getInt32(0);
         Constant * const ONE = b->getInt32(1);
         Constant * const TWO = b->getInt32(2);
 
-        Value * const traceLogArrayField = b->CreateGEP0(historyPtr, {ZERO, ZERO});
-        Value * const traceLogArray = b->CreateLoad(traceLogArrayField);
+        IntegerType * sizeTy = b->getSizeTy();
 
-        Value * const traceLogCountField = b->CreateGEP0(historyPtr, {ZERO, ONE});
-        Value * const traceLogCount = b->CreateLoad(traceLogCountField);
+        Value * const traceLogArrayField = b->CreateGEP(ty, historyPtr, {ZERO, ZERO});
+        Value * const traceLogArray = b->CreateLoad(sizeTy->getPointerTo(), traceLogArrayField);
 
-        Value * const traceLogCapacityField = b->CreateGEP0(historyPtr, {ZERO, TWO});
-        Value * const traceLogCapacity = b->CreateLoad(traceLogCapacityField);
+        Value * const traceLogCountField = b->CreateGEP(ty, historyPtr, {ZERO, ONE});
+        Value * const traceLogCount = b->CreateLoad(sizeTy, traceLogCountField);
+
+        Value * const traceLogCapacityField = b->CreateGEP(ty, historyPtr, {ZERO, TWO});
+        Value * const traceLogCapacity = b->CreateLoad(sizeTy, traceLogCapacityField);
 
         BasicBlock * const expandHistory = b->CreateBasicBlock(prefix + "_expandHistory", mKernelLoopCall);
         BasicBlock * const recordExpansion = b->CreateBasicBlock(prefix + "_recordExpansion", mKernelLoopCall);
@@ -588,7 +598,7 @@ void PipelineCompiler::recordBlockingIO(BuilderRef b, const StreamSetPort port) 
         logArray->addIncoming(traceLogArray, entryBlock);
         logArray->addIncoming(expandedLogArray, branchExitBlock);
         b->CreateStore(b->CreateAdd(traceLogCount, b->getSize(1)), traceLogCountField);
-        b->CreateStore(mSegNo, b->CreateGEP0(logArray, traceLogCount));
+        b->CreateStore(mSegNo, b->CreateGEP(sizeTy, logArray, traceLogCount));
     }
 
 }
@@ -773,6 +783,8 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(BuilderRef b) const {
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
 
         IntegerType * const sizeTy = b->getSizeTy();
+        PointerType * const sizePtrTy = sizeTy->getPointerTo();
+
    //     IntegerType * const boolTy = b->getInt1Ty();
 
         Constant * const ZERO = b->getInt32(0);
@@ -898,10 +910,11 @@ has_ports:
                 const auto & bp = mBufferGraph[e];
                 if (bp.canModifySegmentLength()) {
                     const auto prefix = makeBufferName(i, bp.Port);
-                    Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
+                    Value * historyPtr; Type * historyTy;
+                    std::tie(historyPtr, historyTy) = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);
-                    traceLogArray[j] = b->CreateLoad(b->CreateGEP0(historyPtr, {ZERO, ZERO}));
-                    traceLengthArray[j] = b->CreateLoad(b->CreateGEP0(historyPtr, {ZERO, ONE}));
+                    traceLogArray[j] = b->CreateLoad(sizePtrTy, b->CreateGEP(historyTy, historyPtr, {ZERO, ZERO}));
+                    traceLengthArray[j] = b->CreateLoad(sizeTy, b->CreateGEP(historyTy, historyPtr, {ZERO, ONE}));
                     j++;
                 }
             }
@@ -909,10 +922,11 @@ has_ports:
                 const auto & bp = mBufferGraph[e];
                 if (bp.canModifySegmentLength()) {
                     const auto prefix = makeBufferName(i, bp.Port);
-                    Value * const historyPtr = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
+                    Value * historyPtr; Type * historyTy;
+                    std::tie(historyPtr, historyTy) = b->getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);
-                    traceLogArray[j] = b->CreateLoad(b->CreateGEP0(historyPtr, {ZERO, ZERO}));
-                    traceLengthArray[j] = b->CreateLoad(b->CreateGEP0(historyPtr, {ZERO, ONE}));
+                    traceLogArray[j] = b->CreateLoad(sizePtrTy, b->CreateGEP(historyTy, historyPtr, {ZERO, ZERO}));
+                    traceLengthArray[j] = b->CreateLoad(sizeTy, b->CreateGEP(historyTy, historyPtr, {ZERO, ONE}));
                     j++;
                 }
             }
@@ -966,7 +980,7 @@ has_ports:
             b->CreateLikelyCondBr(notEndOfTrace, check, next);
 
             b->SetInsertPoint(check);
-            Value * const nextSegNo = b->CreateLoad(b->CreateGEP0(traceLogArray[i], currentIndex[i]));
+            Value * const nextSegNo = b->CreateLoad(sizeTy, b->CreateGEP(sizeTy, traceLogArray[i], currentIndex[i]));
             b->CreateCondBr(b->CreateICmpEQ(segNo, nextSegNo), update, next);
 
             b->SetInsertPoint(update);
@@ -1075,20 +1089,20 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
                 const StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
 
                 if (buffer->isDynamic()) {
-                    Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
-                    Type * const traceTy = traceData->getType()->getPointerElementType();
-                    Type * const entryTy =  traceTy->getStructElementType(0)->getPointerElementType();
+                    Value * traceData; Type * traceTy;
+                    std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+                    Type * const entryTy =  traceTy->getStructElementType(0);
                     Value * const entryData = b->CreatePageAlignedMalloc(entryTy, SZ_ONE);
                     // fill in the struct
-                    b->CreateStore(entryData, b->CreateGEP0(traceData, {ZERO, ZERO}));
-                    b->CreateStore(SZ_ONE, b->CreateGEP0(traceData, {ZERO, ONE}));
+                    b->CreateStore(entryData, b->CreateGEP(traceTy, traceData, {ZERO, ZERO}));
+                    b->CreateStore(SZ_ONE, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
                     // then the initial record
-                    b->CreateStore(SZ_ZERO, b->CreateGEP0(entryData, {ZERO, ZERO}));
-                    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP0(entryData, {ZERO, ONE}));
+                    b->CreateStore(SZ_ZERO, b->CreateGEP(entryTy, entryData, {ZERO, ZERO}));
+                    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryTy, entryData, {ZERO, ONE}));
                     const auto n = entryTy->getArrayNumElements(); assert (n > 3);
                     unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
                     Constant * const length = b->getSize(sizeTyWidth * (n - 2));
-                    b->CreateMemZero(b->CreateGEP0(entryData, {ZERO, TWO}), length, sizeTyWidth);
+                    b->CreateMemZero(b->CreateGEP(entryTy, entryData, {ZERO, TWO}), length, sizeTyWidth);
                 }
             }
         }
@@ -1109,19 +1123,21 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
     const StreamSetPort outputPort = port.Port;
     const auto prefix = makeBufferName(mKernelId, outputPort);
 
-    Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
-    Type * const traceDataTy = traceData->getType()->getPointerElementType();
-    Type * const entryTy = traceDataTy->getStructElementType(0)->getPointerElementType();
+    Value * traceData; Type * traceDataTy;
+    std::tie(traceData, traceDataTy) = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+    Type * const entryTy = traceDataTy->getStructElementType(0);
 
     Constant * const ZERO = b->getInt32(0);
     Constant * const ONE = b->getInt32(1);
     Constant * const TWO = b->getInt32(2);
     Constant * const THREE = b->getInt32(3);
 
-    Value * const traceLogArrayField = b->CreateGEP0(traceData, {ZERO, ZERO});
-    Value * entryArray = b->CreateLoad(traceLogArrayField);
-    Value * const traceLogCountField = b->CreateGEP0(traceData, {ZERO, ONE});
-    Value * const traceIndex = b->CreateLoad(traceLogCountField);
+    IntegerType * const sizeTy = b->getSizeTy();
+
+    Value * const traceLogArrayField = b->CreateGEP(traceDataTy, traceData, {ZERO, ZERO});
+    Value * entryArray = b->CreateLoad(entryTy, traceLogArrayField);
+    Value * const traceLogCountField = b->CreateGEP(traceDataTy, traceData, {ZERO, ONE});
+    Value * const traceIndex = b->CreateLoad(sizeTy, traceLogCountField);
     Value * const traceCount = b->CreateAdd(traceIndex, b->getSize(1));
 
     entryArray = b->CreateRealloc(entryTy, entryArray, traceCount);
@@ -1129,21 +1145,23 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
     b->CreateStore(traceCount, traceLogCountField);
 
     // segment num  0
-    b->CreateStore(mSegNo, b->CreateGEP0(entryArray, {traceIndex, ZERO}));
+    b->CreateStore(mSegNo, b->CreateGEP(entryTy, entryArray, {traceIndex, ZERO}));
     // new capacity 1
-    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP0(entryArray, {traceIndex, ONE}));
+    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryTy, entryArray, {traceIndex, ONE}));
     // produced item count 2
     Value * const produced = mCurrentProducedItemCountPhi[outputPort];
-    b->CreateStore(produced, b->CreateGEP0(entryArray, {traceIndex, TWO}));
+    b->CreateStore(produced, b->CreateGEP(entryTy, entryArray, {traceIndex, TWO}));
 
     // consumer processed item count [3,n)
     if (LLVM_LIKELY(!bn.isReturned())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
-        Value * const consumerDataPtr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+
+        Value * consumerDataPtr; Type * consumerTy;
+        std::tie(consumerDataPtr, consumerTy) = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
         const auto n = entryTy->getArrayNumElements(); assert (n > 3);
         assert ((n - 3) == (consumerDataPtr->getType()->getPointerElementType()->getArrayNumElements() - 1));
-        Value * const processedPtr = b->CreateGEP0(consumerDataPtr, { ZERO, ONE });
-        Value * const logPtr = b->CreateGEP0(entryArray, {traceIndex, THREE});
+        Value * const processedPtr = b->CreateGEP(consumerTy, consumerDataPtr, { ZERO, ONE });
+        Value * const logPtr = b->CreateGEP(entryTy, entryArray, {traceIndex, THREE});
         unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
         Constant * const length = b->getSize(sizeTyWidth * (n - 3));
         b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
@@ -1269,6 +1287,8 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
         Constant * const SZ_ZERO = b->getSize(0);
         Constant * const SZ_ONE = b->getSize(1);
 
+        IntegerType * sizeTy = b->getSizeTy();
+
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
 
             for (const auto output : make_iterator_range(out_edges(i, mBufferGraph))) {
@@ -1288,13 +1308,16 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
                     expansionArgs[6] = b->getInt32(buffer);
 
                     const auto prefix = makeBufferName(i, br.Port);
-                    Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
 
-                    Value * const traceArrayField = b->CreateGEP0(traceData, {ZERO, ZERO});
-                    Value * const entryArray = b->CreateLoad(traceArrayField);
+                    Value * traceData; Type * traceTy;
+                    std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
 
-                    Value * const traceCountField = b->CreateGEP0(traceData, {ZERO, ONE});
-                    Value * const traceCount = b->CreateLoad(traceCountField);
+                    Value * const traceArrayField = b->CreateGEP(traceTy, traceData, {ZERO, ZERO});
+                    Type * arrayTy = cast<StructType>(traceTy)->getStructElementType(0);
+                    Value * const entryArray = b->CreateLoad(arrayTy, traceArrayField);
+
+                    Value * const traceCountField = b->CreateGEP(traceTy, traceData, {ZERO, ONE});
+                    Value * const traceCount = b->CreateLoad(sizeTy, traceCountField);
 
                     BasicBlock * const outputEntry = b->GetInsertBlock();
                     BasicBlock * const outputLoop = b->CreateBasicBlock(prefix + "_bufferExpansionReportLoop");
@@ -1317,12 +1340,12 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
 
                     Value * const openingBar = b->CreateSelect(onlyEntry, doubleBar, singleBar);
 
-                    Value * const segmentNumField = b->CreateGEP0(entryArray, {index, ZERO});
-                    Value * const segmentNum = b->CreateLoad(segmentNumField);
+                    Value * const segmentNumField = b->CreateGEP(arrayTy, entryArray, {index, ZERO});
+                    Value * const segmentNum = b->CreateLoad(sizeTy, segmentNumField);
                     expansionArgs[7] = segmentNum;
 
-                    Value * const newBufferSizeField = b->CreateGEP0(entryArray, {index, ONE});
-                    Value * const newBufferSize = b->CreateLoad(newBufferSizeField);
+                    Value * const newBufferSizeField = b->CreateGEP(arrayTy, entryArray, {index, ONE});
+                    Value * const newBufferSize = b->CreateLoad(sizeTy, newBufferSizeField);
                     expansionArgs[8] = newBufferSize;
 
                     b->CreateCall(fTy, Dprintf, expansionArgs);
@@ -1346,8 +1369,8 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
                     itemCountArgs[4] = b->getInt8('O');
                     itemCountArgs[5] = expansionArgs[4];
                     itemCountArgs[6] = expansionArgs[5];
-                    Value * const producedField = b->CreateGEP0(entryArray, {index, TWO});
-                    itemCountArgs[7] = b->CreateLoad(producedField);
+                    Value * const producedField = b->CreateGEP(arrayTy, entryArray, {index, TWO});
+                    itemCountArgs[7] = b->CreateLoad(sizeTy, producedField);
 
                     b->CreateCall(fTy, Dprintf, itemCountArgs);
                     itemCountArgs[4] = b->getInt8('I');
@@ -1360,8 +1383,8 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
                         const Binding & binding = getBinding(consumer, StreamSetPort{PortType::Input, c.Port});
                         itemCountArgs[6] = b->GetString(binding.getName());
                         const auto k = c.Index + 2; assert (k > 2);
-                        Value * const processedField = b->CreateGEP0(entryArray, {index, b->getInt32(k)});
-                        itemCountArgs[7] = b->CreateLoad(processedField);
+                        Value * const processedField = b->CreateGEP(arrayTy, entryArray, {index, b->getInt32(k)});
+                        itemCountArgs[7] = b->CreateLoad(sizeTy, processedField);
                         b->CreateCall(fTy, Dprintf, itemCountArgs);
                     }
 
@@ -1395,8 +1418,9 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
 
         const auto prefix = makeKernelName(mKernelId);
 
-        Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
-        Type * const traceDataTy = traceData->getType()->getPointerElementType();
+        Value * traceData; Type * traceDataTy;
+
+        std::tie(traceData, traceDataTy) = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
         Type * const traceLogTy =  traceDataTy->getStructElementType(1)->getPointerElementType();
 
         Constant * const SZ_ZERO = b->getSize(0);
@@ -1410,10 +1434,10 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
         Value * const traceDataArray = b->CreatePageAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
 
         // fill in the struct
-        b->CreateStore(MAX_INT, b->CreateGEP0(traceData, {ZERO, ZERO})); // "last" num of strides
-        b->CreateStore(traceDataArray, b->CreateGEP0(traceData, {ZERO, ONE})); // trace log
-        b->CreateStore(SZ_ZERO, b->CreateGEP0(traceData, {ZERO, TWO})); // trace length
-        b->CreateStore(SZ_DEFAULT_CAPACITY, b->CreateGEP0(traceData, {ZERO, THREE})); // trace capacity
+        b->CreateStore(MAX_INT, b->CreateGEP(traceDataTy, traceData, {ZERO, ZERO})); // "last" num of strides
+        b->CreateStore(traceDataArray, b->CreateGEP(traceDataTy, traceData, {ZERO, ONE})); // trace log
+        b->CreateStore(SZ_ZERO, b->CreateGEP(traceDataTy, traceData, {ZERO, TWO})); // trace length
+        b->CreateStore(SZ_DEFAULT_CAPACITY, b->CreateGEP(traceDataTy, traceData, {ZERO, THREE})); // trace capacity
     }
 
 }
@@ -1427,7 +1451,9 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
         assert (KernelPartitionId[kernelId - 1] != KernelPartitionId[kernelId]);
         const auto prefix = makeKernelName(kernelId);
 
-        Value * const toUpdate = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
+        Value * toUpdate; Type * traceTy;
+
+        std::tie(toUpdate, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
 
         Module * const m = b->getModule();
         Function * updateSegmentsPerStrideTrace = m->getFunction("$trace_strides_per_segment");
@@ -1435,7 +1461,7 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             auto ip = b->saveIP();
             LLVMContext & C = b->getContext();
             Type * const sizeTy = b->getSizeTy();
-            FunctionType * fty = FunctionType::get(b->getVoidTy(), { toUpdate->getType(), sizeTy, sizeTy }, false);
+            FunctionType * fty = FunctionType::get(b->getVoidTy(), { traceTy, sizeTy, sizeTy }, false);
             updateSegmentsPerStrideTrace = Function::Create(fty, Function::PrivateLinkage, "$trace_strides_per_segment", m);
 
             BasicBlock * const entry = BasicBlock::Create(C, "entry", updateSegmentsPerStrideTrace);
@@ -1460,19 +1486,19 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             Constant * const TWO = b->getInt32(2);
             Constant * const THREE = b->getInt32(3);
 
-            Value * const lastNumOfStridesField = b->CreateGEP0(traceData, {ZERO, ZERO});
-            Value * const lastNumOfStrides = b->CreateLoad(lastNumOfStridesField);
+            Value * const lastNumOfStridesField = b->CreateGEP(traceTy, traceData, {ZERO, ZERO});
+            Value * const lastNumOfStrides = b->CreateLoad(sizeTy, lastNumOfStridesField);
             Value * const changed = b->CreateICmpNE(lastNumOfStrides, numOfStrides);
             b->CreateCondBr(changed, update, exit);
 
             b->SetInsertPoint(update);
-
-            Value * const traceLogField = b->CreateGEP0(traceData, {ZERO, ONE});
-            Value * const traceLog = b->CreateLoad(traceLogField);
-            Value * const traceLengthField = b->CreateGEP0(traceData, {ZERO, TWO});
-            Value * const traceLength = b->CreateLoad(traceLengthField);
-            Value * const traceCapacityField = b->CreateGEP0(traceData, {ZERO, THREE});
-            Value * const traceCapacity = b->CreateLoad(traceCapacityField);
+            Value * const traceLogField = b->CreateGEP(traceTy, traceData, {ZERO, ONE});
+            Type * recordStructTy = cast<StructType>(traceTy)->getStructElementType(1);
+            Value * const traceLog = b->CreateLoad(recordStructTy, traceLogField);
+            Value * const traceLengthField = b->CreateGEP(traceTy, traceData, {ZERO, TWO});
+            Value * const traceLength = b->CreateLoad(sizeTy, traceLengthField);
+            Value * const traceCapacityField = b->CreateGEP(traceTy, traceData, {ZERO, THREE});
+            Value * const traceCapacity = b->CreateLoad(sizeTy, traceCapacityField);
             Value * const hasSpace = b->CreateICmpNE(traceLength, traceCapacity);
             b->CreateLikelyCondBr(hasSpace, write, expand);
 
@@ -1486,24 +1512,14 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             b->CreateBr(write);
 
             b->SetInsertPoint(write);
-            PHINode * const traceLogPhi = b->CreatePHI(traceLog->getType(), 2);
+            PHINode * const traceLogPhi = b->CreatePHI(recordStructTy, 2);
             traceLogPhi->addIncoming(traceLog, update);
             traceLogPhi->addIncoming(expandedtraceLog, expand);
-            b->CreateStore(segNo, b->CreateGEP0(traceLogPhi, {traceLength , ZERO}));
-            b->CreateStore(numOfStrides, b->CreateGEP0(traceLogPhi, {traceLength , ONE}));
+            b->CreateStore(segNo, b->CreateGEP(recordStructTy, traceLogPhi, {traceLength , ZERO}));
+            b->CreateStore(numOfStrides, b->CreateGEP(recordStructTy, traceLogPhi, {traceLength , ONE}));
             b->CreateStore(numOfStrides, lastNumOfStridesField);
             Value * const newTraceLength = b->CreateAdd(traceLength, b->getSize(1));
             b->CreateStore(newTraceLength, traceLengthField);
-
-//            FixedArray<Value *, 6> argVals;
-//            argVals[0] = b->getInt32(STDERR_FILENO);
-//            argVals[1] = b->GetString("ptr %" PRIx64 "  traceLen: %" PRIu64 " numStrides: %" PRIu64 " segNo: %" PRIu64 "\n");
-//            argVals[2] = b->CreatePtrToInt(traceData, b->getInt64Ty());
-//            argVals[3] = traceLength;
-//            argVals[4] = numOfStrides;
-//            argVals[5] = segNo;
-//            Function * Dprintf = b->GetDprintf();
-//            b->CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
 
             b->CreateBr(exit);
 
@@ -1610,11 +1626,14 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
         SmallVector<Value *, 64> traceLogArray(PartitionCount - 1);
         SmallVector<Value *, 64> traceLengthArray(PartitionCount - 1);
 
+        Type * const recordStructTy = ArrayType::get(sizeTy, 2);
+
         for (unsigned i = 0; i < (PartitionCount - 2); ++i) {
             const auto prefix = makeKernelName(partitionRootIds[i]);
-            Value * const traceData = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
-            traceLogArray[i] = b->CreateLoad(b->CreateGEP0(traceData, {ZERO, ONE}));
-            traceLengthArray[i] = b->CreateLoad(b->CreateGEP0(traceData, {ZERO, TWO}));
+            Value * traceData; Type * traceTy;
+            std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
+            traceLogArray[i] = b->CreateLoad(recordStructTy, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
+            traceLengthArray[i] = b->CreateLoad(sizeTy, b->CreateGEP(traceTy, traceData, {ZERO, TWO}));
         }
 
         // Start printing the data lines
@@ -1648,12 +1667,14 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
             Value * const notEndOfTrace = b->CreateICmpNE(currentIndex[i], traceLengthArray[i]);
             b->CreateLikelyCondBr(notEndOfTrace, check, next);
 
+
+
             b->SetInsertPoint(check);
-            Value * const nextSegNo = b->CreateLoad(b->CreateGEP0(traceLogArray[i], { currentIndex[i], ZERO }));
+            Value * const nextSegNo = b->CreateLoad(sizeTy, b->CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ZERO }));
             b->CreateCondBr(b->CreateICmpEQ(segNo, nextSegNo), update, next);
 
             b->SetInsertPoint(update);
-            Value * const numOfStrides = b->CreateLoad(b->CreateGEP0(traceLogArray[i], { currentIndex[i], ONE }));
+            Value * const numOfStrides = b->CreateLoad(sizeTy, b->CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ONE }));
             Value * const currentIndex1 = b->CreateAdd(currentIndex[i], SZ_ONE);
             b->CreateBr(next);
 
@@ -1792,7 +1813,10 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
                                              const StringRef suffix) const {
 
     const auto fieldName = (makeKernelName(mKernelId) + suffix).str();
-    Value * const trace = b->getScalarFieldPtr(fieldName);
+
+    Value * trace; Type * traceTy;
+
+    std::tie(trace, traceTy) = b->getScalarFieldPtr(fieldName);
 
     BasicBlock * const expand = b->CreateBasicBlock("");
     BasicBlock * const record = b->CreateBasicBlock("");
@@ -1801,21 +1825,21 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
     Constant * const ZERO = b->getInt32(0);
     Constant * const ONE = b->getInt32(1);
 
-    Value * const currentLog = b->CreateLoad(trace);
+    Value * const currentLog = b->CreateLoad(traceTy, trace);
     BasicBlock * const entry = b->GetInsertBlock();
     b->CreateCondBr(b->CreateIsNull(offset), expand, record);
 
     b->SetInsertPoint(expand);
-    Type * const logTy = currentLog->getType()->getPointerElementType();
+    Type * const logTy = cast<StructType>(traceTy)->getStructElementType(0);
     Value * const newLog = b->CreatePageAlignedMalloc(logTy);
     PointerType * const voidPtrTy = b->getVoidPtrTy();
-    b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP0(newLog, { ZERO, ONE}));
+    b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(traceTy, newLog, { ZERO, ONE}));
     b->CreateStore(newLog, trace);
     BasicBlock * const expandExit = b->GetInsertBlock();
     b->CreateBr(record);
 
     b->SetInsertPoint(record);
-    PHINode * const log = b->CreatePHI(currentLog->getType(), 2);
+    PHINode * const log = b->CreatePHI(logTy->getPointerTo(), 2);
     log->addIncoming(currentLog, entry);
     log->addIncoming(newLog, expandExit);
 
@@ -1829,7 +1853,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
         const auto i = out.Port.Number;
         Value * const delta = b->CreateSub(current[i], prior[i]);
         indices[3] = b->getInt32(i);
-        b->CreateStore(delta, b->CreateGEP0(log, indices));
+        b->CreateStore(delta, b->CreateGEP(logTy, log, indices));
     }
 }
 
@@ -1913,15 +1937,28 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
 
     SmallVector<Value *, 64> traceLogArray(LastKernel + 1);
 
+//    LLVMContext & C = b->getContext();
+//    IntegerType * const sizeTy = b->getSizeTy();
+//    PointerType * const voidPtrTy = b->getVoidPtrTy();
+//    ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
+//    StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
+//    PointerType * const traceTy = logChunkTy->getPointerTo();
+
+    Type * logChunkTy = nullptr;
+
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const auto n = out_degree(i, mBufferGraph);
         if (LLVM_UNLIKELY(n == 0)) {
             traceLogArray[i] = nullptr;
         } else {
             const auto fieldName = (makeKernelName(i) + suffix).str();
-            traceLogArray[i] = b->getScalarFieldPtr(fieldName);
+            std::tie(traceLogArray[i], logChunkTy) = b->getScalarFieldPtr(fieldName);
         }
     }
+
+    ArrayType * const logTy = cast<ArrayType>(cast<StructType>(logChunkTy)->getStructElementType(0));
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const logChunkPtrTy = logChunkTy->getPointerTo();
 
     Constant * const CHUNK_LENGTH = b->getSize(ITEM_COUNT_DELTA_CHUNK_LENGTH);
     Value * const chunkCount = b->CreateCeilUDiv(mSegNo, CHUNK_LENGTH);
@@ -1945,9 +1982,8 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     SmallVector<PHINode *, 64> currentChunk(LastKernel + 1);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
-        PointerType * const ty = cast<PointerType>(traceLogArray[i]->getType()->getPointerElementType());
-        currentChunk[i] = b->CreatePHI(ty, 2);
-        currentChunk[i]->addIncoming(ConstantPointerNull::get(ty), loopEntry);
+        currentChunk[i] = b->CreatePHI(logChunkPtrTy, 2);
+        currentChunk[i]->addIncoming(ConstantPointerNull::get(logChunkPtrTy), loopEntry);
     }
 
     args[2] = segNo;
@@ -1962,8 +1998,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     SmallVector<Value *, 64> nextChunk(LastKernel + 1);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
-        Type * const ty = traceLogArray[i]->getType();
-        subsequentChunk[i] = b->CreatePHI(ty, 2);
+        subsequentChunk[i] = b->CreatePHI(logChunkPtrTy, 2);
         subsequentChunk[i]->addIncoming(traceLogArray[i], loopStart);
     }
 
@@ -1973,8 +2008,8 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     nextChunkIndices[1] = ONE;
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(subsequentChunk[i] == nullptr)) continue;
-        nextChunk[i] = b->CreateLoad(subsequentChunk[i]);
-        Value * subsequentChunk2 = b->CreateGEP0(nextChunk[i], nextChunkIndices);
+        nextChunk[i] = b->CreateLoad(voidPtrTy, subsequentChunk[i]);
+        Value * subsequentChunk2 = b->CreateGEP(logChunkTy, nextChunk[i], nextChunkIndices);
         subsequentChunk2 = b->CreatePointerCast(subsequentChunk2, subsequentChunk[i]->getType());
         subsequentChunk[i]->addIncoming(subsequentChunk2, getNextLogChunk);
     }
@@ -1987,7 +2022,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     b->SetInsertPoint(selectLogChunk);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(nextChunk[i] == nullptr)) continue;
-        Value * spentLog = b->CreateLoad(b->CreateGEP0(nextChunk[i], nextChunkIndices));
+        Value * spentLog = b->CreateLoad(voidPtrTy, b->CreateGEP(logChunkTy, nextChunk[i], nextChunkIndices));
         b->CreateFree(spentLog);
     }
     b->CreateBr(printLogEntry);
@@ -2015,7 +2050,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
             const auto idx = target(e, mBufferGraph) - FirstStreamSet + 3;
             const BufferPort & out = mBufferGraph[e];
             indices[3] = b->getInt32(out.Port.Number);
-            args[idx] = b->CreateLoad(b->CreateGEP0(currentChunkPhi[i], indices));
+            args[idx] = b->CreateLoad(logTy, b->CreateGEP(logChunkTy, currentChunkPhi[i], indices));
         }
     }
 

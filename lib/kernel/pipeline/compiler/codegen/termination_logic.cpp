@@ -224,8 +224,8 @@ void PipelineCompiler::checkPropagatedTerminationSignals(BuilderRef b) {
 Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned kernelId) {
     assert (HasTerminationSignal.test(kernelId));
     const auto name = TERMINATION_PREFIX + std::to_string(kernelId);
-    Value * const ptr = b->getScalarFieldPtr(name);
-    return b->CreateLoad(ptr, true, name);
+    auto ref = b->getScalarFieldPtr(name);
+    return b->CreateLoad(ref.second, ref.first, true, name);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -233,7 +233,7 @@ Value * PipelineCompiler::readTerminationSignal(BuilderRef b, const unsigned ker
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeTerminationSignal(BuilderRef b, const unsigned kernelId, Value * const signal) const {
     assert (HasTerminationSignal.test(kernelId));
-    Value * const ptr = b->getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId));
+    Value * const ptr = b->getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId)).first;
     b->CreateStore(signal, ptr, true);
 }
 
@@ -252,7 +252,7 @@ void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(BuilderRe
         const StreamSetPort port (PortType::Output, i);
         finalProduced[i] = mProducedItemCount[port];
         if (isCountableType(mReturnedProducedItemCountPtr[port], getOutputBinding(port))) {
-            finalProduced[i] = b->CreateLoad(mReturnedProducedItemCountPtr[port]);
+            finalProduced[i] = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[port]);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, port) +
                        "_producedAfterAbnormalTermination = %" PRIu64, finalProduced[i]);
@@ -340,7 +340,7 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
 
     for (const auto e : make_iterator_range(out_edges(mCurrentPartitionId, mTerminationPropagationGraph))) {
         const auto id = target(e, mTerminationPropagationGraph);
-        Value * const signal = b->getScalarFieldPtr(CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(id));
+        Value * const signal = b->getScalarFieldPtr(CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(id)).first;
         b->CreateAtomicFetchAndAdd(b->getSize(1), signal);
     }
 

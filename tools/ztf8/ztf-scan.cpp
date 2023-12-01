@@ -173,7 +173,7 @@ std::vector<Value *> initializeCompressionMasks(BuilderRef b,
     }
     // Initialize the compression mask.
     // Default initial compression mask is all ones (no zeroes => no compression).
-    b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP0(compressMaskPtr, strideBlockIndex));
+    b->CreateBlockAlignedStore(b->allOnes(), b->CreateGEP(compressMaskPtr, strideBlockIndex));
     Value * const nextBlockNo = b->CreateAdd(blockNo, sz_ONE);
     blockNo->addIncoming(nextBlockNo, maskInitialization);
     // Default initial compression mask is all ones (no zeroes => no compression).
@@ -288,7 +288,7 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     PHINode * const keyWordPhi = b->CreatePHI(sizeTy, 2);
     keyWordPhi->addIncoming(sz_ZERO, strideMasksReady);
     Value * keyWordIdx = b->CreateCountForwardZeroes(keyMaskPhi, "keyWordIdx");
-    Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(keyWordBasePtr, keyWordIdx)), sizeTy);
+    Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keyWordBasePtr, keyWordIdx)), sizeTy);
     Value * theKeyWord = b->CreateSelect(b->CreateICmpEQ(keyWordPhi, sz_ZERO), nextKeyWord, keyWordPhi);
     Value * keyWordPos = b->CreateAdd(stridePos, b->CreateMul(keyWordIdx, sw.WIDTH));
     Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
@@ -301,12 +301,12 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * keyOffset = b->CreateSub(keyLength, lg.HALF_LENGTH);
     // Get the hash of this key.
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
-    Value * hashTablePtr = b->CreateGEP0(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), lg.SUBTABLE_SIZE));
-    Value * tblEntryPtr = b->CreateGEP0(hashTablePtr, b->CreateMul(keyHash, lg.HI));
+    Value * hashTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), lg.SUBTABLE_SIZE));
+    Value * tblEntryPtr = b->CreateGEP(hashTablePtr, b->CreateMul(keyHash, lg.HI));
     // Use two 8-byte loads to get hash and symbol values.
     //b->CallPrintInt("tblEntryPtr", tblEntryPtr);
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
-    Value * tblPtr2 = b->CreateBitCast(b->CreateGEP0(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
+    Value * tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
     Value * symPtr1 = b->CreateBitCast(b->getRawInputPointer("byteData", keyStartPos), lg.halfSymPtrTy);
     Value * symPtr2 = b->CreateBitCast(b->getRawInputPointer("byteData", b->CreateAdd(keyStartPos, keyOffset)), lg.halfSymPtrTy);
     // Check to see if the hash table entry is nonzero (already assigned).
@@ -335,10 +335,10 @@ void LengthGroupCompression::generateMultiBlockLogic(BuilderRef b, Value * const
         Value * pfxLength = b->CreateSub(keyLength, sz_ONE);
         Value * pfxOffset = b->CreateSub(pfxLength, lg.HALF_LENGTH);
         Value * pfxHash = b->CreateAnd(pfxHashValue, lg.HASH_MASK, "pfxHash");
-        Value * pfxTablePtr = b->CreateGEP0(hashTableBasePtr, b->CreateMul(b->CreateSub(pfxLength, lg.LO), lg.SUBTABLE_SIZE));
-        Value * pfxEntryPtr = b->CreateGEP0(pfxTablePtr, b->CreateMul(pfxHash, lg.HI));
+        Value * pfxTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(pfxLength, lg.LO), lg.SUBTABLE_SIZE));
+        Value * pfxEntryPtr = b->CreateGEP(pfxTablePtr, b->CreateMul(pfxHash, lg.HI));
         Value * pfxPtr1 = b->CreateBitCast(pfxEntryPtr, lg.halfSymPtrTy);
-        Value * pfxPtr2 = b->CreateBitCast(b->CreateGEP0(pfxEntryPtr, pfxOffset), lg.halfSymPtrTy);
+        Value * pfxPtr2 = b->CreateBitCast(b->CreateGEP(pfxEntryPtr, pfxOffset), lg.halfSymPtrTy);
         Value * pfx1 = b->CreateMonitoredScalarFieldLoad("hashTable", pfxPtr1);
         Value * pfx2 = b->CreateMonitoredScalarFieldLoad("hashTable", pfxPtr2);
         // Only the second half of the symbol needs to be loaded.
@@ -590,7 +590,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     PHINode * const keyWordPhi = b->CreatePHI(sizeTy, 2);
     keyWordPhi->addIncoming(sz_ZERO, strideMasksReady);
     Value * keyWordIdx = b->CreateCountForwardZeroes(keyMaskPhi, "keyWordIdx");
-    Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(keyWordBasePtr, keyWordIdx)), sizeTy);
+    Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keyWordBasePtr, keyWordIdx)), sizeTy);
     Value * theKeyWord = b->CreateSelect(b->CreateICmpEQ(keyWordPhi, sz_ZERO), nextKeyWord, keyWordPhi);
     Value * keyWordPos = b->CreateAdd(stridePos, b->CreateMul(keyWordIdx, sw.WIDTH));
     Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
@@ -607,11 +607,11 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     // Get the hash of this key.
     Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
     DEBUG_PRINT("keyHash", keyHash);
-    Value * hashTablePtr = b->CreateGEP0(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), lg.SUBTABLE_SIZE));
-    Value * tblEntryPtr = b->CreateGEP0(hashTablePtr, b->CreateMul(keyHash, lg.HI));
+    Value * hashTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(keyLength, lg.LO), lg.SUBTABLE_SIZE));
+    Value * tblEntryPtr = b->CreateGEP(hashTablePtr, b->CreateMul(keyHash, lg.HI));
     // Use two 8-byte loads to get hash and symbol values.
     Value * tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
-    Value * tblPtr2 = b->CreateBitCast(b->CreateGEP0(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
+    Value * tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, keyOffset), lg.halfSymPtrTy);
     Value * symPtr1 = b->CreateBitCast(b->getRawInputPointer("byteData", keyStartPos), lg.halfSymPtrTy);
     Value * symPtr2 = b->CreateBitCast(b->getRawInputPointer("byteData", b->CreateAdd(keyStartPos, keyOffset)), lg.halfSymPtrTy);
 
@@ -660,7 +660,7 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     PHINode * const hashWordPhi = b->CreatePHI(sizeTy, 2);
     hashWordPhi->addIncoming(sz_ZERO, keysDone);
     Value * hashWordIdx = b->CreateCountForwardZeroes(hashMaskPhi, "hashWordIdx");
-    Value * nextHashWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(hashWordBasePtr, hashWordIdx)), sizeTy);
+    Value * nextHashWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(hashWordBasePtr, hashWordIdx)), sizeTy);
     Value * theHashWord = b->CreateSelect(b->CreateICmpEQ(hashWordPhi, sz_ZERO), nextHashWord, hashWordPhi);
     Value * hashWordPos = b->CreateAdd(stridePos, b->CreateMul(hashWordIdx, sw.WIDTH));
     Value * hashPosInWord = b->CreateCountForwardZeroes(theHashWord);
@@ -686,12 +686,12 @@ void LengthGroupDecompression::generateMultiBlockLogic(BuilderRef b, Value * con
     DEBUG_PRINT("hashCode", hashCode);
     Value * symStartPos = b->CreateSub(hashMarkPos, b->CreateSub(symLength, sz_ONE), "symStartPos");
     Value * symOffset = b->CreateSub(symLength, lg.HALF_LENGTH);
-    hashTablePtr = b->CreateGEP0(hashTableBasePtr, b->CreateMul(b->CreateSub(symLength, lg.LO), lg.SUBTABLE_SIZE));
-    tblEntryPtr = b->CreateGEP0(hashTablePtr, b->CreateMul(hashCode, lg.HI));
+    hashTablePtr = b->CreateGEP(hashTableBasePtr, b->CreateMul(b->CreateSub(symLength, lg.LO), lg.SUBTABLE_SIZE));
+    tblEntryPtr = b->CreateGEP(hashTablePtr, b->CreateMul(hashCode, lg.HI));
     // Use two 8-byte loads to get hash and symbol values.
     // b->CallPrintInt("tblEntryPtr", tblEntryPtr);
     tblPtr1 = b->CreateBitCast(tblEntryPtr, lg.halfSymPtrTy);
-    tblPtr2 = b->CreateBitCast(b->CreateGEP0(tblEntryPtr, symOffset), lg.halfSymPtrTy);
+    tblPtr2 = b->CreateBitCast(b->CreateGEP(tblEntryPtr, symOffset), lg.halfSymPtrTy);
     entry1 = b->CreateAlignedLoad(tblPtr1, 1);
     entry2 = b->CreateAlignedLoad(tblPtr2, 1);
     DEBUG_PRINT("symStartPos", symStartPos);
@@ -751,7 +751,7 @@ std::vector<Value *> MonitoredScalarLoadSymbol(BuilderRef b, std::string scalarN
         return std::vector<Value *>{load1};
     }
     Constant * offset = b->getInt32(length - load_length);
-    Value * srcPtr2 = b->CreateGEP0(b->CreateBitCast(sourcePtr, b->getInt8PtrTy()), offset);
+    Value * srcPtr2 = b->CreateGEP(b->CreateBitCast(sourcePtr, b->getInt8PtrTy()), offset);
     Value * load2 = b->CreateMonitoredScalarFieldLoad(scalarName, b->CreateBitCast(srcPtr2, loadPtrTy));
     return std::vector<Value *>{load1, load2};
 }
@@ -764,7 +764,7 @@ std::vector<Value *> loadSymbol(BuilderRef b, Value * sourcePtr, unsigned length
         return std::vector<Value *>{load1};
     }
     Constant * offset = b->getInt32(length - load_length);
-    Value * srcPtr2 = b->CreateGEP0(b->CreateBitCast(sourcePtr, b->getInt8PtrTy()), offset);
+    Value * srcPtr2 = b->CreateGEP(b->CreateBitCast(sourcePtr, b->getInt8PtrTy()), offset);
     Value * load2 = b->CreateAlignedLoad(b->CreateBitCast(srcPtr2, loadPtrTy), 1);
     return std::vector<Value *>{load1, load2};
 }
@@ -778,7 +778,7 @@ void MonitoredScalarStoreSymbol(BuilderRef b, std::string scalarName, std::vecto
         return;
     }
     Constant * offset = b->getInt32(length - store_length);
-    Value * ptr2 = b->CreateGEP0(b->CreateBitCast(ptr, b->getInt8PtrTy()), offset);
+    Value * ptr2 = b->CreateGEP(b->CreateBitCast(ptr, b->getInt8PtrTy()), offset);
     b->CreateMonitoredScalarFieldStore(scalarName, toStore[1], b->CreateBitCast(ptr2, storePtrTy));
 }
 
@@ -790,7 +790,7 @@ void storeSymbol(BuilderRef b, std::vector<Value *> toStore, Value * ptr, unsign
         return;
     }
     Constant * offset = b->getInt32(length - store_length);
-    Value * ptr2 = b->CreateGEP0(b->CreateBitCast(ptr, b->getInt8PtrTy()), offset);
+    Value * ptr2 = b->CreateGEP(b->CreateBitCast(ptr, b->getInt8PtrTy()), offset);
     b->CreateAlignedStore(toStore[1], b->CreateBitCast(ptr2, storePtrTy), 1);
 }
 
@@ -855,7 +855,7 @@ void generateKeyProcessingLoops(BuilderRef b,
         keyWordPhi->addIncoming(sz_ZERO, entryBlock);
         Value * keyWordIdx = b->CreateCountForwardZeroes(keyMaskPhi, "keyWordIdx");
 
-        Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(keyWordBasePtr, keyWordIdx)), sizeTy);
+        Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keyWordBasePtr, keyWordIdx)), sizeTy);
         Value * theKeyWord = b->CreateSelect(b->CreateICmpEQ(keyWordPhi, sz_ZERO), nextKeyWord, keyWordPhi);
         Value * keyWordPos = b->CreateAdd(stridePos, b->CreateMul(keyWordIdx, sw.WIDTH));
         Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
@@ -869,7 +869,7 @@ void generateKeyProcessingLoops(BuilderRef b,
 
         Value * keyStartPos = b->CreateSub(keyMarkPos, sz_MARK_OFFSET, "keyStartPos");
         Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
-        Value * tblEntryPtr = b->CreateGEP0(hashTablePtr, {b->getInt32(0), LGTH_IDX, b->CreateMul(keyHash, lg.HI)});
+        Value * tblEntryPtr = b->CreateGEP(hashTablePtr, {b->getInt32(0), LGTH_IDX, b->CreateMul(keyHash, lg.HI)});
         Value * symPtr = b->getRawInputPointer("byteData", b->getInt32(0), keyStartPos);
 
         // Check to see if the hash table entry is nonzero (already assigned).
@@ -889,14 +889,14 @@ void generateKeyProcessingLoops(BuilderRef b,
             b->SetInsertPoint(tryExtension);
             // Check for an extension entry of which the current key is a prefix.
             // First load the extensionMap entry for the current hash value and check it.
-            Value * extensionMapEntry = b->CreateGEP0(extensionMapPtr, {b->getInt32(0), LGTH_IDX, keyHash});
+            Value * extensionMapEntry = b->CreateGEP(extensionMapPtr, {b->getInt32(0), LGTH_IDX, keyHash});
             Value * extensionHash = b->CreateZExt(b->CreateMonitoredScalarFieldLoad("prefixMapTable", extensionMapEntry), sizeTy);
             b->CreateCondBr(b->CreateIsNull(extensionHash), tryStore, checkExtension);
 
             b->SetInsertPoint(checkExtension);
             // The extension entry is in the hash table for the next highest length.
             LengthGroupParameters eg(b, encodingScheme, encodingScheme.getLengthGroupNo(length+1));
-            Value * extEntryPtr = b->CreateGEP0(hashTablePtr, {b->getInt32(0), b->getInt32(length - lo + 1), b->CreateMul(extensionHash, eg.HI)});
+            Value * extEntryPtr = b->CreateGEP(hashTablePtr, {b->getInt32(0), b->getInt32(length - lo + 1), b->CreateMul(extensionHash, eg.HI)});
             std::vector<Value *> extEntry = MonitoredScalarLoadSymbol(b, "hashTable", extEntryPtr, length);
 #if 0
             BasicBlock * const printExtension = b->CreateBasicBlock("printExtension");
@@ -963,7 +963,7 @@ void generateKeyProcessingLoops(BuilderRef b,
             Value * priorPos =  b->CreateSub(keyMarkPos, sz_ONE);
             Value * prefixHash = b->CreateZExt(b->CreateLoad(b->getRawInputPointer("hashValues", priorPos)), sizeTy);
             prefixHash = b->CreateAnd(prefixHash, lg.HASH_MASK, "prefixHash");
-            Value * extensionMapEntry = b->CreateGEP0(extensionMapPtr, {b->getInt32(0), b->getInt32(length-lo-1), prefixHash});
+            Value * extensionMapEntry = b->CreateGEP(extensionMapPtr, {b->getInt32(0), b->getInt32(length-lo-1), prefixHash});
             Value * storedHash = b->CreateMonitoredScalarFieldLoad("prefixMapTable", extensionMapEntry);
             b->CreateCondBr(b->CreateIsNull(storedHash), storePrefix, nextKey);
             b->SetInsertPoint(storePrefix);
@@ -1149,7 +1149,7 @@ void generateDecompKeyProcessingLoops(BuilderRef b,
         PHINode * const keyWordPhi = b->CreatePHI(sizeTy, 2);
         keyWordPhi->addIncoming(sz_ZERO, entryBlock);
         Value * keyWordIdx = b->CreateCountForwardZeroes(keyMaskPhi, "keyWordIdx");
-        Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(keyWordBasePtr, keyWordIdx)), sizeTy);
+        Value * nextKeyWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(keyWordBasePtr, keyWordIdx)), sizeTy);
         Value * theKeyWord = b->CreateSelect(b->CreateICmpEQ(keyWordPhi, sz_ZERO), nextKeyWord, keyWordPhi);
         Value * keyWordPos = b->CreateAdd(stridePos, b->CreateMul(keyWordIdx, sw.WIDTH));
         Value * keyMarkPosInWord = b->CreateCountForwardZeroes(theKeyWord);
@@ -1158,7 +1158,7 @@ void generateDecompKeyProcessingLoops(BuilderRef b,
         Value * keyStartPos = b->CreateSub(keyMarkPos, sz_MARK_OFFSET, "keyStartPos");
         Value * keyHash = b->CreateAnd(hashValue, lg.HASH_MASK, "keyHash");
 
-        Value * tblEntryPtr = b->CreateGEP0(hashTablePtr, {b->getInt32(0), LGTH_IDX, b->CreateMul(keyHash, lg.HI)});
+        Value * tblEntryPtr = b->CreateGEP(hashTablePtr, {b->getInt32(0), LGTH_IDX, b->CreateMul(keyHash, lg.HI)});
         Value * symPtr = b->getRawInputPointer("byteData", b->getInt32(0), keyStartPos);
         // Check to see if the hash table entry is nonzero (already assigned).
         std::vector<Value *> sym = loadSymbol(b, symPtr, length);
@@ -1228,7 +1228,7 @@ void generateHashProcessingLoops(BuilderRef b,
         PHINode * const hashWordPhi = b->CreatePHI(sizeTy, 2);
         hashWordPhi->addIncoming(sz_ZERO, entryBlock);
         Value * hashWordIdx = b->CreateCountForwardZeroes(hashMaskPhi, "hashWordIdx");
-        Value * nextHashWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP0(hashWordBasePtr, hashWordIdx)), sizeTy);
+        Value * nextHashWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(hashWordBasePtr, hashWordIdx)), sizeTy);
         Value * theHashWord = b->CreateSelect(b->CreateICmpEQ(hashWordPhi, sz_ZERO), nextHashWord, hashWordPhi);
         Value * hashWordPos = b->CreateAdd(stridePos, b->CreateMul(hashWordIdx, sw.WIDTH));
         Value * hashPosInWord = b->CreateCountForwardZeroes(theHashWord);
@@ -1262,7 +1262,7 @@ void generateHashProcessingLoops(BuilderRef b,
         b->CreateBr(continueDecode);
         b->SetInsertPoint(continueDecode);
 #endif
-        Value * tblEntryPtr = b->CreateGEP0(hashTablePtr, {b->getInt32(0), tableNo, b->CreateMul(hashCode, b->CreateAdd(lg.HI, extensionCode))});
+        Value * tblEntryPtr = b->CreateGEP(hashTablePtr, {b->getInt32(0), tableNo, b->CreateMul(hashCode, b->CreateAdd(lg.HI, extensionCode))});
         std::vector<Value *> dictSym = MonitoredScalarLoadSymbol(b, "hashTable", tblEntryPtr, length);
         Value * destPtr = b->getRawOutputPointer("result", b->getInt32(0), symStartPos);
         storeSymbol(b, dictSym, destPtr, length);

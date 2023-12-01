@@ -290,11 +290,11 @@ void PipelineCompiler::phiOutPartitionItemCounts(BuilderRef b, const unsigned ke
                 const auto prefix = makeBufferName(kernel, br.Port);
                 Value * ptr = nullptr;
                 if (LLVM_UNLIKELY(br.isDeferred() && !fromKernelEntryBlock)) {
-                    ptr = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                    ptr = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX).first;
                 } else {
-                    ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+                    ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
                 }
-                produced = b->CreateLoad(ptr);
+                produced = b->CreateLoad(b->getSizeTy(), ptr);
             }
 
             assert (isFromCurrentFunction(b, produced, false));

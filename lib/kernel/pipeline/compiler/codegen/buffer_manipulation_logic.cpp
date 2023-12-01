@@ -61,11 +61,11 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
     BasicBlock * const hasSufficientZeroExtendSpace =
         b->CreateBasicBlock(prefix + "_hasSufficientZeroExtendSpace", insertBefore);
 
-    Value * const zeroExtendSpace = b->getScalarFieldPtr(ZERO_EXTENDED_SPACE);
-    Value * const currentSpace = b->CreateLoad(zeroExtendSpace);
+    auto zeSpaceRef = b->getScalarFieldPtr(ZERO_EXTENDED_SPACE);
+    Value * const currentSpace = b->CreateLoad(zeSpaceRef.second, zeSpaceRef.first);
 
-    Value * const zeroExtendBuffer = b->getScalarFieldPtr(ZERO_EXTENDED_BUFFER);
-    Value * const currentBuffer = b->CreateLoad(zeroExtendBuffer);
+    auto zeBufferRef = b->getScalarFieldPtr(ZERO_EXTENDED_BUFFER);
+    Value * const currentBuffer = b->CreateLoad(zeBufferRef.second, zeBufferRef.first);
 
     requiredSpace = b->CreateRoundUp(requiredSpace, b->getSize(b->getCacheAlignment()));
 
@@ -77,8 +77,8 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlo
     b->CreateFree(currentBuffer);
     Value * const newBuffer = b->CreatePageAlignedMalloc(requiredSpace);
     b->CreateMemZero(newBuffer, requiredSpace, b->getCacheAlignment());
-    b->CreateStore(requiredSpace, zeroExtendSpace);
-    b->CreateStore(newBuffer, zeroExtendBuffer);
+    b->CreateStore(requiredSpace, zeSpaceRef.first);
+    b->CreateStore(newBuffer, zeBufferRef.first);
     b->CreateBr(hasSufficientZeroExtendSpace);
 
     b->SetInsertPoint(hasSufficientZeroExtendSpace);
@@ -356,7 +356,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                     outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
                 }
                 assert (inputPtr->getType() == outputPtr->getType());
-                Value * const val = b->CreateBlockAlignedLoad(inputPtr);
+                Value * const val = b->CreateBlockAlignedLoad(mask->getType(), inputPtr);
                 Value * const maskedVal = b->CreateAnd(val, mask);
                 b->CreateBlockAlignedStore(maskedVal, outputPtr);
 
@@ -414,7 +414,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 void PipelineCompiler::freeZeroedInputBuffers(BuilderRef b) {
     // free any truncated input buffers
     for (unsigned i = 0; i < mNumOfTruncatedInputBuffers; ++i) {
-        b->CreateFree(b->CreateLoad(mTruncatedInputBuffer[i]));
+        b->CreateFree(b->CreateLoad(b->getInt8PtrTy(), mTruncatedInputBuffer[i]));
     }
 }
 
@@ -496,7 +496,7 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * const ptrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
         debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif
-        Value * const value = b->CreateBlockAlignedLoad(inputPtr);
+        Value * const value = b->CreateBlockAlignedLoad(mask->getType(), inputPtr);
         Value * const maskedValue = b->CreateAnd(value, mask);
 
         Value * outputPtr = inputPtr;

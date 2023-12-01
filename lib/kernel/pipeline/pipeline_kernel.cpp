@@ -3,10 +3,14 @@
 #include "compiler/pipeline_compiler.hpp"
 #include <llvm/IR/Function.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
+#include <llvm/Analysis/ConstantFolding.h>
+#endif
 #ifdef ENABLE_PAPI
 #include <papi.h>
 #include <boost/tokenizer.hpp>
 #endif
+
 
 // NOTE: the pipeline kernel is primarily a proxy for the pipeline compiler. Ideally, by making some kernels
 // a "family", the pipeline kernel will be compiled once for the lifetime of a program. Thus we can avoid even
@@ -487,8 +491,12 @@ void PipelineKernel::writeInternallyGeneratedStreamSetScaleVector(const Relation
     auto getJthOffset = [&](const unsigned j) -> size_t {
         FixedArray<unsigned, 1> off;
         off[0] = j;
-        const ConstantInt * const v = cast<ConstantInt>(ConstantExpr::getExtractValue(ar, off));
-        return (v->getLimitedValue() * scale);
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
+        const Constant * const v = ConstantFoldExtractValueInstruction(ar, off);
+        #else
+        const Constant * const v = ConstantExpr::getExtractValue(ar, off);
+        #endif
+        return (cast<ConstantInt>(v)->getLimitedValue() * scale);
     };
 
     unsigned j = 0;
@@ -540,14 +548,17 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     SmallVector<Type *, 32> params;
     params.reserve(getNumOfScalarInputs() + numOfStreamSets);
 
+    StructType * streamSetTy = nullptr;
     PointerType * streamSetPtrTy = nullptr;
+    PointerType * voidPtrTy = b->getVoidPtrTy();
+    IntegerType * int64Ty = b->getInt64Ty();
     if (numOfStreamSets) {
         // must match streamsetptr.h
         FixedArray<Type *, 2> fields;
-        fields[0] = b->getVoidPtrTy();
-        fields[1] = b->getInt64Ty();
-        StructType * sty = StructType::get(b->getContext(), fields);
-        streamSetPtrTy = sty->getPointerTo();
+        fields[0] = voidPtrTy;
+        fields[1] = int64Ty;
+        streamSetTy = StructType::get(b->getContext(), fields);
+        streamSetPtrTy = streamSetTy->getPointerTo();
     }
 
     // The initial params of doSegment are its shared handle, thread-local handle and numOfStrides.
@@ -585,10 +596,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     assert (main->empty());
 
-    #ifdef ENABLE_LIBBACKTRACE
-    b->resetAssertionTraces();
-    #endif
-
     b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
     auto arg = main->arg_begin();
     auto nextArg = [&]() -> Value * {
@@ -616,15 +623,15 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             assert (streamSetArg->getType() == streamSetPtrTy);
             // virtual base input address
             fields[1] = i32_ZERO;
-            Value * const vbaPtr = b->CreateGEP0(streamSetArg, fields);
-            segmentArgs[argCount++] = b->CreateLoad(vbaPtr);
+            Value * const vbaPtr = b->CreateGEP(streamSetTy, streamSetArg, fields);
+            segmentArgs[argCount++] = b->CreateLoad(voidPtrTy, vbaPtr);
             // processed input items
             fields[1] = i32_ONE;
             Value * const processedPtr = b->CreateAllocaAtEntryPoint(b->getSizeTy());
             b->CreateStore(sz_ZERO, processedPtr);
             segmentArgs[argCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[argCount++] = b->CreateLoad(b->CreateGEP0(streamSetArg, fields));
+            segmentArgs[argCount++] = b->CreateLoad(int64Ty, b->CreateGEP(streamSetTy, streamSetArg, fields));
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
@@ -633,13 +640,13 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
-            segmentArgs[argCount++] = b->CreateGEP0(streamSetArg, fields);
+            segmentArgs[argCount++] = b->CreateGEP(streamSetTy, streamSetArg, fields);
 
             // produced output items
             fields[1] = i32_ONE;
-            Value * const itemPtr = b->CreateGEP0(streamSetArg, fields);
-            segmentArgs[argCount++] = b->CreateGEP0(streamSetArg, fields);
-            segmentArgs[argCount++] = b->CreateLoad(itemPtr);
+            Value * const itemPtr = b->CreateGEP(streamSetTy, streamSetArg, fields);
+            segmentArgs[argCount++] = itemPtr;
+            segmentArgs[argCount++] = b->CreateLoad(int64Ty, itemPtr);
         }
 
         assert (argCount == doSegment->arg_size());

@@ -40,7 +40,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo && mSegNo);
     } else if (mUseDynamicMultithreading) {
-        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
+        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
         mSegNo = b->CreateAtomicFetchAndAdd(b->getSize(1), segNoPtr);
@@ -123,7 +123,7 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         b->CreateBr(acquire);
 
         b->SetInsertPoint(acquire);
-        Value * const currentSegNo = b->CreateAtomicLoadAcquire(waitingOnPtr);
+        Value * const currentSegNo = b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const minExpectedSegNo = b->getSize(0); // b->CreateSaturatingSub(segNo, b->getSize(mNumOfThreads - 1U));
             Value * const valid = b->CreateICmpUGE(currentSegNo, minExpectedSegNo);
@@ -186,7 +186,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
-    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
+    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     ptr->setName(makeKernelName(kernelId) + __getSyncLockNameString(type));
     return ptr;
 }

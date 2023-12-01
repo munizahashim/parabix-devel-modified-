@@ -211,20 +211,20 @@ public:
 // internal pipeline functions
 
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b, const std::vector<Value *> & props) const;
-    void writeThreadStructObject(BuilderRef b, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
-    void readThreadStuctObject(BuilderRef b, Value * threadState);
+    void writeThreadStructObject(BuilderRef b, StructType * const threadStateTy, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
+    void readThreadStuctObject(BuilderRef b, StructType * const threadStateTy, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
-    Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
-    void writeTerminationSignalToLocalState(BuilderRef b, Value * const threadState, Value * const terminated) const;
+    Value * readTerminationSignalFromLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
+    void writeTerminationSignalToLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState, Value * const terminated) const;
 
     std::vector<llvm::Value *> storeDoSegmentState() const;
-    void readDoSegmentState(BuilderRef b, Value * const propertyState);
+    void readDoSegmentState(BuilderRef b, StructType * const threadStructTy, Value * const propertyState);
     void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
 
-    inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
+    inline Value * isProcessThread(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
     void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
 
@@ -564,7 +564,7 @@ public:
     Value * getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
     void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
     Value * getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
-    Value * getKernelDoSegmentFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(BuilderRef b) const;
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
 
