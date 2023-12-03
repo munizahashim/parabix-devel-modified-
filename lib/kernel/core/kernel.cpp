@@ -1319,7 +1319,8 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(allocatesInternalStreamSets())) {
         flags |= 4;
     }
-    out << 'F' << ('0' + flags) << getStride();
+    const char code = 'a' + flags;
+    out << 'F' << code << getStride() << ',';
     AttributeSet::print(out);
     for (const Binding & input : mInputScalars) {
         out << ",IV("; input.print(this, out); out << ')';

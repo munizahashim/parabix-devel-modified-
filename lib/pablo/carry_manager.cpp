@@ -876,6 +876,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
 
             indices[1] = b->getInt32(mCurrentFrameIndex);
 
+            Type * const elemTy = mCurrentFrameType->getStructElementType(mCurrentFrameIndex)->getArrayElementType();
 
             for (unsigned i = 1;;++i) {
 
@@ -884,7 +885,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
                 indices[2] = b->getInt32(i - 1);
 
                 Value * const ptr = b->CreateGEP(mCurrentFrameType,  mCurrentFrame, indices);
-                Value * const prior = b->CreateLoad(streamTy, ptr);
+                Value * const prior = b->CreateBitCast(b->CreateLoad(elemTy, ptr), streamTy);
 
                 Value * advanced = nullptr;
                 if (LLVM_LIKELY(summaryBlocks < laneWidth)) {

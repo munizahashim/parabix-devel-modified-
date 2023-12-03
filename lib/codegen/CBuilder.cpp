@@ -1479,33 +1479,71 @@ Function * CBuilder::LinkFunction(StringRef name, FunctionType * type, void * fu
     return mDriver->addLinkFunction(getModule(), name, type, functionPtr);
 }
 
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+Value * CBuilder::CreateGEP(Type * Ty, Value * Ptr, ArrayRef<Value *> IdxList, const Twine & Name, bool IsInBounds) {
+    assert (Ty->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
+    if (IsInBounds) {
+        return IRBuilder<>::CreateInBoundsGEP(Ty, CreatePointerCast(Ptr, Ty->getPointerTo()), IdxList, Name);
+    } else {
+        return IRBuilder<>::CreateGEP(Ty, CreatePointerCast(Ptr, Ty->getPointerTo()), IdxList, Name);
+    }
+}
+#endif
+
 LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, const char * Name) {
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
+    #endif
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    return IRBuilder<>::CreateLoad(IRBuilder<>::CreatePointerCast(Ptr, type->getPointerTo()), Name);
+    #else
     return IRBuilder<>::CreateLoad(type, Ptr, Name);
+    #endif
 }
 
 LoadInst * CBuilder::CreateLoad(Type * type, Value *Ptr, const Twine Name) {
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
+    #endif
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    return IRBuilder<>::CreateLoad(IRBuilder<>::CreatePointerCast(Ptr, type->getPointerTo()), Name);
+    #else
     return IRBuilder<>::CreateLoad(type, Ptr, Name);
+    #endif
 }
 
 LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, bool isVolatile, const Twine Name) {
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
+    #endif
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    return IRBuilder<>::CreateLoad(IRBuilder<>::CreatePointerCast(Ptr, type->getPointerTo()), Name);
+    #else
     return IRBuilder<>::CreateLoad(type, Ptr, isVolatile, Name);
+    #endif
 }
 
 StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     assert ("Ptr (Arg2) was expected to be a pointer type" &&
             Ptr->getType()->isPointerTy());
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    assert (Val->getType()->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
+    #endif
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(Val->getType()), "CreateStore");
     }
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    Val = IRBuilder<>::CreateBitCast(Val, Ptr->getType()->getPointerElementType());
+    #endif
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);
 }
 
@@ -2249,7 +2287,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
     return modified;
 }
 
-llvm::ConstantInt * LLVM_READNONE CBuilder::getTypeSize(llvm::Type * type, IntegerType * valType) const {
+ConstantInt * LLVM_READNONE CBuilder::getTypeSize(Type * type, IntegerType * valType) const {
     // ConstantExpr::getSizeOf was creating an infinite(?) loop when folding the value for some complex structs
     // until replaced with this in LLVM 12.
     DataLayout dl(getModule());

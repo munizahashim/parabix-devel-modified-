@@ -17,6 +17,12 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const sz_ZERO = b->getSize(0);
     Value * const sz_ONE = b->getSize(1);
 
+    Function * const callback = module->getFunction(mDoneCallbackName);
+    if (callback == nullptr) {
+        llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mDoneCallbackName);
+    }
+    FunctionType * const fTy = callback->getFunctionType();
+
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const readItem = b->CreateBasicBlock("readItem");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exitBlock");
@@ -47,27 +53,18 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     b->setProcessedItemCount("source", maxScanIndex);
     Value * const nextIndex = b->CreateAdd(nextStrideNo, initialStride);
     b->setProcessedItemCount("scan", nextIndex);
+    unsigned streamIndex = mNumScanStreams;
     for (auto const & name : mAdditionalStreamNames) {
         Value * const ptr = b->getRawInputPointer(name, b->getInt32(0), index);
-        Value * const item = b->CreateLoad(ptr->getType()->getPointerElementType(), ptr);
+        Value * const item = b->CreateLoad(fTy->getFunctionParamType(streamIndex++), ptr);
         callbackParams.push_back(item);
         b->setProcessedItemCount(name, nextIndex);
-    }
-    Function * const callback = module->getFunction(mCallbackName);
-    FunctionType * fTy = callback->getFunctionType();
-    if (callback == nullptr) {
-        llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mCallbackName);
     }
     b->CreateCall(fTy, callback, ArrayRef<Value *>(callbackParams));
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, exitBlock);
 
     if (doneBlock != exitBlock) {
         b->SetInsertPoint(doneBlock);
-        Function * const callback = module->getFunction(mDoneCallbackName);
-        FunctionType * fTy = callback->getFunctionType();
-        if (callback == nullptr) {
-            llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mDoneCallbackName);
-        }
         b->CreateCall(fTy, callback, ArrayRef<Value *>({}));
         b->CreateBr(exitBlock);
     }

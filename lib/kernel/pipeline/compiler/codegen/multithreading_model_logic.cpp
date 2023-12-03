@@ -124,8 +124,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
     DataLayout DL(b->getModule());
     Type * const intPtrTy = DL.getIntPtrType(voidPtrTy);
-    PointerType * const intPtrPtrTy = intPtrTy->getPointerTo();
-
     BasicBlock * const constructThread = b->CreateBasicBlock("constructThread", mPipelineEnd);
     BasicBlock * const constructedThreads = b->CreateBasicBlock("constructedThreads", mPipelineEnd);
 
@@ -203,7 +201,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     b->SetInsertPoint(constructedThreads);
 
     // execute the process thread
-    Value * const pty_ZERO = Constant::getNullValue(pThreadTy);
     Value * const processState = threadStateArray;
     writeThreadStructObject(b, threadStructTy, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maximumNumOfThreads);
     fieldIndex[0] = i32_ZERO;
@@ -758,7 +755,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     Value * finalSegNo = nullptr;
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
         // Value * const retVal = b->CreatePointerCast(status, intPtrPtrTy);
-        finalSegNo = b->CreateUMax(finalSegNoPhi, b->CreateLoad(intPtrTy, status));
+        Value * const retVal = b->CreatePtrToInt(b->CreateLoad(voidPtrTy, status), intPtrTy);
+        finalSegNo = b->CreateUMax(finalSegNoPhi, retVal);
     }
 
     Value * const jThreadState = b->CreateGEP(threadStructTy, threadStateArray, joinThreadIndex);

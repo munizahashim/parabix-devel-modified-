@@ -156,6 +156,7 @@ unsigned Binding::getFieldWidth() const {
 void Binding::print(const Kernel * kernel, llvm::raw_ostream & out) const noexcept {
     mRate.print(kernel, out);
     AttributeSet::print(out);
+    assert ("binding missing type?" && getType());
     getType()->print(out);
 }
 

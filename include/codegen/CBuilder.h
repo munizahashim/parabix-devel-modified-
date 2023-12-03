@@ -365,6 +365,14 @@ public:
 
     virtual llvm::StoreInst * CreateStore(llvm::Value * Val, llvm::Value * Ptr, bool isVolatile = false);
 
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    llvm::Value * CreateGEP(llvm::Type * Ty, llvm::Value * Ptr, llvm::ArrayRef<llvm::Value *> IdxList, const llvm::Twine & Name = "", bool IsInBounds = false);
+
+    llvm::Value * CreateInBoundsGEP(llvm::Type *Ty, llvm::Value *Ptr, llvm::ArrayRef<llvm::Value *> IdxList, const llvm::Twine &Name = "") {
+        return CreateGEP(Ty, Ptr, IdxList, Name, /* IsInBounds */ true);
+    }
+    #endif
+
     llvm::LoadInst * CreateAlignedLoad(llvm::Type * type, llvm::Value * Ptr, const unsigned Align, const char * Name);
 
     llvm::LoadInst * CreateAlignedLoad(llvm::Type * type, llvm::Value * Ptr, const unsigned Align, const llvm::Twine Name = "");

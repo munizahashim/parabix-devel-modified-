@@ -100,6 +100,8 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
 
     assert (kernel->getModule() == nullptr);
 
+    errs() << "loadCachedObjectFile: " << kernel->getName() << "\n";
+
     // Have we already seen this signature before? if so, we can safely assume that the ExecutionEngine
     // will have a compiled module for this kernel when we execute the pipeline.
     const auto signature = kernel->getSignature();
@@ -119,8 +121,15 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
         sys::path::append(fileName, CACHE_PREFIX);
         fileName.append(moduleId);
         fileName.append(KERNEL_FILE_EXTENSION);
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
         auto kernelBuffer = MemoryBuffer::getFile(fileName, -1, false);
+        #else
+        auto kernelBuffer = MemoryBuffer::getFile(fileName, false, true, false);
+        #endif
         if (kernelBuffer) {
+
+            errs() << "kernelBuffer " << kernel->getName() << "\n";
+
             #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
             auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b->getContext());
             #else
@@ -128,6 +137,9 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
             #endif
             // if there was no error when parsing the bitcode
             if (LLVM_LIKELY(loadedFile)) {
+
+                errs() << "loadedFile " << kernel->getName() << "\n";
+
                 std::unique_ptr<Module> M(std::move(loadedFile.get()));
                 if (LLVM_UNLIKELY(kernel->hasSignature())) {
                     const MDString * const sig = getSignature(M.get());
@@ -142,15 +154,20 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
                     }
                 }
                 sys::path::replace_extension(fileName, OBJECT_FILE_EXTENSION);
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
                 auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), -1, false);
+                #else
+                auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), false, true, false);
+                #endif
                 if (LLVM_LIKELY(objectBuffer)) {
+                    errs() << "objectBuffer " << kernel->getName() << "\n";
                     Module * const m = M.release();
                     assert ("object cache file returned null module?" && m);
                     // defaults to <path>/<moduleId>.kernel
                     m->setModuleIdentifier(moduleId);
                     b->setModule(m);
                     kernel->loadCachedKernel(b);
-                    mCachedObject.emplace(moduleId, std::move(objectBuffer.get()));
+                    mCachedObject.emplace(moduleId, objectBuffer.get().release());
                     mKnownSignatures.emplace(signature, m);
                     // update the modified time of the .o and .kernel files
                     const auto access_time = currentTime();
@@ -199,6 +216,8 @@ invalid:
 #define OF_None F_None
 #endif
 void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef Obj) {
+
+    errs() << "notifyObjectCompiled: " << M->getModuleIdentifier() << "\n";
 
     if (LLVM_LIKELY(M->getNamedMetadata(CACHEABLE) != nullptr)) {
 
