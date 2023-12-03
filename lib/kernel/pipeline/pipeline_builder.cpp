@@ -274,7 +274,6 @@ Kernel * PipelineBuilder::makeKernel() {
             obj->ensureLoaded();
             if (K.isFamilyCall()) {
                 // this differs for icgrep kernel?
-                errs() << obj->getFamilyName() << "   ->  " << obj->getName() << "\n";
                 out << 'F' << obj->getFamilyName();
                 numOfNestedKernelFamilyCalls++;
             } else {
@@ -540,16 +539,9 @@ Kernel * PipelineBuilder::makeKernel() {
 
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
-
-
     mTarget->mKernelName =
         Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline,
             PipelineKernel::makePipelineHashName(signature));
-
-
-    errs() << " ---- " << mTarget->mKernelName << "\n\n" << signature.length() << "   " << signature << "\n\n\n\n";
-
-
 
     return mTarget;
 }

@@ -100,8 +100,6 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
 
     assert (kernel->getModule() == nullptr);
 
-    errs() << "loadCachedObjectFile: " << kernel->getName() << "\n";
-
     // Have we already seen this signature before? if so, we can safely assume that the ExecutionEngine
     // will have a compiled module for this kernel when we execute the pipeline.
     const auto signature = kernel->getSignature();
@@ -124,11 +122,9 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
         auto kernelBuffer = MemoryBuffer::getFile(fileName, -1, false);
         #else
-        auto kernelBuffer = MemoryBuffer::getFile(fileName, false, true, false);
+        auto kernelBuffer = MemoryBuffer::getFile(fileName, false, false, false);
         #endif
         if (kernelBuffer) {
-
-            errs() << "kernelBuffer " << kernel->getName() << "\n";
 
             #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
             auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b->getContext());
@@ -137,8 +133,6 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
             #endif
             // if there was no error when parsing the bitcode
             if (LLVM_LIKELY(loadedFile)) {
-
-                errs() << "loadedFile " << kernel->getName() << "\n";
 
                 std::unique_ptr<Module> M(std::move(loadedFile.get()));
                 if (LLVM_UNLIKELY(kernel->hasSignature())) {
@@ -157,10 +151,9 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
                 auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), -1, false);
                 #else
-                auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), false, true, false);
+                auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), false, false, false);
                 #endif
                 if (LLVM_LIKELY(objectBuffer)) {
-                    errs() << "objectBuffer " << kernel->getName() << "\n";
                     Module * const m = M.release();
                     assert ("object cache file returned null module?" && m);
                     // defaults to <path>/<moduleId>.kernel
@@ -217,8 +210,6 @@ invalid:
 #endif
 void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef Obj) {
 
-    errs() << "notifyObjectCompiled: " << M->getModuleIdentifier() << "\n";
-
     if (LLVM_LIKELY(M->getNamedMetadata(CACHEABLE) != nullptr)) {
 
         const StringRef moduleId(M->getModuleIdentifier());
@@ -272,6 +263,22 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 md->addOperand(og.getOperand(i));
             }
         }
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
+        // We precompute some named state object structs to avoid the overhead of LLVM compilation when
+        // pulling a compiled kernel from the cache. However, these objects are only passed into kernel
+        // functions via pointers and LLVM 15 and later uses opaque pointers, which omits the type info.
+        // Thus we need to explicitly store state types in the metadata. This method works but is not
+        // a great workaround but there does not seem to be a "Type" metadata node apart from DIType,
+        // which does not allow for directly named types nor detailed field info.
+
+        // This requires more investigation.
+        NamedMDNode * const md = H->getOrInsertNamedMetadata("____named_struct_types");
+        std::vector<Metadata *> structs;
+        for (StructType * sty : M->getIdentifiedStructTypes()) {
+            structs.push_back(ConstantAsMetadata::get(Constant::getNullValue(sty)));
+        }
+        md->addOperand(MDNode::get(H->getContext(), structs));
+        #endif
         #ifndef NDEBUG
         assert ((getSignature(M) == nullptr) ^ (getSignature(H.get()) != nullptr));
         if (getSignature(M)) {
