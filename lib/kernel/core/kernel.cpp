@@ -47,6 +47,7 @@ const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
 
 const static auto SHARED_SUFFIX = "_shared_state";
 const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
+constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
@@ -237,6 +238,7 @@ void Kernel::ensureLoaded() {
         return;
     }
     assert (mModule);
+    assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
     SmallVector<char, 256> tmp;
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
@@ -249,6 +251,7 @@ void Kernel::loadCachedKernel(BuilderRef b) {
     assert (!mGenerated);
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b->getModule(); assert (mModule);
+    assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
     SmallVector<char, 256> tmp;
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
@@ -272,13 +275,14 @@ void Kernel::linkExternalMethods(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::constructStateTypes(BuilderRef b) {
     Module * const m = getModule(); assert (b->getModule() == m);
-    SmallVector<char, 256> tmpShared;
-    auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
-    mSharedStateType = getTypeByName(m, strShared);
-    SmallVector<char, 256> tmpThreadLocal;
-    auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
-    mThreadLocalStateType = getTypeByName(m, strThreadLocal);
-    if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
+
+    SmallVector<char, 256> tmpMeta;
+    auto strMeta = concat(getName(), STATE_TYPE_METADATA_SUFFIX, tmpMeta);
+    NamedMDNode * const structTypeMetadata = m->getOrInsertNamedMetadata(strMeta);
+
+    assert (structTypeMetadata);
+
+    if (structTypeMetadata->getNumOperands() == 0) {
 
         flat_set<unsigned> sharedGroups;
         flat_set<unsigned> threadLocalGroups;
@@ -335,9 +339,13 @@ void Kernel::constructStateTypes(BuilderRef b) {
             shared[sharedGroupCount + 1].push_back(scalar.getType());
         }
 
-        DataLayout dl(m);
-
         IntegerType * const int8Ty = b->getInt8Ty();
+
+        const size_t cacheAlignment = b->getCacheAlignment();
+
+        SmallVector<Metadata *, 2> stateTypes;
+
+        DataLayout dl(m);
 
         auto getTypeSize = [&](Type * const type) -> uint64_t {
             if (type == nullptr) {
@@ -350,7 +358,6 @@ void Kernel::constructStateTypes(BuilderRef b) {
             #endif
         };
 
-        const size_t cacheAlignment = b->getCacheAlignment();
 
         auto makeStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
                                   StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
@@ -364,6 +371,9 @@ void Kernel::constructStateTypes(BuilderRef b) {
                     }
                 }
             }
+
+            stateTypes.push_back(ConstantAsMetadata::get(Constant::getNullValue(StructType::create(b->getContext(), name))));
+
             return nullptr;
 found_non_empty_type:
             std::vector<Type *> structTypes(n * 2);
@@ -400,26 +410,56 @@ found_non_empty_type:
             }
             #endif
 
+            stateTypes.push_back(ConstantAsMetadata::get(Constant::getNullValue(st)));
+
             assert (!st->isEmptyTy());
             assert (getTypeSize(st) > 0);
 
             return st;
         };
 
+
+
         // NOTE: StructType::create always creates a new type even if an identical one exists.
         const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
+        SmallVector<char, 256> tmpShared;
+        auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
         mSharedStateType = makeStructType(shared, strShared, sharedGroupCount > 1 && allowStructPadding);
         assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
+        assert (stateTypes.size() == 1);
+
+        SmallVector<char, 256> tmpThreadLocal;
+        auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
         mThreadLocalStateType = makeStructType(threadLocal, strThreadLocal, false);
         assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
+
+        assert (stateTypes.size() == 2);
+        structTypeMetadata->addOperand(MDNode::get(m->getContext(), stateTypes));
+        assert (structTypeMetadata->getNumOperands() == 1);
+
+        assert (mSharedStateType == nullptr || mSharedStateType->isSized());
+        assert (mThreadLocalStateType == nullptr || mThreadLocalStateType->isSized());
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
             errs() << "KERNEL: " << mKernelName
                    << " SHARED STATE: " << getTypeSize(mSharedStateType) << " bytes"
                       ", THREAD LOCAL STATE: "  << getTypeSize(mThreadLocalStateType) << " bytes\n";
         }
+    } else {
+        assert (structTypeMetadata->getNumOperands() == 1);
+        MDNode * structTypes = structTypeMetadata->getOperand(0);
+        assert (structTypes->getNumOperands() == 2);
+        Type * shType = cast<ConstantAsMetadata>(structTypes->getOperand(0))->getType();
+        mSharedStateType = nullIfEmpty(cast<StructType>(shType));
+        assert (mSharedStateType == nullptr || mSharedStateType->isSized());
 
+
+        Type * tlType = cast<ConstantAsMetadata>(structTypes->getOperand(1))->getType();
+        mThreadLocalStateType = nullIfEmpty(cast<StructType>(tlType));
+        assert (mThreadLocalStateType == nullptr || mThreadLocalStateType->isSized());
     }
+
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1076,8 +1116,7 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef /* b */, const MainMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        Value * const handle = b->CreatePageAlignedMalloc(getSharedStateType());
-        return handle;
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;

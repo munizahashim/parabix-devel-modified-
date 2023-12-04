@@ -256,6 +256,9 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 Function::Create(f.getFunctionType(), Function::ExternalLinkage, f.getName(), H.get());
             }
         }
+
+
+
         for (const auto & og : M->named_metadata()) {
             NamedMDNode * const md = H->getOrInsertNamedMetadata(og.getName());
             const auto n = og.getNumOperands();
@@ -263,22 +266,6 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 md->addOperand(og.getOperand(i));
             }
         }
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
-        // We precompute some named state object structs to avoid the overhead of LLVM compilation when
-        // pulling a compiled kernel from the cache. However, these objects are only passed into kernel
-        // functions via pointers and LLVM 15 and later uses opaque pointers, which omits the type info.
-        // Thus we need to explicitly store state types in the metadata. This method works but is not
-        // a great workaround but there does not seem to be a "Type" metadata node apart from DIType,
-        // which does not allow for directly named types nor detailed field info.
-
-        // This requires more investigation.
-        NamedMDNode * const md = H->getOrInsertNamedMetadata("____named_struct_types");
-        std::vector<Metadata *> structs;
-        for (StructType * sty : M->getIdentifiedStructTypes()) {
-            structs.push_back(ConstantAsMetadata::get(Constant::getNullValue(sty)));
-        }
-        md->addOperand(MDNode::get(H->getContext(), structs));
-        #endif
         #ifndef NDEBUG
         assert ((getSignature(M) == nullptr) ^ (getSignature(H.get()) != nullptr));
         if (getSignature(M)) {
