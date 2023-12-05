@@ -196,11 +196,12 @@ void IStreamSelect::generateMultiBlockLogic(BuilderRef b, Value * const numOfStr
     strideNo->addIncoming(b->getSize(0), block_Entry);
     uint32_t outIdx = 0;
     Value * const absPos = b->CreateAdd(strideNo, initialStride);
+    IntegerType * const fieldTy = b->getIntNTy(mFieldWidth);
     for (auto const & binding : mOperation.bindings) {
         auto const & name = binding.first;
         for (auto const & idx : binding.second) {
             Value * const ptr = b->getRawInputPointer(name, b->getInt32(idx), absPos);
-            Value * const val = b->CreateLoad(ptr->getType()->getPointerElementType(), ptr);
+            Value * const val = b->CreateLoad(fieldTy, ptr);
             b->CreateStore(val, b->getRawOutputPointer("output", b->getInt32(outIdx), absPos));
             outIdx++;
         }

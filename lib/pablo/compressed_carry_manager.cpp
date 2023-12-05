@@ -366,6 +366,7 @@ StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * co
 
         if (LLVM_UNLIKELY(inNonCarryCollapsingLoop && state.size() > 0)) {
             mHasNonCarryCollapsingLoops = true;
+            cd.setNestedCarryStateType(carryState);
             summaryType = (CarryData::SummaryType)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
             FixedArray<Type *, 3> fields;
             fields[NestedCapacity] = b->getSizeTy();

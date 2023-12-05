@@ -1595,7 +1595,7 @@ Value * RepeatingBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddre
         assert (isConstantOne(getStreamSetCount(b)));
         Value * offset = b->CreateSub(transferredItems, b->CreateURem(transferredItems, mModulus));
         Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
-        Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+        Type * itemTy = cast<VectorType>(elemTy)->getElementType();
         #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
         const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
         #else
@@ -1605,12 +1605,11 @@ Value * RepeatingBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddre
         if (LLVM_UNLIKELY(itemWidth < 8)) {
             const Rational itemsPerByte{8, itemWidth};
             offset = b->CreateUDivRational(offset, itemsPerByte);
-            itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
-        } else {
-            itemPtrTy = itemTy->getPointerTo(mAddressSpace);
+            itemTy = b->getInt8Ty();
         }
+        itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
         addr = b->CreatePointerCast(baseAddress, itemPtrTy);
-        addr = b->CreateInBoundsGEP(mType, addr, b->CreateNeg(offset));
+        addr = b->CreateInBoundsGEP(itemTy, addr, b->CreateNeg(offset));
     } else {
         Value * const transferredBlocks = b->CreateLShr(transferredItems, LOG_2_BLOCK_WIDTH);
         Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());

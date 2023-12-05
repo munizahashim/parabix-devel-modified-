@@ -11,15 +11,19 @@ using namespace llvm;
 
 namespace kernel {
 
-void editdCPUKernel::bitblock_advance_ci_co(BuilderRef idb,
-                                            Value * val, unsigned shift, Value * stideCarryArr, unsigned carryIdx,
+void editdCPUKernel::bitblock_advance_ci_co(BuilderRef b,
+                                            Value * val, unsigned shift, Value * strideCarryArr, unsigned carryIdx,
                                             std::vector<std::vector<Value *>> & adv,
                                             std::vector<std::vector<int>> & calculated, int i, int j) const {
     if (calculated[i][j] == 0) {
-        Value * ptr = idb->CreateGEP(stideCarryArr, {idb->getInt32(0), idb->getInt32(carryIdx)});
-        Value * ci = idb->CreateLoad(ptr);
-        std::pair<Value *, Value *> rslt = idb->bitblock_advance(val, ci, shift);
-        idb->CreateStore(std::get<0>(rslt), ptr);
+        FixedArray<Value *, 2> indices;
+        indices[0] = b->getInt32(0);
+        indices[1] = b->getInt32(carryIdx);
+        Type * bbTy = b->getBitBlockType();
+        Value * ptr = b->CreateGEP(bbTy, strideCarryArr, indices);
+        Value * ci = b->CreateLoad(bbTy, ptr);
+        std::pair<Value *, Value *> rslt = b->bitblock_advance(val, ci, shift);
+        b->CreateStore(std::get<0>(rslt), ptr);
         adv[i][j] = std::get<1>(rslt);
         calculated[i][j] = 1;
     }
@@ -53,15 +57,17 @@ void editdCPUKernel::generateDoBlockMethod(BuilderRef idb) {
         e[0][j] = idb->allOnes();
     }
 
+    Type * bbTy = idb->getBitBlockType();
+
     for(unsigned g = 0; g < mGroupSize; g++){
-        Value * pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+        Value * pattCh = idb->CreateLoad(bbTy, idb->CreateGEP(bbTy, pattStartPtr, pattPos));
         Value * pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
         Value * pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
         pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
 
         e[0][0] = pattStream;
         for(unsigned i = 1; i < mPatternLen; i++){
-            pattCh = idb->CreateLoad(idb->CreateGEP(pattStartPtr, pattPos));
+            pattCh = idb->CreateLoad(bbTy, idb->CreateGEP(bbTy, pattStartPtr, pattPos));
             pattIdx = idb->CreateAnd(idb->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
             pattStream = idb->loadInputStreamBlock("CCStream", idb->CreateZExt(pattIdx, int32ty));
             pattPos = idb->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));

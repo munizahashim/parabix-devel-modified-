@@ -110,7 +110,7 @@ protected:
 private:
     std::string              mCallbackName;
     std::string              mDoneCallbackName;
-    std::vector<std::string> mAdditionalStreamNames;
+//    std::vector<std::string> mAdditionalStreamNames;
     const uint32_t           mNumScanStreams;
 };
 

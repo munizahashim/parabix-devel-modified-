@@ -143,7 +143,7 @@ protected:
     const PabloKernel *                             mKernel;
 
     llvm::Value *                                   mCurrentFrame;
-    llvm::Type *                                    mCurrentFrameType;
+    llvm::StructType *                              mCurrentFrameType;
     unsigned                                        mCurrentFrameIndex;
 
     const CarryData *                               mCarryInfo;
@@ -164,17 +164,32 @@ protected:
     llvm::Value *                                   mLoopSelector;
     llvm::Value *                                   mNextLoopSelector;
     llvm::Value *                                   mCarryPackPtr;
-    Vec<llvm::Value *>                              mNonCarryCollapsingModeStack;
+
+    struct NonCarryCollapsingFrame {
+        llvm::StructType * OuterFrameType;
+        llvm::Value *      OuterFrame;
+        size_t             NestedFrameIndex;
+        llvm::PHINode *    LoopIterationPhi = nullptr;
+        llvm::Value *      LastNonZeroIteration = nullptr;
+        llvm::Value *      LastIncomingCarryIteration;
+
+        NonCarryCollapsingFrame(llvm::StructType * ty, llvm::Value * frame, size_t index, llvm::Value * lastIncomingCarryIteration)
+        : OuterFrameType(ty), OuterFrame(frame), NestedFrameIndex(index), LastIncomingCarryIteration(lastIncomingCarryIteration) {
+
+        }
+    };
+
+    Vec<NonCarryCollapsingFrame>                    mNonCarryCollapsingModeStack;
 
     Vec<CarryData>                                  mCarryMetadata;
 
     struct CarryFrame {
-        llvm::Value *   Frame = nullptr;
-        llvm::Type *    Type = nullptr;
-        unsigned        Index = 0;
+        llvm::Value *       Frame = nullptr;
+        llvm::StructType *  Type = nullptr;
+        unsigned            Index = 0;
 
         CarryFrame() = default;
-        CarryFrame(llvm::Value * frame, llvm::Type * type, unsigned index) : Frame(frame), Type(type), Index(index) {}
+        CarryFrame(llvm::Value * frame, llvm::StructType * type, unsigned index) : Frame(frame), Type(type), Index(index) {}
     };
 
     Vec<CarryFrame>                                 mCarryFrameStack;

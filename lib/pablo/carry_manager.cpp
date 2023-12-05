@@ -270,17 +270,11 @@ void CarryManager::enterLoopScope(BuilderRef b) {
 
         FixedArray<Value *, 2> indices;
         indices[0] = b->getInt32(mCurrentFrameIndex);
-        indices[1] = b->getInt32(NestedCapacity);
-        Value * const capacityPtr = b->CreateGEP(mCurrentFrameType, mCurrentFrame, indices);
-        indices[1] = b->getInt32(NestedCarryState);
-        Value * const arrayPtr = b->CreateGEP(mCurrentFrameType, mCurrentFrame, indices);
         indices[1] = b->getInt32(LastIncomingCarryLoopIteration);
         Value * const lastIncomingCarryIterationPtr = b->CreateGEP(mCurrentFrameType, mCurrentFrame, indices);
         Value * const lastIncomingCarryIteration = b->CreateLoad(b->getSizeTy(), lastIncomingCarryIterationPtr);
-        mNonCarryCollapsingModeStack.push_back(lastIncomingCarryIterationPtr);
-        mNonCarryCollapsingModeStack.push_back(lastIncomingCarryIteration);
-        mNonCarryCollapsingModeStack.push_back(arrayPtr);
-        mNonCarryCollapsingModeStack.push_back(capacityPtr);
+        assert (mCurrentFrameType->getStructNumElements() == 3);
+        mNonCarryCollapsingModeStack.emplace_back(cast<StructType>(mCurrentFrameType), mCurrentFrame, mCurrentFrameIndex, lastIncomingCarryIteration);
     }
 }
 
@@ -293,9 +287,8 @@ Value * CarryManager::generateEntrySummaryTest(BuilderRef b, Value * condition) 
         if (LLVM_LIKELY(condition->getType() == b->getBitBlockType())) {
             condition = b->bitblock_any(condition);
         }
-        const auto n = mNonCarryCollapsingModeStack.size();
-        Value * const lastIncomingCarryIteration = mNonCarryCollapsingModeStack[n - 3];
-        condition = b->CreateOr(condition, b->CreateIsNotNull(lastIncomingCarryIteration));
+        const NonCarryCollapsingFrame & frame = mNonCarryCollapsingModeStack.back();
+        condition = b->CreateOr(condition, b->CreateIsNotNull(frame.LastIncomingCarryIteration));
     } else if (LLVM_LIKELY(mCarryInfo->hasSummary())) {
         assert ("summary condition cannot be null!" && condition);
         assert ("summary test was not generated" && mNextSummaryTest);
@@ -351,32 +344,31 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
 
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
 
-        report_fatal_error("Not handled yet");
-
-#if 0
+        assert (mCarryInfo->getNestedCarryStateType());
 
         DataLayout DL(b->getModule());
 
         IntegerType * const sizeTy = b->getSizeTy();
 
         ConstantInt * const ZERO = b->getSize(0);
-        Value * const capacityPtr = mNonCarryCollapsingModeStack.pop_back_val();
-        Value * const carryStateArrayPtr = mNonCarryCollapsingModeStack.pop_back_val();
 
-        Type * const int8Ty = b->getInt8Ty();
-        Type * const int8PtrTy = b->getInt8PtrTy();
+        NonCarryCollapsingFrame & frame = mNonCarryCollapsingModeStack.back();
 
         // Check whether we need to resize the carry state
         PHINode * const lastNonZeroCarryOutIterationPhi = b->CreatePHI(sizeTy, 2);
         lastNonZeroCarryOutIterationPhi->addIncoming(ZERO, entryBlock);
-        mNonCarryCollapsingModeStack.push_back(lastNonZeroCarryOutIterationPhi);
+        frame.LastNonZeroIteration = lastNonZeroCarryOutIterationPhi;
 
         PHINode * const indexPhi = b->CreatePHI(sizeTy, 2);
         indexPhi->addIncoming(ZERO, entryBlock);
-        mNonCarryCollapsingModeStack.push_back(indexPhi);
-        Value * const carryStateArray = b->CreateLoad(carryStateArrayPtr);
-        assert (carryStateArray->getType()->isPointerTy());
+        frame.LoopIterationPhi = indexPhi;
 
+        FixedArray<Value *, 2> indices;
+        indices[0] = b->getInt32(frame.NestedFrameIndex);
+        indices[1] = b->getInt32(NestedCapacity);
+        assert (frame.OuterFrameType->getStructNumElements() == 3);
+        assert (frame.OuterFrameType->getStructElementType(NestedCapacity) == sizeTy);
+        Value * const capacityPtr = b->CreateGEP(frame.OuterFrameType, frame.OuterFrame, indices);
         Value * const capacity = b->CreateLoad(sizeTy, capacityPtr);
 
         BasicBlock * const entry = b->GetInsertBlock();
@@ -384,14 +376,23 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         BasicBlock * const reallocExisting = b->CreateBasicBlock("ReallocExisting");
         BasicBlock * const createNew = b->CreateBasicBlock("CreateNew");
         BasicBlock * const resumeKernel = b->CreateBasicBlock("ResumeKernel");
+
+        indices[1] = b->getInt32(NestedCarryState);
+        Value * const carryStateArrayPtr = b->CreateGEP(frame.OuterFrameType, frame.OuterFrame, indices);
+        StructType * nestedCarryTy = mCarryInfo->getNestedCarryStateType(); assert (nestedCarryTy);
+        Type * nestedCarryPtrTy = frame.OuterFrameType->getStructElementType(NestedCarryState);
+
+        assert (nestedCarryPtrTy->isPointerTy());
+        Value * const carryStateArray = b->CreateLoad(nestedCarryPtrTy, carryStateArrayPtr);
+        assert (carryStateArray->getType()->isPointerTy());
+
         b->CreateLikelyCondBr(b->CreateICmpNE(indexPhi, capacity), resumeKernel, resizeCarryState);
 
         // RESIZE CARRY BLOCK
         b->SetInsertPoint(resizeCarryState);
         const auto blockSize = b->getBitBlockWidth() / 8;
-//        PointerType * const carryStatePtrTy = cast<PointerType>(carryStateArray->getType());
-//        Type * const carryStateTy = carryStatePtrTy->getPointerElementType();
-        Constant * const carryStateTySize = b->getTypeSize(mCurrentFrameType);
+        PointerType * const carryStatePtrTy = mCurrentFrameType->getPointerTo();
+        Constant * const carryStateTySize = b->getTypeSize(nestedCarryTy);
         b->CreateLikelyCondBr(b->CreateICmpNE(capacity, ZERO), reallocExisting, createNew);
 
         // REALLOCATE EXISTING
@@ -403,7 +404,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         Value * newCarryStateArray = b->CreatePageAlignedMalloc(newCapacitySize);
         b->CreateMemCpy(newCarryStateArray, carryStateArray, capacitySize, b->getCacheAlignment());
         b->CreateFree(carryStateArray);
-        Value * const startNewArrayPtr = b->CreateGEP(int8Ty, b->CreatePointerCast(newCarryStateArray, int8PtrTy), capacitySize);
+        Value * const startNewArrayPtr = b->CreateGEP(b->getInt8Ty(), b->CreatePointerCast(newCarryStateArray, b->getInt8PtrTy()), capacitySize);
         b->CreateMemZero(startNewArrayPtr, capacitySize, blockSize);
         newCarryStateArray = b->CreatePointerCast(newCarryStateArray, carryStatePtrTy);
         b->CreateStore(newCarryStateArray, carryStateArrayPtr);
@@ -429,12 +430,15 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         updatedCarryStateArrayPhi->addIncoming(newCarryStateArray, reallocExisting);
 
         // NOTE: the 3 here is only to pass the assertion later. It refers to the number of elements in the carry data struct.
+        assert (mCurrentFrameType->getStructNumElements() == 3);
         mCarryFrameStack.emplace_back(mCurrentFrame, mCurrentFrameType, 3);
-        mCurrentFrame = b->CreateGEP(carryStatePtrTy, updatedCarryStateArrayPhi, indexPhi);
 
+        mCurrentFrame = b->CreateGEP(mCurrentFrameType, updatedCarryStateArrayPhi, indexPhi);
+        assert (mCurrentFrameType->getStructElementType(NestedCarryState)->isPointerTy());
+        assert (nestedCarryTy->getPointerTo() == mCurrentFrameType->getStructElementType(NestedCarryState));
+        mCurrentFrameType = nestedCarryTy;
         mCurrentFrameIndex = 0;
 
-#endif
     }
 }
 
@@ -445,37 +449,35 @@ void CarryManager::leaveLoopBody(BuilderRef b) {
     assert (mLoopDepth > 0);
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
 
-        #if 0
-
         assert (mCarryInfo->hasSummary());
 
         Value * const carryOutAccumulator = mCarrySummaryStack.back();
 
         const CarryFrame & outer = mCarryFrameStack.back();
         mCurrentFrame = outer.Frame;
-        mCurrentFrameType = outer.Type;
+        mCurrentFrameType = cast<StructType>(outer.Type);
         mCurrentFrameIndex = 3;
         assert (outer.Index == 3);
         mCarryFrameStack.pop_back();
 
         BasicBlock * const exitBlock = b->GetInsertBlock();
 
-        PHINode * const loopIndexPhi = cast<PHINode>(mNonCarryCollapsingModeStack.pop_back_val());
+        NonCarryCollapsingFrame & nestingFrame = mNonCarryCollapsingModeStack.back();
+
+        PHINode * const loopIndexPhi = nestingFrame.LoopIterationPhi;
         Value * const nextLoopIndex = b->CreateAdd(loopIndexPhi, b->getSize(1));
         loopIndexPhi->addIncoming(nextLoopIndex, exitBlock);
 
-        PHINode * const lastNonZeroCarryOutIterationPhi = cast<PHINode>(mNonCarryCollapsingModeStack.pop_back_val());
+        PHINode * const lastNonZeroCarryOutIterationPhi = cast<PHINode>(nestingFrame.LastNonZeroIteration);
         Value * const anyCarryOut = b->bitblock_any(carryOutAccumulator);
         Value * const nonZeroCarryOutIteration = b->CreateSelect(anyCarryOut, nextLoopIndex, lastNonZeroCarryOutIterationPhi, "nonZeroCarryOut");
         lastNonZeroCarryOutIterationPhi->addIncoming(nonZeroCarryOutIteration, exitBlock);
 
-        Value * const lastIncomingCarryIteration = mNonCarryCollapsingModeStack.pop_back_val();
+        Value * const lastIncomingCarryIteration = nestingFrame.LastIncomingCarryIteration;
         assert (lastIncomingCarryIteration->getType()->isIntegerTy());
         mNextSummaryTest = b->CreateICmpULT(loopIndexPhi, lastIncomingCarryIteration);
 
-        mNonCarryCollapsingModeStack.push_back(nonZeroCarryOutIteration);
-
-        #endif
+        nestingFrame.LastNonZeroIteration = nonZeroCarryOutIteration;
     }
 
     if (mLoopDepth == 1) {
@@ -521,11 +523,13 @@ Value * CarryManager::generateExitSummaryTest(BuilderRef b, Value * condition) {
  * @brief leaveLoopScope
  ** ------------------------------------------------------------------------------------------------------------- */
 void CarryManager::leaveLoopScope(BuilderRef b, BasicBlock * const entryBlock, BasicBlock * const exitBlock) {
+
     PHINode * nonZeroCarryOutPhi = nullptr;
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
         nonZeroCarryOutPhi = b->CreatePHI(b->getSizeTy(), 2);
         nonZeroCarryOutPhi->addIncoming(b->getSize(0), entryBlock);
-        Value * const nonZeroCarryOutIteration = mNonCarryCollapsingModeStack.pop_back_val();
+        const NonCarryCollapsingFrame & nestingFrame = mNonCarryCollapsingModeStack.back();
+        Value * const nonZeroCarryOutIteration = nestingFrame.LastNonZeroIteration;
         assert (nonZeroCarryOutIteration->getType()->isIntegerTy());
         nonZeroCarryOutPhi->addIncoming(nonZeroCarryOutIteration, exitBlock);
     }
@@ -535,9 +539,14 @@ void CarryManager::leaveLoopScope(BuilderRef b, BasicBlock * const entryBlock, B
     }
     combineCarryOutSummary(b, 2);
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
-        Value * const lastIncomingCarryIterationPtr = mNonCarryCollapsingModeStack.pop_back_val();
+        const NonCarryCollapsingFrame & nestingFrame = mNonCarryCollapsingModeStack.back();
+        FixedArray<Value *, 2> indices;
+        indices[0] = b->getInt32(nestingFrame.NestedFrameIndex);
+        indices[1] = b->getInt32(LastIncomingCarryLoopIteration);
+        Value * const lastIncomingCarryIterationPtr = b->CreateGEP(nestingFrame.OuterFrameType, nestingFrame.OuterFrame, indices);
         assert (lastIncomingCarryIterationPtr->getType()->isPointerTy());
         b->CreateStore(nonZeroCarryOutPhi, lastIncomingCarryIterationPtr);
+        mNonCarryCollapsingModeStack.pop_back();
     }
     leaveScope();
     assert (mLoopDepth > 0);
@@ -603,7 +612,7 @@ void CarryManager::enterScope(BuilderRef b) {
     // compilation or a memory corruption has occured.
     assert (mCurrentFrameIndex < mCurrentFrameType->getStructNumElements());
     mCurrentFrame = b->CreateGEP(mCurrentFrameType, mCurrentFrame, {b->getInt32(0), b->getInt32(mCurrentFrameIndex)});
-    mCurrentFrameType = cast<StructType>(mCurrentFrameType)->getStructElementType(mCurrentFrameIndex);
+    mCurrentFrameType = cast<StructType>(mCurrentFrameType->getStructElementType(mCurrentFrameIndex));
     // Verify we're pointing to a carry frame struct
     mCurrentFrameIndex = 0;
     mNextSummaryTest = nullptr;
@@ -623,7 +632,7 @@ void CarryManager::leaveScope() {
     assert (!mCarryFrameStack.empty());
     const CarryFrame & outer = mCarryFrameStack.back();
     mCurrentFrame = outer.Frame;
-    mCurrentFrameType = outer.Type;
+    mCurrentFrameType = cast<StructType>(outer.Type);
     mCurrentFrameIndex = outer.Index;
 
     mCarryFrameStack.pop_back();
@@ -922,8 +931,6 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(BuilderRef b, Value * co
         }
     }
 
-    Type * const carryTy = mCurrentFrameType->getStructElementType(mCurrentFrameIndex)->getArrayElementType();
-
     indices[1] = b->getInt32(mCurrentFrameIndex++);
 
     // special case using a single buffer entry and the carry_out value.
@@ -1211,6 +1218,7 @@ StructType * CarryManager::analyse(BuilderRef b, const PabloBlock * const scope,
     // carry state pointer, and summary pointer struct.
     if (LLVM_UNLIKELY(inNonCarryCollapsingLoop && state.size() > 0)) {
         mHasNonCarryCollapsingLoops = true;
+        cd.setNestedCarryStateType(carryState);
         summaryType = (CarryData::SummaryType)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
         FixedArray<Type *, 3> fields;
         fields[NestedCapacity] = b->getSizeTy();

@@ -119,7 +119,7 @@ void CopyKernel::generateDoSegmentMethod(BuilderRef b) {
             }
             Value * const maskPos = b->CreateUMin(current, BLOCK_WIDTH);
             Value * const mask = b->CreateNot(b->bitblock_mask_from(maskPos));
-            Value * val = b->CreateAnd(b->CreateAlignedLoad(inputPtr, bw / 8), mask);
+            Value * val = b->CreateAnd(b->CreateAlignedLoad(b->getBitBlockType(), inputPtr, bw / 8), mask);
             b->CreateStore(val, outputPtr);
             current = b->CreateSaturatingSub(current, BLOCK_WIDTH);
         }
@@ -252,8 +252,8 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
                 lhs = b->getInputStreamPackPtr("lhs", I, J, strideNo);
                 rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
             }
-            lhs = b->CreateBlockAlignedLoad(lhs);
-            rhs = b->CreateBlockAlignedLoad(rhs);
+            lhs = b->CreateBlockAlignedLoad(b->getBitBlockType(), lhs);
+            rhs = b->CreateBlockAlignedLoad(b->getBitBlockType(), rhs);
 
             // Perform vector comparison lhs != rhs.
             // Result will be a vector of all zeros if lhs == rhs
@@ -289,11 +289,12 @@ void StreamEq::generateFinalizeMethod(BuilderRef b) {
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * const ptrVal = b->CreateLoad(b->getScalarField("result_ptr"));
+    Value * resultPtr = b->getScalarField("result_ptr");
+    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
     Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
 
     Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, b->getScalarField("result_ptr"));
+    b->CreateStore(newVal, resultPtr);
 }
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);

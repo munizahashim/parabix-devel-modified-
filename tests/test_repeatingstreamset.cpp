@@ -173,7 +173,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
     StreamSetBuffer * const outputBuffer = b->getOutputStreamSetBuffer("output");
     PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
-    Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
+    Type * const outputStreamSetTy = outputBuffer->getType();
 
 
     ConstantInt * const sz_ZERO = b->getSize(0);
@@ -184,9 +184,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     const auto numLanes = blockWidth / laneWidth;
     ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
 
+
     SmallVector<Constant *, 16> laneVal(numLanes);
     SmallVector<Constant *, 16> packVal(fieldWidth);
     SmallVector<GlobalVariable *, 16> streamVal(numElements);
+    SmallVector<Type *, 16> streamValTy(numElements);
 
     Module & mod = *b->getModule();
 
@@ -216,9 +218,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         }
 
         ArrayType * const streamTy = ArrayType::get(elementTy, runLength);
+        streamValTy[p] = streamTy;
         Constant * const patternVal = ConstantArray::get(streamTy, dataVectorArray);
         GlobalVariable * const gv = new GlobalVariable(mod, streamTy, true, GlobalValue::PrivateLinkage, patternVal);
         gv->setAlignment(MaybeAlign{blockWidth /8});
+        assert (streamTy->getPointerTo() == gv->getType());
 
         streamVal[p] = gv;
     }
@@ -342,7 +346,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
-        Value * const src = b->CreateGEP(streamVal[i]->getType()->getPointerElementType(), streamVal[i], offset);
+        Value * const src = b->CreateGEP(streamValTy[i], streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
         b->CreateMemCpy(dst, src, elementSize, 1U);
     }
@@ -384,7 +388,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         } else {
             ptr = outputBuffer->getStreamPackPtr(b.get(), ba, b->getInt32(i), startIndex, packIndex);
         }
-        Value * const val = b->CreateBlockAlignedLoad(ptr);
+        Value * const val = b->CreateBlockAlignedLoad(b->getBitBlockType(), ptr);
         Value * const maskedVal = b->CreateAnd(val, mask);
         b->CreateBlockAlignedStore(maskedVal, ptr);
     }
@@ -515,6 +519,8 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
 
+    Type * const bbTy = b->getBitBlockType();
+
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
@@ -550,14 +556,14 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
                 rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
             }
             if (UnalignedLHS) {
-                lhs = b->CreateAlignedLoad(lhs, 1);
+                lhs = b->CreateAlignedLoad(bbTy, lhs, 1);
             } else {
-                lhs = b->CreateBlockAlignedLoad(lhs);
+                lhs = b->CreateBlockAlignedLoad(bbTy, lhs);
             }
             if (UnalignedRHS) {
-                rhs = b->CreateAlignedLoad(rhs, 1);
+                rhs = b->CreateAlignedLoad(bbTy, rhs, 1);
             } else {
-                rhs = b->CreateBlockAlignedLoad(rhs);
+                rhs = b->CreateBlockAlignedLoad(bbTy, rhs);
             }
 
             // Perform vector comparison lhs != rhs.
@@ -593,11 +599,12 @@ void StreamEq::generateFinalizeMethod(BuilderRef b) {
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * const ptrVal = b->CreateLoad(b->getScalarField("result_ptr"));
+    Value * resultPtr = b->getScalarField("result_ptr");
+    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
     Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
 
     Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, b->getScalarField("result_ptr"));
+    b->CreateStore(newVal, resultPtr);
 }
 
 typedef void (*TestFunctionType)(uint32_t * output);

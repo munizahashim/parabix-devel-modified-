@@ -403,7 +403,7 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
 
     Module & mod = *b->getModule();
     GlobalVariable * const patternData =
-        new GlobalVariable(mod, patternVec->getType(), true, GlobalValue::ExternalLinkage, patternVec);
+        new GlobalVariable(mod, arrTy, true, GlobalValue::ExternalLinkage, patternVec);
     const auto align = blockWidth / 8;
     patternData->setAlignment(MaybeAlign{align});
     Value * const ptr = b->CreatePointerCast(patternData, b->getVoidPtrTy());
