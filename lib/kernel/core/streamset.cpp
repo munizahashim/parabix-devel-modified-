@@ -1607,7 +1607,7 @@ Value * RepeatingBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddre
             offset = b->CreateUDivRational(offset, itemsPerByte);
             itemTy = b->getInt8Ty();
         }
-        itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
+        itemPtrTy = itemTy->getPointerTo(mAddressSpace);
         addr = b->CreatePointerCast(baseAddress, itemPtrTy);
         addr = b->CreateInBoundsGEP(itemTy, addr, b->CreateNeg(offset));
     } else {

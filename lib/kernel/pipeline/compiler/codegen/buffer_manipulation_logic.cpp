@@ -234,6 +234,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             name << "__maskInput" << itemWidth;
 
+            const auto unaligned = input.hasAttribute(AttrId::AllowsUnalignedAccess);
+            if (unaligned) {
+                name << "U";
+            }
+
             Module * const m = b->getModule();
 
             Function * maskInput = m->getFunction(name.str());
@@ -315,7 +320,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
                 Value * const mallocBytes = b->CreateSub(requiredPtrInt, initialPtrInt);
 
+
+
                 const auto blockSize = b->getBitBlockWidth() / 8;
+                const auto alignment = unaligned ? 1 : blockSize;
+
                 Value * const maskedBuffer = b->CreateAlignedMalloc(mallocBytes, blockSize);
                 b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
                 b->CreateStore(maskedBuffer, bufferStorage);
@@ -326,7 +335,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                 Value * const fullCopyEndPtrInt = b->CreatePtrToInt(fullCopyEndPtr, intPtrTy);
                 Value * const fullBytesToCopy = b->CreateSub(fullCopyEndPtrInt, initialPtrInt);
 
-                b->CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, blockSize);
+                b->CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, alignment);
                 Value * const outputVBA = tmp.getStreamBlockPtr(b, mallocedAddress, sz_ZERO, b->CreateNeg(initial));
                 Value * const maskedAddress = b->CreatePointerCast(outputVBA, bufferPtrTy);
                 assert (maskedAddress->getType() == inputAddress->getType());
@@ -358,14 +367,14 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
                     Value * const partialCopyInputEndPtrInt = b->CreatePtrToInt(partialCopyInputEndPtr, intPtrTy);
                     Value * const partialCopyInputStartPtrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
                     Value * const bytesToCopy = b->CreateSub(partialCopyInputEndPtrInt, partialCopyInputStartPtrInt);
-                    b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, blockSize);
+                    b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, alignment);
                     inputPtr = partialCopyInputEndPtr;
                     outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
                 }
                 assert (inputPtr->getType() == outputPtr->getType());
-                Value * const val = b->CreateBlockAlignedLoad(mask->getType(), inputPtr);
+                Value * const val = b->CreateAlignedLoad(mask->getType(), inputPtr, alignment);
                 Value * const maskedVal = b->CreateAnd(val, mask);
-                b->CreateBlockAlignedStore(maskedVal, outputPtr);
+                b->CreateAlignedStore(maskedVal, outputPtr, alignment);
 
                 Value * const nextIndex = b->CreateAdd(streamIndex, sz_ONE);
                 Value * const notDone = b->CreateICmpNE(nextIndex, numOfStreams);
