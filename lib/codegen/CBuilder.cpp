@@ -839,27 +839,31 @@ PointerType * LLVM_READNONE CBuilder::getVoidPtrTy(const unsigned AddressSpace) 
 }
 
 
-Value * CBuilder::CreateAtomicFetchAndAdd(Value * const val, Value * const ptr) {
+Value * CBuilder::CreateAtomicFetchAndAdd(Value * const val, Value * const ptr, MaybeAlign align) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         Constant * const Size = getTypeSize(val->getType());
         CheckAddress(ptr, Size, "CreateAtomicFetchAndAdd: ptr");
     }
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(13, 0, 0)
     return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, AtomicOrdering::AcquireRelease);
-#else
+#elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
     return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, None, AtomicOrdering::AcquireRelease);
+#else
+    return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, align, AtomicOrdering::AcquireRelease);
 #endif
 }
 
-Value * CBuilder::CreateAtomicFetchAndSub(Value * const val, Value * const ptr) {
+Value * CBuilder::CreateAtomicFetchAndSub(Value * const val, Value * const ptr, MaybeAlign align) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         Constant * const Size = getTypeSize(val->getType());
         CheckAddress(ptr, Size, "CreateAtomicFetchAndSub: ptr");
     }
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(13, 0, 0)
     return CreateAtomicRMW(AtomicRMWInst::Sub, ptr, val, AtomicOrdering::AcquireRelease);
+#elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
+    return CreateAtomicRMW(AtomicRMWInst::Add, ptr, val, None, AtomicOrdering::AcquireRelease);
 #else
-    return CreateAtomicRMW(AtomicRMWInst::Sub, ptr, val, None, AtomicOrdering::AcquireRelease);
+    return CreateAtomicRMW(AtomicRMWInst::Sub, ptr, val, align, AtomicOrdering::AcquireRelease);
 #endif
 }
 
@@ -1359,17 +1363,16 @@ AllocaInst * CBuilder::CreateAllocaAtEntryPoint(Type * Ty, Value * ArraySize, co
 
     auto BB = GetInsertBlock();
     auto F = BB->getParent();
-    auto & BL = F->getBasicBlockList();
-    if (LLVM_UNLIKELY(BL.empty())) {
+    auto entryBlock = F->begin();
+    if (LLVM_UNLIKELY(entryBlock == F->end())) {
         report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
     }
-    auto & entryBlock = BL.front();
-    auto const first = entryBlock.getFirstNonPHIOrDbgOrLifetime();
+    auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
     const auto & DL = F->getParent()->getDataLayout();
     const auto addrSize = DL.getAllocaAddrSpace();
     if (LLVM_UNLIKELY(first == nullptr)) {
-        return new AllocaInst(Ty, addrSize, ArraySize, Name, &entryBlock);
+        return new AllocaInst(Ty, addrSize, ArraySize, Name, &*entryBlock);
     } else {
         return new AllocaInst(Ty, addrSize, ArraySize, Name, first);
     }
@@ -2295,8 +2298,10 @@ ConstantInt * LLVM_READNONE CBuilder::getTypeSize(Type * type, IntegerType * val
     if (LLVM_LIKELY(type != nullptr)) {
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
         size = dl.getTypeAllocSize(type);
-        #else
+        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
         size = dl.getTypeAllocSize(type).getFixedSize();
+        #else
+        size = dl.getTypeAllocSize(type).getFixedValue();
         #endif
     }
     if (valType == nullptr) {

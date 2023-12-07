@@ -280,9 +280,9 @@ public:
 
     virtual llvm::StoreInst *  CreateAtomicStoreRelease(llvm::Value * val, llvm::Value * ptr);
 
-    llvm::Value * CreateAtomicFetchAndAdd(llvm::Value * val, llvm::Value * ptr);
+    llvm::Value * CreateAtomicFetchAndAdd(llvm::Value * val, llvm::Value * ptr, llvm::MaybeAlign align = llvm::MaybeAlign{});
 
-    llvm::Value * CreateAtomicFetchAndSub(llvm::Value * val, llvm::Value * ptr);
+    llvm::Value * CreateAtomicFetchAndSub(llvm::Value * val, llvm::Value * ptr, llvm::MaybeAlign align = llvm::MaybeAlign{});
 
     void CreateAssert(llvm::Value * assertion, const llvm::Twine failureMessage) {
         return __CreateAssert(CreateIsNotNull(assertion), failureMessage, {});

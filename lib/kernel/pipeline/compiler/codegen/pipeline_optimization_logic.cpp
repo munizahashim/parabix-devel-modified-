@@ -28,7 +28,7 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock 
 
     BasicBlock * const to = b->GetInsertBlock();
 
-    for (Instruction & inst : phiContainer->getInstList()) {
+    for (Instruction & inst : *phiContainer) {
         if (LLVM_LIKELY(isa<PHINode>(inst))) {
             PHINode & pn = cast<PHINode>(inst);
             for (unsigned i = 0; i != pn.getNumIncomingValues(); ++i) {
@@ -43,11 +43,12 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock 
 
     if (!toReplace->empty()) {
         Instruction * toMove = &toReplace->front();
-        auto & list = to->getInstList();
+//        auto & list = to->getInstList();
         while (toMove) {
             Instruction * const next = toMove->getNextNode();
             toMove->removeFromParent();
-            list.push_back(toMove);
+            toMove->insertAfter(&to->back());
+//            list.push_back(toMove);
             toMove = next;
         }
     }
@@ -114,7 +115,7 @@ void PipelineCompiler::simplifyPhiNodes(Module * const m) const {
     for (Function & f : m->getFunctionList()) {
         bool anyPhis = false;
 
-        for (BasicBlock & bb : f.getBasicBlockList()) {
+        for (BasicBlock & bb : f) {
 
             preds.assign(pred_begin(&bb), pred_end(&bb));
             const auto n = preds.size();

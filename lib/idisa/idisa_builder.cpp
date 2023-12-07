@@ -15,6 +15,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <toolchain/toolchain.h>
 #include <unistd.h>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 
@@ -1158,7 +1161,7 @@ Value * IDISA_Builder::bitblock_mask_from(Value * const position, const bool saf
     Value * const fullFieldWidthMasks = CreateSExt(CreateICmpUGT(posBaseVec, positionVec), fwVectorType(fieldWidth));
     Constant * const FIELD_ONES = ConstantInt::getAllOnesValue(getSizeTy());
     Value * const bitField = CreateShl(FIELD_ONES, CreateAnd(pos, getSize(fieldWidth - 1)));
-    Value * const fieldNo = CreateLShr(pos, getSize(std::log2(fieldWidth)));
+    Value * const fieldNo = CreateLShr(pos, getSize(floor_log2(fieldWidth)));
     Value * result = CreateInsertElement(fullFieldWidthMasks, bitField, fieldNo);
     if (!safe) { // if the originalPos doesn't match the moddedPos then the originalPos must exceed the block width.
         Constant * const VECTOR_ZEROES = Constant::getNullValue(fwVectorType(fieldWidth));
@@ -1185,7 +1188,7 @@ Value * IDISA_Builder::bitblock_mask_to(Value * const position, const bool safe)
     Value * const fullFieldWidthMasks = CreateSExt(CreateICmpULT(posBaseVec, positionVec), fwVectorType(fieldWidth));
     Constant * const FIELD_ONES = ConstantInt::getAllOnesValue(getSizeTy());
     Value * const bitField = CreateLShr(FIELD_ONES, CreateAnd(getSize(fieldWidth - 1), CreateNot(pos)));
-    Value * const fieldNo = CreateLShr(pos, getSize(std::log2(fieldWidth)));
+    Value * const fieldNo = CreateLShr(pos, getSize(floor_log2(fieldWidth)));
     Value * result = CreateInsertElement(fullFieldWidthMasks, bitField, fieldNo);
     if (!safe) { // if the originalPos doesn't match the moddedPos then the originalPos must exceed the block width.
         Constant * const VECTOR_ONES = Constant::getAllOnesValue(fwVectorType(fieldWidth));
@@ -1203,7 +1206,7 @@ Value * IDISA_Builder::bitblock_set_bit(Value * const position, const bool safe)
     const unsigned fieldWidth = getSizeTy()->getBitWidth();
     Value * const bitField = CreateShl(getSize(1), CreateAnd(originalPos, getSize(fieldWidth - 1)));
     Value * const pos = safe ? position : CreateAnd(originalPos, getSize(mBitBlockWidth - 1));
-    Value * const fieldNo = CreateLShr(pos, getSize(std::log2(fieldWidth)));
+    Value * const fieldNo = CreateLShr(pos, getSize(floor_log2(fieldWidth)));
     Constant * const VECTOR_ZEROES = Constant::getNullValue(fwVectorType(fieldWidth));
     Value * result = CreateInsertElement(VECTOR_ZEROES, bitField, fieldNo);
     if (!safe) { // If the originalPos doesn't match the moddedPos then the originalPos must exceed the block width.
