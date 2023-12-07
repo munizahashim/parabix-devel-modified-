@@ -284,181 +284,198 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
     if (structTypeMetadata->getNumOperands() == 0) {
 
-        flat_set<unsigned> sharedGroups;
-        flat_set<unsigned> threadLocalGroups;
-
-        for (const auto & scalar : mInternalScalars) {
-            assert (scalar.getValueType());
-            switch (scalar.getScalarType()) {
-                case ScalarType::Internal:
-                    sharedGroups.insert(scalar.getGroup());
-                    break;
-                case ScalarType::ThreadLocal:
-                    threadLocalGroups.insert(scalar.getGroup());
-                    break;
-                default: break;
-            }
-        }
-
-        const auto sharedGroupCount = sharedGroups.size();
-        const auto threadLocalGroupCount = threadLocalGroups.size();
-
-        std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
-        std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
-
-        for (const auto & scalar : mInputScalars) {
-            assert (scalar.getType());
-            shared[0].push_back(scalar.getType());
-        }
-
-        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-        // within the kernel state to hide the complexity from the user?
-        for (const auto & scalar : mInternalScalars) {
-            assert (scalar.getValueType());
-
-            auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
-                const auto f = groups.find(scalar.getGroup());
-                assert (f != groups.end());
-                return std::distance(groups.begin(), f);
-            };
-
-            switch (scalar.getScalarType()) {
-                case ScalarType::Internal:
-                    shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
-                    break;
-                case ScalarType::ThreadLocal:
-                    threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
-                    break;
-                default: break;
-            }
-        }
-
-        assert (shared[sharedGroupCount + 1].empty());
-        for (const auto & scalar : mOutputScalars) {
-            assert (scalar.getType());
-            shared[sharedGroupCount + 1].push_back(scalar.getType());
-        }
-
-        IntegerType * const int8Ty = b->getInt8Ty();
-
-        const size_t cacheAlignment = b->getCacheAlignment();
-
-        SmallVector<Metadata *, 2> stateTypes;
-
-        DataLayout dl(m);
-
-        auto getTypeSize = [&](Type * const type) -> uint64_t {
-            if (type == nullptr) {
-                return 0UL;
-            }
-            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-            return dl.getTypeAllocSize(type);
-            #else
-            return dl.getTypeAllocSize(type).getFixedSize();
-            #endif
-        };
-
-
-        auto makeStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
-                                  StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
-
-            const auto n = structTypeVec.size();
-            for (unsigned i = 0; i < n; ++i) {
-                const auto & V = structTypeVec[i];
-                for (unsigned j = 0; j < V.size(); ++j) {
-                    if (LLVM_LIKELY(!V[j]->isEmptyTy())) {
-                        goto found_non_empty_type;
-                    }
-                }
-            }
-
-            stateTypes.push_back(ConstantAsMetadata::get(Constant::getNullValue(StructType::create(b->getContext(), name))));
-
-            return nullptr;
-found_non_empty_type:
-            std::vector<Type *> structTypes(n * 2);
-
-            const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
-
-            size_t byteOffset = 0;
-            for (unsigned i = 0; i < n; ++i) {
-                StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
-                assert (sty->isSized());
-                const auto typeSize = getTypeSize(sty);
-                byteOffset += typeSize;
-                const auto offset = (byteOffset % align);
-                const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
-                structTypes[i * 2] = sty;
-                ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
-                assert (paddingTy->isSized());
-                structTypes[i * 2 + 1] = paddingTy;
-                byteOffset += padding;
-            }
-
-            StructType * const st = StructType::create(b->getContext(), structTypes, name);
-            assert (!st->isEmptyTy());
-            assert (st->isSized());
-
-            #ifndef NDEBUG
-            const StructLayout * const sl = dl.getStructLayout(st);
-            assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
-            if (addGroupCacheLinePadding) {
-                for (unsigned i = 0; i < n; ++i) {
-                    const auto offset = sl->getElementOffset(i * 2);
-                    assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
-                }
-            }
-            #endif
-
-            stateTypes.push_back(ConstantAsMetadata::get(Constant::getNullValue(st)));
-
-            assert (!st->isEmptyTy());
-            assert (getTypeSize(st) > 0);
-
-            return st;
-        };
-
-
-
-        // NOTE: StructType::create always creates a new type even if an identical one exists.
-        const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
         SmallVector<char, 256> tmpShared;
         auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
-        mSharedStateType = makeStructType(shared, strShared, sharedGroupCount > 1 && allowStructPadding);
-        assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
-        assert (stateTypes.size() == 1);
+        mSharedStateType = getTypeByName(m, strShared);
 
         SmallVector<char, 256> tmpThreadLocal;
         auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
-        mThreadLocalStateType = makeStructType(threadLocal, strThreadLocal, false);
-        assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
+        mThreadLocalStateType = getTypeByName(m, strThreadLocal);
 
-        assert (stateTypes.size() == 2);
+        auto isIncompleteType = [&](StructType * const st) -> bool {
+            if (st) {
+                return st->isOpaque() || st->isEmptyTy();
+            }
+            return false;
+        };
+
+        if (LLVM_LIKELY((mSharedStateType == nullptr && mThreadLocalStateType == nullptr)
+                        || isIncompleteType(mSharedStateType) || isIncompleteType(mThreadLocalStateType))) {
+
+            flat_set<unsigned> sharedGroups;
+            flat_set<unsigned> threadLocalGroups;
+
+            for (const auto & scalar : mInternalScalars) {
+                assert (scalar.getValueType());
+                switch (scalar.getScalarType()) {
+                    case ScalarType::Internal:
+                        sharedGroups.insert(scalar.getGroup());
+                        break;
+                    case ScalarType::ThreadLocal:
+                        threadLocalGroups.insert(scalar.getGroup());
+                        break;
+                    default: break;
+                }
+            }
+
+            const auto sharedGroupCount = sharedGroups.size();
+            const auto threadLocalGroupCount = threadLocalGroups.size();
+
+            std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
+            std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+            for (const auto & scalar : mInputScalars) {
+                assert (scalar.getType());
+                shared[0].push_back(scalar.getType());
+            }
+
+            // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
+            // within the kernel state to hide the complexity from the user?
+            for (const auto & scalar : mInternalScalars) {
+                assert (scalar.getValueType());
+
+                auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+                    const auto f = groups.find(scalar.getGroup());
+                    assert (f != groups.end());
+                    return std::distance(groups.begin(), f);
+                };
+
+                switch (scalar.getScalarType()) {
+                    case ScalarType::Internal:
+                        shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                        break;
+                    case ScalarType::ThreadLocal:
+                        threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                        break;
+                    default: break;
+                }
+            }
+
+            assert (shared[sharedGroupCount + 1].empty());
+            for (const auto & scalar : mOutputScalars) {
+                assert (scalar.getType());
+                shared[sharedGroupCount + 1].push_back(scalar.getType());
+            }
+
+            IntegerType * const int8Ty = b->getInt8Ty();
+
+            const size_t cacheAlignment = b->getCacheAlignment();
+
+            DataLayout dl(m);
+
+            auto getTypeSize = [&](Type * const type) -> uint64_t {
+                if (type == nullptr) {
+                    return 0UL;
+                }
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+                return dl.getTypeAllocSize(type);
+                #else
+                return dl.getTypeAllocSize(type).getFixedSize();
+                #endif
+            };
+
+
+            auto makeStructType = [&](StructType * st,
+                                      const std::vector<std::vector<Type *>> & structTypeVec,
+                                      StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
+
+                const auto n = structTypeVec.size();
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto & V = structTypeVec[i];
+                    for (unsigned j = 0; j < V.size(); ++j) {
+                        assert (isa<StructType>(V[j]) ? !cast<StructType>(V[j])->isOpaque() : true);
+                        if (LLVM_LIKELY(!V[j]->isEmptyTy())) {
+                            goto found_non_empty_type;
+                        }
+                    }
+                }
+
+                return nullptr;
+    found_non_empty_type:
+                std::vector<Type *> structTypes(n * 2);
+
+                const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
+
+                size_t byteOffset = 0;
+                for (unsigned i = 0; i < n; ++i) {
+                    StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
+                    assert (sty->isSized());
+                    const auto typeSize = getTypeSize(sty);
+                    byteOffset += typeSize;
+                    const auto offset = (byteOffset % align);
+                    const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
+                    structTypes[i * 2] = sty;
+                    ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
+                    assert (paddingTy->isSized());
+                    structTypes[i * 2 + 1] = paddingTy;
+                    byteOffset += padding;
+                }
+
+                if (st == nullptr) {
+                    st = StructType::create(b->getContext(), structTypes, name);
+                } else {
+                    st->setBody(structTypes);
+                }
+
+                assert (!st->isEmptyTy());
+                assert (st->isSized());
+                assert (getTypeSize(st) > 0);
+
+                #ifndef NDEBUG
+                const StructLayout * const sl = dl.getStructLayout(st);
+                assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
+                if (addGroupCacheLinePadding) {
+                    for (unsigned i = 0; i < n; ++i) {
+                        const auto offset = sl->getElementOffset(i * 2);
+                        assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                    }
+                }
+                #endif
+
+                return st;
+            };
+
+            // NOTE: StructType::create always creates a new type even if an identical one exists.
+            const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
+            mSharedStateType = makeStructType(mSharedStateType, shared, strShared, sharedGroupCount > 1 && allowStructPadding);
+            assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
+
+            mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
+            assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
+
+            if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
+                errs() << "KERNEL: " << mKernelName
+                       << " SHARED STATE: " << getTypeSize(mSharedStateType) << " bytes"
+                          ", THREAD LOCAL STATE: "  << getTypeSize(mThreadLocalStateType) << " bytes\n";
+            }
+        }
+
+        auto makeTypeMetadata = [&](StructType * st, StringRef name) -> Metadata * {
+            if (st == nullptr) {
+                st = StructType::create(b->getContext(), name);
+            }
+            return ConstantAsMetadata::get(Constant::getNullValue(st));
+        };
+
+        FixedArray<Metadata *, 2> stateTypes;
+        stateTypes[0] = makeTypeMetadata(mSharedStateType, strShared);
+        stateTypes[1] = makeTypeMetadata(mThreadLocalStateType, strThreadLocal);
         structTypeMetadata->addOperand(MDNode::get(m->getContext(), stateTypes));
         assert (structTypeMetadata->getNumOperands() == 1);
 
-        assert (mSharedStateType == nullptr || mSharedStateType->isSized());
-        assert (mThreadLocalStateType == nullptr || mThreadLocalStateType->isSized());
-
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
-            errs() << "KERNEL: " << mKernelName
-                   << " SHARED STATE: " << getTypeSize(mSharedStateType) << " bytes"
-                      ", THREAD LOCAL STATE: "  << getTypeSize(mThreadLocalStateType) << " bytes\n";
-        }
     } else {
         assert (structTypeMetadata->getNumOperands() == 1);
         MDNode * structTypes = structTypeMetadata->getOperand(0);
         assert (structTypes->getNumOperands() == 2);
-        Type * shType = cast<ConstantAsMetadata>(structTypes->getOperand(0))->getType();
+        Type * shType = cast<ConstantAsMetadata>(structTypes->getOperand(0))->getType(); assert (shType);
+
         mSharedStateType = nullIfEmpty(cast<StructType>(shType));
-        assert (mSharedStateType == nullptr || mSharedStateType->isSized());
+        assert (mSharedStateType == nullptr || !mSharedStateType->isOpaque());
+        Type * tlType = cast<ConstantAsMetadata>(structTypes->getOperand(1))->getType(); assert (tlType);
 
-
-        Type * tlType = cast<ConstantAsMetadata>(structTypes->getOperand(1))->getType();
         mThreadLocalStateType = nullIfEmpty(cast<StructType>(tlType));
-        assert (mThreadLocalStateType == nullptr || mThreadLocalStateType->isSized());
+        assert (mThreadLocalStateType == nullptr || !mThreadLocalStateType->isOpaque());
     }
-
 
 }
 
@@ -583,12 +600,6 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
         Module * const m = b->getModule();
         func = m->getFunction(funcName);
         if (LLVM_LIKELY(func == nullptr)) {
-
-//            FixedArray<Type *, 2> params;
-//            PointerType * const voidPtrTy = b->getVoidPtrTy();
-//            params[0] = voidPtrTy;
-//            params[1] = voidPtrTy;
-
             SmallVector<Type *, 2> params;
             if (LLVM_LIKELY(isStateful())) {
                 params.push_back(getSharedStateType()->getPointerTo());

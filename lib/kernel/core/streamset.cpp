@@ -153,7 +153,7 @@ unsigned StreamSetBuffer::getFieldWidth() const {
  */
 Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Value * absolutePosition) const {
     Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
-    Type * const itemTy = cast<VectorType>(elemTy)->getElementType();
+    Type * itemTy = cast<VectorType>(elemTy)->getElementType();
     #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
     const unsigned itemWidth = itemTy->getPrimitiveSizeInBits();
     #else
@@ -188,11 +188,9 @@ Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Va
                                 absolutePosition, streamCount, b->getSize(itemWidth));
         }
         pos = b->CreateUDivRational(pos, itemsPerByte);
-        itemPtrTy = b->getInt8Ty()->getPointerTo(mAddressSpace);
-    } else {
-        itemPtrTy = itemTy->getPointerTo(mAddressSpace);
+        itemTy = b->getInt8Ty();
     }
-    addr = b->CreatePointerCast(addr, itemPtrTy);
+    addr = b->CreatePointerCast(addr, itemTy->getPointerTo(mAddressSpace));
     return b->CreateInBoundsGEP(itemTy, addr, pos);
 
 }

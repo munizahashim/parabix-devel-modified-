@@ -908,6 +908,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
             return false;
         }
         assert (!stateType->isOpaque());
+        assert (stateType->isSized());
         const auto n = stateType->getStructNumElements();
         assert ((n % 2) == 0);
         for (unsigned i = 0; i < n; i += 2) {
@@ -919,7 +920,6 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
     if (options == InitializeOptions::IncludeThreadLocalScalars) {
         assert ("incorrect thread local handle/type!" && verifyStateType(mThreadLocalHandle, threadLocalTy));
     }
-    #undef CHECK_TYPES
     #endif
 
     mScalarFieldMap.clear();
@@ -981,6 +981,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         indices[1] = b->getInt32(groupId * 2);
         auto & k = sharedIndex[groupId];
         for (const auto & binding : bindings) {
+            assert (sharedTy);
             assert ((groupId * 2) < sharedTy->getStructNumElements());
             assert (k < sharedTy->getStructElementType(groupId * 2)->getStructNumElements());
             assert (sharedTy->getStructElementType(groupId * 2)->getStructElementType(k) == binding.getType());

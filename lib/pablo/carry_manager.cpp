@@ -383,6 +383,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         Type * nestedCarryPtrTy = frame.OuterFrameType->getStructElementType(NestedCarryState);
 
         assert (nestedCarryPtrTy->isPointerTy());
+        PointerType * const carryStatePtrTy = mCurrentFrameType->getPointerTo();
         Value * const carryStateArray = b->CreateLoad(nestedCarryPtrTy, carryStateArrayPtr);
         assert (carryStateArray->getType()->isPointerTy());
 
@@ -391,7 +392,6 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         // RESIZE CARRY BLOCK
         b->SetInsertPoint(resizeCarryState);
         const auto blockSize = b->getBitBlockWidth() / 8;
-        PointerType * const carryStatePtrTy = mCurrentFrameType->getPointerTo();
         Constant * const carryStateTySize = b->getTypeSize(nestedCarryTy);
         b->CreateLikelyCondBr(b->CreateICmpNE(capacity, ZERO), reallocExisting, createNew);
 
@@ -406,7 +406,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         b->CreateFree(carryStateArray);
         Value * const startNewArrayPtr = b->CreateGEP(b->getInt8Ty(), b->CreatePointerCast(newCarryStateArray, b->getInt8PtrTy()), capacitySize);
         b->CreateMemZero(startNewArrayPtr, capacitySize, blockSize);
-        newCarryStateArray = b->CreatePointerCast(newCarryStateArray, carryStatePtrTy);
+        newCarryStateArray = b->CreatePointerCast(newCarryStateArray, nestedCarryPtrTy);
         b->CreateStore(newCarryStateArray, carryStateArrayPtr);
         b->CreateBr(resumeKernel);
 
@@ -418,13 +418,13 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         Constant * const initialCapacitySize = ConstantExpr::getMul(initialCarryStateCapacity, carryStateTySize);
         Value * initialArray = b->CreatePageAlignedMalloc(initialCapacitySize);
         b->CreateMemZero(initialArray, initialCapacitySize, blockSize);
-        initialArray = b->CreatePointerCast(initialArray, carryStatePtrTy);
+        initialArray = b->CreatePointerCast(initialArray, nestedCarryPtrTy);
         b->CreateStore(initialArray, carryStateArrayPtr);
         b->CreateBr(resumeKernel);
 
         // RESUME KERNEL
         b->SetInsertPoint(resumeKernel);
-        PHINode * const updatedCarryStateArrayPhi = b->CreatePHI(carryStatePtrTy, 3, "carryStatePtr");
+        PHINode * const updatedCarryStateArrayPhi = b->CreatePHI(nestedCarryPtrTy, 3, "carryStatePtr");
         updatedCarryStateArrayPhi->addIncoming(carryStateArray, entry);
         updatedCarryStateArrayPhi->addIncoming(initialArray, createNew);
         updatedCarryStateArrayPhi->addIncoming(newCarryStateArray, reallocExisting);
@@ -433,7 +433,7 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         assert (mCurrentFrameType->getStructNumElements() == 3);
         mCarryFrameStack.emplace_back(mCurrentFrame, mCurrentFrameType, 3);
 
-        mCurrentFrame = b->CreateGEP(mCurrentFrameType, updatedCarryStateArrayPhi, indexPhi);
+        mCurrentFrame = b->CreateGEP(nestedCarryTy, updatedCarryStateArrayPhi, indexPhi);
         assert (mCurrentFrameType->getStructElementType(NestedCarryState)->isPointerTy());
         assert (nestedCarryTy->getPointerTo() == mCurrentFrameType->getStructElementType(NestedCarryState));
         mCurrentFrameType = nestedCarryTy;
