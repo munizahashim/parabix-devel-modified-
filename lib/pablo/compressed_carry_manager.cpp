@@ -77,8 +77,10 @@ static Type * toSummaryType(BuilderRef b, int32_t summarySize) {
 inline unsigned getVectorBitWidth(const Type * const ty) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
     return cast<FixedVectorType>(ty)->getPrimitiveSizeInBits();
-    #else
+    #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
     return cast<FixedVectorType>(ty)->getPrimitiveSizeInBits().getFixedSize();
+    #else
+    return cast<FixedVectorType>(ty)->getPrimitiveSizeInBits().getFixedValue();
     #endif
 }
 
@@ -213,19 +215,18 @@ StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * co
 
     DataLayout dl(b->getModule());
 
-    auto getTypeSize = [&](Type * const type) {
+    auto getTypeSizeInt = [&](Type * const type) -> uint64_t {
+        if (type == nullptr) {
+            return 0UL;
+        }
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
         return dl.getTypeAllocSize(type);
-        #else
+        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
         return dl.getTypeAllocSize(type).getFixedSize();
+        #else
+        return dl.getTypeAllocSize(type).getFixedValue();
         #endif
     };
-
-//    auto getTypeAlign = [&](Type * const type) {
-//        return dl.getABITypeAlignment(type);
-//    };
-
-//    std::vector<Type *> tmp;
 
     std::function<StructType *(const PabloBlock *, unsigned, unsigned, bool)> analyseRec = [&](
             const PabloBlock * const scope,
@@ -320,7 +321,7 @@ StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * co
         unsigned packedSizeInBits = 0;
         const auto n = state.size();
         for (unsigned i = 0; i < n; ++i) {
-            packedSizeInBits += getTypeSize(state[i]);
+            packedSizeInBits += getTypeSizeInt(state[i]);
         }
         packedSizeInBits *= 8;
 

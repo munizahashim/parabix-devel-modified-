@@ -363,17 +363,18 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
             DataLayout dl(m);
 
-            auto getTypeSize = [&](Type * const type) -> uint64_t {
+            auto getTypeSizeInt = [&](Type * const type) -> uint64_t {
                 if (type == nullptr) {
                     return 0UL;
                 }
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
                 return dl.getTypeAllocSize(type);
-                #else
+                #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
                 return dl.getTypeAllocSize(type).getFixedSize();
+                #else
+                return dl.getTypeAllocSize(type).getFixedValue();
                 #endif
             };
-
 
             auto makeStructType = [&](StructType * st,
                                       const std::vector<std::vector<Type *>> & structTypeVec,
@@ -400,7 +401,7 @@ void Kernel::constructStateTypes(BuilderRef b) {
                 for (unsigned i = 0; i < n; ++i) {
                     StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
                     assert (sty->isSized());
-                    const auto typeSize = getTypeSize(sty);
+                    const auto typeSize = getTypeSizeInt(sty);
                     byteOffset += typeSize;
                     const auto offset = (byteOffset % align);
                     const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
@@ -419,7 +420,7 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
                 assert (!st->isEmptyTy());
                 assert (st->isSized());
-                assert (getTypeSize(st) > 0);
+                assert (getTypeSizeInt(st) > 0);
 
                 #ifndef NDEBUG
                 const StructLayout * const sl = dl.getStructLayout(st);
@@ -445,8 +446,8 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
             if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
                 errs() << "KERNEL: " << mKernelName
-                       << " SHARED STATE: " << getTypeSize(mSharedStateType) << " bytes"
-                          ", THREAD LOCAL STATE: "  << getTypeSize(mThreadLocalStateType) << " bytes\n";
+                       << " SHARED STATE: " << getTypeSizeInt(mSharedStateType) << " bytes"
+                          ", THREAD LOCAL STATE: "  << getTypeSizeInt(mThreadLocalStateType) << " bytes\n";
             }
         }
 

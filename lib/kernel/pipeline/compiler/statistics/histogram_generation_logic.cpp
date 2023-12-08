@@ -354,7 +354,7 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
  * @brief updateTransferredItemsForHistogramData
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
-
+#if 0
     ConstantInt * const sz_ZERO = b->getSize(0);
     ConstantInt * const sz_ONE = b->getSize(1);
 
@@ -544,7 +544,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         recordPort(mBufferGraph[e]);
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

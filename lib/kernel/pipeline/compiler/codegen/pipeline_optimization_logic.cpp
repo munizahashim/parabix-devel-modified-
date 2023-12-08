@@ -86,7 +86,10 @@ void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
     pm->add(createDeadCodeEliminationPass());        // Eliminate any trivially dead code
     pm->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
     pm->add(createEarlyCSEPass());
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+    // TODO: look into using the newer pass manager system
+    // pm->add(new MemCpyOptPass());
+    #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
     pm->add(createMemCpyOptPass());
     #endif
     // pm->add(createHotColdSplittingPass());

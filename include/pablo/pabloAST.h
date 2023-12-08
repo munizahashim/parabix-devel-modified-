@@ -383,8 +383,20 @@ private:
 class StatementList {
     friend class Statement;
     friend class PabloBlock;
+    #if __cplusplus >= 201703L
+    class __statement_iterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Statement *;
+        using difference_type = Statement *;
+        using pointer = Statement **;
+        using reference = Statement *& ;
+    };
+    #else
+    using __statement_iterator = std::iterator<std::forward_iterator_tag, Statement>;
+    #endif
 public:
-    class iterator: public std::iterator<std::forward_iterator_tag, Statement> {
+    class iterator: public __statement_iterator {
     public:
         iterator(): mCurrent(nullptr) {}
 
@@ -425,7 +437,7 @@ public:
         friend class const_iterator;
     };
 
-    class const_iterator: public std::iterator<std::forward_iterator_tag, Statement> {
+    class const_iterator: public __statement_iterator {
     public:
         const_iterator(): mCurrent(nullptr) {}
         const_iterator(const Statement* base): mCurrent(base) {}
@@ -459,10 +471,10 @@ public:
 
     private:
         const Statement * mCurrent;
-        friend struct iterator;
+        friend class iterator;
     };
 
-    class reverse_iterator: public std::iterator<std::forward_iterator_tag, Statement> {
+    class reverse_iterator: public __statement_iterator {
     public:
         reverse_iterator(): mCurrent(nullptr) {}
 
@@ -503,7 +515,7 @@ public:
         friend class const_reverse_iterator;
     };
 
-    class const_reverse_iterator: public std::iterator<std::forward_iterator_tag, Statement> {
+    class const_reverse_iterator: public __statement_iterator {
     public:
         const_reverse_iterator(): mCurrent(nullptr) {}
         const_reverse_iterator(const Statement* base): mCurrent(base) {}
@@ -538,7 +550,7 @@ public:
 
     private:
         const Statement * mCurrent;
-        friend struct iterator;
+        friend class iterator;
     };
 
 public:

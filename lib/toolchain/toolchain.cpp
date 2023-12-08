@@ -7,7 +7,11 @@
 #include <toolchain/toolchain.h>
 #include <unicode/core/UCD_Config.h>
 #include <llvm/Support/CommandLine.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/raw_ostream.h>
 #include <boost/interprocess/mapped_region.hpp>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)

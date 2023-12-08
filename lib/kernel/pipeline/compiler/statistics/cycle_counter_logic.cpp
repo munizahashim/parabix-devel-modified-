@@ -1118,7 +1118,7 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
                                                     const BufferNode & bn,
                                                     const BufferPort & port,
                                                     const StreamSetBuffer * const buffer) const {
-
+#if 0
     assert (mTraceDynamicBuffers && buffer->isDynamic());
     const StreamSetPort outputPort = port.Port;
     const auto prefix = makeBufferName(mKernelId, outputPort);
@@ -1166,15 +1166,14 @@ void PipelineCompiler::recordBufferExpansionHistory(BuilderRef b,
         Constant * const length = b->getSize(sizeTyWidth * (n - 3));
         b->CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
     }
-
-
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printOptionalBufferExpansionHistory
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
+#if 0
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
 
         // Print the title line
@@ -1407,13 +1406,14 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(BuilderRef b) {
         constantArgs[1] = doubleBar;
         b->CreateCall(fTy, Dprintf, constantArgs);
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
-
+#if 0
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         const auto prefix = makeKernelName(mKernelId);
@@ -1439,13 +1439,14 @@ void PipelineCompiler::initializeStridesPerSegment(BuilderRef b) const {
         b->CreateStore(SZ_ZERO, b->CreateGEP(traceDataTy, traceData, {ZERO, TWO})); // trace length
         b->CreateStore(SZ_DEFAULT_CAPACITY, b->CreateGEP(traceDataTy, traceData, {ZERO, THREE})); // trace capacity
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kernelId, Value * const totalStrides) const {
+#if 0
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
         // NOTE: this records only the change to attempt to reduce the memory usage of this log.
         assert (KernelPartitionId[kernelId - 1] != KernelPartitionId[kernelId]);
@@ -1537,6 +1538,7 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
         b->CreateCall(updateSegmentsPerStrideTrace, args);
 
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1560,6 +1562,7 @@ void PipelineCompiler::concludeStridesPerSegmentRecording(BuilderRef b) const {
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
+#if 0
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         IntegerType * const sizeTy = b->getSizeTy();
@@ -1722,6 +1725,7 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
             b->CreateFree(traceLogArray[i]);
         }
     }
+#endif
 }
 
 #define ITEM_COUNT_DELTA_CHUNK_LENGTH (64 * 1024)
@@ -1811,7 +1815,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
                                              const Vec<Value *> & current,
                                              const Vec<Value *> & prior,
                                              const StringRef suffix) const {
-
+#if 0
     const auto fieldName = (makeKernelName(mKernelId) + suffix).str();
 
     Value * trace; Type * traceTy;
@@ -1855,12 +1859,14 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
         indices[3] = b->getInt32(i);
         b->CreateStore(delta, b->CreateGEP(logTy, log, indices));
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addItemCountDeltaProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addItemCountDeltaProperties(BuilderRef b, const unsigned kernel, const StringRef suffix) const {
+#if 0
     const auto n = out_degree(kernel, mBufferGraph);
     LLVMContext & C = b->getContext();
     IntegerType * const sizeTy = b->getSizeTy();
@@ -1871,13 +1877,14 @@ void PipelineCompiler::addItemCountDeltaProperties(BuilderRef b, const unsigned 
     const auto fieldName = (makeKernelName(kernel) + suffix).str();
     const auto groupId = getCacheLineGroupId(kernel);
     mTarget->addInternalScalar(traceTy, fieldName, groupId);
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printItemCountDeltas
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title, const StringRef suffix) const {
-
+#if 0
     IntegerType * const sizeTy = b->getSizeTy();
 
     Constant * const ZERO = b->getInt32(0);
@@ -2079,6 +2086,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
         if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
         b->CreateFree(currentChunkPhi[i]);
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
