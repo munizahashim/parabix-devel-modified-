@@ -58,18 +58,34 @@ void PipelineCompiler::initDynamicThreadingReportProperties(BuilderRef b) {
  * @brief recordDynamicThreadingState
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, Value * currentSyncOverhead, Value * currentNumOfThreads) const {
-#if 0
+
+    auto & C = b->getContext();
+
+    IntegerType * i64Ty = b->getInt64Ty();
+
+    FixedArray<Type *, 3> DMEntryFields;
+    DMEntryFields[0] = i64Ty;
+    DMEntryFields[1] = TypeBuilder<float, false>::get(C);
+    DMEntryFields[2] = b->getInt32Ty();
+    StructType * const DMEntryTy = StructType::get(C, DMEntryFields, true);
+
+    FixedArray<Type *, 3> DMEntryGroupFields;
+    DMEntryGroupFields[0] = ArrayType::get(DMEntryTy, MAX_ENTRY_GROUP_SIZE);
+    DMEntryGroupFields[1] = b->getInt64Ty();
+    DMEntryGroupFields[2] = b->getVoidPtrTy();
+    StructType * const DMEntryGroupTy = StructType::get(C, DMEntryGroupFields, true);
+
     assert (TraceDynamicMultithreading);
-    Value * dataPtr = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT);
-    Value * data = b->CreateLoad(dataPtr);
+    Value * dataPtr = b->getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT).first;
+    Value * data = b->CreateLoad(DMEntryGroupTy->getPointerTo(), dataPtr);
     Constant * const i32_ZERO = b->getInt32(0);
     Constant * const i32_ONE = b->getInt32(1);
     Constant * const i32_TWO = b->getInt32(2);
     FixedArray<Value *, 2> groupIndices;
     groupIndices[0] = i32_ZERO;
     groupIndices[1] = i32_ONE;
-    Value * currentCountPtr = b->CreateGEP(data, groupIndices);
-    Value * const currentCount = b->CreateLoad(currentCountPtr);
+    Value * currentCountPtr = b->CreateGEP(DMEntryGroupTy, data, groupIndices);
+    Value * const currentCount = b->CreateLoad(i64Ty, currentCountPtr);
     Value * const outOfSpace = b->CreateICmpEQ(currentCount, b->getSize(MAX_ENTRY_GROUP_SIZE));
     BasicBlock * const mallocNewChunk = b->CreateBasicBlock("mallocNewDynamicThreadingBlock");
     BasicBlock * const updateDynamicThreading = b->CreateBasicBlock("updateDynamicThreadingTrace");
@@ -81,7 +97,7 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
     Value * newChunk = b->CreateAlignedMalloc(entryGroupSize, sizeof(void*));
     b->CreateMemZero(newChunk, entryGroupSize, sizeof(void*));
     groupIndices[1] = i32_TWO;
-    Value * currentNextPtr = b->CreateGEP(data, groupIndices);
+    Value * currentNextPtr = b->CreateGEP(DMEntryGroupTy, data, groupIndices);
     assert (newChunk->getType() == b->getVoidPtrTy());
     b->CreateStore(newChunk, currentNextPtr);
     newChunk = b->CreatePointerCast(newChunk, cast<PointerType>(data->getType()));
@@ -99,20 +115,20 @@ void PipelineCompiler::recordDynamicThreadingState(BuilderRef b, Value * segNo, 
 
     groupIndices[1] = i32_ONE;
     Value * const nextCount = b->CreateAdd(count, b->getSize(1));
-    b->CreateStore(nextCount, b->CreateGEP(statePhi, groupIndices));
+    b->CreateStore(nextCount, b->CreateGEP(DMEntryGroupTy, statePhi, groupIndices));
 
     FixedArray<Value *, 4> entryIndices;
     entryIndices[0] = i32_ZERO;
     entryIndices[1] = i32_ZERO;
     entryIndices[2] = currentCount;
     entryIndices[3] = i32_ZERO;
-    b->CreateStore(segNo, b->CreateGEP(statePhi, entryIndices));
+    b->CreateStore(segNo, b->CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
     entryIndices[3] = i32_ONE;
-    b->CreateStore(currentSyncOverhead, b->CreateGEP(statePhi, entryIndices));
+    b->CreateStore(currentSyncOverhead, b->CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
     entryIndices[3] = i32_TWO;
     Value * const numThreads = b->CreateTrunc(currentNumOfThreads, b->getInt32Ty());
-    b->CreateStore(numThreads, b->CreateGEP(statePhi, entryIndices));
-#endif
+    b->CreateStore(numThreads, b->CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
+
 }
 
 

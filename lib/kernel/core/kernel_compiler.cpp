@@ -998,7 +998,7 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
-        Type * actualType = nullptr;
+        Type * scalarType = nullptr;
         auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
             const auto f = groups.find(binding.getGroup());
             assert (f != groups.end());
@@ -1014,8 +1014,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 auto & k = sharedIndex[j];
                 assert ((j * 2) < sharedTy->getStructNumElements());
                 assert (k < sharedTy->getStructElementType(j * 2)->getStructNumElements());
-                actualType = sharedTy->getStructElementType(j * 2)->getStructElementType(k);
-                assert (actualType == binding.getValueType());
+                scalarType = sharedTy->getStructElementType(j * 2)->getStructElementType(k);
+                assert (scalarType == binding.getValueType());
                 indices[2] = b->getInt32(k++);
                 scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
                 END_SCOPED_REGION
@@ -1029,15 +1029,15 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 auto & k = threadLocalIndex[j];
                 assert ((j * 2) < threadLocalTy->getStructNumElements());
                 assert (k < threadLocalTy->getStructElementType(j * 2)->getStructNumElements());
-                actualType = threadLocalTy->getStructElementType(j * 2)->getStructElementType(k);
-                assert (actualType == binding.getValueType());
+                scalarType = threadLocalTy->getStructElementType(j * 2)->getStructElementType(k);
+                assert (scalarType == binding.getValueType());
                 indices[2] = b->getInt32(k++);
                 scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
 
                 if (LLVM_UNLIKELY(options == InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars)) {
                     Value * const mainScalar = b->CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
 
-                    addToScalarFieldMap(INTERNAL_COMMON_THREAD_LOCAL_PREFIX + binding.getName(), scalar, binding.getValueType(), actualType);
+                    addToScalarFieldMap(INTERNAL_COMMON_THREAD_LOCAL_PREFIX + binding.getName(), scalar, binding.getValueType(), scalarType);
 
                     using AccumRule = Kernel::ThreadLocalScalarAccumulationRule;
 
@@ -1046,8 +1046,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                         const auto ip = b->saveIP();
                         b->SetInsertPoint(combineExit);
 
-                        if (isa<ArrayType>(threadLocalTy)) {
-                            ArrayType * const arrayTy = cast<ArrayType>(threadLocalTy);
+                        if (isa<ArrayType>(scalarType)) {
+                            ArrayType * const arrayTy = cast<ArrayType>(scalarType);
 
                             unsigned depth = 2;
                             for (ArrayType * aTy = arrayTy;;) {
@@ -1078,13 +1078,14 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                                 if (idx == depth) {
                                     assert (elemTy->isIntOrIntVectorTy());
                                     Value * const scalarVal = b->CreateLoad(elemTy, b->CreateGEP(threadLocalTy, scalar, indices));
+                                    assert (scalarVal->getType()->isIntOrIntVectorTy());
                                     Value * const mainScalarPtr = b->CreateGEP(threadLocalTy, mainScalar, indices);
                                     Value * mainScalarVal = b->CreateLoad(elemTy, mainScalarPtr);
 
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {
                                         case AccumRule::Sum:
-                                            mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
+                                            mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal, "sum");
                                             break;
                                         default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
                                     }
@@ -1122,8 +1123,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
                             combineExit = recursiveAccum(1, arrayTy);
                         } else {
-                            Value * const scalarVal = b->CreateLoad(threadLocalTy, scalar);
-                            Value * mainScalarVal = b->CreateLoad(threadLocalTy, mainScalar);
+                            Value * const scalarVal = b->CreateLoad(scalarType, scalar);
+                            Value * mainScalarVal = b->CreateLoad(scalarType, mainScalar);
                             switch (binding.getAccumulationRule()) {
                                 case Kernel::ThreadLocalScalarAccumulationRule::Sum:
                                     mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
@@ -1141,14 +1142,14 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 END_SCOPED_REGION
                 break;
             case ScalarType::NonPersistent:
-                actualType = binding.getValueType(); assert (actualType);
-                scalar = b->CreateAllocaAtEntryPoint(actualType);
-                b->CreateStore(Constant::getNullValue(actualType), scalar);
+                scalarType = binding.getValueType(); assert (scalarType);
+                scalar = b->CreateAllocaAtEntryPoint(scalarType);
+                b->CreateStore(Constant::getNullValue(scalarType), scalar);
                 break;
             default: llvm_unreachable("I/O scalars cannot be internal");
         }
 
-        addToScalarFieldMap(binding.getName(), scalar, binding.getValueType(), actualType);
+        addToScalarFieldMap(binding.getName(), scalar, binding.getValueType(), scalarType);
     }
 
     enumerate(mOutputScalars, sharedGroups.size() + 1);

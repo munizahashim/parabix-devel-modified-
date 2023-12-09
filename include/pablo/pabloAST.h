@@ -383,7 +383,7 @@ private:
 class StatementList {
     friend class Statement;
     friend class PabloBlock;
-    #if __cplusplus >= 201703L
+    #if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
     class __statement_iterator {
     public:
         using iterator_category = std::forward_iterator_tag;
