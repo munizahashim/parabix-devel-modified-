@@ -855,11 +855,20 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
             out << "+BIC";
         }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+            out << "+TBIO";
+        }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
             out << "+TDB";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicMultithreading))) {
             out << "+TDM";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceProducedItemCounts))) {
+            out << "+TPIC";
+        }
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))) {
+            out << "+TUIC";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
             out << "+TSS";

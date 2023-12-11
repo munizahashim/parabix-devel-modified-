@@ -425,14 +425,12 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     BasicBlock * recordBlockedIO = nullptr;
     BasicBlock * insufficentIO = mKernelInsufficientInput;
     assert (mKernelInsufficientInput);
-    if (LLVM_UNLIKELY(TraceIO)) {
-        recordBlockedIO = b->CreateBasicBlock(prefix + "_recordBlockedIO", hasInputData);
-        insufficentIO = recordBlockedIO;
-    }
-
     Value * hasEnoughOrIsClosed = sufficientInput;
     Value * insufficient = mBranchToLoopExit;
-    if (LLVM_UNLIKELY(TraceIO)) {
+
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
+        recordBlockedIO = b->CreateBasicBlock(prefix + "_recordBlockedIO", hasInputData);
+        insufficentIO = recordBlockedIO;
         // do not record the block if this not the first execution of the
         // kernel but ensure that the system knows at least one failed.
         hasEnoughOrIsClosed = sufficientInput;
@@ -450,7 +448,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     // When tracing blocking I/O, test all I/O streams but do not execute
     // the kernel if any stream is insufficient.
-    if (LLVM_UNLIKELY(TraceIO)) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         BasicBlock * const entryBlock = b->GetInsertBlock();
 
         b->SetInsertPoint(recordBlockedIO);
@@ -461,7 +459,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         b->SetInsertPoint(hasInputData);
         IntegerType * const boolTy = b->getInt1Ty();
 
-        PHINode * const anyInsufficient = b->CreatePHI(boolTy, 2);
+        PHINode * const anyInsufficient = b->CreatePHI(boolTy, 2, "anyInsufficient");
         anyInsufficient->addIncoming(insufficient, entryBlock);
         anyInsufficient->addIncoming(b->getTrue(), exitBlock);
         mBranchToLoopExit = anyInsufficient;
@@ -1452,7 +1450,7 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
                position, current, currentPtr);
     #endif
 
-    if (mBranchToLoopExit) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         current = b->CreateSelect(mBranchToLoopExit, previouslyTransferred, current);
     }
     if (LLVM_UNLIKELY(CheckAssertions)) {

@@ -150,7 +150,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
 
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
-    if (mMayHaveInsufficientIO && TraceIO) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         b->CreateUnlikelyCondBr(mBranchToLoopExit, mKernelInsufficientInput, mKernelLoopCall);
     } else {
         b->CreateBr(mKernelLoopCall);
