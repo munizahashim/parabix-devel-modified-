@@ -167,6 +167,8 @@ void __print_dynamic_multithreading_report(const DMEntryGroup * const root, cons
         }
     }
 
+
+
     for (auto c = root->Next; c; ) {
         auto n = c->Next;
         free(c);
