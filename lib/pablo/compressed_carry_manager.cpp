@@ -215,19 +215,6 @@ StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * co
 
     DataLayout dl(b->getModule());
 
-    auto getTypeSizeInt = [&](Type * const type) -> uint64_t {
-        if (type == nullptr) {
-            return 0UL;
-        }
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return dl.getTypeAllocSize(type);
-        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-        return dl.getTypeAllocSize(type).getFixedSize();
-        #else
-        return dl.getTypeAllocSize(type).getFixedValue();
-        #endif
-    };
-
     std::function<StructType *(const PabloBlock *, unsigned, unsigned, bool)> analyseRec = [&](
             const PabloBlock * const scope,
             const unsigned ifDepth,
@@ -321,7 +308,7 @@ StructType * CompressedCarryManager::analyse(BuilderRef b, const PabloBlock * co
         unsigned packedSizeInBits = 0;
         const auto n = state.size();
         for (unsigned i = 0; i < n; ++i) {
-            packedSizeInBits += getTypeSizeInt(state[i]);
+            packedSizeInBits += CBuilder::getTypeSize(dl, state[i]);
         }
         packedSizeInBits *= 8;
 

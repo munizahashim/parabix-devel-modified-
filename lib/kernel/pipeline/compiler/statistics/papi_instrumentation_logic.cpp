@@ -33,6 +33,8 @@ ArrayType * PipelineCompiler::getPAPIEventCounterType(BuilderRef b) const {
 //        const auto n = (NumOfPAPIEvents + k - 1) / k;
 //        return ArrayType::get(kernel::FixedVectorType::get(papiCounterTy, k), n);
 //    }
+
+
     return ArrayType::get(papiCounterTy, NumOfPAPIEvents);
 }
 
@@ -157,7 +159,12 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, Value * co
         readPAPIMeasurement(b, kernelId, PAPIReadAfterMeasurementArray);
 
         const auto prefix = makeKernelName(kernelId);
-        Value * evenCounterSumArray = b->getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+        Value * eventCounterSumArray; Type * eventCounterSumty;
+
+        std::tie(eventCounterSumArray, eventCounterSumty) = b->getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+        Type * const counterArrayTy = eventCounterSumty->getArrayElementType();
+        assert (counterArrayTy->isArrayTy());
+        Type * const counterTy = counterArrayTy->getArrayElementType();
 
         Constant * i32_ZERO = b->getInt32(0);
 
@@ -168,23 +175,21 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, Value * co
         update[0] = i32_ZERO;
         update[1] = b->getInt32((unsigned)measurementType);
 
-        const auto n = beforeMeasurement->getType()->getPointerElementType()->getArrayNumElements();
-        for (unsigned i = 0; i < n; ++i) {
+        for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             from[1] = b->getInt32(i);
-            assert (beforeMeasurement->getType() == PAPIReadAfterMeasurementArray->getType());
-            Value * const beforeVal = b->CreateLoad(b->CreateGEP0(beforeMeasurement, from));
-         //   b->CallPrintInt("beforeVal", beforeVal);
-            Value * const afterVal = b->CreateLoad(b->CreateGEP0(PAPIReadAfterMeasurementArray, from));
-         //   b->CallPrintInt("afterVal", afterVal);
+            Value * const beforeVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, beforeMeasurement, from));
+            Value * const afterVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPIReadAfterMeasurementArray, from));
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                b->CreateAssert(b->CreateICmpUGE(afterVal, beforeVal), "???");
+            }
+
+
             Value * const diff = b->CreateSub(afterVal, beforeVal);
-         //   b->CallPrintInt("diff", diff);
             update[2] = from[1];
-            Value * const ptr = b->CreateGEP0(evenCounterSumArray, update);
-            Value * const curr = b->CreateLoad(ptr);
+            Value * const ptr = b->CreateGEP(eventCounterSumty, eventCounterSumArray, update);
+            Value * const curr = b->CreateLoad(counterTy, ptr);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b->CreateAdd(curr, diff);
-        //    b->CallPrintInt("ptr", ptr);
-        //    b->CallPrintInt("updatedVal", updatedVal);
             b->CreateStore(updatedVal, ptr);
         }
     }
@@ -201,22 +206,24 @@ void PipelineCompiler::recordTotalPAPIMeasurement(BuilderRef b, Value * const be
 
         readPAPIMeasurement(b, PipelineOutput, PAPIReadAfterMeasurementArray);
 
-        Value * const evenCounterSumArray = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
+        Value * eventCounterSumArray; Type * counterArrayTy;
+        std::tie(eventCounterSumArray, counterArrayTy) = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
+
+        Type * const counterTy = counterArrayTy->getArrayElementType();
+        assert (counterTy->isIntegerTy());
 
         Constant * const i32_ZERO = b->getInt32(0);
 
         FixedArray<Value *, 2> from;
         from[0] = i32_ZERO;
 
-        const auto n = beforeMeasurement->getType()->getPointerElementType()->getArrayNumElements();
-        for (unsigned i = 0; i < n; ++i) {
+        for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             from[1] = b->getInt32(i);
-            assert (beforeMeasurement->getType() == PAPIReadAfterMeasurementArray->getType());
-            Value * const beforeVal = b->CreateLoad(b->CreateGEP0(beforeMeasurement, from));
-            Value * const afterVal = b->CreateLoad(b->CreateGEP0(PAPIReadAfterMeasurementArray, from));
+            Value * const beforeVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, beforeMeasurement, from));
+            Value * const afterVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPIReadAfterMeasurementArray, from));
             Value * const diff = b->CreateSub(afterVal, beforeVal);
-            Value * const ptr = b->CreateGEP0(evenCounterSumArray, from);
-            Value * const curr = b->CreateLoad(ptr);
+            Value * const ptr = b->CreateGEP(counterArrayTy, eventCounterSumArray, from);
+            Value * const curr = b->CreateLoad(counterTy, ptr);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b->CreateAdd(curr, diff);
             b->CreateStore(updatedVal, ptr);
@@ -296,6 +303,36 @@ void PipelineCompiler::checkPAPIRetValAndExitOnError(BuilderRef b, StringRef sou
     b->SetInsertPoint(onSuccess);
 }
 
+template<typename T>
+auto constexpr cpow(T base, T exponent) -> T {
+    static_assert(std::is_integral<T>(), "exponent must be integral");
+    return exponent == 0 ? 1 : base * cpow<T>(base, exponent - 1);
+}
+
+inline size_t ceil_log10(size_t n) {
+    size_t k = 1;
+    constexpr auto E16 = cpow<size_t>(10ULL, 16ULL);
+    errs() << "E16: " << E16 << "\n";
+    while (n >= E16) {
+        n /= E16;
+        k += 16;
+    }
+    constexpr auto E8 = cpow<size_t>(10ULL, 8ULL);
+    if (n >= E8) {
+        n /= E8;
+        k += 8;
+    }
+    constexpr auto E4 = cpow<size_t>(10ULL, 4ULL);
+    if (n >= E4) {
+        n /= E4;
+        k += 4;
+    }
+    while (n) {
+        n /= 10;
+        k++;
+    }
+    return k;
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief __print_pipeline_PAPI_report
@@ -336,15 +373,7 @@ void __print_pipeline_PAPI_report(const unsigned numOfKernels, const char ** ker
     for (unsigned i = 0; i != numOfEvents; i++) {
         maxCounter = std::max(maxCounter, totals[i]);
     }
-    size_t maxCounterLength = 1;
-    BEGIN_SCOPED_REGION
-    papi_counter_t n = 10;
-    while (maxCounter >= n) {
-        n *= static_cast<papi_counter_t>(10);
-        ++maxCounterLength;
-    }
-    maxCounterLength = std::max(maxCounterLength, 7UL);
-    END_SCOPED_REGION
+    const auto maxCounterLength = std::max(ceil_log10(maxCounter), 7UL);
 
     out << "PAPI REPORT\n";
     out.indent(4 + maxNameLength + 1 + maxEventLength + 3 + (4 * 7) + 2);
@@ -406,7 +435,7 @@ void __print_pipeline_PAPI_report(const unsigned numOfKernels, const char ** ker
     #define GET_VALUE(kernel, event, counter) \
         values[kernel][((counter) * numOfFields + event)]
 
-    std::vector<papi_counter_t> other_subtotals{numOfEvents};
+    SmallVector<papi_counter_t, 4> other_subtotals(numOfEvents);
 
     for (unsigned i = 0; i < numOfKernels; ++i) {
         for (unsigned j = 0; j < numOfEvents; ++j) {
@@ -589,16 +618,18 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             ArrayType * const arTy = ArrayType::get(type, size);
             Constant * const ar = ConstantArray::get(arTy, array);
             Module & mod = *b->getModule();
-            GlobalVariable * const gv = new GlobalVariable(mod, arTy, true, GlobalValue::PrivateLinkage, ar);
+            GlobalVariable * const gv = new GlobalVariable(mod, ar->getType(), true, GlobalValue::PrivateLinkage, ar);
             FixedArray<Value *, 2> tmp;
             tmp[0] = ZERO;
             tmp[1] = ZERO;
-            return b->CreateInBoundsGEP(gv, tmp);
+            return b->CreateInBoundsGEP(arTy, gv, tmp);
         };
 
         Value * const arrayOfEventCodes = b->getScalarField(STATISTICS_PAPI_EVENT_SET_LIST);
 
-        Value * const totals = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
+        Value * totals; Type * totalsTy;
+
+        std::tie(totals, totalsTy) = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
 
@@ -614,6 +645,7 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
 
         } else {
 
+            DataLayout dl(b->getModule());
 
             std::vector<Constant *> kernelNames;
             for (auto i = FirstKernel; i <= LastKernel; ++i) {
@@ -627,8 +659,8 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
 
             Value * const arrayOfKernelNames = toGlobal(kernelNames, int8PtrTy, numOfKernels);
 
-            Constant * const c = b->getTypeSize(totals->getType()->getPointerElementType());
-            Constant * const fields = ConstantExpr::getUDiv(c, b->getTypeSize(papiCounterTy));
+            const auto totalsTySize = CBuilder::getTypeSize(dl, totalsTy);
+            const auto papiCounterTySize = CBuilder::getTypeSize(dl, papiCounterTy);
 
             ArrayType * const arTy = ArrayType::get(counterPtrTy, LastKernel - FirstKernel + 1);
 
@@ -639,9 +671,9 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             FixedArray<Value *, 2> indices;
             indices[0] = b->getInt32(0);
             for (size_t i = FirstKernel; i <= LastKernel; ++i) {
-                Value * const base = b->getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+                Value * const base = b->getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX).first;
                 indices[1] = b->getInt32(i - FirstKernel);
-                b->CreateStore(b->CreatePointerCast(base, counterPtrTy), b->CreateGEP0(pointerArray, indices));
+                b->CreateStore(b->CreatePointerCast(base, counterPtrTy), b->CreateGEP(arTy, pointerArray, indices));
 
             }
 
@@ -653,7 +685,8 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             args[1] = arrayOfKernelNames;
             args[2] = ConstantInt::get(intTy, NumOfPAPIEvents);
             args[3] = arrayOfEventCodes;
-            args[4] = ConstantExpr::getTrunc(fields, intTy);
+            assert ((totalsTySize % papiCounterTySize) == 0);
+            args[4] = ConstantInt::get(intTy, totalsTySize / papiCounterTySize);
             args[5] = b->CreatePointerCast(pointerArray, counterPtrTy->getPointerTo()); // values
             args[6] = b->CreatePointerCast(totals, counterPtrTy);
 

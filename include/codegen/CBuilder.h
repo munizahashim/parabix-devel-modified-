@@ -270,6 +270,8 @@ public:
 
     llvm::ConstantInt * LLVM_READNONE getTypeSize(llvm::Type * type, llvm::IntegerType * valType = nullptr) const;
 
+    static uintptr_t LLVM_READNONE getTypeSize(llvm::DataLayout & DL, llvm::Type * type);
+
     inline unsigned getCacheAlignment() const {
         return mCacheLineAlignment;
     }

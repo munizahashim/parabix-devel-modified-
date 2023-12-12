@@ -953,13 +953,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , FirstScalar(P.FirstScalar)
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
-
-, RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
-
-
-, PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
-, HasZeroExtendedStream(P.HasZeroExtendedStream)
-, EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
 #ifdef ENABLE_PAPI
 , NumOfPAPIEvents([&]() -> unsigned {
     const auto & S = codegen::PapiCounterOptions;
@@ -970,6 +963,10 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
     }
 }())
 #endif
+, RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
+, PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
+, HasZeroExtendedStream(P.HasZeroExtendedStream)
+, EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
 , TraceIO(DebugOptionIsSet(codegen::EnableBlockingIOCounter) || DebugOptionIsSet(codegen::TraceBlockedIO))
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
