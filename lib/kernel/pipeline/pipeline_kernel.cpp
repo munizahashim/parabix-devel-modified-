@@ -113,7 +113,15 @@ void terminatePAPI(BuilderRef b, Value * eventSet) {
     Function * const PAPICleanupEventsetFn = m->getFunction("PAPI_cleanup_eventset");
     b->CreateCall(PAPICleanupEventsetFn->getFunctionType(), PAPICleanupEventsetFn, args);
     Function * const PAPIDestroyEventsetFn = m->getFunction("PAPI_destroy_eventset");
-    b->CreateCall(PAPIDestroyEventsetFn->getFunctionType(), PAPIDestroyEventsetFn, args);
+
+    FunctionType * fTy = PAPIDestroyEventsetFn->getFunctionType();
+
+//    fTy->getFunctionParamType(0)->isPointerTy()
+    Value * eventSetData = b->CreateAllocaAtEntryPoint(eventSet->getType());
+    b->CreateStore(eventSet, eventSetData);
+    args[0] = eventSetData;
+
+    b->CreateCall(fTy, PAPIDestroyEventsetFn, args);
     Function * const PAPIShutdownFn = m->getFunction("PAPI_shutdown");
     b->CreateCall(PAPIShutdownFn->getFunctionType(), PAPIShutdownFn, {});
 }
@@ -678,7 +686,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
         const auto n = eventList.size();
         Constant * const initializer = ConstantDataArray::get(b->getContext(), ArrayRef<int>(eventList.data(), n));
-        eventListVal = new GlobalVariable(*m, intTy, true, GlobalVariable::ExternalLinkage, initializer);
+        eventListVal = new GlobalVariable(*m, initializer->getType(), true, GlobalVariable::ExternalLinkage, initializer);
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif

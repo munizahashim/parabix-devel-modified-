@@ -292,15 +292,13 @@ void Kernel::constructStateTypes(BuilderRef b) {
         auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
         mThreadLocalStateType = getTypeByName(m, strThreadLocal);
 
-        auto isIncompleteType = [&](StructType * const st) -> bool {
-            if (st) {
-                return st->isOpaque() || st->isEmptyTy();
-            }
-            return false;
+        auto isOpaqueType = [&](StructType * const st) -> bool {
+            return st ? st->isOpaque() : false;
         };
 
         if (LLVM_LIKELY((mSharedStateType == nullptr && mThreadLocalStateType == nullptr)
-                        || isIncompleteType(mSharedStateType) || isIncompleteType(mThreadLocalStateType))) {
+                        || isOpaqueType(mSharedStateType)
+                        || isOpaqueType(mThreadLocalStateType))) {
 
             flat_set<unsigned> sharedGroups;
             flat_set<unsigned> threadLocalGroups;
@@ -363,19 +361,6 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
             DataLayout dl(m);
 
-            auto getTypeSizeInt = [&](Type * const type) -> uint64_t {
-                if (type == nullptr) {
-                    return 0UL;
-                }
-                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                return dl.getTypeAllocSize(type);
-                #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-                return dl.getTypeAllocSize(type).getFixedSize();
-                #else
-                return dl.getTypeAllocSize(type).getFixedValue();
-                #endif
-            };
-
             auto makeStructType = [&](StructType * st,
                                       const std::vector<std::vector<Type *>> & structTypeVec,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
@@ -401,7 +386,7 @@ void Kernel::constructStateTypes(BuilderRef b) {
                 for (unsigned i = 0; i < n; ++i) {
                     StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
                     assert (sty->isSized());
-                    const auto typeSize = getTypeSizeInt(sty);
+                    const auto typeSize = CBuilder::getTypeSize(dl, sty);
                     byteOffset += typeSize;
                     const auto offset = (byteOffset % align);
                     const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
@@ -414,13 +399,17 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
                 if (st == nullptr) {
                     st = StructType::create(b->getContext(), structTypes, name);
+                    assert (!st->isOpaque());
+                    assert (!st->isEmptyTy());
                 } else {
+                    st->print(errs()); errs() << "\n\n";
+                    assert (st->isOpaque());
                     st->setBody(structTypes);
                 }
 
                 assert (!st->isEmptyTy());
                 assert (st->isSized());
-                assert (getTypeSizeInt(st) > 0);
+                assert (CBuilder::getTypeSize(dl, st) > 0);
 
                 #ifndef NDEBUG
                 const StructLayout * const sl = dl.getStructLayout(st);
@@ -438,16 +427,18 @@ void Kernel::constructStateTypes(BuilderRef b) {
 
             // NOTE: StructType::create always creates a new type even if an identical one exists.
             const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
-            mSharedStateType = makeStructType(mSharedStateType, shared, strShared, sharedGroupCount > 1 && allowStructPadding);
-            assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
-
-            mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
-            assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
-
+            if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
+                mSharedStateType = makeStructType(mSharedStateType, shared, strShared, sharedGroupCount > 1 && allowStructPadding);
+                assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
+            }
+            if (mThreadLocalStateType == nullptr || mThreadLocalStateType->isOpaque()) {
+                mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
+                assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
+            }
             if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
                 errs() << "KERNEL: " << mKernelName
-                       << " SHARED STATE: " << getTypeSizeInt(mSharedStateType) << " bytes"
-                          ", THREAD LOCAL STATE: "  << getTypeSizeInt(mThreadLocalStateType) << " bytes\n";
+                       << " SHARED STATE: " << CBuilder::getTypeSize(dl, mSharedStateType) << " bytes"
+                          ", THREAD LOCAL STATE: "  << CBuilder::getTypeSize(dl, mThreadLocalStateType) << " bytes\n";
             }
         }
 
@@ -1241,9 +1232,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
     #ifndef NDEBUG
     const auto originalNumOfHoseArgs = hostArgs.size();
     #endif
-
-    const auto k = hostArgs.size();
-
     if (LLVM_LIKELY(isStateful())) {
         addHostArg(handle);
     } else {

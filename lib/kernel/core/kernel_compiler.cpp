@@ -1069,17 +1069,17 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                             SmallVector<Value *, 4> indices(size);
                             indices[0] = i32_ZERO;
 
+
                             std::function<BasicBlock *(unsigned, Type *)> recursiveAccum = [&](const unsigned idx, Type * const elemTy) {
                                 assert (idx <= size);
                                 assert (indices.size() == size);
 
                                 BasicBlock * const entry = b->GetInsertBlock();
 
-                                if (idx == depth) {
-                                    assert (elemTy->isIntOrIntVectorTy());
-                                    Value * const scalarVal = b->CreateLoad(elemTy, b->CreateGEP(threadLocalTy, scalar, indices));
+                                if (idx == size) {
+                                    Value * const scalarVal = b->CreateLoad(elemTy, b->CreateGEP(scalarType, scalar, indices));
                                     assert (scalarVal->getType()->isIntOrIntVectorTy());
-                                    Value * const mainScalarPtr = b->CreateGEP(threadLocalTy, mainScalar, indices);
+                                    Value * const mainScalarPtr = b->CreateGEP(scalarType, mainScalar, indices);
                                     Value * mainScalarVal = b->CreateLoad(elemTy, mainScalarPtr);
 
                                     assert (scalarVal->getType() == mainScalarVal->getType());

@@ -577,20 +577,8 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
     #ifndef NDEBUG
     BEGIN_SCOPED_REGION
     DataLayout dl(b->getModule());
-    auto getTypeSizeInt = [&dl](Type * const type) -> size_t {
-        if (type == nullptr) {
-            return 0UL;
-        }
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return dl.getTypeAllocSize(type);
-        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-        return dl.getTypeAllocSize(type).getFixedSize();
-        #else
-        return dl.getTypeAllocSize(type).getFixedValue();
-        #endif
-    };
-    assert (getTypeSizeInt(hpdTy) == sizeof(HistogramPortData));
-    assert (getTypeSizeInt(hkdTy) == sizeof(HistogramKernelData));
+    assert (CBuilder::getTypeSize(dl, hpdTy) == sizeof(HistogramPortData));
+    assert (CBuilder::getTypeSize(dl, hkdTy) == sizeof(HistogramKernelData));
     END_SCOPED_REGION
     #endif
 

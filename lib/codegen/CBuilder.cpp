@@ -2294,20 +2294,24 @@ ConstantInt * LLVM_READNONE CBuilder::getTypeSize(Type * type, IntegerType * val
     // ConstantExpr::getSizeOf was creating an infinite(?) loop when folding the value for some complex structs
     // until replaced with this in LLVM 12.
     DataLayout dl(getModule());
-    size_t size = 0;
-    if (LLVM_LIKELY(type != nullptr)) {
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        size = dl.getTypeAllocSize(type);
-        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-        size = dl.getTypeAllocSize(type).getFixedSize();
-        #else
-        size = dl.getTypeAllocSize(type).getFixedValue();
-        #endif
-    }
     if (valType == nullptr) {
         valType = getSizeTy();
     }
-    return ConstantInt::get(valType, size);
+    return ConstantInt::get(valType, getTypeSize(dl, type));
+}
+
+uintptr_t LLVM_READNONE CBuilder::getTypeSize(llvm::DataLayout & DL, llvm::Type * type) {
+    uintptr_t size = 0;
+    if (LLVM_LIKELY(type != nullptr)) {
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
+        size = DL.getTypeAllocSize(type);
+        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
+        size = DL.getTypeAllocSize(type).getFixedSize();
+        #else
+        size = DL.getTypeAllocSize(type).getFixedValue();
+        #endif
+    }
+    return size;
 }
 
 std::string CBuilder::getKernelName() const {

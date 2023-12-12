@@ -258,9 +258,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     #endif
     #ifdef ENABLE_PAPI
     ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
+    Constant * nil = Constant::getNullValue(papiCounterArrayTy);
     PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIKernelStart");
+    b->CreateStore(nil, PAPIReadKernelStartMeasurementArray);
     PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIBefore");
+    b->CreateStore(nil, PAPIReadBeforeMeasurementArray);
     PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIAfter");
+    b->CreateStore(nil, PAPIReadAfterMeasurementArray);
     getPAPIEventSet(b);
     #endif
     Value * segmentStartTime = nullptr;
@@ -1060,10 +1064,14 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     Value * PAPIReadPipelineStartMeasurementArray = nullptr;
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
         ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
+        Constant * nil = Constant::getNullValue(papiCounterArrayTy);
         PAPIReadPipelineStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
         PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        b->CreateStore(nil, PAPIReadKernelStartMeasurementArray);
         PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        b->CreateStore(nil, PAPIReadBeforeMeasurementArray);
         PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        b->CreateStore(nil, PAPIReadAfterMeasurementArray);
         getPAPIEventSet(b);
     }
     #endif
