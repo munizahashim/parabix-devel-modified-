@@ -229,7 +229,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     buildKernelCallArgumentList(b, args);
 
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif
     startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
     Value * doSegmentRetVal = nullptr;
@@ -248,7 +248,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif
 
     if (mKernelCanTerminateEarly) {

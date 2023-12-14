@@ -257,14 +257,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     debugInit(b);
     #endif
     #ifdef ENABLE_PAPI
-    ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
-    Constant * nil = Constant::getNullValue(papiCounterArrayTy);
-    PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIKernelStart");
-    b->CreateStore(nil, PAPIReadKernelStartMeasurementArray);
-    PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIBefore");
-    b->CreateStore(nil, PAPIReadBeforeMeasurementArray);
-    PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIAfter");
-    b->CreateStore(nil, PAPIReadAfterMeasurementArray);
+    createPAPIMeasurementArrays(b);
     getPAPIEventSet(b);
     #endif
     Value * segmentStartTime = nullptr;
@@ -345,10 +338,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         #ifdef ENABLE_PAPI
         Value * PAPIPipelineStartMeasurementArray = nullptr;
         if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
-            PAPIPipelineStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIStart");
-            PAPIReadKernelStartMeasurementArray = nullptr;
-            PAPIReadBeforeMeasurementArray = nullptr;
-            PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy, nullptr, "PAPIAfter");
+            createPAPIMeasurementArrays(b);
             getPAPIEventSet(b);
             registerPAPIThread(b);
         }
@@ -356,7 +346,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
 
         startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
         #ifdef ENABLE_PAPI
-        readPAPIMeasurement(b, PipelineInput, PAPIPipelineStartMeasurementArray);
+        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
         #endif
 
         #ifdef PRINT_DEBUG_MESSAGES
@@ -629,9 +619,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         #endif
 
         #ifdef ENABLE_PAPI
-        recordTotalPAPIMeasurement(b, PAPIPipelineStartMeasurementArray);
+        recordTotalPAPIMeasurement(b);
         #endif
-
         updateTotalCycleCounterTime(b);
 
         mExpectedNumOfStridesMultiplier = nullptr;
@@ -1061,26 +1050,13 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     mNumOfFixedThreads = b->getSize(1);
 
     #ifdef ENABLE_PAPI
-    Value * PAPIReadPipelineStartMeasurementArray = nullptr;
-    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
-        ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
-        Constant * nil = Constant::getNullValue(papiCounterArrayTy);
-        PAPIReadPipelineStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        PAPIReadKernelStartMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        b->CreateStore(nil, PAPIReadKernelStartMeasurementArray);
-        PAPIReadBeforeMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        b->CreateStore(nil, PAPIReadBeforeMeasurementArray);
-        PAPIReadAfterMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        b->CreateStore(nil, PAPIReadAfterMeasurementArray);
-        getPAPIEventSet(b);
-    }
+    createPAPIMeasurementArrays(b);
+    getPAPIEventSet(b);
     #endif
-
     startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, PipelineInput, PAPIReadPipelineStartMeasurementArray);
+    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
     #endif
-
     start(b);
 
     mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
@@ -1104,9 +1080,8 @@ void PipelineCompiler::generateSingleThreadKernelMethod(BuilderRef b) {
     updateExternalProducedItemCounts(b);
 
     #ifdef ENABLE_PAPI
-    recordTotalPAPIMeasurement(b, PAPIReadPipelineStartMeasurementArray);
+    recordTotalPAPIMeasurement(b);
     #endif
-
     updateTotalCycleCounterTime(b);
 
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {

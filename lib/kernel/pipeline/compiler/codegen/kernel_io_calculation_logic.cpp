@@ -841,7 +841,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     b->SetInsertPoint(expandBuffer);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_BUFFER_EXPANSION, PAPIKernelCounter::PAPI_BUFFER_COPY});
     #endif
     startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
     Value * priorBufferPtr = nullptr;
@@ -919,12 +919,15 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     b->SetInsertPoint(afterCopyBackOrExpand);
     if (mustExpand) {
         updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+        #ifdef ENABLE_PAPI
+        accumPAPIMeasurementWithoutReset(b, mKernelId, mustExpand, PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
+        #endif
     } else {
         updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
+        #ifdef ENABLE_PAPI
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPI_BUFFER_EXPANSION);
+        #endif
     }
-    #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
-    #endif
 
     auto & afterExpansion = mInternalWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;

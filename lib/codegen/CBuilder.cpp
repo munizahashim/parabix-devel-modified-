@@ -2085,7 +2085,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                         return !(isa<Function>(V) || isa<Constant>(V));
                         #endif
                     };
-                    assert ("null pointer for function call?" && ci.getCalledFunction() || isIndirectCall());
+                    assert ("null pointer for function call?" && (ci.getCalledFunction() || isIndirectCall()));
                     // if we're using address sanitizer, try to determine whether we're
                     // rechecking the same address
                     if (isIndirectCall()) {
