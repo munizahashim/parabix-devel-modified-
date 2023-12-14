@@ -302,7 +302,7 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
                 offset[0] = b->getInt32(0);
                 offset[1] = b->getInt32(2);
 
-                Value * const first = b->CreateLoad(i64Ty, b->CreateGEP(listTy, root, offset));
+                Value * const first = b->CreateLoad(voidPtrTy, b->CreateGEP(listTy, root, offset));
                 Value * const nil = ConstantPointerNull::get(voidPtrTy);
 
                 b->CreateCondBr(b->CreateICmpNE(first, nil), freeLoop, freeExit);
@@ -364,27 +364,22 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
 
     IntegerType * const i64Ty = b->getInt64Ty();
     PointerType * const voidPtrTy = b->getVoidPtrTy();
-    FixedArray<Type *, 3> fields;
-    fields[0] = i64Ty;
-    fields[1] = i64Ty;
-    fields[2] = voidPtrTy;
-    StructType * const listTy = StructType::get(b->getContext(), fields);
 
     const auto anyGreedy = hasAnyGreedyInput(mKernelId);
 
-    auto recordDynamicEntry = [&](Value * const initialEntry, Value * const itemCount, ArrayType * type) {
+    auto recordDynamicEntry = [&](Value * const initialEntry, Value * const itemCount, Type * listTy) {
 
         Module * const m = b->getModule();
 
         Function * func = m->getFunction("updateHistogramList");
         if (func == nullptr) {
 
-            PointerType * const entryPtrTy = type->getPointerTo();
+          //  PointerType * const entryPtrTy = type->getPointerTo();
             IntegerType * const sizeTy = b->getSizeTy();
 
             PointerType * const listPtrTy = listTy->getPointerTo();
 
-            FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {entryPtrTy, sizeTy}, false);
+            FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {listPtrTy, sizeTy}, false);
 
             ConstantInt * const i32_ZERO = b->getInt32(0);
             ConstantInt * const i32_ONE = b->getInt32(1);
@@ -422,7 +417,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             b->CreateUnlikelyCondBr(b->CreateICmpEQ(itemCount, sz_ZERO), updateEntry, scanLoop);
 
             b->SetInsertPoint(scanLoop);
-            PHINode * const lastEntry = b->CreatePHI(entryPtrTy, 2, "lastEntry");
+            PHINode * const lastEntry = b->CreatePHI(listPtrTy, 2, "lastEntry");
             lastEntry->addIncoming(firstEntry, entry);
             PHINode * const lastItemCount = b->CreatePHI(b->getSizeTy(), 2, "lastPosition");
             lastItemCount->addIncoming(sz_ZERO, entry);
@@ -452,8 +447,8 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             b->CreateCondBr(b->CreateICmpEQ(currentItemCount, itemCount), updateEntry, insertNewEntry);
 
             b->SetInsertPoint(insertNewEntry);
-            Value * const size = b->getTypeSize(type);
-            Value * const newEntry = b->CreatePointerCast(b->CreateAlignedMalloc(size, sizeof(uint64_t)), entryPtrTy);
+            Value * const size = b->getTypeSize(listTy);
+            Value * const newEntry = b->CreatePointerCast(b->CreateAlignedMalloc(size, sizeof(uint64_t)), listPtrTy);
             offset[1] = i32_ZERO;
             b->CreateStore(itemCount, b->CreateGEP(listTy, newEntry, offset));
             offset[1] = i32_ONE;
@@ -464,7 +459,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             b->CreateRetVoid();
 
             b->SetInsertPoint(updateEntry);
-            PHINode * const entryToUpdate = b->CreatePHI(entryPtrTy, 2);
+            PHINode * const entryToUpdate = b->CreatePHI(listPtrTy, 2);
             entryToUpdate->addIncoming(currentEntry, updateOrInsertEntry);
             entryToUpdate->addIncoming(firstEntry, entry);
             offset[1] = i32_ONE;
@@ -507,7 +502,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             } else {
                 diff = calculateDiff(mProducedItemCount[br.Port], mCurrentProducedDeferredItemCountPhi[br.Port], "produced deferred");
             }
-            recordDynamicEntry(base, diff, cast<ArrayType>(type));
+            recordDynamicEntry(base, diff, type);
         }
         // fixed rate doesn't need to be tracked as the only one that wouldn't be the exact rate would be
         // the final partial one but that isn't a very interesting value to model.
@@ -515,6 +510,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             const auto prefix = makeBufferName(mKernelId, br.Port);
             Value * base; Type * type;
             std::tie(base, type) = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
+
             Value * diff = nullptr;
             if (br.Port.Type == PortType::Input) {
                 diff = calculateDiff(mProcessedItemCount[br.Port], mCurrentProcessedItemCountPhi[br.Port], "processed");
@@ -522,9 +518,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
                 diff = calculateDiff(mProducedItemCount[br.Port], mCurrentProducedItemCountPhi[br.Port], "produced");
             }
 
-            if (LLVM_UNLIKELY(anyGreedy || pr.isUnknown())) {
-                recordDynamicEntry(base, diff, cast<ArrayType>(type));
-            } else {
+            if (LLVM_LIKELY(isa<ArrayType>(type))) {
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     Value * const maxSize = b->getSize(type->getArrayNumElements() - 1);
                     Value * const valid = b->CreateICmpULE(diff, maxSize);
@@ -536,9 +530,12 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
                 FixedArray<Value *, 2> args;
                 args[0] = sz_ZERO;
                 args[1] = diff;
-                Value * const toInc = b->CreateGEP(listTy, base, args);
+                Value * const toInc = b->CreateGEP(type, base, args);
                 b->CreateStore(b->CreateAdd(b->CreateLoad(i64Ty, toInc), sz_ONE), toInc);
+            } else {
+                recordDynamicEntry(base, diff, type);
             }
+
         }
     };
 

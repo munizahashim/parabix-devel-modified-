@@ -1476,7 +1476,8 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
             auto ip = b->saveIP();
             LLVMContext & C = b->getContext();
             Type * const sizeTy = b->getSizeTy();
-            FunctionType * fty = FunctionType::get(b->getVoidTy(), { traceTy, sizeTy, sizeTy }, false);
+            Type * const tracePtrTy = traceTy->getPointerTo();
+            FunctionType * fty = FunctionType::get(b->getVoidTy(), { tracePtrTy, sizeTy, sizeTy }, false);
             updateSegmentsPerStrideTrace = Function::Create(fty, Function::PrivateLinkage, "$trace_strides_per_segment", m);
 
             BasicBlock * const entry = BasicBlock::Create(C, "entry", updateSegmentsPerStrideTrace);
@@ -1489,12 +1490,21 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
 
             auto arg = updateSegmentsPerStrideTrace->arg_begin();
             arg->setName("traceData");
-            Value * const traceData = &*arg++;
+            Value * traceData = &*arg++;
             arg->setName("segNo");
             Value * const segNo = &*arg++;
             arg->setName("numOfStrides");
             Value * const numOfStrides = &*arg++;
             assert (arg == updateSegmentsPerStrideTrace->arg_end());
+
+//            Type * const recordStructTy = ArrayType::get(sizeTy, 2);
+
+//            FixedArray<Type *, 4> traceStruct;
+//            traceStruct[0] = sizeTy; // last num of strides (to avoid unnecessary loads of the trace
+//                                     // log and simplify the logic for first stride)
+//            traceStruct[1] = recordStructTy->getPointerTo(); // pointer to trace log
+//            traceStruct[2] = sizeTy; // trace length
+//            traceStruct[3] = sizeTy; // trace capacity (for realloc)
 
             Constant * const ZERO = b->getInt32(0);
             Constant * const ONE = b->getInt32(1);
@@ -1508,25 +1518,29 @@ void PipelineCompiler::recordStridesPerSegment(BuilderRef b, const unsigned kern
 
             b->SetInsertPoint(update);
             Value * const traceLogField = b->CreateGEP(traceTy, traceData, {ZERO, ONE});
-            Type * recordStructTy = cast<StructType>(traceTy)->getStructElementType(1);
-            Value * const traceLog = b->CreateLoad(recordStructTy, traceLogField);
+            assert (traceLogField->getType()->isPointerTy());
+            Type * const recordStructTy = ArrayType::get(sizeTy, 2);
+            Type * const recordStructPtrTy = recordStructTy->getPointerTo();
+            Value * const traceLog = b->CreateLoad(recordStructPtrTy, traceLogField);
             Value * const traceLengthField = b->CreateGEP(traceTy, traceData, {ZERO, TWO});
             Value * const traceLength = b->CreateLoad(sizeTy, traceLengthField);
             Value * const traceCapacityField = b->CreateGEP(traceTy, traceData, {ZERO, THREE});
+            assert (traceCapacityField->getType()->isPointerTy());
             Value * const traceCapacity = b->CreateLoad(sizeTy, traceCapacityField);
             Value * const hasSpace = b->CreateICmpNE(traceLength, traceCapacity);
             b->CreateLikelyCondBr(hasSpace, write, expand);
 
             b->SetInsertPoint(expand);
             Value * const nextTraceCapacity = b->CreateShl(traceCapacity, 1);
-            Type * const traceLogTy =  ArrayType::get(sizeTy, 2);
-            Value * const expandedtraceLog = b->CreateRealloc(traceLogTy, traceLog, nextTraceCapacity);
+            assert (traceLog->getType()->isPointerTy());
+            Value * const expandedtraceLog = b->CreateRealloc(recordStructTy, traceLog, nextTraceCapacity);
+            assert (expandedtraceLog->getType() == traceLog->getType());
             b->CreateStore(expandedtraceLog, traceLogField);
             b->CreateStore(nextTraceCapacity, traceCapacityField);
             b->CreateBr(write);
 
             b->SetInsertPoint(write);
-            PHINode * const traceLogPhi = b->CreatePHI(recordStructTy, 2);
+            PHINode * const traceLogPhi = b->CreatePHI(recordStructPtrTy, 2);
             traceLogPhi->addIncoming(traceLog, update);
             traceLogPhi->addIncoming(expandedtraceLog, expand);
             b->CreateStore(segNo, b->CreateGEP(recordStructTy, traceLogPhi, {traceLength , ZERO}));
@@ -1642,12 +1656,13 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
         SmallVector<Value *, 64> traceLengthArray(PartitionCount - 1);
 
         Type * const recordStructTy = ArrayType::get(sizeTy, 2);
+        Type * const recordStructPtrTy = recordStructTy->getPointerTo();
 
         for (unsigned i = 0; i < (PartitionCount - 2); ++i) {
             const auto prefix = makeKernelName(partitionRootIds[i]);
             Value * traceData; Type * traceTy;
             std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
-            traceLogArray[i] = b->CreateLoad(recordStructTy, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
+            traceLogArray[i] = b->CreateLoad(recordStructPtrTy, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
             traceLengthArray[i] = b->CreateLoad(sizeTy, b->CreateGEP(traceTy, traceData, {ZERO, TWO}));
         }
 
@@ -1681,8 +1696,6 @@ void PipelineCompiler::printOptionalStridesPerSegment(BuilderRef b) const {
             BasicBlock * const next = b->CreateBasicBlock();
             Value * const notEndOfTrace = b->CreateICmpNE(currentIndex[i], traceLengthArray[i]);
             b->CreateLikelyCondBr(notEndOfTrace, check, next);
-
-
 
             b->SetInsertPoint(check);
             Value * const nextSegNo = b->CreateLoad(sizeTy, b->CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ZERO }));
@@ -1826,14 +1839,23 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
                                              const Vec<Value *> & current,
                                              const Vec<Value *> & prior,
                                              const StringRef suffix) const {
-    const auto fieldName = (makeKernelName(mKernelId) + suffix).str();
+    const auto kernelName = makeKernelName(mKernelId);
+    const auto fieldName = (kernelName + suffix).str();
 
-    Value * trace; Type * traceTy;
 
-    std::tie(trace, traceTy) = b->getScalarFieldPtr(fieldName);
 
-    BasicBlock * const expand = b->CreateBasicBlock("");
-    BasicBlock * const record = b->CreateBasicBlock("");
+    Value * trace = b->getScalarFieldPtr(fieldName).first;
+
+    auto & C = b->getContext();
+    IntegerType * const sizeTy = b->getSizeTy();
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    const auto n = out_degree(mKernelId, mBufferGraph);
+    ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
+    StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
+    PointerType * const traceTy = logChunkTy->getPointerTo();
+
+    BasicBlock * const expand = b->CreateBasicBlock(kernelName + "_expandItemCountDeltArray");
+    BasicBlock * const record = b->CreateBasicBlock(kernelName + "_recordItemCountDelta");
 
     Value * const offset = b->CreateURem(mSegNo, b->getSize(ITEM_COUNT_DELTA_CHUNK_LENGTH));
     Constant * const ZERO = b->getInt32(0);
@@ -1844,10 +1866,8 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
     b->CreateCondBr(b->CreateIsNull(offset), expand, record);
 
     b->SetInsertPoint(expand);
-    Type * const logTy = cast<StructType>(traceTy)->getStructElementType(0);
-    Value * const newLog = b->CreatePageAlignedMalloc(logTy);
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
-    b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(traceTy, newLog, { ZERO, ONE}));
+    Value * const newLog = b->CreatePageAlignedMalloc(logChunkTy);
+    b->CreateStore(b->CreatePointerCast(currentLog, voidPtrTy), b->CreateGEP(logChunkTy, newLog, { ZERO, ONE}));
     b->CreateStore(newLog, trace);
     BasicBlock * const expandExit = b->GetInsertBlock();
     b->CreateBr(record);
@@ -1867,7 +1887,7 @@ void PipelineCompiler::recordItemCountDeltas(BuilderRef b,
         const auto i = out.Port.Number;
         Value * const delta = b->CreateSub(current[i], prior[i]);
         indices[3] = b->getInt32(i);
-        b->CreateStore(delta, b->CreateGEP(logTy, log, indices));
+        b->CreateStore(delta, b->CreateGEP(logChunkTy, log, indices));
     }
 }
 
@@ -1937,41 +1957,37 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     // Generate line format string
     buffer.clear();
 
+    const auto inputStreamSets = out_degree(PipelineInput, mBufferGraph);
+
     format << "%" PRIu64; // seg #
-    for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+    for (auto i = FirstStreamSet + inputStreamSets; i <= LastStreamSet; ++i) {
         format << ",%" PRIu64; // processed item count delta
     }
     format << "\n";
 
     // Print each kernel line
-    SmallVector<Value *, 64> args(LastStreamSet - FirstStreamSet + 4);
+    SmallVector<Value *, 64> args(LastStreamSet - (FirstStreamSet + inputStreamSets) + 4);
     args[0] = STDERR;
     args[1] = b->GetString(format.str());
 
     SmallVector<Value *, 64> traceLogArray(LastKernel + 1);
+    SmallVector<StructType *, 64> traceLogType(LastKernel + 1);
 
-//    LLVMContext & C = b->getContext();
-//    IntegerType * const sizeTy = b->getSizeTy();
-//    PointerType * const voidPtrTy = b->getVoidPtrTy();
-//    ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
-//    StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
-//    PointerType * const traceTy = logChunkTy->getPointerTo();
-
-    Type * logChunkTy = nullptr;
+    LLVMContext & C = b->getContext();
+    PointerType * const voidPtrTy = b->getVoidPtrTy();
 
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const auto n = out_degree(i, mBufferGraph);
         if (LLVM_UNLIKELY(n == 0)) {
             traceLogArray[i] = nullptr;
+            traceLogType[i] = nullptr;
         } else {
             const auto fieldName = (makeKernelName(i) + suffix).str();
-            std::tie(traceLogArray[i], logChunkTy) = b->getScalarFieldPtr(fieldName);
+            traceLogArray[i] = b->getScalarFieldPtr(fieldName).first;
+            ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
+            traceLogType[i] = StructType::get(C, { logTy, voidPtrTy } );
         }
     }
-
-    ArrayType * const logTy = cast<ArrayType>(cast<StructType>(logChunkTy)->getStructElementType(0));
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
-    PointerType * const logChunkPtrTy = logChunkTy->getPointerTo();
 
     Constant * const CHUNK_LENGTH = b->getSize(ITEM_COUNT_DELTA_CHUNK_LENGTH);
     Value * const chunkCount = b->CreateCeilUDiv(mSegNo, CHUNK_LENGTH);
@@ -1993,8 +2009,9 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     PHINode * const chunkIndex = b->CreatePHI(sizeTy, 2);
     chunkIndex->addIncoming(chunkCount, loopEntry);
     SmallVector<PHINode *, 64> currentChunk(LastKernel + 1);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = PipelineInput; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
+        PointerType * logChunkPtrTy = traceLogType[i]->getPointerTo();
         currentChunk[i] = b->CreatePHI(logChunkPtrTy, 2);
         currentChunk[i]->addIncoming(ConstantPointerNull::get(logChunkPtrTy), loopEntry);
     }
@@ -2009,9 +2026,9 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     nextChunkIndexPhi->addIncoming(SZ_ZERO, loopStart);
     SmallVector<PHINode *, 64> subsequentChunk(LastKernel + 1);
     SmallVector<Value *, 64> nextChunk(LastKernel + 1);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = PipelineInput; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
-        subsequentChunk[i] = b->CreatePHI(logChunkPtrTy, 2);
+        subsequentChunk[i] = b->CreatePHI(traceLogArray[i]->getType(), 2);
         subsequentChunk[i]->addIncoming(traceLogArray[i], loopStart);
     }
 
@@ -2022,7 +2039,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(subsequentChunk[i] == nullptr)) continue;
         nextChunk[i] = b->CreateLoad(voidPtrTy, subsequentChunk[i]);
-        Value * subsequentChunk2 = b->CreateGEP(logChunkTy, nextChunk[i], nextChunkIndices);
+        Value * subsequentChunk2 = b->CreateGEP(traceLogType[i], nextChunk[i], nextChunkIndices);
         subsequentChunk2 = b->CreatePointerCast(subsequentChunk2, subsequentChunk[i]->getType());
         subsequentChunk[i]->addIncoming(subsequentChunk2, getNextLogChunk);
     }
@@ -2035,7 +2052,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     b->SetInsertPoint(selectLogChunk);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(nextChunk[i] == nullptr)) continue;
-        Value * spentLog = b->CreateLoad(voidPtrTy, b->CreateGEP(logChunkTy, nextChunk[i], nextChunkIndices));
+        Value * spentLog = b->CreateLoad(voidPtrTy, b->CreateGEP(traceLogType[i], nextChunk[i], nextChunkIndices));
         b->CreateFree(spentLog);
     }
     b->CreateBr(printLogEntry);
@@ -2045,7 +2062,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     nextChunkIndexPhi2->addIncoming(chunkIndex, loopStart);
     nextChunkIndexPhi2->addIncoming(nextChunkIndexPhi, selectLogChunk);
     SmallVector<PHINode *, 64> currentChunkPhi(LastKernel + 1);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = PipelineInput; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(nextChunk[i] == nullptr)) continue;
         Type * const ty = nextChunk[i]->getType();
         currentChunkPhi[i] = b->CreatePHI(ty, 2);
@@ -2058,12 +2075,24 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     indices[1] = ZERO;
     indices[2] = offset;
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
-        for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-            const auto idx = target(e, mBufferGraph) - FirstStreamSet + 3;
-            const BufferPort & out = mBufferGraph[e];
-            indices[3] = b->getInt32(out.Port.Number);
-            args[idx] = b->CreateLoad(logTy, b->CreateGEP(logChunkTy, currentChunkPhi[i], indices));
+        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) {
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                const auto streamSet = target(e, mBufferGraph);
+                assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
+                const auto idx = (streamSet - (FirstStreamSet + inputStreamSets)) + 3;
+                assert (args[idx] == nullptr);
+                args[idx] = SZ_ZERO;
+            }
+        } else {
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                const auto streamSet = target(e, mBufferGraph);
+                assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
+                const auto idx = (streamSet - (FirstStreamSet + inputStreamSets)) + 3;
+                const BufferPort & out = mBufferGraph[e];
+                indices[3] = b->getInt32(out.Port.Number);
+                assert (args[idx] == nullptr);
+                args[idx] = b->CreateLoad(sizeTy, b->CreateGEP(traceLogType[i], currentChunkPhi[i], indices));
+            }
         }
     }
 
@@ -2088,7 +2117,7 @@ void PipelineCompiler::printItemCountDeltas(BuilderRef b, const StringRef title,
     finalArgs[0] = STDERR;
     finalArgs[1] = b->GetString("\n");
     b->CreateCall(fTy, Dprintf, finalArgs);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+    for (auto i = PipelineInput; i <= LastKernel; ++i) {
         if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
         b->CreateFree(currentChunkPhi[i]);
     }

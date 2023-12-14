@@ -117,7 +117,8 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         debugPrint(b, prefix + ": waiting for %ssegment number %" PRIu64 ", initially %" PRIu64,
                    __getSyncLockName(b, type), segNo, b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr));
         #endif
-        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode(); assert (nextNode);
+        assert (b->GetInsertBlock());
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
         BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
         BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_LSN_acquired", nextNode);
         b->CreateBr(acquire);
