@@ -436,6 +436,7 @@ public:
                      std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
     void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
+    std::string getSignature() {return mSignature;}
 
 protected:
     Bindings streamSetInputBindings();
@@ -457,6 +458,7 @@ private:
     std::vector<std::pair<int, int>>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
+    std::string                 mSignature;
 };
 
 
