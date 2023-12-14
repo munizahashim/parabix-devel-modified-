@@ -254,11 +254,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
                     Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                    const auto typeSize = DL.getTypeAllocSize(type);
-                    #else
-                    const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
-                    #endif
+                    const auto typeSize = b->getTypeSize(DL, type);
                     const ProcessingRate & rate = outputRate.getRate();
                     assert (rate.isFixed());
                     const auto j = mapping[streamSet - FirstStreamSet];

@@ -719,6 +719,7 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
     }
     return intSegNo;
 #endif
+    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

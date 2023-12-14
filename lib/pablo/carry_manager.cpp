@@ -383,7 +383,6 @@ void CarryManager::enterLoopBody(BuilderRef b, BasicBlock * const entryBlock) {
         Type * nestedCarryPtrTy = frame.OuterFrameType->getStructElementType(NestedCarryState);
 
         assert (nestedCarryPtrTy->isPointerTy());
-        PointerType * const carryStatePtrTy = mCurrentFrameType->getPointerTo();
         Value * const carryStateArray = b->CreateLoad(nestedCarryPtrTy, carryStateArrayPtr);
         assert (carryStateArray->getType()->isPointerTy());
 

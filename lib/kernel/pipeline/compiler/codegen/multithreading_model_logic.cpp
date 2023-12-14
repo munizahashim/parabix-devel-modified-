@@ -915,18 +915,10 @@ StructType * PipelineCompiler::getThreadStuctType(BuilderRef b, const std::vecto
     }
 
     DataLayout dl(b->getModule());
-    auto getTypeSize = [&](Type * const type) -> uint64_t { assert (type);
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return dl.getTypeAllocSize(type);
-        #else
-        return dl.getTypeAllocSize(type).getFixedSize();
-        #endif
-    };
-
     // add padding to force this struct to be cache-line-aligned
     uint64_t structSize = 0UL;
     for (unsigned i = 0; i < THREAD_STRUCT_SIZE; ++i) {
-        structSize += getTypeSize(fields[i]);
+        structSize += b->getTypeSize(dl, fields[i]);
     }
     const auto cl = b->getCacheAlignment();
     const auto paddingBytes = (2 * cl) - (structSize % cl);

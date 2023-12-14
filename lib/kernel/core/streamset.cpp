@@ -179,7 +179,6 @@ Value * StreamSetBuffer::getRawItemPointer(BuilderPtr b, Value * streamIndex, Va
         addr = getStreamBlockPtr(b, getBaseAddress(b), streamIndex, blockIndex);
         pos = b->CreateURem(absolutePosition, BLOCK_WIDTH);
     }
-    PointerType * itemPtrTy = nullptr;
     if (LLVM_UNLIKELY(itemWidth < 8)) {
         const Rational itemsPerByte{8, itemWidth};
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
