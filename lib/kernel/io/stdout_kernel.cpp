@@ -68,7 +68,7 @@ void FileSink::generateInitializeMethod(BuilderRef b) {
     #else
     b->CreateUnlinkCall(fileName);
     #endif
-    b->CreateMemCpy(b->CreateGEP0(temporaryFileName, fileNameLength), b->GetString("XXXXXX"), suffixPlusNullLength, 1);
+    b->CreateMemCpy(b->CreateGEP(b->getInt8Ty(), temporaryFileName, fileNameLength), b->GetString("XXXXXX"), suffixPlusNullLength, 1);
     Value * const temporaryFd = b->CreateMkstempCall(temporaryFileName);
     ConstantInt * const errorCodeFd = b->getInt32(-1);
     Value * failure = b->CreateICmpEQ(temporaryFd, errorCodeFd);

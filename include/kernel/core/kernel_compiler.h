@@ -21,7 +21,9 @@ public:
 
     using Rational = ProcessingRate::Rational;
 
-    using ScalarValueMap = llvm::StringMap<llvm::Value *>;
+    using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
+
+    using ScalarValueMap = llvm::StringMap<ScalarRef>;
 
     using ScalarAliasMap = std::vector<std::pair<std::string, std::string>>;
 
@@ -324,7 +326,7 @@ public:
 
     bool hasScalarField(const llvm::StringRef name) const;
 
-    llvm::Value * getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
+    ScalarRef getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
 
     LLVM_READNONE const BindingMapEntry & getBinding(const BindingType type, const llvm::StringRef name) const;
 
@@ -346,7 +348,7 @@ protected:
 
     void addAlias(llvm::StringRef alias, llvm::StringRef scalarName);
 
-    llvm::Value * getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
+    ScalarRef getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
 
 public:
 

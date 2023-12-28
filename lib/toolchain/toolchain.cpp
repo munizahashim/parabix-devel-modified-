@@ -7,9 +7,16 @@
 #include <toolchain/toolchain.h>
 #include <unicode/core/UCD_Config.h>
 #include <llvm/Support/CommandLine.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/raw_ostream.h>
 #include <boost/interprocess/mapped_region.hpp>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#include <thread>
+#endif
 
 using namespace llvm;
 
@@ -180,7 +187,9 @@ static cl::opt<bool, true> OptSplitTransposition("enable-split-s2p", cl::locatio
 
 static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+                     cl::init(std::thread::hardware_concurrency()),
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
                      cl::init(llvm::sys::getHostNumPhysicalCores()),
 #else
                      cl::init(2),
@@ -190,7 +199,9 @@ MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
 
 static cl::opt<unsigned, true>
 ThreadNumOption("thread-num", cl::location(SegmentThreads),
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+                #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+                cl::init(std::thread::hardware_concurrency() - 1),
+                #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
                 // If we have more than 2 cores, leave one for other processes,
                 // and use the rest for multithreading of the pipeline.
                 cl::init(std::max(llvm::sys::getHostNumPhysicalCores() - 1, 2)),
@@ -339,7 +350,9 @@ void AddParabixVersionPrinter() {
 
 void setTaskThreads(unsigned taskThreads) {
     TaskThreads = std::max(taskThreads, 1u);
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+    unsigned coresPerTask = std::thread::hardware_concurrency()/TaskThreads;
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
     unsigned coresPerTask = llvm::sys::getHostNumPhysicalCores()/TaskThreads;
 #else
     unsigned coresPerTask = 2;  // assumption

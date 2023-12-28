@@ -50,9 +50,11 @@ enum PAPIKernelCounter {
   , PAPI_KERNEL_EXECUTION = 4
   , PAPI_KERNEL_TOTAL = 5
   // ------------------
-  , NUM_OF_PAPI_COUNTERS = 6
-//  // ------------------
-//  , PAPI_FULL_PIPELINE_TIME = 0
+  , NUM_OF_PAPI_KERNEL_COUNTERS = 6
+  // ------------------
+  , PAPI_FULL_PIPELINE_TIME = 6
+  // ------------------
+  , NUM_OF_PAPI_COUNTERS = 7
 };
 #endif
 
@@ -211,20 +213,20 @@ public:
 // internal pipeline functions
 
     LLVM_READNONE StructType * getThreadStuctType(BuilderRef b, const std::vector<Value *> & props) const;
-    void writeThreadStructObject(BuilderRef b, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
-    void readThreadStuctObject(BuilderRef b, Value * threadState);
+    void writeThreadStructObject(BuilderRef b, StructType * const threadStateTy, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
+    void readThreadStuctObject(BuilderRef b, StructType * const threadStateTy, Value * threadState);
     void deallocateThreadState(BuilderRef b, Value * const threadState);
 
     void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
     void deallocateThreadLocalState(BuilderRef b, Value * const localState);
-    Value * readTerminationSignalFromLocalState(BuilderRef b, Value * const threadState) const;
-    void writeTerminationSignalToLocalState(BuilderRef b, Value * const threadState, Value * const terminated) const;
+    Value * readTerminationSignalFromLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
+    void writeTerminationSignalToLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState, Value * const terminated) const;
 
     std::vector<llvm::Value *> storeDoSegmentState() const;
-    void readDoSegmentState(BuilderRef b, Value * const propertyState);
+    void readDoSegmentState(BuilderRef b, StructType * const threadStructTy, Value * const propertyState);
     void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
 
-    inline Value * isProcessThread(BuilderRef b, Value * const threadState) const;
+    inline Value * isProcessThread(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
     void updateExternalProducedItemCounts(BuilderRef b);
     void writeMaximumStrideLengthMetadata(BuilderRef b) const;
 
@@ -520,9 +522,12 @@ public:
     void registerPAPIThread(BuilderRef b) const;
     void getPAPIEventSet(BuilderRef b);
     void createPAPIMeasurementArrays(BuilderRef b);
-    void readPAPIMeasurement(BuilderRef b, const unsigned kernelId, Value * const measurementArray) const;
-    void accumPAPIMeasurementWithoutReset(BuilderRef b, Value * const beforeMeasurement, const unsigned kernelId, const PAPIKernelCounter measurementType) const;
-    void recordTotalPAPIMeasurement(BuilderRef b, Value * const beforeMeasurement) const;
+    void readPAPIMeasurement(BuilderRef b, Value * const measurementArray) const;
+    void startPAPIMeasurement(BuilderRef b, const PAPIKernelCounter measurementType) const;
+    void startPAPIMeasurement(BuilderRef b, const std::initializer_list<PAPIKernelCounter> types) const;
+    void accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, const PAPIKernelCounter measurementType) const;
+    void accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const;
+    void recordTotalPAPIMeasurement(BuilderRef b) const;
     void unregisterPAPIThread(BuilderRef b) const;
     void startPAPI(BuilderRef b);
     void stopPAPI(BuilderRef b);
@@ -561,10 +566,10 @@ public:
 
     Value * getFamilyFunctionFromKernelState(BuilderRef b, Type * const type, const std::string &suffix) const;
     Value * callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const;
-    Value * getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
     void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
-    Value * getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
-    Value * getKernelDoSegmentFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
+    std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(BuilderRef b) const;
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
 
@@ -884,9 +889,8 @@ protected:
     //SmallVector<int, 8>                         PAPIEventList;
     Value *                                     PAPIEventSet = nullptr;
     Value *                                     PAPIEventSetVal = nullptr;
-    Value *                                     PAPIReadKernelStartMeasurementArray = nullptr;
-    Value *                                     PAPIReadBeforeMeasurementArray = nullptr;
-    Value *                                     PAPIReadAfterMeasurementArray = nullptr;
+    FixedArray<Value *, NUM_OF_PAPI_COUNTERS>   PAPIEventCounterArray;
+    Value *                                     PAPITempMeasurementArray = nullptr;
     #endif
 
     // debug state
@@ -953,13 +957,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , FirstScalar(P.FirstScalar)
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
-
-, RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
-
-
-, PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
-, HasZeroExtendedStream(P.HasZeroExtendedStream)
-, EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
 #ifdef ENABLE_PAPI
 , NumOfPAPIEvents([&]() -> unsigned {
     const auto & S = codegen::PapiCounterOptions;
@@ -970,6 +967,10 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
     }
 }())
 #endif
+, RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
+, PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
+, HasZeroExtendedStream(P.HasZeroExtendedStream)
+, EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
 , TraceIO(DebugOptionIsSet(codegen::EnableBlockingIOCounter) || DebugOptionIsSet(codegen::TraceBlockedIO))
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))

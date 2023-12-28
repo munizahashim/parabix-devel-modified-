@@ -103,7 +103,7 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef 
             // an internally generated streamset might only be used by one of the nested kernels
             if (streamSet <= LastStreamSet) {
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-                Value * const handle = b->getScalarFieldPtr(handleName);
+                Value * const handle = b->getScalarFieldPtr(handleName).first;
                 const BufferNode & bn = mBufferGraph[streamSet];
                 #ifndef NDEBUG
                 const RelationshipNode & rn = mStreamGraph[streamSet];
@@ -160,7 +160,7 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
 
     const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-    Value * const handle = b->getScalarFieldPtr(handleName);
+    Value * const handle = b->getScalarFieldPtr(handleName).first;
     buffer->setHandle(handle);
 
     const RelationshipNode & rn = mStreamGraph[streamSet];

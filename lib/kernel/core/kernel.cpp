@@ -47,6 +47,7 @@ const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
 
 const static auto SHARED_SUFFIX = "_shared_state";
 const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
+constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
@@ -237,6 +238,7 @@ void Kernel::ensureLoaded() {
         return;
     }
     assert (mModule);
+    assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
     SmallVector<char, 256> tmp;
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
@@ -249,6 +251,7 @@ void Kernel::loadCachedKernel(BuilderRef b) {
     assert (!mGenerated);
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b->getModule(); assert (mModule);
+    assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
     SmallVector<char, 256> tmp;
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
@@ -272,154 +275,200 @@ void Kernel::linkExternalMethods(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::constructStateTypes(BuilderRef b) {
     Module * const m = getModule(); assert (b->getModule() == m);
-    SmallVector<char, 256> tmpShared;
-    auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
-    mSharedStateType = getTypeByName(m, strShared);
-    SmallVector<char, 256> tmpThreadLocal;
-    auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
-    mThreadLocalStateType = getTypeByName(m, strThreadLocal);
-    if (LLVM_LIKELY(mSharedStateType == nullptr && mThreadLocalStateType == nullptr)) {
 
-        flat_set<unsigned> sharedGroups;
-        flat_set<unsigned> threadLocalGroups;
+    SmallVector<char, 256> tmpMeta;
+    auto strMeta = concat(getName(), STATE_TYPE_METADATA_SUFFIX, tmpMeta);
+    NamedMDNode * const structTypeMetadata = m->getOrInsertNamedMetadata(strMeta);
 
-        for (const auto & scalar : mInternalScalars) {
-            assert (scalar.getValueType());
-            switch (scalar.getScalarType()) {
-                case ScalarType::Internal:
-                    sharedGroups.insert(scalar.getGroup());
-                    break;
-                case ScalarType::ThreadLocal:
-                    threadLocalGroups.insert(scalar.getGroup());
-                    break;
-                default: break;
-            }
-        }
+    assert (structTypeMetadata);
 
-        const auto sharedGroupCount = sharedGroups.size();
-        const auto threadLocalGroupCount = threadLocalGroups.size();
+    if (structTypeMetadata->getNumOperands() == 0) {
 
-        std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
-        std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+        SmallVector<char, 256> tmpShared;
+        auto strShared = concat(getName(), SHARED_SUFFIX, tmpShared);
+        mSharedStateType = getTypeByName(m, strShared);
 
-        for (const auto & scalar : mInputScalars) {
-            assert (scalar.getType());
-            shared[0].push_back(scalar.getType());
-        }
+        SmallVector<char, 256> tmpThreadLocal;
+        auto strThreadLocal = concat(getName(), THREAD_LOCAL_SUFFIX, tmpThreadLocal);
+        mThreadLocalStateType = getTypeByName(m, strThreadLocal);
 
-        // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-        // within the kernel state to hide the complexity from the user?
-        for (const auto & scalar : mInternalScalars) {
-            assert (scalar.getValueType());
-
-            auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
-                const auto f = groups.find(scalar.getGroup());
-                assert (f != groups.end());
-                return std::distance(groups.begin(), f);
-            };
-
-            switch (scalar.getScalarType()) {
-                case ScalarType::Internal:
-                    shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
-                    break;
-                case ScalarType::ThreadLocal:
-                    threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
-                    break;
-                default: break;
-            }
-        }
-
-        assert (shared[sharedGroupCount + 1].empty());
-        for (const auto & scalar : mOutputScalars) {
-            assert (scalar.getType());
-            shared[sharedGroupCount + 1].push_back(scalar.getType());
-        }
-
-        DataLayout dl(m);
-
-        IntegerType * const int8Ty = b->getInt8Ty();
-
-        auto getTypeSize = [&](Type * const type) -> uint64_t {
-            if (type == nullptr) {
-                return 0UL;
-            }
-            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-            return dl.getTypeAllocSize(type);
-            #else
-            return dl.getTypeAllocSize(type).getFixedSize();
-            #endif
+        auto isOpaqueType = [&](StructType * const st) -> bool {
+            return st ? st->isOpaque() : false;
         };
 
-        const size_t cacheAlignment = b->getCacheAlignment();
+        if (LLVM_LIKELY((mSharedStateType == nullptr && mThreadLocalStateType == nullptr)
+                        || isOpaqueType(mSharedStateType)
+                        || isOpaqueType(mThreadLocalStateType))) {
 
-        auto makeStructType = [&](const std::vector<std::vector<Type *>> & structTypeVec,
-                                  StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
+            flat_set<unsigned> sharedGroups;
+            flat_set<unsigned> threadLocalGroups;
 
-            const auto n = structTypeVec.size();
-            for (unsigned i = 0; i < n; ++i) {
-                const auto & V = structTypeVec[i];
-                for (unsigned j = 0; j < V.size(); ++j) {
-                    if (LLVM_LIKELY(!V[j]->isEmptyTy())) {
-                        goto found_non_empty_type;
+            for (const auto & scalar : mInternalScalars) {
+                assert (scalar.getValueType());
+                switch (scalar.getScalarType()) {
+                    case ScalarType::Internal:
+                        sharedGroups.insert(scalar.getGroup());
+                        break;
+                    case ScalarType::ThreadLocal:
+                        threadLocalGroups.insert(scalar.getGroup());
+                        break;
+                    default: break;
+                }
+            }
+
+            const auto sharedGroupCount = sharedGroups.size();
+            const auto threadLocalGroupCount = threadLocalGroups.size();
+
+            std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
+            std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+            for (const auto & scalar : mInputScalars) {
+                assert (scalar.getType());
+                shared[0].push_back(scalar.getType());
+            }
+
+            // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
+            // within the kernel state to hide the complexity from the user?
+            for (const auto & scalar : mInternalScalars) {
+                assert (scalar.getValueType());
+
+                auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
+                    const auto f = groups.find(scalar.getGroup());
+                    assert (f != groups.end());
+                    return std::distance(groups.begin(), f);
+                };
+
+                switch (scalar.getScalarType()) {
+                    case ScalarType::Internal:
+                        shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                        break;
+                    case ScalarType::ThreadLocal:
+                        threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                        break;
+                    default: break;
+                }
+            }
+
+            assert (shared[sharedGroupCount + 1].empty());
+            for (const auto & scalar : mOutputScalars) {
+                assert (scalar.getType());
+                shared[sharedGroupCount + 1].push_back(scalar.getType());
+            }
+
+            IntegerType * const int8Ty = b->getInt8Ty();
+
+            const size_t cacheAlignment = b->getCacheAlignment();
+
+            DataLayout dl(m);
+
+            auto makeStructType = [&](StructType * st,
+                                      const std::vector<std::vector<Type *>> & structTypeVec,
+                                      StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
+
+                const auto n = structTypeVec.size();
+                for (unsigned i = 0; i < n; ++i) {
+                    const auto & V = structTypeVec[i];
+                    for (unsigned j = 0; j < V.size(); ++j) {
+                        assert (isa<StructType>(V[j]) ? !cast<StructType>(V[j])->isOpaque() : true);
+                        if (LLVM_LIKELY(!V[j]->isEmptyTy())) {
+                            goto found_non_empty_type;
+                        }
                     }
                 }
-            }
-            return nullptr;
-found_non_empty_type:
-            std::vector<Type *> structTypes(n * 2);
 
-            const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
+                return nullptr;
+    found_non_empty_type:
+                std::vector<Type *> structTypes(n * 2);
 
-            size_t byteOffset = 0;
-            for (unsigned i = 0; i < n; ++i) {
-                StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
-                assert (sty->isSized());
-                const auto typeSize = getTypeSize(sty);
-                byteOffset += typeSize;
-                const auto offset = (byteOffset % align);
-                const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
-                structTypes[i * 2] = sty;
-                ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
-                assert (paddingTy->isSized());
-                structTypes[i * 2 + 1] = paddingTy;
-                byteOffset += padding;
-            }
+                const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
 
-            StructType * const st = StructType::create(b->getContext(), structTypes, name);
-            assert (!st->isEmptyTy());
-            assert (st->isSized());
-
-            #ifndef NDEBUG
-            const StructLayout * const sl = dl.getStructLayout(st);
-            assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
-            if (addGroupCacheLinePadding) {
+                size_t byteOffset = 0;
                 for (unsigned i = 0; i < n; ++i) {
-                    const auto offset = sl->getElementOffset(i * 2);
-                    assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                    StructType * const sty = StructType::create(b->getContext(), structTypeVec[i]);
+                    assert (sty->isSized());
+                    const auto typeSize = CBuilder::getTypeSize(dl, sty);
+                    byteOffset += typeSize;
+                    const auto offset = (byteOffset % align);
+                    const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
+                    structTypes[i * 2] = sty;
+                    ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
+                    assert (paddingTy->isSized());
+                    structTypes[i * 2 + 1] = paddingTy;
+                    byteOffset += padding;
                 }
+
+                if (st == nullptr) {
+                    st = StructType::create(b->getContext(), structTypes, name);
+                    assert (!st->isOpaque());
+                    assert (!st->isEmptyTy());
+                } else {
+                    st->print(errs()); errs() << "\n\n";
+                    assert (st->isOpaque());
+                    st->setBody(structTypes);
+                }
+
+                assert (!st->isEmptyTy());
+                assert (st->isSized());
+                assert (CBuilder::getTypeSize(dl, st) > 0);
+
+                #ifndef NDEBUG
+                const StructLayout * const sl = dl.getStructLayout(st);
+                assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
+                if (addGroupCacheLinePadding) {
+                    for (unsigned i = 0; i < n; ++i) {
+                        const auto offset = sl->getElementOffset(i * 2);
+                        assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
+                    }
+                }
+                #endif
+
+                return st;
+            };
+
+            // NOTE: StructType::create always creates a new type even if an identical one exists.
+            const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
+            if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
+                mSharedStateType = makeStructType(mSharedStateType, shared, strShared, sharedGroupCount > 1 && allowStructPadding);
+                assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
             }
-            #endif
-
-            assert (!st->isEmptyTy());
-            assert (getTypeSize(st) > 0);
-
-            return st;
-        };
-
-        // NOTE: StructType::create always creates a new type even if an identical one exists.
-        const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
-        mSharedStateType = makeStructType(shared, strShared, sharedGroupCount > 1 && allowStructPadding);
-        assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
-        mThreadLocalStateType = makeStructType(threadLocal, strThreadLocal, false);
-        assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
-
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
-            errs() << "KERNEL: " << mKernelName
-                   << " SHARED STATE: " << getTypeSize(mSharedStateType) << " bytes"
-                      ", THREAD LOCAL STATE: "  << getTypeSize(mThreadLocalStateType) << " bytes\n";
+            if (mThreadLocalStateType == nullptr || mThreadLocalStateType->isOpaque()) {
+                mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
+                assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
+            }
+            if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
+                errs() << "KERNEL: " << mKernelName
+                       << " SHARED STATE: " << CBuilder::getTypeSize(dl, mSharedStateType) << " bytes"
+                          ", THREAD LOCAL STATE: "  << CBuilder::getTypeSize(dl, mThreadLocalStateType) << " bytes\n";
+            }
         }
 
+        auto makeTypeMetadata = [&](StructType * st, StringRef name) -> Metadata * {
+            if (st == nullptr) {
+                st = StructType::create(b->getContext(), name);
+            }
+            return ConstantAsMetadata::get(Constant::getNullValue(st));
+        };
+
+        FixedArray<Metadata *, 2> stateTypes;
+        stateTypes[0] = makeTypeMetadata(mSharedStateType, strShared);
+        stateTypes[1] = makeTypeMetadata(mThreadLocalStateType, strThreadLocal);
+        structTypeMetadata->addOperand(MDNode::get(m->getContext(), stateTypes));
+        assert (structTypeMetadata->getNumOperands() == 1);
+
+    } else {
+        assert (structTypeMetadata->getNumOperands() == 1);
+        MDNode * structTypes = structTypeMetadata->getOperand(0);
+        assert (structTypes->getNumOperands() == 2);
+        Type * shType = cast<ConstantAsMetadata>(structTypes->getOperand(0))->getType(); assert (shType);
+
+        mSharedStateType = nullIfEmpty(cast<StructType>(shType));
+        assert (mSharedStateType == nullptr || !mSharedStateType->isOpaque());
+        Type * tlType = cast<ConstantAsMetadata>(structTypes->getOperand(1))->getType(); assert (tlType);
+
+        mThreadLocalStateType = nullIfEmpty(cast<StructType>(tlType));
+        assert (mThreadLocalStateType == nullptr || !mThreadLocalStateType->isOpaque());
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -484,6 +533,13 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
         initFunc->setCallingConv(CallingConv::C);
         initFunc->setDoesNotRecurse();
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            initFunc->setHasUWTable();
+            #else
+            initFunc->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
 
         auto arg = initFunc->arg_begin();
         auto setNextArgName = [&](const StringRef name) {
@@ -536,12 +592,6 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
         Module * const m = b->getModule();
         func = m->getFunction(funcName);
         if (LLVM_LIKELY(func == nullptr)) {
-
-//            FixedArray<Type *, 2> params;
-//            PointerType * const voidPtrTy = b->getVoidPtrTy();
-//            params[0] = voidPtrTy;
-//            params[1] = voidPtrTy;
-
             SmallVector<Type *, 2> params;
             if (LLVM_LIKELY(isStateful())) {
                 params.push_back(getSharedStateType()->getPointerTo());
@@ -552,6 +602,13 @@ Function * Kernel::addInitializeThreadLocalDeclaration(BuilderRef b) const {
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -615,6 +672,13 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) 
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -677,6 +741,13 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(BuilderRe
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -820,7 +891,13 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
         doSegment = Function::Create(doSegmentType, GlobalValue::ExternalLinkage, funcName, m);
         doSegment->setCallingConv(CallingConv::C);
         doSegment->setDoesNotRecurse();
-
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            doSegment->setHasUWTable();
+            #else
+            doSegment->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
         auto arg = doSegment->arg_begin();
         auto setNextArgName = [&](const StringRef name) {
             assert (arg);
@@ -936,6 +1013,13 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(BuilderRef b) const {
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
             func->setDoesNotRecurse();
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                func->setHasUWTable();
+                #else
+                func->setUWTableKind(UWTableKind::Default);
+                #endif
+            }
 
             auto arg = func->arg_begin();
             auto setNextArgName = [&](const StringRef name) {
@@ -1003,6 +1087,13 @@ Function * Kernel::addFinalizeDeclaration(BuilderRef b) const {
         terminateFunc = Function::Create(terminateType, GlobalValue::ExternalLinkage, funcName, m);
         terminateFunc->setCallingConv(CallingConv::C);
         terminateFunc->setDoesNotRecurse();
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+            terminateFunc->setHasUWTable();
+            #else
+            terminateFunc->setUWTableKind(UWTableKind::Default);
+            #endif
+        }
 
         auto args = terminateFunc->arg_begin();
         if (LLVM_LIKELY(isStateful())) {
@@ -1028,22 +1119,10 @@ Function * Kernel::addOrDeclareMainFunction(BuilderRef /* b */, const MainMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(BuilderRef b) const {
     if (LLVM_LIKELY(isStateful())) {
-        Value * const handle = b->CreatePageAlignedMalloc(getSharedStateType());
-        return handle;
+        return b->CreatePageAlignedMalloc(getSharedStateType());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeInstance
- ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::initializeInstance(BuilderRef b, ArrayRef<Value *> args) const {
-    assert (args.size() == getNumOfScalarInputs() + 1);
-    assert (args[0] && "cannot initialize before creation");
-    assert (args[0]->getType()->getPointerElementType() == getSharedStateType());
-    Function * const init = getInitializeFunction(b);
-    b->CreateCall(init->getFunctionType(), init, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1153,9 +1232,6 @@ Value * Kernel::constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamM
     #ifndef NDEBUG
     const auto originalNumOfHoseArgs = hostArgs.size();
     #endif
-
-    const auto k = hostArgs.size();
-
     if (LLVM_LIKELY(isStateful())) {
         addHostArg(handle);
     } else {
@@ -1282,7 +1358,8 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(allocatesInternalStreamSets())) {
         flags |= 4;
     }
-    out << 'F' << ('0' + flags) << getStride();
+    const char code = 'a' + flags;
+    out << 'F' << code << getStride() << ',';
     AttributeSet::print(out);
     for (const Binding & input : mInputScalars) {
         out << ",IV("; input.print(this, out); out << ')';

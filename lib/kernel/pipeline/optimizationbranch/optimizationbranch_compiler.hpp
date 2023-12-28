@@ -538,7 +538,7 @@ inline const RelationshipRef & getConditionRef(const RelationshipGraph & G) {
  * @brief callKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned branchType) {
-
+#if 0
     const Kernel * const kernel = mBranches[branchType];
 
     if (LLVM_UNLIKELY(kernel == nullptr)) {
@@ -645,14 +645,14 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         Value * const termSignal = canTerminate ? terminated : b->getFalse();
         mTerminatedPhi->addIncoming(termSignal, b->GetInsertBlock());
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief enterBranch
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branchType) const {
-
+#if 0
     const Kernel * const kernel = mBranches[branchType];
     const auto prefix = kernel->getName();
 
@@ -718,13 +718,15 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
     return intSegNo;
-
+#endif
+    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief exitBranch
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchType) const {
+#if 0
     // decrement the number of active threads count for this branch
     Constant * const sz_ONE = b->getSize(1);
 
@@ -746,7 +748,7 @@ void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchT
         Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -597,8 +597,8 @@ void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
 
     // Extract the values we will use in the main processing loop
     Value * const markerStream = b->getInputStreamBlockPtr("marker", ZERO, strideIndex);
-    Value * const markerValue = b->CreateBlockAlignedLoad(markerStream);
-    Value * const selectors = b->fwCast(pdepWidth, markerValue);
+    Type * const vecType = b->fwVectorType(pdepWidth);
+    Value * const selectors = b->CreateBlockAlignedLoad(vecType, markerStream);
     Value * const numOfSelectors = b->simd_popcount(pdepWidth, selectors);
 
     // For each element of the marker block
@@ -626,7 +626,7 @@ void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         // Calculate the block and swizzle index of the current swizzle row
         Value * const blockOffset = b->CreateUDiv(updatedSourceOffset, BLOCK_WIDTH);
         Value * const swizzleIndex = b->CreateUDiv(b->CreateURem(updatedSourceOffset, BLOCK_WIDTH), PDEP_WIDTH);
-        Value * const swizzle = b->CreateBlockAlignedLoad(b->getInputStreamBlockPtr("source", swizzleIndex, blockOffset));
+        Value * const swizzle = b->CreateBlockAlignedLoad(b->getBitBlockType(), b->getInputStreamBlockPtr("source", swizzleIndex, blockOffset));
         Value * const swizzleOffset = b->CreateURem(updatedSourceOffset, PDEP_WIDTH);
 
         // Shift the swizzle to the right to clear off any used bits ...

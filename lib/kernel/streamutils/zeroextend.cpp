@@ -87,7 +87,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     for (unsigned i = 0; i < inputFieldWidth; ++i) {
         Value * const offset = b->CreateAdd(baseInputOffset, b->getSize(i));
         Value * const ptr = b->CreateGEP(inputTy, baseInputPtr, offset);
-        inputBuffer[i] = b->CreateAlignedLoad(ptr, (inputFieldWidth / CHAR_BIT));
+        inputBuffer[i] = b->CreateAlignedLoad(inputTy, ptr, (inputFieldWidth / CHAR_BIT));
     }
 
     std::vector<Value *> outputBuffer(inputFieldWidth * 2);

@@ -13,6 +13,8 @@ public:
 
     using Rational = ProcessingRate::Rational;
 
+    using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
+
     enum TerminationCode : unsigned {
         None = 0
         , Terminated = 1
@@ -24,7 +26,7 @@ public:
     llvm::Value * getThreadLocalHandle() const noexcept;
 
     // Get the value of a scalar field for the current instance.
-    llvm::Value * getScalarFieldPtr(const llvm::StringRef fieldName);
+    ScalarRef getScalarFieldPtr(const llvm::StringRef fieldName);
 
     llvm::Value * getScalarField(const llvm::StringRef fieldName);
 

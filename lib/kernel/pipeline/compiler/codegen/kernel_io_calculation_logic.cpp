@@ -425,14 +425,12 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     BasicBlock * recordBlockedIO = nullptr;
     BasicBlock * insufficentIO = mKernelInsufficientInput;
     assert (mKernelInsufficientInput);
-    if (LLVM_UNLIKELY(TraceIO)) {
-        recordBlockedIO = b->CreateBasicBlock(prefix + "_recordBlockedIO", hasInputData);
-        insufficentIO = recordBlockedIO;
-    }
-
     Value * hasEnoughOrIsClosed = sufficientInput;
     Value * insufficient = mBranchToLoopExit;
-    if (LLVM_UNLIKELY(TraceIO)) {
+
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
+        recordBlockedIO = b->CreateBasicBlock(prefix + "_recordBlockedIO", hasInputData);
+        insufficentIO = recordBlockedIO;
         // do not record the block if this not the first execution of the
         // kernel but ensure that the system knows at least one failed.
         hasEnoughOrIsClosed = sufficientInput;
@@ -450,7 +448,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     // When tracing blocking I/O, test all I/O streams but do not execute
     // the kernel if any stream is insufficient.
-    if (LLVM_UNLIKELY(TraceIO)) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         BasicBlock * const entryBlock = b->GetInsertBlock();
 
         b->SetInsertPoint(recordBlockedIO);
@@ -461,7 +459,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         b->SetInsertPoint(hasInputData);
         IntegerType * const boolTy = b->getInt1Ty();
 
-        PHINode * const anyInsufficient = b->CreatePHI(boolTy, 2);
+        PHINode * const anyInsufficient = b->CreatePHI(boolTy, 2, "anyInsufficient");
         anyInsufficient->addIncoming(insufficient, entryBlock);
         anyInsufficient->addIncoming(b->getTrue(), exitBlock);
         mBranchToLoopExit = anyInsufficient;
@@ -841,16 +839,17 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     b->SetInsertPoint(expandBuffer);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_BUFFER_EXPANSION, PAPIKernelCounter::PAPI_BUFFER_COPY});
     #endif
     startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
     Value * priorBufferPtr = nullptr;
     if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
-        priorBufferPtr = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS); // <- threadlocal
-        Value * const priorBuffer = b->CreateLoad(priorBufferPtr);
+        Type * bufTy;
+        std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
+        Value * const priorBuffer = b->CreateLoad(bufTy, priorBufferPtr); // <- threadlocal
         b->CreateFree(priorBuffer);
-        b->CreateStore(ConstantPointerNull::get(cast<PointerType>(priorBuffer->getType())), priorBufferPtr);
+        b->CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -918,12 +917,15 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     b->SetInsertPoint(afterCopyBackOrExpand);
     if (mustExpand) {
         updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+        #ifdef ENABLE_PAPI
+        accumPAPIMeasurementWithoutReset(b, mKernelId, mustExpand, PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
+        #endif
     } else {
         updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
+        #ifdef ENABLE_PAPI
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPI_BUFFER_EXPANSION);
+        #endif
     }
-    #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPI_BUFFER_EXPANSION);
-    #endif
 
     auto & afterExpansion = mInternalWritableOutputItems[outputPort.Number];
     afterExpansion[WITH_OVERFLOW] = nullptr;
@@ -1444,14 +1446,14 @@ Value * PipelineCompiler::getPartialSumItemCount(BuilderRef b, const BufferPort 
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
-    Value * current = b->CreateLoad(currentPtr);
+    Value * current = b->CreateLoad(b->getSizeTy(), currentPtr);
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
     debugPrint(b, "  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
                position, current, currentPtr);
     #endif
 
-    if (mBranchToLoopExit) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         current = b->CreateSelect(mBranchToLoopExit, previouslyTransferred, current);
     }
     if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -1580,7 +1582,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * const pos = b->CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
-    Value * const requiredItems = b->CreateLoad(ptr);
+    Value * const requiredItems = b->CreateLoad(b->getSizeTy(), ptr);
     Value * const notEnough = b->CreateICmpUGT(requiredItems, sourceItemCount);
 
     Value * const notDone = b->CreateICmpNE(strideIndex, sz_ZERO);
@@ -1681,11 +1683,8 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         ConstantInt * const sz_ZERO = b->getSize(0);
 
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
-
         Value * const vecAddr = b->CreatePointerCast(addr, vecPtrTy);
-
-        Value * const baseValue = b->CreateBlockAlignedLoad(vecAddr);
-
+        Value * const baseValue = b->CreateBlockAlignedLoad(vecTy, vecAddr);
 
         Value * const offset = b->CreateURem(index, sz_stepsPerBlock);
         Value * const total = b->CreateExtractElement(baseValue, offset);
@@ -1697,7 +1696,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         Value * const mergedValue = b->CreateOr(baseValue, maskedSplat);
         b->CreateBlockAlignedStore(mergedValue, vecAddr);
         for (unsigned k = 1; k <= spanLength; ++k) {
-            Value * const ptr = b->CreateGEP0(vecAddr, b->getSize(k));
+            Value * const ptr = b->CreateGEP(b->getBitBlockType(), vecAddr, b->getSize(k));
             b->CreateBlockAlignedStore(splat, ptr);
         }
 

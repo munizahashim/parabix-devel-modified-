@@ -27,12 +27,11 @@ namespace pablo { class While; }
 namespace pablo {
 
 class PabloCompiler final : public kernel::BlockKernelCompiler {
+public:
 
     friend class PabloKernel;
 
     using TranslationMap = std::unordered_map<const PabloAST *, llvm::Value *>;
-
-public:
 
     using BuilderRef = kernel::Kernel::BuilderRef;
 

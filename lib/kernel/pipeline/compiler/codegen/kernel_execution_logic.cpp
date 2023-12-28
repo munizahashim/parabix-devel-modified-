@@ -11,24 +11,24 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     // TODO: send in the # of output items we want in the external buffers
 
-    Value * const doSegment = getKernelDoSegmentFunction(b);
-
-    FunctionType * const doSegFuncType = cast<FunctionType>(doSegment->getType()->getPointerElementType());
+    Value * doSegment;
+    FunctionType * doSegFuncType;
+    std::tie(doSegment, doSegFuncType) = getKernelDoSegmentFunction(b);
 
     #ifndef NDEBUG
     mKernelDoSegmentFunctionType = doSegFuncType;
     #endif
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::WRITE);
+        b->CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
     if (mKernelIsInternallySynchronized) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
         // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
-        Value * const intSegNoPtr = b->getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX);
-        mInternallySynchronizedSubsegmentNumber = b->CreateLoad(intSegNoPtr);
+        Value * const intSegNoPtr = b->getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX).first;
+        mInternallySynchronizedSubsegmentNumber = b->CreateLoad(b->getSizeTy(), intSegNoPtr);
         Value * const nextSegNo = b->CreateAdd(mInternallySynchronizedSubsegmentNumber, b->getSize(1));
         b->CreateStore(nextSegNo, intSegNoPtr);
         #ifdef PRINT_DEBUG_MESSAGES
@@ -229,7 +229,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     buildKernelCallArgumentList(b, args);
 
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif
     startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
     Value * doSegmentRetVal = nullptr;
@@ -248,7 +248,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     #endif
 
     if (mKernelCanTerminateEarly) {
@@ -301,7 +301,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     }
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernelSharedHandle, CBuilder::Protect::NONE);
+        b->CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::NONE);
     }
 
 }
@@ -352,7 +352,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             argTy->print(out);
             out << " but got ";
             arg->getType()->print(out);
-            report_fatal_error(StringRef(out.str()).str());
+            report_fatal_error(out.str());
         }
         #endif
         args.push_back(arg);
@@ -389,15 +389,13 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
     }
     assert (mKernelThreadLocalHandle == nullptr || !mKernelThreadLocalHandle->getType()->isEmptyTy());
     if (LLVM_UNLIKELY(mKernelThreadLocalHandle)) {
-        assert (mKernelThreadLocalHandle->getType()->getPointerElementType() == mKernel->getThreadLocalStateType());
         if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
             ConstantInt * i32_ZERO = b->getInt32(0);
             FixedArray<Value *, 3> offset;
             offset[0] = i32_ZERO;
             offset[1] = i32_ZERO;
             offset[2] = i32_ZERO;
-            Value * const branchTypePtr = b->CreateGEP0(mKernelThreadLocalHandle, offset);
-            assert (branchTypePtr->getType()->getPointerElementType() == mOptimizationBranchSelectedBranch->getType());
+            Value * const branchTypePtr = b->CreateGEP(mKernel->getThreadLocalStateType(), mKernelThreadLocalHandle, offset);
             b->CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
         }
         addNextArg(mKernelThreadLocalHandle);
@@ -569,7 +567,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             assert (input.isDeferred() ^ (mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr));
             if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                 assert (mReturnedProcessedItemCountPtr[inputPort]);
-                mProcessedDeferredItemCount[inputPort] = b->CreateLoad(mReturnedProcessedItemCountPtr[inputPort]);
+                mProcessedDeferredItemCount[inputPort] = b->CreateLoad(b->getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, inputPort);
                 debugPrint(b, prefix + "_processed_deferred' = %" PRIu64, mProcessedDeferredItemCount[inputPort]);
@@ -594,7 +592,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProcessedItemCountPtr[inputPort]);
-            processed = b->CreateLoad(mReturnedProcessedItemCountPtr[inputPort]);
+            processed = b->CreateLoad(b->getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -620,7 +618,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             assert (output.isDeferred() ^ (mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr));
             if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                 assert (mReturnedProducedItemCountPtr[outputPort]);
-                mProducedDeferredItemCount[outputPort] = b->CreateLoad(mReturnedProducedItemCountPtr[outputPort]);
+                mProducedDeferredItemCount[outputPort] = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, outputPort);
                 debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProcessedDeferredItemCount[outputPort]);
@@ -645,7 +643,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProducedItemCountPtr[outputPort]);
-            produced = b->CreateLoad(mReturnedProducedItemCountPtr[outputPort]);
+            produced = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
         } else if (rate.isRelative()) {
             auto getRefPort = [&] () {
                 const auto refPort = getReference(outputPort);

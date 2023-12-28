@@ -114,7 +114,10 @@ void StreamEquivalenceKernel::generateFinalizeMethod(BuilderRef b) {
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * const ptrVal = b->CreateLoad(b->getScalarField("result_ptr"));
+    Value * resultPtr = b->getScalarField("result_ptr");
+
+
+    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
     Value * resultState;
     if (mMode == Mode::EQ) {
         resultState = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));
@@ -138,7 +141,7 @@ void StreamEquivalenceKernel::generateFinalizeMethod(BuilderRef b) {
         );
     }
     Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, b->getScalarField("result_ptr"));
+    b->CreateStore(newVal, resultPtr);
 }
 
 } // namespace kernel
@@ -161,11 +164,8 @@ void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs
 
 void AssertDebug(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
     using namespace kernel;
-    errs() << "\n\n";
     P->CreateKernelCall<DebugDisplayKernel>("lhs", lhs);
     P->CreateKernelCall<DebugDisplayKernel>("rhs", rhs);
-    errs() << "\n\n";
-
     // return false
     auto ptr = P->getInputScalar("output");
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);

@@ -40,7 +40,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo && mSegNo);
     } else if (mUseDynamicMultithreading) {
-        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
+        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
         mSegNo = b->CreateAtomicFetchAndAdd(b->getSize(1), segNoPtr);
@@ -115,15 +115,16 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx, type);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + ": waiting for %ssegment number %" PRIu64 ", initially %" PRIu64,
-                   __getSyncLockName(b, type), segNo, b->CreateAtomicLoadAcquire(waitingOnPtr));
+                   __getSyncLockName(b, type), segNo, b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr));
         #endif
-        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode(); assert (nextNode);
+        assert (b->GetInsertBlock());
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
         BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
         BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_LSN_acquired", nextNode);
         b->CreateBr(acquire);
 
         b->SetInsertPoint(acquire);
-        Value * const currentSegNo = b->CreateAtomicLoadAcquire(waitingOnPtr);
+        Value * const currentSegNo = b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const minExpectedSegNo = b->getSize(0); // b->CreateSaturatingSub(segNo, b->getSize(mNumOfThreads - 1U));
             Value * const valid = b->CreateICmpUGE(currentSegNo, minExpectedSegNo);
@@ -186,7 +187,7 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
-    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
+    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     ptr->setName(makeKernelName(kernelId) + __getSyncLockNameString(type));
     return ptr;
 }

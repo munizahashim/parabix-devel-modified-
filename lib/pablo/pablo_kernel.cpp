@@ -215,9 +215,9 @@ void PabloKernel::generateFinalizeMethod(BuilderRef b) {
 
         Function * dprintf = b->GetDprintf();
 
+        Value * profile; Type * profileTy;
 
-
-        Value * profile = b->getScalarFieldPtr("profile");
+        std::tie(profile, profileTy) = b->getScalarFieldPtr("profile");
 
 
         unsigned branchCount = 0;
@@ -230,7 +230,7 @@ void PabloKernel::generateFinalizeMethod(BuilderRef b) {
             str << bb->getName();
             str << "\n";
 
-            Value * taken = b->CreateLoad(b->CreateGEP0(profile, {b->getInt32(0), b->getInt32(branchCount++)}));
+            Value * taken = b->CreateLoad(profileTy, b->CreateGEP(profileTy, profile, {b->getInt32(0), b->getInt32(branchCount++)}));
             b->CreateCall(dprintf, {fd, b->GetString(str.str()), taken});
 
         }

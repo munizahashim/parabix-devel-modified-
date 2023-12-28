@@ -273,6 +273,7 @@ Kernel * PipelineBuilder::makeKernel() {
             auto obj = K.Object;
             obj->ensureLoaded();
             if (K.isFamilyCall()) {
+                // this differs for icgrep kernel?
                 out << 'F' << obj->getFamilyName();
                 numOfNestedKernelFamilyCalls++;
             } else {

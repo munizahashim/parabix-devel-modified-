@@ -368,7 +368,7 @@ RE * externalizeProperties(RE * r) {
 
 struct AnyExternalizer : public RE_Transformer {
     AnyExternalizer() : RE_Transformer("AnyExternalizer") {}
-    RE * transformAny(Any * a) override {
+    RE * transformAny(re::Any * a) override {
         Name * externName = makeName("u8index");
         externName->setDefinition(a);
         return externName;
