@@ -58,6 +58,7 @@
 #include <re/compile/re_compiler.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjectTable.h>
+#include <unicode/utf/utf_compiler.h>
 
 using namespace kernel;
 using namespace pablo;
@@ -1116,14 +1117,15 @@ MaskCC::MaskCC(BuilderRef b, const CC * CC_to_mask, StreamSet * basis, StreamSet
 
 void MaskCC::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::unique_ptr<cc::CC_Compiler> ccc;
-    if (basis.size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basis[0]);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    Var * maskVar = pb.createVar("maskVar", pb.createZeroes());
+    unicodeCompiler.addTarget(maskVar, mCC_to_mask);
+    if (LLVM_UNLIKELY(AlgorithmOptionIsSet(DisableIfHierarchy))) {
+        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basis);
+        unicodeCompiler.compile();
     }
-    PabloAST * mask = pb.createNot(ccc->compileCC(mCC_to_mask));
+    PabloAST * mask = pb.createNot(maskVar);
     if (mIndexStrm) {
         PabloAST * idx = getInputStreamSet("index")[0];
         mask = pb.createAnd(idx, mask);

@@ -452,7 +452,7 @@ UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
     return ranges;
 }
 
-void UTF_Compiler::addTarget(Var * theVar, CC * theCC) {
+void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
     mTarget.emplace(theCC, theVar);
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
