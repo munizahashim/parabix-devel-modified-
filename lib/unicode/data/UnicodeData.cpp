@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2022 International Characters, Inc.
+ *  Copyright (c) 2024 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -53147,7 +53147,7 @@ S
         0x1e930, 0x1e931, 0x1e932, 0x1e933, 0x1e934, 0x1e935, 0x1e936,
         0x1e937, 0x1e938, 0x1e939, 0x1e93a, 0x1e93b, 0x1e93c, 0x1e93d,
         0x1e93e, 0x1e93f, 0x1e940, 0x1e941, 0x1e942, 0x1e943};
-        static StringPropertyObject property_object(suc,
+        static CodePointPropertyObject property_object(suc,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
                                                     static_cast<const char *>(string_buffer),
@@ -55109,7 +55109,7 @@ k
         0x1e90f, 0x1e910, 0x1e911, 0x1e912, 0x1e913, 0x1e914, 0x1e915,
         0x1e916, 0x1e917, 0x1e918, 0x1e919, 0x1e91a, 0x1e91b, 0x1e91c,
         0x1e91d, 0x1e91e, 0x1e91f, 0x1e920, 0x1e921};
-        static StringPropertyObject property_object(slc,
+        static CodePointPropertyObject property_object(slc,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
                                                     static_cast<const char *>(string_buffer),
@@ -57042,7 +57042,7 @@ S
         0x1e935, 0x1e936, 0x1e937, 0x1e938, 0x1e939, 0x1e93a, 0x1e93b,
         0x1e93c, 0x1e93d, 0x1e93e, 0x1e93f, 0x1e940, 0x1e941, 0x1e942,
         0x1e943};
-        static StringPropertyObject property_object(stc,
+        static CodePointPropertyObject property_object(stc,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
                                                     static_cast<const char *>(string_buffer),

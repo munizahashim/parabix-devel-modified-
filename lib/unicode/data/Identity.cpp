@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2022 International Characters, Inc.
+ *  Copyright (c) 2024 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -49,7 +49,7 @@ namespace UCD {
 
         const static std::vector<codepoint_t> defined_cps{
         };
-        static StringPropertyObject property_object(identity,
+        static CodePointPropertyObject property_object(identity,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
                                                     static_cast<const char *>(string_buffer),

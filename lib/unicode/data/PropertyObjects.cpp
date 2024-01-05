@@ -340,6 +340,90 @@ const UnicodeSet NumericPropertyObject::GetCodepointSetMatchingPattern(re::RE * 
     return matched;
 }
 
+const UnicodeSet CodePointPropertyObject::GetCodepointSet(const std::string & value_spec) {
+    if (value_spec.empty()) {
+        return mNullCodepointSet;
+    } else {
+        UnicodeSet result_set;
+        unsigned val_bytes = value_spec.length();
+        codepoint_t cp;
+        if (val_bytes == firstCodepointLengthAndVal(value_spec, cp)) {
+            if (mSelfCodepointSet.contains(cp)) {
+                result_set.insert(cp);
+            }
+        }
+        const char * value_str = value_spec.c_str();
+        const char * search_str = mStringBuffer;
+        unsigned buffer_line = 0;
+        while (buffer_line < mExplicitCps.size()) {
+            const char * eol = strchr(search_str, '\n');
+            unsigned len = eol - search_str;
+            if ((len == val_bytes) && (memcmp(search_str, value_str, len) == 0)) {
+                result_set.insert(mExplicitCps[buffer_line]);
+            }
+            buffer_line++;
+            search_str = eol+1;
+        }
+        return result_set;
+    }
+}
+
+const UnicodeSet CodePointPropertyObject::GetPropertyIntersection(PropertyObject * p) {
+    UnicodeSet intersection;
+    if (isa<StringPropertyObject>(p) || isa<StringOverridePropertyObject>(p)) {
+        intersection = (mNullCodepointSet & p->GetNullSet()) + (mSelfCodepointSet & p->GetReflexiveSet());
+        for (unsigned i = 0; i < mExplicitCps.size(); i++) {
+            if (GetStringValue(mExplicitCps[i]) == p->GetStringValue(mExplicitCps[i])) {
+                intersection.insert(mExplicitCps[i]);
+            }
+        }
+        return intersection;
+    } else return UnicodeSet();
+}
+
+const UnicodeSet CodePointPropertyObject::GetCodepointSetMatchingPattern(re::RE * re, GrepLinesFunctionType grep) {
+    UCD::UnicodeSet matched(*re::matchableCodepoints(re) & mSelfCodepointSet);
+    if (re::matchesEmptyString(re)) {
+        matched.insert(mNullCodepointSet);
+    }
+    const unsigned bufSize = mStringOffsets[mExplicitCps.size()];
+    std::vector<uint64_t> matchedLines = grep(re, mStringBuffer, bufSize);
+    for (const auto v : matchedLines) {
+        matched.insert(mExplicitCps[v]);
+    }
+    return matched;
+}
+
+const UnicodeSet CodePointPropertyObject::GetNullSet() const {
+    return mNullCodepointSet;
+}
+
+const UnicodeSet CodePointPropertyObject::GetReflexiveSet() const {
+    return mSelfCodepointSet;
+}
+
+const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
+    if (mNullCodepointSet.contains(cp)) return "";
+    if (mSelfCodepointSet.contains(cp)) {
+        std::u32string s(1, cp);
+        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+        return conv.to_bytes(s);
+    }
+    // Otherwise, binary search through the explicit cps to find the index.
+    // string index.
+    unsigned lo = 0;
+    unsigned hi = mExplicitCps.size()-1;
+    while (lo < hi) {
+        unsigned mid = (lo + hi)/2;
+        if (cp <= mExplicitCps[mid]) hi = mid;
+        else lo = mid + 1;
+    }
+    // Now lo == hi is the index of the desired string.
+    unsigned offset = mStringOffsets[lo];
+    unsigned lgth = mStringOffsets[lo+1] - offset - 1;
+    return std::string(&mStringBuffer[offset], lgth);
+}
+
 const UnicodeSet StringPropertyObject::GetCodepointSet(const std::string & value_spec) {
     if (value_spec.empty()) {
         return mNullCodepointSet;

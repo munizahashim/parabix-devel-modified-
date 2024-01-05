@@ -1,6 +1,6 @@
 
 /*
- *  Copyright (c) 2022 International Characters, Inc.
+ *  Copyright (c) 2024 International Characters, Inc.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters, Inc.
  *
@@ -602,7 +602,7 @@ namespace UCD {
         0xfe59, 0xfe5a, 0xfe5b, 0xfe5c, 0xfe5d, 0xfe5e, 0xfe64, 0xfe65,
         0xff08, 0xff09, 0xff1c, 0xff1e, 0xff3b, 0xff3d, 0xff5b, 0xff5d,
         0xff5f, 0xff60, 0xff62, 0xff63};
-        static StringPropertyObject property_object(bmg,
+        static CodePointPropertyObject property_object(bmg,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
                                                     static_cast<const char *>(string_buffer),

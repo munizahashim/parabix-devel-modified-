@@ -32,6 +32,7 @@ public:
         ExtensionProperty,
         NumericProperty,
         StringProperty,
+        CodePointProperty,
         StringOverrideProperty,
         BoundaryProperty,
         ObsoleteProperty,
@@ -202,6 +203,42 @@ private:
     const char * mStringBuffer;  // buffer holding all string values for other codepoints, in sorted order.
     unsigned mBufSize;
     const std::vector<UCD::codepoint_t> mExplicitCps;
+};
+
+class CodePointPropertyObject final : public PropertyObject {
+public:
+    static inline bool classof(const PropertyObject * p) {
+        return p->getClassTypeId() == ClassTypeId::CodePointProperty;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    CodePointPropertyObject(UCD::property_t p, const UnicodeSet && nullSet, const UnicodeSet && mapsToSelf, const char * string_buffer,
+                         const std::vector<unsigned> && offsets, const std::vector<UCD::codepoint_t> && cps)
+    : PropertyObject(p, ClassTypeId::StringProperty)
+    , mNullCodepointSet(std::move(nullSet))
+    , mSelfCodepointSet(std::move(mapsToSelf))
+    , mStringBuffer(string_buffer)
+    , mStringOffsets(offsets)
+    , mExplicitCps(cps)
+    {
+
+    }
+    const UnicodeSet GetCodepointSet(const std::string & value_spec) override;
+    const UnicodeSet GetCodepointSetMatchingPattern(re::RE * pattern, GrepLinesFunctionType) override;
+    const UnicodeSet GetNullSet() const override;
+    const UnicodeSet GetReflexiveSet() const override;
+    const std::string GetStringValue(UCD::codepoint_t cp) const override;
+    const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
+
+private:
+    const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
+    const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
+    // Codepoints other than those in these two sets are explicitly represented.
+    const char * mStringBuffer;  // buffer holding all string values for explicit codepoints, in sorted order.
+    const std::vector<unsigned> mStringOffsets;        // the offsets of each string within the buffer.
+    //unsigned mBufSize;                               // mStringOffsets has one extra element for buffer size.
+    const std::vector<UCD::codepoint_t> mExplicitCps;  // the codepoints having explicit strings
 };
 
 class StringPropertyObject final : public PropertyObject {

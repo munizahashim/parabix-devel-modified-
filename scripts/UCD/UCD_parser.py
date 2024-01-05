@@ -45,6 +45,7 @@ Emoji_Properties = ["Emoji", "Emoji_Presentation", "Emoji_Modifier", "Emoji_Modi
 Compatibility_Properties = ["alnum", "xdigit", "blank", "print", "word", "graph"]
 # Grapheme Cluster Break and Word Boundary properties
 Boundary_Properties = ["g", "w"]
+Codepoint_Properties = ["suc", "slc", "stc", "scf", "bmg", "bmp"]
 Overridden_Properties = ["uc", "lc", "tc", "cf"]
 
 def parse_PropertyAlias_txt():
@@ -69,19 +70,18 @@ def parse_PropertyAlias_txt():
             property_object_map[property_code] = EnumeratedPropertyObject()
         elif property_kind == "Catalog":   # Age, Block, Script
             property_object_map[property_code] = EnumeratedPropertyObject()
-        elif property_kind == "String":
-            if property_code in Overridden_Properties:
+        elif property_kind == "Numeric":
+            property_object_map[property_code] = NumericPropertyObject()
+        elif property_code == "scx":
+            property_object_map[property_code] = ExtensionPropertyObject()
+        else:
+            # String and Miscellaneous properties have string or codepoint values
+            if property_code in Codepoint_Properties:
+                property_object_map[property_code] = CodePointPropertyObject()
+            elif property_code in Overridden_Properties:
                 overridden_code = "s" + property_code
                 property_object_map[property_code] = StringOverridePropertyObject(overridden_code)
             else:
-                property_object_map[property_code] = StringPropertyObject()
-        elif property_kind == "Numeric":
-            property_object_map[property_code] = NumericPropertyObject()
-        else:  # Miscellaneous properties
-            if property_code == "scx":
-                property_object_map[property_code] = ExtensionPropertyObject()
-            else:
-                # All other Miscellaneous properties have string values
                 property_object_map[property_code] = StringPropertyObject()
         property_object_map[property_code].setID(property_code, prop_preferred_full_name)
         prop_aliases = re.findall("[-A-Za-z_0-9]+", prop_extra)

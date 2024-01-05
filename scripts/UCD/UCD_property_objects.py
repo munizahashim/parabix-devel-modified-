@@ -248,6 +248,48 @@ class StringPropertyObject(PropertyObject):
         return ""
 
 
+class CodePointPropertyObject(PropertyObject):
+    def __init__(self):
+        PropertyObject.__init__(self)
+        self.cp_value_map = {}
+        self.null_str_set = empty_uset()
+        self.reflexive_set = empty_uset()
+
+    def getPropertyKind(self):
+        return "CodePoint"
+
+    def addDataRecord(self, cp_lo, cp_hi, stringValue):
+        if stringValue == '':
+            self.null_str_set = uset_union(self.null_str_set, range_uset(cp_lo, cp_hi))
+        else:
+            if codepoint_String_regexp.match(stringValue):
+                s = ""
+                for cp in [int(x, 16) for x in stringValue.split(' ')]:
+                    s += chr(cp)
+                stringValue = s
+            for cp in range(cp_lo, cp_hi+1):
+                if len(stringValue) == 1 and ord(stringValue[0]) == cp:
+                    #print("Found reflexive entry for %s: %s" % (self.property_code, stringValue))
+                    self.reflexive_set = uset_union(self.reflexive_set, singleton_uset(ord(stringValue[0])))
+                else:
+                    self.cp_value_map[cp] = stringValue
+
+    def finalizeProperty(self):
+        explicitly_defined_cps = empty_uset()
+        for cp in self.cp_value_map.keys():
+            explicitly_defined_cps = uset_union(explicitly_defined_cps, singleton_uset(cp))
+        # set <script> default
+        if self.default_value == "<code point>":
+            self.reflexive_set = uset_union(self.reflexive_set, uset_complement(uset_union(explicitly_defined_cps, self.null_str_set)))
+        else:
+            self.null_str_set = uset_union(self.null_str_set, uset_complement(uset_union(explicitly_defined_cps, self.reflexive_set)))
+
+    def getStringValue(self, cp):
+        if (cp in self.cp_value_map): return self.cp_value_map[cp]
+        if self.default_value == "<code point>": return chr(cp)
+        return ""
+
+
 class StringOverridePropertyObject(PropertyObject):
     def __init__(self, overridden_code):
         PropertyObject.__init__(self)
