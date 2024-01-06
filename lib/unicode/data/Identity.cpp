@@ -43,18 +43,12 @@ namespace UCD {
 
 
 
-        const static std::vector<unsigned> buffer_offsets = {
-        0};
-        const static char string_buffer alignas(64) [256] = u8R"__()__";
-
-        const static std::vector<codepoint_t> defined_cps{
+        const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {
         };
         static CodePointPropertyObject property_object(identity,
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
-                                                    static_cast<const char *>(string_buffer),
-                                                    std::move(buffer_offsets),
-                                                    std::move(defined_cps));
+                                                    std::move(explicit_cp_data));
     }
 PropertyObject * get_IDENTITY_PropertyObject() {  return & IDENTITY_ns::property_object; }
 }

@@ -109,18 +109,12 @@ CodepointProperty_template = r"""    namespace ${prop_enum_up}_ns {
 
         ${reflexive_set_value}
 
-        const static std::vector<unsigned> buffer_offsets = {
-        ${buffer_offsets}};
-        const static char string_buffer alignas(64) [${allocation_length}] = u8R"__(${string_buffer})__";
-
-        const static std::vector<codepoint_t> defined_cps{
-        ${explicitly_defined_cps}};
+        const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {
+        ${explicit_cp_data}};
         static CodePointPropertyObject property_object(${prop_enum},
                                                     std::move(null_codepoint_set),
                                                     std::move(reflexive_set),
-                                                    static_cast<const char *>(string_buffer),
-                                                    std::move(buffer_offsets),
-                                                    std::move(defined_cps));
+                                                    std::move(explicit_cp_data));
     }
 """
 
@@ -151,7 +145,18 @@ def emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map
                          ))
 
 def emit_codepoint_property(f, property_code, null_set, reflexive_set, cp_value_map):
-    emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map, CodepointProperty_template)
+    s = string.Template(CodepointProperty_template)
+    cps = sorted(cp_value_map.keys())
+    explicit_cp_map = cformat.multiline_fill(['{0x%04x, 0x%04x}' % (cp, ord(cp_value_map[cp])) for cp in cps], ',', 8)
+    f.write(s.substitute(prop_enum = property_code,
+                         prop_enum_up = property_code.upper(),
+                         null_set_ranges = cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(null_set)], ',', 8),
+                         null_set_value = null_set.generate("null_codepoint_set", 8),
+                         reflexive_set_ranges = cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(reflexive_set)], ',', 8),
+                         reflexive_set_value = reflexive_set.generate("reflexive_set", 8),
+                         explicitly_defined_cp_count = len(cps),
+                         explicit_cp_data = explicit_cp_map
+                         ))
 
 def emit_string_override_property(f, property_code, overridden_code, override_set, cp_value_map):
     s = string.Template(r"""    namespace ${prop_enum_up}_ns {

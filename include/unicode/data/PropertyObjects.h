@@ -213,14 +213,12 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
-    CodePointPropertyObject(UCD::property_t p, const UnicodeSet && nullSet, const UnicodeSet && mapsToSelf, const char * string_buffer,
-                         const std::vector<unsigned> && offsets, const std::vector<UCD::codepoint_t> && cps)
+    CodePointPropertyObject(UCD::property_t p, const UnicodeSet && nullSet, const UnicodeSet && mapsToSelf,
+                            const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> && explicit_map)
     : PropertyObject(p, ClassTypeId::StringProperty)
     , mNullCodepointSet(std::move(nullSet))
     , mSelfCodepointSet(std::move(mapsToSelf))
-    , mStringBuffer(string_buffer)
-    , mStringOffsets(offsets)
-    , mExplicitCps(cps)
+    , mExplicitCodepointMap(explicit_map)
     {
 
     }
@@ -235,10 +233,7 @@ private:
     const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
     const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
     // Codepoints other than those in these two sets are explicitly represented.
-    const char * mStringBuffer;  // buffer holding all string values for explicit codepoints, in sorted order.
-    const std::vector<unsigned> mStringOffsets;        // the offsets of each string within the buffer.
-    //unsigned mBufSize;                               // mStringOffsets has one extra element for buffer size.
-    const std::vector<UCD::codepoint_t> mExplicitCps;  // the codepoints having explicit strings
+    const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> mExplicitCodepointMap;
 };
 
 class StringPropertyObject final : public PropertyObject {
