@@ -549,6 +549,16 @@ private:
     bool mHasCheckStream;
 };
 
+class CodePointMatchKernel : public pablo::PabloKernel {
+public:
+    CodePointMatchKernel(BuilderRef b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mMatchDistance;
+    UCD::property_t mProperty;
+};
+
 class AbortOnNull final : public MultiBlockKernel {
 public:
     AbortOnNull(BuilderRef, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);

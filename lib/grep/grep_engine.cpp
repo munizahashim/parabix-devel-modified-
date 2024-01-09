@@ -69,6 +69,7 @@
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <sys/stat.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_toolchain.h>
@@ -295,23 +296,25 @@ void GrepEngine::initRE(re::RE * re) {
         for (auto m : FRT.mNameMap) {
             re::Reference * ref = cast<re::Reference>(m.second);
             UCD::property_t p = ref->getReferencedProperty();
-            if (p == UCD::identity) {
-                auto u8_u21 = new U21_External();
-                mExternalTable.declareExternal(u8, "u21", u8_u21);
-                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
-            } else {
-                std::string extName = UCD::getPropertyFullName(p) + "_basis";
-                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
-            }
+            std::string instanceName = ref->getInstanceName();
             auto captureLen = getLengthRange(ref->getCapture(), &cc::Unicode).first;
             if (captureLen != 1) {
                 llvm::report_fatal_error("Capture length > 1 is a future extension");
             }
-            std::string instanceName = ref->getInstanceName();
             auto mapping = mRefInfo.twixtREs.find(instanceName);
             auto twixtLen = getLengthRange(mapping->second, &cc::Unicode).first;
             auto dist = captureLen + twixtLen;
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
+            UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+            if (isa<UCD::EnumeratedPropertyObject>(propObj)) {
+                std::string extName = UCD::getPropertyFullName(p) + "_basis";
+                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
+            } else {
+                // Identity or other codepoint properties
+                auto u8_u21 = new U21_External();
+                mExternalTable.declareExternal(u8, "u21", u8_u21);
+                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
+            }
         }
     }
     if (mColoring) {

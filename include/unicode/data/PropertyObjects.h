@@ -215,7 +215,7 @@ public:
     }
     CodePointPropertyObject(UCD::property_t p, const UnicodeSet && nullSet, const UnicodeSet && mapsToSelf,
                             const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> && explicit_map)
-    : PropertyObject(p, ClassTypeId::StringProperty)
+    : PropertyObject(p, ClassTypeId::CodePointProperty)
     , mNullCodepointSet(std::move(nullSet))
     , mSelfCodepointSet(std::move(mapsToSelf))
     , mExplicitCodepointMap(explicit_map)

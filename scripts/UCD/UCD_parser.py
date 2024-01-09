@@ -45,7 +45,7 @@ Emoji_Properties = ["Emoji", "Emoji_Presentation", "Emoji_Modifier", "Emoji_Modi
 Compatibility_Properties = ["alnum", "xdigit", "blank", "print", "word", "graph"]
 # Grapheme Cluster Break and Word Boundary properties
 Boundary_Properties = ["g", "w"]
-Codepoint_Properties = ["suc", "slc", "stc", "scf", "bmg", "bmp"]
+Codepoint_Properties = ["suc", "slc", "stc", "scf", "bmg", "bpb"]
 Overridden_Properties = ["uc", "lc", "tc", "cf"]
 
 def parse_PropertyAlias_txt():
