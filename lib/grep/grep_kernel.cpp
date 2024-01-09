@@ -281,25 +281,26 @@ void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<St
 }
 
 const std::vector<std::string> PropertyDistanceExternal::getParameters() {
-    if (mProperty == UCD::identity) return {"basis"};
-    return {UCD::getPropertyFullName(mProperty) + "_basis"};
+    UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
+    if (isa<UCD::EnumeratedPropertyObject>(propObj)) {
+        return {UCD::getPropertyFullName(mProperty) + "_basis"};
+    }
+    return {"basis"};
 }
 
 void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    if (mProperty == UCD::identity) {
+    UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
+    if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
+        std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
+        std::vector<re::CC *> ccs;
+        for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
+        StreamSet * basis = b->CreateStreamSet(ccs.size());
+        b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
+        installStreamSet(basis);
+    } else {
         StreamSet * u21 = b->CreateStreamSet(21);
         b->CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
         installStreamSet(u21);
-    } else {
-        UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
-        if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
-            std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
-            std::vector<re::CC *> ccs;
-            for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
-            StreamSet * basis = b->CreateStreamSet(ccs.size());
-            b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
-            installStreamSet(basis);
-        }
     }
 }
 

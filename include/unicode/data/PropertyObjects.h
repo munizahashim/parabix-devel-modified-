@@ -226,14 +226,21 @@ public:
     const UnicodeSet GetCodepointSetMatchingPattern(re::RE * pattern, GrepLinesFunctionType) override;
     const UnicodeSet GetNullSet() const override;
     const UnicodeSet GetReflexiveSet() const override;
+    // Get the codepoint property value for a given cp.
+    // Precondition: cp is not within GetNullSet();
+    const UCD::codepoint_t GetCodePointValue(UCD::codepoint_t cp) const;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
+    // Return bit_xform_sets such that bit_xform_sets[i] includes a given
+    // codepoint cp if cp and GetCodePointValue(cp) differ at bit position i.
+    std::vector<UnicodeSet> & GetBitTransformSets();
 
 private:
     const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
     const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
     // Codepoints other than those in these two sets are explicitly represented.
     const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> mExplicitCodepointMap;
+    std::vector<UnicodeSet> bit_xform_sets;
 };
 
 class StringPropertyObject final : public PropertyObject {

@@ -391,20 +391,46 @@ const UnicodeSet CodePointPropertyObject::GetReflexiveSet() const {
     return mSelfCodepointSet;
 }
 
-const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
-    if (mNullCodepointSet.contains(cp)) return "";
+const codepoint_t CodePointPropertyObject::GetCodePointValue(codepoint_t cp) const {
     if (mSelfCodepointSet.contains(cp)) {
-        std::u32string s(1, cp);
-        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-        return conv.to_bytes(s);
+        return cp;
     }
     auto f = mExplicitCodepointMap.find(cp);
     if (f != mExplicitCodepointMap.end()) {
-        std::u32string s(1, f->second);
-        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-        return conv.to_bytes(s);
+        return f->second;
     }
     llvm::report_fatal_error("codepoint property value not found");
+}
+
+const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
+    std::u32string s(1, GetCodePointValue(cp));
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+    return conv.to_bytes(s);
+}
+
+std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
+    // Return the previously computed vector of bit transformation sets, if it exists.
+    if (bit_xform_sets.empty()) {
+        // Otherwise compute and return.
+        //
+        // Basis set i is the set of all codepoints whose numerical enumeration code e
+        // has bit i set, i.e., (e >> i) & 1 == 1.
+        for (auto & p : mExplicitCodepointMap) {
+            codepoint_t bit_diff = p.second & p.first;
+            unsigned bit = 0;
+            while (bit_diff > 0) {
+                if ((bit_diff & 1UL) == 1UL) {
+                    while (bit_xform_sets.size() <= bit) {
+                        bit_xform_sets.push_back(UnicodeSet());
+                    }
+                    bit_xform_sets[bit].insert(p.first);
+                }
+                bit_diff >>= 1;
+                bit++;
+            }
+        }
+    }
+    return bit_xform_sets;
 }
 
 const UnicodeSet StringPropertyObject::GetCodepointSet(const std::string & value_spec) {
