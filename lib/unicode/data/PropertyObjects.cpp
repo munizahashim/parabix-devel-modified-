@@ -416,7 +416,7 @@ std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
         // Basis set i is the set of all codepoints whose numerical enumeration code e
         // has bit i set, i.e., (e >> i) & 1 == 1.
         for (auto & p : mExplicitCodepointMap) {
-            codepoint_t bit_diff = p.second & p.first;
+            codepoint_t bit_diff = p.second ^ p.first;
             unsigned bit = 0;
             while (bit_diff > 0) {
                 if ((bit_diff & 1UL) == 1UL) {
