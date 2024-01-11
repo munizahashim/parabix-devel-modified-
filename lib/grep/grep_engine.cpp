@@ -309,7 +309,7 @@ void GrepEngine::initRE(re::RE * re) {
             if (isa<UCD::EnumeratedPropertyObject>(propObj)) {
                 std::string extName = UCD::getPropertyFullName(p) + "_basis";
                 mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
-            } else {
+            } else if (isa<UCD::CodePointPropertyObject>(propObj)) {
                 // Identity or other codepoint properties
                 auto u8_u21 = new U21_External();
                 mExternalTable.declareExternal(u8, "u21", u8_u21);
@@ -932,28 +932,33 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
         std::vector<unsigned> insertAmts;
         for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
+        StreamSet * const SpanMarks = E->CreateStreamSet(2, 1);
+        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "SpanMarks", SpanMarks);
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         // Basis bit streams expanded with 0 bits for each string to be inserted.
+        if (mIllustrator) mIllustrator->captureBixNum(E, "InsertIndex", InsertIndex);
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+        SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ExpandedMarks", ExpandedMarks);
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
@@ -963,6 +968,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
         E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "ColorizedBreaks", ColorizedBreaks);
 
         // TODO: source coords >= colorized coords until the final stride?
         // E->AssertEqualLength(SourceCoords, ColorizedCoords);
@@ -1011,6 +1017,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "Filtered", Filtered);
 
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
@@ -1033,6 +1040,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
