@@ -11,8 +11,13 @@
 #include <llvm/IR/Intrinsics.h>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
 #include <llvm/IR/IntrinsicsX86.h>
+#endif
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
 #include <llvm/Support/Host.h>
 #endif
+
 
 using namespace llvm;
 

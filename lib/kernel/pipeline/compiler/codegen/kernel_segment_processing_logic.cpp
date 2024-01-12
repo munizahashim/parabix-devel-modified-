@@ -8,65 +8,6 @@
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief start
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::start(BuilderRef b) {
-
-    mCurrentKernelName = mKernelName[PipelineInput];
-    mPipelineLoop = b->CreateBasicBlock("PipelineLoop");
-    mPipelineEnd = b->CreateBasicBlock("PipelineEnd");
-
-    makePartitionEntryPoints(b);
-
-    if (CheckAssertions) {
-        mRethrowException = b->WriteDefaultRethrowBlock();
-    }
-
-    mPipelineStartTime = startCycleCounter(b);
-
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugInit(b);
-    if (mIsNestedPipeline) {
-        debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
-    } else {
-        debugPrint(b, "================================================= START %" PRIx64, getHandle());
-    }
-    const auto prefix = mTarget->getName();
-    if (mNumOfStrides) {
-        debugPrint(b, prefix + " +++ NUM OF STRIDES %" PRIu64 "+++", mNumOfStrides);
-    }
-    if (mIsFinal) {
-        debugPrint(b, prefix + " +++ IS FINAL %" PRIu8 "+++", mIsFinal);
-    }
-    #endif
-
-    #ifdef ENABLE_PAPI
-    createEventSetAndStartPAPI(b);
-    #endif
-
-    mExpectedNumOfStridesMultiplier = b->getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
-    initializeFlowControl(b);
-    readExternalConsumerItemCounts(b);
-    loadInternalStreamSetHandles(b, true);
-    loadInternalStreamSetHandles(b, false);
-
-    mKernel = nullptr;
-    mKernelId = 0;
-    mAddressableItemCountPtr.clear();
-    mVirtualBaseAddressPtr.clear();
-    mNumOfTruncatedInputBuffers = 0;
-    mTruncatedInputBuffer.clear();
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    b->CreateBr(mPipelineLoop);
-
-    b->SetInsertPoint(mPipelineLoop);
-    mMadeProgressInLastSegment = b->CreatePHI(b->getInt1Ty(), 2, "madeProgressInLastSegment");
-    mMadeProgressInLastSegment->addIncoming(b->getTrue(), entryBlock);
-    mPipelineProgress = b->getFalse();
-    obtainCurrentSegmentNumber(b, entryBlock);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(BuilderRef b) {
@@ -92,16 +33,13 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #endif
     identifyPipelineInputs(mKernelId);
 
-
     mIsBounded = isBounded();
     mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
-        if (port.canModifySegmentLength()) {
-            checkInputChannels = true;
-            break;
-        }
+        checkInputChannels |= port.canModifySegmentLength();
+        mHasPrincipalInput |= port.isPrincipal();
     }
 
     bool checkOutputChannels = false;
@@ -212,7 +150,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
 
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
-    if (mMayHaveInsufficientIO && TraceIO) {
+    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         b->CreateUnlikelyCondBr(mBranchToLoopExit, mKernelInsufficientInput, mKernelLoopCall);
     } else {
         b->CreateBr(mKernelLoopCall);
@@ -268,6 +206,11 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+//    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+//        const BufferPort & port = mBufferGraph[e];
+//        assert (port.Port.Type == PortType::Input);
+//        mAvailableInputItemCount[port.Port] = mAvailableInputItemCountPhi[port.Port];
+//    }
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
@@ -282,6 +225,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
+    freeZeroedInputBuffers(b);
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);
 
@@ -391,6 +335,7 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
             assert (mProcessedDeferredItemCount[port]);
             mAlreadyProcessedDeferredPhi[port]->addIncoming(mProcessedDeferredItemCount[port], exitBlockAfterLoopAgainTest);
         }
+//        mAvailableInputItemCountPhi[port]->addIncoming(mAvailableInputItemCount[port], exitBlockAfterLoopAgainTest);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -443,7 +388,8 @@ void PipelineCompiler::normalCompletionCheck(BuilderRef b) {
     // update KernelTerminated phi nodes
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto inputPort = mBufferGraph[e].Port;
-        Value * const itemCount = mProcessedItemCount[inputPort]; assert (itemCount);
+        const auto streamSet = source(e, mBufferGraph);
+        Value * const itemCount = mLocallyAvailableItems[streamSet]; assert (itemCount);
         mProcessedItemCountAtTerminationPhi[inputPort]->addIncoming(itemCount, exitBlock);
     }
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -522,6 +468,11 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(BuilderRef b) {
             mAlreadyProcessedDeferredPhi[port] = phi;
             mCurrentProcessedDeferredItemCountPhi[port] = phi;
         }
+//        PHINode * const availPhi = b->CreatePHI(sizeTy, 2, prefix + "_availableInputPhi");
+//        mAvailableInputItemCountPhi[port] = availPhi;
+//        mAvailableInputItemCount[port] = availPhi;
+//        const auto streamSet = source(e, mBufferGraph);
+//        availPhi->addIncoming(mLocallyAvailableItems[streamSet], mKernelLoopStart);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -899,81 +850,6 @@ void PipelineCompiler::updatePhisAfterTermination(BuilderRef b) {
             mUpdatedProducedDeferredPhi[port]->addIncoming(produced, exitBlock);
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief end
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::end(BuilderRef b) {
-
-    // A pipeline will end for one or two reasons:
-
-    // 1) Process has *halted* due to insufficient external I/O.
-
-    // 2) All pipeline sinks have terminated (i.e., any kernel that writes
-    // to a pipeline output, is marked as having a side-effect, or produces
-    // an input for some call in which no dependent kernels is a pipeline
-    // sink).
-
-    // TODO: if we determine that all of the pipeline I/O is consumed in one invocation of the
-    // pipeline, we can avoid testing at the end whether its terminated.
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    b->CreateBr(mPartitionEntryPoint[PartitionCount]);
-
-    b->SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
-    #endif
-    Value * terminated = nullptr;
-    if (mIsNestedPipeline) {
-        if (mCurrentThreadTerminationSignalPtr) {
-            terminated = hasPipelineTerminated(b);
-        }
-        b->CreateBr(mPipelineEnd);
-    } else {
-        terminated = hasPipelineTerminated(b);
-        Value * const done = b->CreateIsNotNull(terminated);
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            Value * const progressedOrFinished = b->CreateOr(mPipelineProgress, done);
-            Value * const live = b->CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
-            b->CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
-        }
-        BasicBlock * const exitBlock = b->GetInsertBlock();
-        mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-        incrementCurrentSegNo(b, exitBlock);
-        b->CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
-    }
-    b->SetInsertPoint(mPipelineEnd);
-    if (mCurrentThreadTerminationSignalPtr) {
-        assert (canSetTerminateSignal());
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "# pipeline terminated = %" PRIu64 " for %" PRIx64, terminated, getHandle());
-        #endif
-        b->CreateStore(terminated, mCurrentThreadTerminationSignalPtr);
-    }
-    // free any truncated input buffers
-    for (Value * const bufferPtr : mTruncatedInputBuffer) {
-        b->CreateFree(b->CreateLoad(bufferPtr));
-    }
-    #ifdef PRINT_DEBUG_MESSAGES
-    if (mIsNestedPipeline) {
-        debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
-    } else {
-        debugPrint(b, "================================================= END %" PRIx64, getHandle());
-    }
-    #endif
-
-    #ifdef ENABLE_PAPI
-    stopPAPIAndDestroyEventSet(b);
-    #endif
-
-    updateTotalCycleCounterTime(b);
-
-    mExpectedNumOfStridesMultiplier = nullptr;
-    mThreadLocalStreamSetBaseAddress = nullptr;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    mSegNo = mBaseSegNo;
-    #endif
-
 }
 
 

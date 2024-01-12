@@ -5,6 +5,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
@@ -118,8 +119,13 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
         sys::path::append(fileName, CACHE_PREFIX);
         fileName.append(moduleId);
         fileName.append(KERNEL_FILE_EXTENSION);
+        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
         auto kernelBuffer = MemoryBuffer::getFile(fileName, -1, false);
+        #else
+        auto kernelBuffer = MemoryBuffer::getFile(fileName, false, false, false);
+        #endif
         if (kernelBuffer) {
+
             #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
             auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b->getContext());
             #else
@@ -127,6 +133,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
             #endif
             // if there was no error when parsing the bitcode
             if (LLVM_LIKELY(loadedFile)) {
+
                 std::unique_ptr<Module> M(std::move(loadedFile.get()));
                 if (LLVM_UNLIKELY(kernel->hasSignature())) {
                     const MDString * const sig = getSignature(M.get());
@@ -141,7 +148,11 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
                     }
                 }
                 sys::path::replace_extension(fileName, OBJECT_FILE_EXTENSION);
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
                 auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), -1, false);
+                #else
+                auto objectBuffer = MemoryBuffer::getFile(fileName.c_str(), false, false, false);
+                #endif
                 if (LLVM_LIKELY(objectBuffer)) {
                     Module * const m = M.release();
                     assert ("object cache file returned null module?" && m);
@@ -149,7 +160,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
                     m->setModuleIdentifier(moduleId);
                     b->setModule(m);
                     kernel->loadCachedKernel(b);
-                    mCachedObject.emplace(moduleId, std::move(objectBuffer.get()));
+                    mCachedObject.emplace(moduleId, objectBuffer.get().release());
                     mKnownSignatures.emplace(signature, m);
                     // update the modified time of the .o and .kernel files
                     const auto access_time = currentTime();
@@ -219,7 +230,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 << "\" in object cache directory.\n\n"
                 "Reason: " << EC.message() << "\n\n"
                 "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-            report_fatal_error(msg.str());
+            report_fatal_error(Twine(msg.str()));
         }
         objFile.write(Obj.getBufferStart(), Obj.getBufferSize());
         objFile.close();
@@ -235,7 +246,7 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 << "\" in object cache directory.\n\n"
                 "Reason: " << EC.message() << "\n\n"
                 "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-            report_fatal_error(msg.str());
+            report_fatal_error(Twine(msg.str()));
         }
 
         // Clone the function prototypes and metadata to minimize the size of the stored .kernel file.
@@ -245,6 +256,9 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
                 Function::Create(f.getFunctionType(), Function::ExternalLinkage, f.getName(), H.get());
             }
         }
+
+
+
         for (const auto & og : M->named_metadata()) {
             NamedMDNode * const md = H->getOrInsertNamedMetadata(og.getName());
             const auto n = og.getNumOperands();
@@ -290,7 +304,7 @@ std::unique_ptr<MemoryBuffer> ParabixObjectCache::getObject(const Module * modul
         msg << "getObject called multiple times for \""
             << moduleId
             << "\".\n\n";
-        report_fatal_error(msg.str());
+        report_fatal_error(Twine(msg.str()));
     }
     #else
     mCachedObject.erase(f);
@@ -433,7 +447,7 @@ inline void ParabixObjectCache::loadCacheSettings() noexcept {
             << mCachePath.str() << "\" with read/write permissions.\n\n"
             "Reason: " << err.message() << "\n\n"
             "Rerun " << codegen::ProgramName << " with --enable-object-cache=0";
-        report_fatal_error(msg.str());
+        report_fatal_error(Twine(msg.str()));
     }
 
 }

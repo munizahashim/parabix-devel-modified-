@@ -440,7 +440,7 @@ void PabloVerifier::verify(const PabloKernel * kernel, const std::string & locat
         if (location.empty()) {
             llvm::report_fatal_error(err.what());
         } else {
-            llvm::report_fatal_error(std::string(err.what()) + " @ " + location);
+            llvm::report_fatal_error(llvm::StringRef(err.what()) + " @ " + location);
         }
     }
 }

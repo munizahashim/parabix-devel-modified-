@@ -39,6 +39,7 @@ public:
         , Rep
         , Seq
         , Start
+        , Permute
     };
     inline ClassTypeId getClassTypeId() const {
         return mClassTypeId;
@@ -75,6 +76,8 @@ protected:
 // Does the RE match the empty string, considering that ^ and $ each
 // do match an empty string.
 bool matchesEmptyString(const RE * re);
+
+[[noreturn]] void UnsupportedRE(const std::string & errmsg);
 
 }
 

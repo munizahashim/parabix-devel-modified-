@@ -155,29 +155,15 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         }
         itemCount = produced;
     } else {
-
-        if (in_degree(streamSet, mConsumerGraph) == 0) {
-            errs() << "err: " << mKernelId << " -> " << streamSet << "\n";
+        const auto id = getTruncatedStreamSetSourceId(streamSet);
+        auto consumedRef = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+        Value * ptr = consumedRef.first;
+        if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+            Constant * const ZERO = b->getInt32(0);
+            ptr = b->CreateInBoundsGEP(consumedRef.second, ptr, { ZERO, ZERO } );
         }
-
-        const auto e = in_edge(streamSet, mConsumerGraph);
-        const ConsumerEdge & c = mConsumerGraph[e];
-        const auto producer = source(e, mConsumerGraph);
-        if (LLVM_LIKELY(producer != PipelineInput || mTraceIndividualConsumedItemCounts)) {
-            const auto id = getTruncatedStreamSetSourceId(streamSet);
-            Value * ptr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
-            if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                Constant * const ZERO = b->getInt32(0);
-                ptr = b->CreateInBoundsGEP(ptr, { ZERO, ZERO } );
-            }
-            itemCount = b->CreateLoad(ptr, mNumOfThreads > 1);
-        } else {
-            Value * const ptr = getProcessedInputItemsPtr(c.Port);
-            assert (isFromCurrentFunction(b, ptr, false));
-            itemCount = b->CreateLoad(ptr, mNumOfThreads > 1);
-        }
+        itemCount = b->CreateLoad(b->getSizeTy(), ptr, true);
     }
-
     return itemCount;
 #endif
 }
@@ -220,8 +206,8 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
 
             const auto id = getTruncatedStreamSetSourceId(streamSet);
             if (out_degree(id, mConsumerGraph) > 0) {
-                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
-                Value * const prior = b->CreateLoad(transConsumedPtr);
+                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id)).first;
+                Value * const prior = b->CreateLoad(b->getSizeTy(), transConsumedPtr);
                 const auto output = in_edge(streamSet, mBufferGraph);
                 const auto producer = source(output, mBufferGraph);
                 const auto prodPrefix = makeBufferName(producer, mBufferGraph[output].Port);
@@ -271,16 +257,19 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
     const auto id = getTruncatedStreamSetSourceId(streamSet);
 
-    Value * ptr = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+
+
+    auto consumedRef = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+    Value * ptr = consumedRef.first;
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-        ptr = b->CreateInBoundsGEP(ptr, { b->getInt32(0), b->getInt32(slot) });
+        ptr = b->CreateInBoundsGEP(consumedRef.second, ptr, { b->getInt32(0), b->getInt32(slot) });
     }
 
     // if we skipped over a partition, we don't want to update the
     // current consumed value; rather than load the old consumed
     // value at the point of production and incur a potential cache
     // miss penalty, just load it here.
-    Value * const prior = b->CreateLoad(ptr);
+    Value * const prior = b->CreateLoad(b->getSizeTy(), ptr);
     Value * const skipped = b->CreateIsNull(consumed);
     consumed = b->CreateSelect(skipped, prior, consumed);
 
@@ -300,11 +289,18 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
     b->CreateStore(consumed, ptr);
 
-    // update external count
-    if (LLVM_UNLIKELY(producer == PipelineInput && slot == 0)) {
-        b->CreateStore(consumed, getProcessedInputItemsPtr(outputPort.Port.Number));
-    }
+}
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateExternalConsumedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateExternalConsumedItemCounts(BuilderRef b) {
+    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const auto streamSet = target(input, mBufferGraph);
+        Value * const consumed = readConsumedItemCount(b, streamSet);
+        const BufferPort & inputPort = mBufferGraph[input];
+        b->CreateStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number));
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -317,7 +313,8 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
             assert (streamSet == getTruncatedStreamSetSourceId(streamSet));
             const auto consumer = target(e, mConsumerGraph);
             if (consumer >= mKernelId) { // && consumer <= targetKernelId
-                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+                const auto name = TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
+                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), name).first;
                 b->CreateStore(b->getSize(0), transConsumedPtr);
                 break;
             }

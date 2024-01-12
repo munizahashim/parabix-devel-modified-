@@ -28,7 +28,7 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock 
 
     BasicBlock * const to = b->GetInsertBlock();
 
-    for (Instruction & inst : phiContainer->getInstList()) {
+    for (Instruction & inst : *phiContainer) {
         if (LLVM_LIKELY(isa<PHINode>(inst))) {
             PHINode & pn = cast<PHINode>(inst);
             for (unsigned i = 0; i != pn.getNumIncomingValues(); ++i) {
@@ -43,11 +43,12 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock 
 
     if (!toReplace->empty()) {
         Instruction * toMove = &toReplace->front();
-        auto & list = to->getInstList();
+//        auto & list = to->getInstList();
         while (toMove) {
             Instruction * const next = toMove->getNextNode();
             toMove->removeFromParent();
-            list.push_back(toMove);
+            toMove->insertAfter(&to->back());
+//            list.push_back(toMove);
             toMove = next;
         }
     }
@@ -77,7 +78,7 @@ void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
         m->print(errs(), nullptr);
 //        pm->add(createCFGOnlyPrinterLegacyPassPass());
 //        pm->run(*m);
-        report_fatal_error(msg.str());
+        report_fatal_error(StringRef(msg.str()));
     }
     #endif
     simplifyPhiNodes(m);
@@ -85,7 +86,10 @@ void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
     pm->add(createDeadCodeEliminationPass());        // Eliminate any trivially dead code
     pm->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
     pm->add(createEarlyCSEPass());
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+    // TODO: look into using the newer pass manager system
+    // pm->add(new MemCpyOptPass());
+    #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
     pm->add(createMemCpyOptPass());
     #endif
     // pm->add(createHotColdSplittingPass());
@@ -114,7 +118,7 @@ void PipelineCompiler::simplifyPhiNodes(Module * const m) const {
     for (Function & f : m->getFunctionList()) {
         bool anyPhis = false;
 
-        for (BasicBlock & bb : f.getBasicBlockList()) {
+        for (BasicBlock & bb : f) {
 
             preds.assign(pred_begin(&bb), pred_end(&bb));
             const auto n = preds.size();

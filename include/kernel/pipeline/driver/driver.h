@@ -52,6 +52,8 @@ public:
 
     kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;
 
+    kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
+
     void addKernel(not_null<Kernel *> kernel);
 
     virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
@@ -86,10 +88,6 @@ protected:
     void LinkFunction(not_null<Kernel *> kernel, llvm::StringRef name, ExternalFunctionType & functionPtr) const;
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
-
-private:
-
-    kernel::RepeatingStreamSet * __CreateRepeatingStreamSet8(const uint8_t * string, size_t length);
 
 protected:
 

@@ -241,7 +241,7 @@ void Statement::setOperand(const unsigned index, PabloAST * const value) {
         value->print(out);
         out << " in statement ";
         this->print(out);
-        llvm::report_fatal_error(out.str());
+        llvm::report_fatal_error(llvm::StringRef(out.str()));
     }
     prior->removeUser(this);
     mOperand[index] = value;

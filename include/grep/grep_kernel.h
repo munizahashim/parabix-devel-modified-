@@ -300,12 +300,12 @@ public:
     }
     FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
         ExternalStreamObject(Kind::FilterByMask, e->getLengthRange(), e->getOffset()),
-            mBase(base), mParamNames(paramNames), mBaseExternal(e) {}
+            mBase(base), mParamNames(paramNames) {} // , mBaseExternal(e)
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     const StreamIndexCode mBase;
     const std::vector<std::string> mParamNames;
-    ExternalStreamObject * const mBaseExternal;
+//    ExternalStreamObject * const mBaseExternal;
 };
 
 class FixedSpanExternal final : public ExternalStreamObject {
@@ -436,6 +436,7 @@ public:
                      std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
     void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
+    std::string getSignature() {return mSignature;}
 
 protected:
     Bindings streamSetInputBindings();
@@ -457,6 +458,7 @@ private:
     std::vector<std::pair<int, int>>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
+    std::string                 mSignature;
 };
 
 
@@ -545,6 +547,16 @@ protected:
 private:
     unsigned mMatchDistance;
     bool mHasCheckStream;
+};
+
+class CodePointMatchKernel : public pablo::PabloKernel {
+public:
+    CodePointMatchKernel(BuilderRef b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mMatchDistance;
+    UCD::property_t mProperty;
 };
 
 class AbortOnNull final : public MultiBlockKernel {

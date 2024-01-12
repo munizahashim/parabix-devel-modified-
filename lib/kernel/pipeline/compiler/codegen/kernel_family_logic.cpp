@@ -32,125 +32,122 @@ void PipelineCompiler::addFamilyKernelProperties(BuilderRef b,
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief addPipelineKernelProperties
+ * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+  //  PointerType * const voidPtrTy = b->getVoidPtrTy();
 
-    auto nextArg = [&]() {
-        assert (arg != arg_end);
-        Value * const v = &*arg;
-        std::advance(arg, 1);
-        return v;
-    };
+    #ifndef NDEBUG
+    unsigned inputNum = 0;
+    #endif
+    Constant * voidPtr = ConstantPointerNull::get(b->getVoidPtrTy());
 
-    // To avoid the expense of instantiating a pipeline compiler when generating the
-    // "main" function for the pipeline on a subsequent run, family args are passed in
-    // order of the original kernels in the pipeline; however, the order of these kernels
-    // are actually executed may be shuffled around in the pipeline itself. So to map the
-    // original order to the pipeline order, we just search for a matching kernel object.
+    for (auto binding : make_iterator_range(out_edges(PipelineInput, mFamilyScalarGraph))) {
 
-    bool hasKernelFamilyCalls = false;
+        auto & D = mFamilyScalarGraph[binding];
+        assert (D.InputNum == inputNum++);
+        const auto kernelId = target(binding, mFamilyScalarGraph);
+        assert (kernelId != PipelineInput);
 
-    for (const auto & K : cast<PipelineKernel>(mTarget)->getKernels()) {
-
-        const Kernel * const kernel = K.Object;
-
-        if (LLVM_UNLIKELY(K.isFamilyCall())) {
-
-            hasKernelFamilyCalls = true;
-
-            auto kernelId = PipelineInput;
-
-            for (auto i = FirstKernel; i <= LastKernel; ++i) {
-                if (kernel == getKernel(i)) {
-                    kernelId = i;
-                    break;
+        auto nextArg = [&](const unsigned flags) {
+            assert (arg != arg_end);
+            Value * v = &*arg;
+            assert (v->getType() == b->getVoidPtrTy());
+            if ((D.CaptureFlags & flags) == flags) {
+                v = &*arg;
+                assert (v->getType() == b->getVoidPtrTy());
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    // TODO: make these assertions more informative
+                    b->CreateAssert(v, "invalid family param %" PRIu64, b->getSize(arg->getArgNo()));
                 }
-            }
-
-            if (LLVM_UNLIKELY(kernelId < FirstKernel)) {
-
-                #ifndef NDEBUG
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << "Warning: family kernel ";
-                out << kernel->getName();
-                out << " was removed from the pipeline.\n";
-                errs() << out.str();
-                #endif
-
-                if (LLVM_LIKELY(kernel->isStateful())) {
-                    nextArg();
-                }
-
-                const auto tl = kernel->hasThreadLocal();
-                const auto ai = kernel->allocatesInternalStreamSets();
-                if (ai) {
-                    nextArg();
-                }
-                if (tl) {
-                    nextArg();
-                    if (ai) {
-                        nextArg();
-                    }
-                }
-                nextArg();
-                if (tl) {
-                    nextArg();
-                }
-                nextArg();
-
             } else {
-
-                // get the internal prefix for this kernel.
-                const auto prefix = makeKernelName(kernelId);
-
-                auto readNextScalar = [&](const StringRef name) {
-                    auto ptr = getScalarFieldPtr(b.get(), name); assert (ptr);
-                    Value * value = b->CreatePointerCast(nextArg(), voidPtrTy);
-                    if (LLVM_UNLIKELY(CheckAssertions)) {
-                        b->CreateAssert(value, "family parameter (%s) was given a null value", b->GetString(name));
-                    }
-                    b->CreateStore(value, ptr);
-                };
-
-                if (LLVM_LIKELY(kernel->isStateful())) {
-                    readNextScalar(prefix);
+                v = &*arg;
+                assert (v->getType() == b->getVoidPtrTy());
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    b->CreateAssertZero(v, "invalid non-zero family param %" PRIu64, b->getSize(arg->getArgNo()));
                 }
-
-                const auto tl = kernel->hasThreadLocal();
-                const auto ai = kernel->allocatesInternalStreamSets();
-                if (ai) {
-                    readNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                }
-                if (tl) {
-                    readNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                    if (ai) {
-                        readNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
-                    }
-                }
-                readNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
-                if (tl) {
-                    readNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX);
-                }
-                readNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX);
+                v = voidPtr;
             }
-        }
-    }
+            std::advance(arg, 1);
+            return v;
+        };
 
-    if (hasKernelFamilyCalls && !mTarget->containsKernelFamilyCalls()) {
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream out(tmp);
-        out << mTarget->getName()
-            << " contains calls to family kernels but containsKernelFamilyCalls()"
-               " returns false";
-        report_fatal_error(out.str());
+        assert (D.SharedStateObject == nullptr);
+
+        D.SharedStateObject =
+            nextArg(FamilyScalarData::CaptureSharedStateObject);
+        D.allocateSharedInternalStreamSetsFuncPointer =
+            nextArg(FamilyScalarData::CaptureAllocateInternal);
+        D.initializeThreadLocalFuncPointer =
+            nextArg(FamilyScalarData::CaptureThreadLocal);
+        D.allocateThreadLocalFuncPointer =
+            nextArg(FamilyScalarData::CaptureThreadLocal | FamilyScalarData::CaptureAllocateInternal);
+        D.doSegmentFuncPointer =
+            nextArg(0);
+        D.finalizeThreadLocalFuncPointer =
+            nextArg(FamilyScalarData::CaptureThreadLocal);
+        D.finalizeFuncPointer =
+            nextArg(0);
+
+        if ((D.CaptureFlags & FamilyScalarData::CaptureStoreInKernelState) != 0) {
+
+            // get the internal prefix for this kernel.
+            const auto prefix = makeKernelName(kernelId);
+
+            auto storeNextScalar = [&](const StringRef name, Value * value) {
+                auto ptr = getScalarFieldPtr(b.get(), name);
+                if (LLVM_UNLIKELY(CheckAssertions)) {
+                    b->CreateAssert(value, "family parameter (%s) was given a null value", b->GetString(name));
+                }
+                b->CreateStore(value, ptr.first);
+            };
+
+            if (LLVM_LIKELY((D.CaptureFlags & FamilyScalarData::CaptureSharedStateObject) != 0)) {
+                storeNextScalar(prefix, D.SharedStateObject);
+            }
+
+            if ((D.CaptureFlags & FamilyScalarData::CaptureAllocateInternal) != 0) {
+                storeNextScalar(prefix + ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, D.allocateSharedInternalStreamSetsFuncPointer);
+            }
+            if ((D.CaptureFlags & FamilyScalarData::CaptureThreadLocal) != 0) {
+                storeNextScalar(prefix + INITIALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, D.initializeThreadLocalFuncPointer);
+                if ((D.CaptureFlags & FamilyScalarData::CaptureAllocateInternal) != 0) {
+                    storeNextScalar(prefix + ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX, D.allocateThreadLocalFuncPointer);
+                }
+            }
+            storeNextScalar(prefix + DO_SEGMENT_FUNCTION_POINTER_SUFFIX, D.doSegmentFuncPointer);
+            if ((D.CaptureFlags & FamilyScalarData::CaptureThreadLocal) != 0) {
+                storeNextScalar(prefix + FINALIZE_THREAD_LOCAL_FUNCTION_POINTER_SUFFIX, D.finalizeThreadLocalFuncPointer);
+            }
+            storeNextScalar(prefix + FINALIZE_FUNCTION_POINTER_SUFFIX, D.finalizeFuncPointer);
+        }
     }
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addFamilyCallInitializationArguments
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::addFamilyCallInitializationArguments(BuilderRef b, const unsigned kernelId, ArgVec & args) const {
+
+    #ifndef NDEBUG
+    unsigned paramNum = 0;
+    #endif
+
+    for (auto binding : make_iterator_range(in_edges(PipelineOutput + kernelId, mFamilyScalarGraph))) {
+        const FamilyScalarData & D = mFamilyScalarGraph[binding];
+        assert (D.PassedParamNum == paramNum++);
+        args.push_back(D.SharedStateObject);
+        args.push_back(D.allocateSharedInternalStreamSetsFuncPointer);
+        args.push_back(D.initializeThreadLocalFuncPointer);
+        args.push_back(D.allocateThreadLocalFuncPointer);
+        args.push_back(D.doSegmentFuncPointer);
+        assert(isFromCurrentFunction(b.get(), D.doSegmentFuncPointer, false));
+        args.push_back(D.finalizeThreadLocalFuncPointer);
+        args.push_back(D.finalizeFuncPointer);
+    }
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInitializationFunction
@@ -175,8 +172,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
         args.push_back(mKernelSharedHandle);
     }
     const auto prefix = makeKernelName(mKernelId);
-    Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-
+    Value * const threadLocal = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     if (isKernelFamilyCall(mKernelId)) {
         PointerType * const ptrTy = cast<PointerType>(init->getFunctionType()->getParamType(args.size()));
         args.push_back(ConstantPointerNull::getNullValue(ptrTy));
@@ -192,34 +188,40 @@ Value * PipelineCompiler::callKernelInitializeFunction(BuilderRef b, const ArgVe
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelAllocateSharedInternalStreamSetsFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateSharedInternalStreamSetsFunction(b, false);
+    FunctionType * funcTy = term->getFunctionType();
+    Value * func = term;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_SHARED_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
-    return term;
+    return std::make_pair(func, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelAllocateThreadLocalInternalStreamSetsFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const {
     Function * const term = mKernel->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
+    FunctionType * funcTy = term->getFunctionType();
+    Value * func = term;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
+        func = getFamilyFunctionFromKernelState(b, term->getType(), ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_FUNCTION_POINTER_SUFFIX);
     }
-    return term;
+    return std::make_pair(func, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getDoSegmentFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
+std::pair<Value *, FunctionType *> PipelineCompiler::getKernelDoSegmentFunction(BuilderRef b) const {
     Function * const doSegment = mKernel->getDoSegmentFunction(b);
+    FunctionType * const funcTy = doSegment->getFunctionType();
+    Value * funcPtr = doSegment;
     if (isKernelFamilyCall(mKernelId)) {
-        return getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
+        funcPtr = getFamilyFunctionFromKernelState(b, doSegment->getType(), DO_SEGMENT_FUNCTION_POINTER_SUFFIX);
     }
-    return doSegment;
+    return std::make_pair(funcPtr, funcTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

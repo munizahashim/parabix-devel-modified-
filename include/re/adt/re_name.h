@@ -6,7 +6,7 @@
 #include <re/adt/re_cc.h>
 #include <re/adt/re_re.h>
 #include <unicode/data/PropertyAliases.h>
-
+#include <llvm/ADT/Twine.h>
 namespace UCD {
     class UnicodeSet;
 }
@@ -155,7 +155,7 @@ template <typename To, typename FromTy> To * defCast(FromTy * e) {
 
 [[ noreturn ]]
 inline void UndefinedNameError(const re::Name * n) {
-    llvm::report_fatal_error("Error: Undefined name in regular expression: \"" + n->getName() + "\".");
+    llvm::report_fatal_error(llvm::Twine("Error: Undefined name in regular expression: \"") + n->getName() + "\".");
 }
 
 class Capture : public RE {
@@ -271,7 +271,7 @@ inline PropertyExpression * makeBoundaryExpression(std::string ident, std::strin
 
 inline void UnresolvedPropertyExpressionError(const PropertyExpression * pe) {
     std::string prop = pe->getPropertyIdentifier();
-    llvm::report_fatal_error("Error: Unresolved procperty expression in RE: " + prop);
+    llvm::report_fatal_error(llvm::Twine("Error: Unresolved procperty expression in RE: ") + prop);
 }
 
 

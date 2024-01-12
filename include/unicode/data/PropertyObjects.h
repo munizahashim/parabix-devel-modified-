@@ -32,6 +32,7 @@ public:
         ExtensionProperty,
         NumericProperty,
         StringProperty,
+        CodePointProperty,
         StringOverrideProperty,
         BoundaryProperty,
         ObsoleteProperty,
@@ -202,6 +203,44 @@ private:
     const char * mStringBuffer;  // buffer holding all string values for other codepoints, in sorted order.
     unsigned mBufSize;
     const std::vector<UCD::codepoint_t> mExplicitCps;
+};
+
+class CodePointPropertyObject final : public PropertyObject {
+public:
+    static inline bool classof(const PropertyObject * p) {
+        return p->getClassTypeId() == ClassTypeId::CodePointProperty;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    CodePointPropertyObject(UCD::property_t p, const UnicodeSet && nullSet, const UnicodeSet && mapsToSelf,
+                            const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> && explicit_map)
+    : PropertyObject(p, ClassTypeId::CodePointProperty)
+    , mNullCodepointSet(std::move(nullSet))
+    , mSelfCodepointSet(std::move(mapsToSelf))
+    , mExplicitCodepointMap(explicit_map)
+    {
+
+    }
+    const UnicodeSet GetCodepointSet(const std::string & value_spec) override;
+    const UnicodeSet GetCodepointSetMatchingPattern(re::RE * pattern, GrepLinesFunctionType) override;
+    const UnicodeSet GetNullSet() const override;
+    const UnicodeSet GetReflexiveSet() const override;
+    // Get the codepoint property value for a given cp.
+    // Precondition: cp is not within GetNullSet();
+    const UCD::codepoint_t GetCodePointValue(UCD::codepoint_t cp) const;
+    const std::string GetStringValue(UCD::codepoint_t cp) const override;
+    const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
+    // Return bit_xform_sets such that bit_xform_sets[i] includes a given
+    // codepoint cp if cp and GetCodePointValue(cp) differ at bit position i.
+    std::vector<UnicodeSet> & GetBitTransformSets();
+
+private:
+    const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
+    const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
+    // Codepoints other than those in these two sets are explicitly represented.
+    const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> mExplicitCodepointMap;
+    std::vector<UnicodeSet> bit_xform_sets;
 };
 
 class StringPropertyObject final : public PropertyObject {

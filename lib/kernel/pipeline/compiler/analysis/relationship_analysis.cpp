@@ -36,6 +36,8 @@ struct TruncatedStreamSetData {
 
 using TruncatedStreamSetVec = SmallVector<TruncatedStreamSetData, 2>;
 
+using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineScalarType::CommandLineScalarCount>;
+
 //TODO: change enum tag to distinguish relationships and streamsets
 
 struct RelationshipGraphBuilder {
@@ -69,13 +71,29 @@ void addProducerStreamSets(const PortType portType, const unsigned producer, con
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief canonicalizeAnyCommandLineScalar
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline Relationship * canonicalizeAnyCommandLineScalar(Relationship * const rel) { assert (rel);
+    if (isa<CommandLineScalar>(rel)) {
+        const unsigned k = (unsigned)cast<CommandLineScalar>(rel)->getCLType();
+        if (CommandLineScalars[k] == nullptr) {
+            CommandLineScalars[k] = rel;
+        } else {
+            return CommandLineScalars[k];
+        }
+    }
+    return rel;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addProducerRelationships
  ** ------------------------------------------------------------------------------------------------------------- */
 void addProducerScalars(const PortType portType, const unsigned producer, const Bindings & array) {
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
-        assert (isa<Scalar>(array[i].getRelationship()));
-        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, array[i].getRelationship());
+        Relationship * const r = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+        assert (isa<Scalar>(r) || isa<CommandLineScalar>(r));
+        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, r);
         add_edge(producer, relationship, RelationshipType{portType, i}, G);
     }
 }
@@ -102,8 +120,8 @@ void addConsumerStreamSets(const PortType portType, const unsigned consumer, con
 void addConsumerScalars(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
     const auto n = array.size();
     for (unsigned i = 0; i < n; ++i) {
-        assert (isa<Scalar>(array[i].getRelationship()));
-        const auto rel = array[i].getRelationship();
+        Relationship * const rel = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+        assert (isa<Scalar>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel));
         const auto relationship = G.addOrFind(RelationshipNode::IsScalar, rel, addRelationship);
         add_edge(relationship, consumer, RelationshipType{portType, i}, G);
     }
@@ -118,10 +136,10 @@ void addConsumerCalls(const PortType portType, const CallBinding & call) {
     if (LLVM_UNLIKELY(n == 0)) {
         return;
     }
-    const auto consumer = G.addOrFind(RelationshipNode::IsCallee, &call);
+    const auto callFunc = G.addOrFind(RelationshipNode::IsCallee, &call);
     for (unsigned i = 0; i < n; ++i) {
-        const auto relationship = G.addOrFind(RelationshipNode::IsKernel, array[i]);
-        add_edge(relationship, consumer, RelationshipType{portType, i}, G);
+        const auto relationship = G.find(RelationshipNode::IsScalar, array[i]);
+        add_edge(relationship, callFunc, RelationshipType{portType, i}, G);
     }
 }
 
@@ -149,7 +167,7 @@ StreamSetPort getReferencePort(const Kernel * const kernel, const StringRef ref)
         << kernel->getName()
         << " does not contain a StreamSet called "
         << ref;
-    report_fatal_error(msg.str());
+    report_fatal_error(StringRef(msg.str()));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -186,7 +204,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
                     << "."
                     << item.getName()
                     << " cannot refer to an output stream";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
             const Binding & ref = getReferenceBinding(kernel, refPort);
             assert (ref.getRelationship()->isStreamSet());
@@ -198,7 +216,7 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
                     << "."
                     << item.getName()
                     << " cannot refer to a Fixed-rate stream";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
             // To preserve acyclicity, reference bindings always point to the binding that refers to it.
             // To simplify later I/O lookup, the edge stores the info of the reference port.
@@ -224,7 +242,6 @@ void addTruncatedStreamSetContraints() {
 
         // TODO: if we take this as an input with an equivalent rate, do not add it as a check?
         // Or make general check to prevent that for any port drawing from the same streamset?
-        #warning not completely finished yet
 
         Binding * const trunc = new Binding("#trunc", c.SourceData, output.getRate());
         mInternalBindings.emplace_back(trunc);
@@ -296,7 +313,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
                                 msg << ": pop count reference ";
                                 msg << refBinding.getName();
                                 msg << " must refer to a non-deferred Fixed rate stream";
-                                report_fatal_error(msg.str());
+                                report_fatal_error(StringRef(msg.str()));
                             }
                             refVertex = add_vertex(refStream, H);
                             M.emplace(refStream, refVertex);
@@ -309,7 +326,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
                             msg << ": pop count reference ";
                             msg << refBinding.getName();
                             msg << " cannot have a rational rate";
-                            report_fatal_error(msg.str());
+                            report_fatal_error(StringRef(msg.str()));
                         }
                         const auto type = rate.isPopCount() ? CountingType::Positive : CountingType::Negative;
                         add_edge(refVertex, i, Edge{type, port, strideLength.numerator()}, H);
@@ -551,7 +568,6 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                         inputs[port.Number] = std::make_pair(relationship, ref);
                         ++numOfStreams;
                     } else if (node.Type == RelationshipNode::IsScalar) {
-                        assert (isa<Scalar>(G[input].Relationship));
                         scalars[port.Number] = input;
                     }
                 }
@@ -639,7 +655,7 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                     }
 
                     if (LLVM_UNLIKELY(error)) {
-                        report_fatal_error(kernel->getName() + " is ambiguous: multiple I/O layouts have the same signature");
+                        report_fatal_error(StringRef(kernel->getName()) + " is ambiguous: multiple I/O layouts have the same signature");
                     }
                 }
             }
@@ -742,7 +758,7 @@ RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
 , mInternalKernels(P.mInternalKernels)
 , mInternalBindings(P.mInternalBindings)
 , mInternalBuffers(P.mInternalBuffers) {
-
+    std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
 }
 
 ProgramGraph & G;
@@ -751,6 +767,7 @@ Kernels & mKernels;
 OwningVector<Kernel> &          mInternalKernels;
 OwningVector<Binding> &         mInternalBindings;
 OwningVector<StreamSetBuffer> & mInternalBuffers;
+CommandLineScalarVec            CommandLineScalars;
 TruncatedStreamSetVec           TruncatedStreamSets;
 };
 
@@ -779,7 +796,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
             raw_string_ostream msg(tmp);
             msg << mPipelineKernel->getName()
                 << " contains itself in its pipeline";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
 
         const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
@@ -1223,7 +1240,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
                             out << "Error: input reference for binding " <<
                                    kernelObj->getName() << "." << rn.Binding.get().getName() <<
                                    " refers to an output stream.";
-                            report_fatal_error(out.str());
+                            report_fatal_error(StringRef(out.str()));
                         }
                         add_edge(ref.Number, port.Number, E);
                         break;

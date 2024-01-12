@@ -85,15 +85,15 @@ void LineSpanFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
     spanIndex->addIncoming(ic_SpansProcessedCount, block_Entry);
     PHINode * const lineNumberIndex = b->CreatePHI(i64, 3);
     lineNumberIndex->addIncoming(ic_LineNumbersProcessedCount, block_Entry);
-    Value * const lineNumVal = b->CreateLoad(b->getRawInputPointer("lineNumbers", lineNumberIndex));
+    Value * const lineNumVal = b->CreateLoad(i64, b->getRawInputPointer("lineNumbers", lineNumberIndex));
     if (codegen::DebugOptionIsSet(codegen::EnableAsserts)) {
         b->CreateAssert(b->CreateICmpUGE(lineNumVal, spanIndex), "spans have overtaken line numbers");
     }
     b->CreateCondBr(b->CreateICmpEQ(lineNumVal, spanIndex), block_UseSpan, block_SkipSpan);
 
     b->SetInsertPoint(block_UseSpan);
-    Value * const startVal = b->CreateLoad(b->getRawInputPointer("spans", i64_ZERO, spanIndex));
-    Value * const endVal = b->CreateLoad(b->getRawInputPointer("spans", i64_ONE, spanIndex));
+    Value * const startVal = b->CreateLoad(i64, b->getRawInputPointer("spans", i64_ZERO, spanIndex));
+    Value * const endVal = b->CreateLoad(i64, b->getRawInputPointer("spans", i64_ONE, spanIndex));
     b->CreateStore(startVal, b->getRawOutputPointer("output", i64_ZERO, lineNumberIndex));
     b->CreateStore(endVal, b->getRawOutputPointer("output", i64_ONE, lineNumberIndex));
     b->setProducedItemCount("output", b->CreateAdd(lineNumberIndex, i64_ONE));

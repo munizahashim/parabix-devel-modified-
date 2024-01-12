@@ -149,11 +149,11 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * recordSeparators = P->CreateStreamSet(1);
     StreamSet * fieldSeparators = P->CreateStreamSet(1);
     StreamSet * quoteEscape = P->CreateStreamSet(1);
+
+    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     SHOW_STREAM(recordSeparators);
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
-
-    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     StreamSet * toKeep = P->CreateStreamSet(1);
     P->CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
     SHOW_STREAM(toKeep);

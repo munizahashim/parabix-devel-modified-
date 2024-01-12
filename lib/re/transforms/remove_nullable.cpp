@@ -122,4 +122,22 @@ RE * removeNullableSuffix(RE * r) {
     return NullableSuffixRemover().transformRE(r);
 }
 
+class ZeroBoundElimination final : public RE_Transformer {
+public:
+    ZeroBoundElimination() : RE_Transformer("ZeroBoundElimination") {}
+protected:
+    RE * transformRep(Rep * r) override {
+        if (r->getLB() > 0) return r;
+        return makeAlt({makeSeq(), makeRep(r->getRE(), 1, r->getUB())});
+    }
+    RE * transformAssertion(Assertion * a) override {
+        return a;
+    }
+};
+
+RE * zeroBoundElimination(RE * re,
+                          NameTransformationMode m) {
+    return ZeroBoundElimination().transformRE(re, m);
+}
+
 }

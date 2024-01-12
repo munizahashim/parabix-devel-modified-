@@ -26,8 +26,8 @@ using namespace llvm;
 
 namespace UCD {
     
-void UnicodePropertyExpressionError(std::string errmsg) {
-    llvm::report_fatal_error(errmsg);
+void UnicodePropertyExpressionError(const std::string & errmsg) {
+    llvm::report_fatal_error(llvm::StringRef(errmsg));
 }
 
 struct PropertyResolver : public RE_Transformer {
@@ -183,14 +183,14 @@ struct PropertyReferencePromotion : public RE_Transformer {
         int prop_code = exp->getPropertyCode();
         if (prop_code < 0) return exp;  // No property code - leave unchanged.
         const auto & propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
-        if (isa<EnumeratedPropertyObject>(propObj)) {
+        //if (isa<EnumeratedPropertyObject>(propObj) || isa<CodePointPropertyObject>(propObj)) {
             RE * defn = exp->getResolvedRE();
             if (defn == nullptr) return exp;
             if (Reference * ref = dyn_cast<Reference>(defn)) {
                 ref -> setReferencedProperty(static_cast<UCD::property_t>(prop_code));
                 return ref;
             }
-        }
+        //}
         return exp;
     }
 };
@@ -368,7 +368,7 @@ RE * externalizeProperties(RE * r) {
 
 struct AnyExternalizer : public RE_Transformer {
     AnyExternalizer() : RE_Transformer("AnyExternalizer") {}
-    RE * transformAny(Any * a) override {
+    RE * transformAny(re::Any * a) override {
         Name * externName = makeName("u8index");
         externName->setDefinition(a);
         return externName;

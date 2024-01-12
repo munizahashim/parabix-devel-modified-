@@ -168,7 +168,7 @@ struct HexConverter {
                 return static_cast<uint8_t>(val - 'a' + 10);
             }
         }
-        llvm::report_fatal_error(std::string("'").append(1, c).append("' is not a valid hex digit"));
+        llvm::report_fatal_error(llvm::StringRef("'") + std::string(1,c) + "' is not a valid hex digit");
     }
 };
 
@@ -180,7 +180,7 @@ struct BinaryConverter {
         } else if (c == '0' || c == '.') {
             val = 0;
         } else {
-            llvm::report_fatal_error(std::string("'").append(1, c).append("' is not a valid binary digit"));
+            llvm::report_fatal_error(llvm::StringRef("'") + std::string(1,c) + "' is not a valid binary digit");
         }
         return val;
     }
@@ -308,10 +308,10 @@ private:
         assertNotEOF(t);
         if (auto ch = llvm::dyn_cast<Char>(t.get())) {
             if (ch->value != c) {
-                llvm::report_fatal_error("stream parse error: unexpected token - expected '" + std::string(1, c) + "'");
+                llvm::report_fatal_error(llvm::StringRef("stream parse error: unexpected token - expected '") + std::string(1, c) + "'");
             }
         } else {
-            llvm::report_fatal_error("stream parse error: unexpected token - expected '" + std::string(1, c) + "'");
+            llvm::report_fatal_error(llvm::StringRef("stream parse error: unexpected token - expected '") + std::string(1, c) + "'");
         }
     }
 
@@ -328,7 +328,7 @@ private:
                 parseRep(accumList);
                 break;
             default:
-                llvm::report_fatal_error("stream parse error: unexpected token '" + std::string(1, ch->value) + "'");
+                llvm::report_fatal_error(llvm::StringRef("stream parse error: unexpected token '") + std::string(1, ch->value) + "'");
             }
         } else if (llvm::isa<Val>(token.get())) {
             auto* val = llvm::cast<Val>(token.get());

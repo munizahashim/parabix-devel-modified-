@@ -36,7 +36,7 @@ std::vector<std::string> get_CSV_headers(std::string filename) {
         headerFile.close();
         headers = parse_CSV_headers(line1);
     } else {
-        llvm::report_fatal_error("Cannot open " + filename);
+        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + filename);
     }
     return headers;
 }

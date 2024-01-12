@@ -68,34 +68,37 @@ public:
 
     llvm::Constant * getSplat(const unsigned fieldCount, llvm::Constant * Elt);
 
-    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Value * const ptr) {
-        return CreateAlignedLoad(ptr, mBitBlockWidth / 8);
+    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Type * type, llvm::Value * const ptr) {
+        return CreateAlignedLoad(type, ptr, mBitBlockWidth / 8);
     }
 
-    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Value * const ptr, llvm::Value * const index) {
-        return CreateBlockAlignedLoad(CreateGEP(ptr, index));
-    }
+//    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Type * type, llvm::Value * const ptr, llvm::Value * const index) {
+//        return CreateBlockAlignedLoad(type, CreateGEP(type, ptr, index));
+//    }
 
-    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
-        return CreateBlockAlignedLoad(CreateGEP(ptr, indices));
-    }
+//    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Type * type, llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
+//        llvm::Value * gi = CreateGEP(type, ptr, indices);
+//        return CreateBlockAlignedLoad(gi->getType(), gi);
+//    }
 
     llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr) {
         return CreateAlignedStore(value, ptr, mBitBlockWidth / 8);
     }
 
-    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, llvm::Value * const index) {
-        return CreateBlockAlignedStore(value, CreateGEP(ptr, index));
-    }
+//    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, llvm::Value * const index) {
+//        llvm::Type * elemTy = ptr->getType()->getPointerElementType();
+//        return CreateBlockAlignedStore(value, CreateGEP(elemTy, ptr, index));
+//    }
 
-    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
-        return CreateBlockAlignedStore(value, CreateGEP(ptr, indices));
-    }
+//    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
+//        llvm::Type * elemTy = ptr->getType()->getPointerElementType();
+//        return CreateBlockAlignedStore(value, CreateGEP(elemTy, ptr, indices));
+//    }
 
     llvm::Value * CreateBlockAlignedMalloc(llvm::Value * size) {
         return CreateAlignedMalloc(size, mBitBlockWidth / 8);
     }
-
+    
     FixedVectorType * fwVectorType(const unsigned fw);
 
     llvm::Constant * simd_himask(unsigned fw);
@@ -246,7 +249,7 @@ public:
     llvm::CallInst * CallPrintRegister(llvm::StringRef regName, llvm::Value * const value, const STD_FD fd = STD_FD::STD_ERR);
 
 protected:
-    LLVM_ATTRIBUTE_NORETURN void UnsupportedFieldWidthError(const unsigned FieldWidth, std::string op_name);
+    [[noreturn]] void UnsupportedFieldWidthError(const unsigned FieldWidth, std::string op_name);
 
     llvm::Constant * bit_interleave_byteshuffle_table(unsigned fw);  // support function for merge using shuffles.
 

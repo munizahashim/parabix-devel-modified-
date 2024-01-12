@@ -16,6 +16,7 @@ DEPS
     kernel.streamutils
     kernel.unicode
     kernel.util
+    re.adt
 )
 
 parabix_add_executable(
@@ -45,6 +46,7 @@ DEPS
     kernel.pipeline
     kernel.streamutils
     kernel.unicode
+    re.adt
     re.cc
     toolchain
 )
@@ -60,6 +62,7 @@ DEPS
     kernel.pipeline
     kernel.streamutils
     kernel.unicode
+    re.adt
     re.cc
     toolchain
 )

@@ -163,6 +163,7 @@ private:
     SelectedInputList mInputOps;
     unsigned mFieldsPerBlock;
     unsigned mStreamCount;
+    llvm::Type * mPendingType;
     unsigned mPendingSetCount;
 };
 

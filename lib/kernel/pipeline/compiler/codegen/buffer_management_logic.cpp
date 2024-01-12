@@ -58,14 +58,14 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but must do so to support " << kernelObj->getName() << ".";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
         if (LLVM_UNLIKELY(kernelObj->allocatesInternalStreamSets())) {
             SmallVector<char, 1024> tmp;
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but " << kernelObj->getName() << " must do so to be correctly initialized.";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
     }
 }
@@ -85,8 +85,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
             } else if (LLVM_UNLIKELY(bn.isConstant())) {
                 assert (nonLocal);
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
+                buffer->setHandle(b->getScalarFieldPtr(handleName));
                 const auto & sn = mStreamGraph[streamSet];
                 assert (sn.Type == RelationshipNode::IsStreamSet);
                 if (cast<RepeatingStreamSet>(sn.Relationship)->isDynamic()) {
@@ -101,8 +100,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 const auto producer = source(pe, mBufferGraph);
                 const BufferPort & rd = mBufferGraph[pe];
                 const auto handleName = makeBufferName(producer, rd.Port);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
+                buffer->setHandle(b->getScalarFieldPtr(handleName));
             }
         }
     }
@@ -134,19 +132,17 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     params.push_back(mKernelSharedHandle);
                 }
                 Value * func = nullptr;
+                FunctionType * funcTy;
                 if (nonLocal) {
-                    func = getKernelAllocateSharedInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateSharedInternalStreamSetsFunction(b);
                 } else {
-                    func = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                const auto scale = MaximumNumOfStrides[i] * Rational{mNumOfThreads};
-                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, scale));
+                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
 
-                FunctionType * const funcType = cast<FunctionType>(func->getType()->getPointerElementType());
-
-                b->CreateCall(funcType, func, params);
+                b->CreateCall(funcTy, func, params);
             }
         }
     }
@@ -165,8 +161,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     const auto producer = source(pe, mBufferGraph);
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto handleName = makeBufferName(producer, rd.Port);
-                    Value * const handle = b->getScalarFieldPtr(handleName);
-                    buffer->setHandle(handle);
+                    buffer->setHandle(b->getScalarFieldPtr(handleName));
                 } else {
                     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 }
@@ -227,9 +222,9 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateExternalPipelineIO
+ * @brief updateExternalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
+void PipelineCompiler::updateExternalProducedItemCounts(BuilderRef b) {
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -359,14 +354,14 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
         const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
-        Value * const processedPtr = b->getScalarFieldPtr(prefix + suffix);
-        mProcessedItemCountPtr[inputPort] = processedPtr;
-        Value * itemCount = b->CreateLoad(processedPtr);
+        auto prodRef = b->getScalarFieldPtr(prefix + suffix);
+        mProcessedItemCountPtr[inputPort] = prodRef.first;
+        Value * itemCount = b->CreateLoad(prodRef.second, prodRef.first);
         mInitiallyProcessedItemCount[inputPort] = itemCount;
         if (br.isDeferred()) {
-            Value * const deferred = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProcessedDeferredItemCountPtr[inputPort] = deferred;
-            itemCount = b->CreateLoad(deferred);
+            auto defRef = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
+            itemCount = b->CreateLoad(defRef.second, defRef.first);
             mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
         }
     }
@@ -387,14 +382,14 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
         const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
-        Value * const produced = b->getScalarFieldPtr(prefix + suffix);
-        mProducedItemCountPtr[outputPort] = produced;
-        Value * const itemCount = b->CreateLoad(produced);
+        auto prodRef = b->getScalarFieldPtr(prefix + suffix);
+        mProducedItemCountPtr[outputPort] = prodRef.first;
+        Value * const itemCount = b->CreateLoad(prodRef.second, prodRef.first);
         mInitiallyProducedItemCount[streamSet] = itemCount;
         if (br.isDeferred()) {
-            Value * const deferred = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProducedDeferredItemCountPtr[outputPort] = deferred;
-            Value * const itemCount = b->CreateLoad(deferred);
+            auto defRef = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            mProducedDeferredItemCountPtr[outputPort] = defRef.first;
+            Value * const itemCount = b->CreateLoad(defRef.second, defRef.first);
             mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
         }
     }
@@ -418,13 +413,12 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = source(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
-            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
             ptr = mProcessedItemCountPtr[inputPort];
         }
@@ -455,13 +449,12 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = target(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
-            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
             ptr = mProducedItemCountPtr[outputPort];
         }
@@ -533,9 +526,8 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) cons
             const BufferNode & bn = mBufferGraph[streamSet];
             assert (bn.isNonThreadLocal());
             Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
-            Value * vba = b->CreateLoad(ptr);
             StreamSetBuffer * const buffer = bn.Buffer;
-            vba = b->CreatePointerCast(vba, buffer->getPointerType());
+            Value * vba = b->CreateLoad(buffer->getPointerType(), ptr);
             buffer->setBaseAddress(b.get(), vba);
 //            if (CheckAssertions) {
 //                b->CreateAssert(vba, "%s.%s returned virtual base addresss cannot be null",
@@ -751,9 +743,9 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
     b->SetInsertPoint(copyStart);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_BUFFER_COPY);
     #endif
-    Value * const beforeCopy = startCycleCounter(b);
+    startCycleCounter(b, CycleCounter::BUFFER_COPY);
 
     Value * source = buffer->getOverflowAddress(b);
     Value * target = buffer->getMallocAddress(b);
@@ -766,10 +758,12 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
     Value * const totalBytesPerStreamSetBlock = b->CreateMul(bytesPerStream, numOfStreams);
 
+    IntegerType * const int8Ty = b->getInt8Ty();
+
     if (mode == CopyMode::LookBehind || mode == CopyMode::Delay) {
         Value * const offset = b->CreateNeg(totalBytesPerStreamSetBlock);
-        source = b->CreateInBoundsGEP(source, offset);
-        target = b->CreateInBoundsGEP(target, offset);
+        source = b->CreateInBoundsGEP(int8Ty, source, offset);
+        target = b->CreateInBoundsGEP(int8Ty, target, offset);
     }
 
     if (mode == CopyMode::LookAhead || mode == CopyMode::Delay) {
@@ -783,7 +777,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     if (copyLoop) {
 
         BasicBlock * recordCopyCycleCount = nullptr;
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             recordCopyCycleCount = b->CreateBasicBlock(prefix + "RecordCycleCount", copyExit);
         }
 
@@ -793,8 +787,8 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         PHINode * const idx = b->CreatePHI(b->getSizeTy(), 2);
         idx->addIncoming(b->getSize(0), copyStart);
         Value * const offset = b->CreateMul(idx, bytesPerStream);
-        Value * const sourcePtr = b->CreateGEP(source, offset);
-        Value * const targetPtr = b->CreateGEP(target, offset);
+        Value * const sourcePtr = b->CreateGEP(int8Ty, source, offset);
+        Value * const targetPtr = b->CreateGEP(int8Ty, target, offset);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_copying %" PRIu64 " bytes from %" PRIx64 " to %" PRIx64 " (align=%" PRIu64 ")", bytesToCopy, sourcePtr, targetPtr, b->getSize(align));
@@ -809,11 +803,11 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         BasicBlock * const loopExit = EnableCycleCounter ? recordCopyCycleCount : copyExit;
         b->CreateCondBr(done, loopExit, copyLoop);
 
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             b->SetInsertPoint(recordCopyCycleCount);
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
-            accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
             b->CreateBr(copyExit);
         }
@@ -827,10 +821,11 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         #endif
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
-        if (EnableCycleCounter || EnablePAPICounters) {
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+        assert (NumOfPAPIEvents > 0);
+        if (EnableCycleCounter || NumOfPAPIEvents) {
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
-            accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
         }
         b->CreateBr(copyExit);
@@ -845,18 +840,6 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
 
-    DataLayout DL(b->getModule());
-
-    IntegerType * const int8Ty = b->getInt8Ty();
-
-    auto getTypeSize = [&](Type * const type) -> uint64_t {
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return DL.getTypeAllocSize(type);
-        #else
-        return DL.getTypeAllocSize(type).getFixedSize();
-        #endif
-    };
-
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -866,7 +849,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             assert (!bn.isTruncated());
             assert (RequiredThreadLocalStreamSetMemory > 0);
             assert (mThreadLocalStreamSetBaseAddress);
-            assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == int8Ty);
+            assert (mThreadLocalStreamSetBaseAddress->getType() == b->getInt8PtrTy());
             auto start = bn.BufferStart;
             assert ((start % b->getCacheAlignment()) == 0);
             #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -879,11 +862,11 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
-            Constant * const bytesPerPack = ConstantExpr::getSizeOf(ptrTy->getElementType());
+            Constant * const bytesPerPack = b->getTypeSize(buffer->getType());
             Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
 
             Value * const offset = b->CreateSub(startOffset, producedBytes);
-            Value * ba = b->CreateGEP(mThreadLocalStreamSetBaseAddress, offset);
+            Value * ba = b->CreateGEP(b->getInt8Ty(), mThreadLocalStreamSetBaseAddress, offset);
             ba = b->CreatePointerCast(ba, ptrTy);
             buffer->setBaseAddress(b, ba);
 
@@ -907,9 +890,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
 
-
     Value * const baseAddress = buffer->getBaseAddress(b);
-
     if (bufferNode.isUnowned()) {
         assert (bufferNode.isNonThreadLocal());
         assert (!bufferNode.isConstant());
@@ -967,7 +948,7 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
     const auto toFetch = round_up_to<unsigned>(cl * 3, typeSize);
     Value * const baseAddr = b->CreatePointerCast(addr, b->getInt8PtrTy());
     for (unsigned i = 0; i < toFetch; i += cl) {
-        args[0] = b->CreateGEP(baseAddr, b->getSize(i));
+        args[0] = b->CreateGEP0(baseAddr, b->getSize(i));
         b->CreateCall(prefetchFunc->getFunctionType(), prefetchFunc, args);
     }
 #endif

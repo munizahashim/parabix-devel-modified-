@@ -44,7 +44,10 @@ public:
         , TruncatedStreamSet
         // scalar types
         , Scalar
+        , CommandLineScalar
         , ScalarConstant
+        // -----------------
+        , __Count
     };
 
     ClassTypeId getClassTypeId() const noexcept {
@@ -174,8 +177,8 @@ using StreamSets = std::vector<StreamSet *>;
 
 class Scalar : public Relationship {
 public:
-    static bool classof(const Relationship * e) {
-        return e->getClassTypeId() == ClassTypeId::Scalar || e->getClassTypeId() == ClassTypeId::ScalarConstant;;
+    static bool classof(const Relationship * e) { assert (e);
+        return e->getClassTypeId() == ClassTypeId::Scalar;
     }
     static bool classof(const void *) {
         return false;
@@ -185,6 +188,43 @@ public:
 protected:
     Scalar(const ClassTypeId typeId, llvm::Type *type) noexcept;
 };
+
+enum class CommandLineScalarType {
+    MinThreadCount
+    , MaxThreadCount
+    , DynamicMultithreadingPeriod
+    , DynamicMultithreadingAddSynchronizationThreshold
+    , DynamicMultithreadingRemoveSynchronizationThreshold
+    #ifdef ENABLE_PAPI
+    , PAPIEventSet
+    , PAPIEventList
+    #endif
+    // --------------------
+    , CommandLineScalarCount
+};
+
+// Command scalars are intended to be internal values that pipeline main function passes
+// to the outermost pipeline kernel but is matched by its subtype rather than pointer/object
+// equivalence
+class CommandLineScalar : public Scalar {
+public:
+
+    static bool classof(const Relationship * e) {
+        return e->getClassTypeId() == ClassTypeId::CommandLineScalar;
+    }
+    static bool classof(const void *) {
+        return false;
+    }
+
+    CommandLineScalarType getCLType() const {
+        return mCLType;
+    }
+
+    CommandLineScalar(const CommandLineScalarType clType, llvm::Type *type) noexcept;
+private:
+    const CommandLineScalarType mCLType;
+};
+
 
 class ScalarConstant : public Scalar {
 public:

@@ -59,13 +59,17 @@
 #include <re/transforms/re_contextual_simplification.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
+#include <re/transforms/remove_nullable.h>
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
+#include <re/transforms/expand_permutes.h>
 #include <re/transforms/name_intro.h>
 #include <re/transforms/reference_transform.h>
+#include <re/transforms/variable_alt_promotion.h>
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <sys/stat.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_toolchain.h>
@@ -268,7 +272,8 @@ void GrepEngine::initRE(re::RE * re) {
     if ((mEngineKind != EngineKind::EmitMatches) || mInvertMatches) {
         mColoring = false;
     }
-    mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
+    mRE = expandPermutes(re);
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     // Determine the unit of length for the RE.  If the RE involves
     // fixed length UTF-8 sequences only, then UTF-8 can be used
     // for most efficient processing.   Otherwise we must use full
@@ -291,27 +296,33 @@ void GrepEngine::initRE(re::RE * re) {
         for (auto m : FRT.mNameMap) {
             re::Reference * ref = cast<re::Reference>(m.second);
             UCD::property_t p = ref->getReferencedProperty();
-            if (p == UCD::identity) {
-                auto u8_u21 = new U21_External();
-                mExternalTable.declareExternal(u8, "u21", u8_u21);
-                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
-            } else {
-                std::string extName = UCD::getPropertyFullName(p) + "_basis";
-                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
-            }
+            std::string instanceName = ref->getInstanceName();
             auto captureLen = getLengthRange(ref->getCapture(), &cc::Unicode).first;
             if (captureLen != 1) {
                 llvm::report_fatal_error("Capture length > 1 is a future extension");
             }
-            std::string instanceName = ref->getInstanceName();
             auto mapping = mRefInfo.twixtREs.find(instanceName);
             auto twixtLen = getLengthRange(mapping->second, &cc::Unicode).first;
             auto dist = captureLen + twixtLen;
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
+            UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+            if (isa<UCD::EnumeratedPropertyObject>(propObj)) {
+                std::string extName = UCD::getPropertyFullName(p) + "_basis";
+                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
+            } else if (isa<UCD::CodePointPropertyObject>(propObj)) {
+                // Identity or other codepoint properties
+                auto u8_u21 = new U21_External();
+                mExternalTable.declareExternal(u8, "u21", u8_u21);
+                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
+            }
         }
     }
-    if (!mColoring) mRE = remove_nullable_ends(mRE);
-
+    if (mColoring) {
+        mRE = zeroBoundElimination(mRE);
+        mRE = variableAltPromotion(mRE, mLengthAlphabet);
+    } else {
+        mRE = remove_nullable_ends(mRE);
+    }
     mRE = regular_expression_passes(mRE);
     UCD::PropertyExternalizer PE;
     mRE = PE.transformRE(mRE);
@@ -813,11 +824,7 @@ public:
                          , [&]() -> std::string {
                              return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
                          }()
-                         // num of threads
-                         , 1
                          // contains kernel family calls
-                         , false
-                         // has repeating streamset
                          , false
                          // kernel list
                          , {}
@@ -832,6 +839,8 @@ public:
                          // input scalars
                          , {Binding{b->getIntAddrTy(), "callbackObject", callbackObject}}
                          // output scalars
+                         , {}
+                         // internally generated streamsets
                          , {}
                          // length assertions
                          , {}) {
@@ -912,28 +921,33 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
         std::vector<unsigned> insertAmts;
         for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
+        StreamSet * const SpanMarks = E->CreateStreamSet(2, 1);
+        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "SpanMarks", SpanMarks);
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         // Basis bit streams expanded with 0 bits for each string to be inserted.
+        if (mIllustrator) mIllustrator->captureBixNum(E, "InsertIndex", InsertIndex);
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+        SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ExpandedMarks", ExpandedMarks);
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
@@ -943,6 +957,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
         E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "ColorizedBreaks", ColorizedBreaks);
 
         // TODO: source coords >= colorized coords until the final stride?
         // E->AssertEqualLength(SourceCoords, ColorizedCoords);
@@ -991,6 +1006,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "Filtered", Filtered);
 
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
@@ -1013,6 +1029,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
@@ -1164,7 +1181,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
 
         accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
         if (accum.mBatchBuffer == nullptr) {
-            llvm::report_fatal_error("Unable to allocate batch buffer of size: " + std::to_string(aligned_size));
+            llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
         }
         char * current_base = accum.mBatchBuffer;
 
@@ -1259,12 +1276,13 @@ void * DoGrepThreadFunction(void *args) {
 }
 
 bool GrepEngine::searchAllFiles() {
+
     std::vector<pthread_t> threads(codegen::TaskThreads);
 
     for(unsigned long i = 1; i < codegen::TaskThreads; ++i) {
         const int rc = pthread_create(&threads[i], nullptr, DoGrepThreadFunction, (void *)this);
         if (rc) {
-            llvm::report_fatal_error("Failed to create thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to create thread: code ") + std::to_string(rc));
         }
     }
     // Main thread also does the work;
@@ -1273,7 +1291,7 @@ bool GrepEngine::searchAllFiles() {
         void * status = nullptr;
         const int rc = pthread_join(threads[i], &status);
         if (rc) {
-            llvm::report_fatal_error("Failed to join thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to join thread: code ") + std::to_string(rc));
         }
     }
     return grepMatchFound;
@@ -1284,6 +1302,7 @@ void * GrepEngine::DoGrepThreadMethod() {
 
     unsigned fileIdx = mNextFileToGrep++;
     while (fileIdx < mFileGroups.size()) {
+
         const auto grepResult = doGrep(mFileGroups[fileIdx], mResultStrs[fileIdx]);
         mFileStatus[fileIdx] = FileStatus::GrepComplete;
         if (grepResult > 0) {
@@ -1333,11 +1352,12 @@ void * GrepEngine::DoGrepThreadMethod() {
 }
 
 InternalSearchEngine::InternalSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto & idb = mGrepDriver.getBuilder();
@@ -1358,7 +1378,6 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
                                        Binding{idb->getSizeTy(), "length"},
                                        Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
@@ -1413,11 +1432,12 @@ void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLengt
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine) :
     InternalMultiSearchEngine(engine->mGrepDriver) {}
@@ -1435,7 +1455,6 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
         Binding{idb->getSizeTy(), "length"},
         Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);

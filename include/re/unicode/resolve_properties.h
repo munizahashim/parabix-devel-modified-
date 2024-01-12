@@ -17,7 +17,7 @@ namespace re {
 
 namespace UCD {
 
-LLVM_ATTRIBUTE_NORETURN void UnicodePropertyExpressionError(std::string errmsg);
+[[noreturn]] void UnicodePropertyExpressionError(const std::string & errmsg);
 
 /*  Link all property expression nodes to their property_enum code, and
     standardize the property name.   */

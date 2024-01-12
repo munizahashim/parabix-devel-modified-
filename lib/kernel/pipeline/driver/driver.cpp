@@ -8,6 +8,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 using namespace kernel;
+using namespace llvm;
 
 using RelationshipAllocator = Relationship::Allocator;
 
@@ -15,14 +16,22 @@ using RelationshipAllocator = Relationship::Allocator;
  * @brief makePipelineWithIO
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, std::move(stream_inputs), std::move(stream_outputs), std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           std::move(stream_inputs), std::move(stream_outputs),
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipeline
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
-    return std::make_unique<ProgramBuilder>(*this, Bindings{}, Bindings{}, std::move(scalar_inputs), std::move(scalar_outputs));
+    PipelineKernel * const pipeline =
+        new PipelineKernel(getBuilder(),
+                           {}, {},
+                           std::move(scalar_inputs), std::move(scalar_outputs));
+    return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -63,7 +72,7 @@ TruncatedStreamSet * BaseDriver::CreateTruncatedStreamSet(const StreamSet * data
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateConstant
  ** ------------------------------------------------------------------------------------------------------------- */
-Scalar * BaseDriver::CreateScalar(not_null<llvm::Type *> scalarType) noexcept {
+Scalar * BaseDriver::CreateScalar(not_null<Type *> scalarType) noexcept {
     RelationshipAllocator A(mAllocator);
     return new (A) Scalar(scalarType);
 }
@@ -71,9 +80,34 @@ Scalar * BaseDriver::CreateScalar(not_null<llvm::Type *> scalarType) noexcept {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateConstant
  ** ------------------------------------------------------------------------------------------------------------- */
-Scalar * BaseDriver::CreateConstant(not_null<llvm::Constant *> value) noexcept {
+Scalar * BaseDriver::CreateConstant(not_null<Constant *> value) noexcept {
     RelationshipAllocator A(mAllocator);
     return new (A) ScalarConstant(value);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateCommandLineScalar
+ ** ------------------------------------------------------------------------------------------------------------- */
+Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcept {
+    RelationshipAllocator A(mAllocator);
+    Type * scalarTy = nullptr;
+    switch (type) {
+
+        #ifdef ENABLE_PAPI
+        case CommandLineScalarType::PAPIEventSet:
+            scalarTy = mBuilder->getInt32Ty(); break;
+        case CommandLineScalarType::PAPIEventList:
+            scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
+        #endif
+        case CommandLineScalarType::DynamicMultithreadingAddSynchronizationThreshold:
+        case CommandLineScalarType::DynamicMultithreadingRemoveSynchronizationThreshold:
+            scalarTy = mBuilder->getFloatTy(); break;
+        default:
+            scalarTy = mBuilder->getSizeTy(); break;
+    }
+
+
+    return new (A) CommandLineScalar(type, scalarTy);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -94,12 +128,12 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
     }
     for (Binding & input : kernel->getInputStreamSetBindings()) {
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
-            llvm::report_fatal_error(kernel->getName()+ "." + input.getName() + " must be set upon construction");
+            report_fatal_error(StringRef(kernel->getName()) + "." + input.getName() + " must be set upon construction");
         }
     }
     for (Binding & output : kernel->getOutputStreamSetBindings()) {
         if (LLVM_UNLIKELY(output.getRelationship() == nullptr)) {
-            llvm::report_fatal_error(kernel->getName()+ "." + output.getName() + " must be set upon construction");
+            report_fatal_error(StringRef(kernel->getName()) + "." + output.getName() + " must be set upon construction");
         }
     }
     for (Binding & output : kernel->getOutputScalarBindings()) {
@@ -129,26 +163,17 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief __CreateRepeatingStreamSet8
- ** ------------------------------------------------------------------------------------------------------------- */
-kernel::RepeatingStreamSet * BaseDriver::__CreateRepeatingStreamSet8(const uint8_t * string, size_t length) {
-    return nullptr;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 BaseDriver::BaseDriver(std::string && moduleName)
-: mContext(new llvm::LLVMContext())
-, mMainModule(new llvm::Module(moduleName, *mContext))
+: mContext(new LLVMContext())
+, mMainModule(new Module(moduleName, *mContext))
 , mBuilder(nullptr)
 , mObjectCache(nullptr) {
     if (LLVM_UNLIKELY(codegen::EnableObjectCache)) {
         mObjectCache.reset(new ParabixObjectCache());
     }
 }
-
-// static void dummy_segf_handler(int sig, siginfo_t *si, void *unused) { }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief destructor

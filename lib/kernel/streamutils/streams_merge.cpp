@@ -46,7 +46,7 @@ null_streamset:
         out << '_' << streamSetRunLength << 'x' << lastNumOfInputs;
     }
     if (LLVM_UNLIKELY(output->getNumElements() < maxNumOfInputStreams)) {
-        report_fatal_error("StreamsMerge: output streamset requires " + std::to_string(maxNumOfInputStreams) + " streams");
+        report_fatal_error(StringRef("StreamsMerge: output streamset requires ") + std::to_string(maxNumOfInputStreams) + " streams");
     }
     out << ':' << output->getNumElements();
     out.flush();

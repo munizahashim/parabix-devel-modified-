@@ -687,7 +687,7 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
 
         P->CreateKernelCall<StdOutKernel>(u8bytes);
     } else {
-        llvm::report_fatal_error("Unsupported output encoding: " + OutputEncoding);
+        llvm::report_fatal_error(llvm::StringRef("Unsupported output encoding: ") + OutputEncoding);
     }
 
     return reinterpret_cast<gb18030FunctionType>(P->compile());

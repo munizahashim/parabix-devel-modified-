@@ -143,9 +143,12 @@ protected:
     const PabloKernel *                             mKernel;
 
     llvm::Value *                                   mCurrentFrame;
+    llvm::StructType *                              mCurrentFrameType;
     unsigned                                        mCurrentFrameIndex;
 
     const CarryData *                               mCarryInfo;
+
+    llvm::StructType *                              mCarryFrameType;
 
     llvm::Value *                                   mNextSummaryTest;
 
@@ -161,11 +164,35 @@ protected:
     llvm::Value *                                   mLoopSelector;
     llvm::Value *                                   mNextLoopSelector;
     llvm::Value *                                   mCarryPackPtr;
-    Vec<llvm::Value *>                              mNonCarryCollapsingModeStack;
+
+    struct NonCarryCollapsingFrame {
+        llvm::StructType * OuterFrameType;
+        llvm::Value *      OuterFrame;
+        size_t             NestedFrameIndex;
+        llvm::PHINode *    LoopIterationPhi = nullptr;
+        llvm::Value *      LastNonZeroIteration = nullptr;
+        llvm::Value *      LastIncomingCarryIteration;
+
+        NonCarryCollapsingFrame(llvm::StructType * ty, llvm::Value * frame, size_t index, llvm::Value * lastIncomingCarryIteration)
+        : OuterFrameType(ty), OuterFrame(frame), NestedFrameIndex(index), LastIncomingCarryIteration(lastIncomingCarryIteration) {
+
+        }
+    };
+
+    Vec<NonCarryCollapsingFrame>                    mNonCarryCollapsingModeStack;
 
     Vec<CarryData>                                  mCarryMetadata;
 
-    Vec<std::pair<llvm::Value *, unsigned>>         mCarryFrameStack;
+    struct CarryFrame {
+        llvm::Value *       Frame = nullptr;
+        llvm::StructType *  Type = nullptr;
+        unsigned            Index = 0;
+
+        CarryFrame() = default;
+        CarryFrame(llvm::Value * frame, llvm::StructType * type, unsigned index) : Frame(frame), Type(type), Index(index) {}
+    };
+
+    Vec<CarryFrame>                                 mCarryFrameStack;
 
     unsigned                                        mCarryScopes;
     Vec<unsigned>                                   mCarryScopeIndex;

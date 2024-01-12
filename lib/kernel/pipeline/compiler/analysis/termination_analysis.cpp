@@ -85,7 +85,7 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
 
     mTerminationPropagationGraph = TerminationPropagationGraph(LastKernel + 1U);
 
-    HasTerminationSignal.resize(LastKernel + 1U);
+    HasTerminationSignal.resize(PipelineOutput + 1U);
 
     BitVector marks(PipelineOutput + 1U);
 

@@ -84,8 +84,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         const auto m = K.size();
         for (unsigned i = 0; i < m; ++i) {
             const auto producer = K[i];
-            const auto stridesPerSegmentVar = VarList[producer];
-            assert (stridesPerSegmentVar);
+            assert (VarList[producer]);
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
 
             for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {

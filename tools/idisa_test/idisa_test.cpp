@@ -165,7 +165,7 @@ void IdisaBinaryOpTestKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value
     } else if (mIdisaOperation == "mvmd_dslli") {
         result = kb->mvmd_dslli(mTestFw, operand1, operand2, mImmediateShift);
     } else {
-        llvm::report_fatal_error("Binary operation " + mIdisaOperation + " is unknown to the IdisaBinaryOpTestKernel kernel.");
+        llvm::report_fatal_error(llvm::StringRef("Binary operation ") + mIdisaOperation + " is unknown to the IdisaBinaryOpTestKernel kernel.");
     }
     kb->storeOutputStreamBlock("result", ZeroConst, blockOffsetPhi, kb->bitCast(result));
     Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
@@ -304,7 +304,7 @@ void IdisaBinaryOpCheckKernel::generateDoBlockMethod(BuilderRef kb) {
                         shft = kb->CreateSelect(mask_i_isSet, shft, kb->CreateAdd(shft, oneConst));
                     }
                 } else {
-                    llvm::report_fatal_error("Unknown SIMD vertical operation: " + mIdisaOperation);
+                    llvm::report_fatal_error(llvm::StringRef("Unknown SIMD vertical operation: ") + mIdisaOperation);
                 }
                 expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw, expectedBlock, expected, i));
             } else if (mIdisaOperation == "hsimd_packh") {

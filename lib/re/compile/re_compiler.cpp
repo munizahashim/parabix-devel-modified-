@@ -139,7 +139,7 @@ Marker RE_Block_Compiler::process(RE * const re, Marker marker) {
         // CCs may be passed through the toolchain directly to the compiler.
         return compileAny(marker);
     } else {
-        RE_Compiler::UnsupportedRE("RE Compiler failed to process " + Printer_RE::PrintRE(re));
+        UnsupportedRE("RE Compiler failed to process " + Printer_RE::PrintRE(re));
     }
 }
 
@@ -182,7 +182,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
-    llvm::report_fatal_error("Alphabet " + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
+    llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
 }
 
 inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
@@ -194,7 +194,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         // sequences (e.g., sequences of UTF-8 CCs).
         RE * defn = name->getDefinition();
         if (!defn) {
-            llvm::report_fatal_error("RE compiler cannot find name as external or definition: " + nameString);
+            llvm::report_fatal_error(llvm::StringRef("RE compiler cannot find name as external or definition: ") + nameString);
         }
         if (mMain.mIndexingAlphabet) {
             // If we have an indexing alphabet, then the marker may be aligned
@@ -217,11 +217,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     }
     auto externalLength = f->second.minLength();
     if (externalLength != f->second.maxLength()) {
-        llvm::report_fatal_error("Variable length external not in initial position:  "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
     auto external_adv = externalLength + externalMarker.offset();
     if (external_adv < marker.offset()) {
-        llvm::report_fatal_error("Negative advance amount in processing "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Negative advance amount in processing ")  + nameString);
     }
     auto adv = external_adv - marker.offset();
     PabloAST * nextPos = marker.stream();
@@ -308,7 +308,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
             Marker fbyte = AdvanceMarker(marker, 1);
             return Marker(mPB.createAnd(fbyte.stream(), boundaryCond, "boundary"), 1);
         }
-        else RE_Compiler::UnsupportedRE("Unsupported boundary assertion");
+        else UnsupportedRE("Unsupported boundary assertion");
     }
     // Lookahead assertions.
     auto lengths = lengthRange(asserted);
@@ -335,7 +335,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         return Marker(mPB.createAnd(following.stream(), la, "lookahead"), 1);
     }
     llvm::errs() << "lengths.second = " << lengths.second << "\n";
-    RE_Compiler::UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
+    UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
 }
 
 inline bool alignedUnicodeLength(const RE * const lh, const RE * const rh) {
@@ -355,7 +355,7 @@ Marker RE_Block_Compiler::compileDiff(Diff * diff, Marker marker) {
         AlignMarkers(t1, t2);
         return Marker(mPB.createAnd(t1.stream(), mPB.createNot(t2.stream()), "diff"), t1.offset());
     }
-    RE_Compiler::UnsupportedRE("Unsupported Diff operands: " + Printer_RE::PrintRE(diff));
+    UnsupportedRE("Unsupported Diff operands: " + Printer_RE::PrintRE(diff));
 }
 
 Marker RE_Block_Compiler::compileIntersect(Intersect * const x, Marker marker) {
@@ -367,7 +367,7 @@ Marker RE_Block_Compiler::compileIntersect(Intersect * const x, Marker marker) {
         AlignMarkers(t1, t2);
         return Marker(mPB.createAnd(t1.stream(), t2.stream(), "intersect"), t1.offset());
     }
-    RE_Compiler::UnsupportedRE("Unsupported Intersect operands: " + Printer_RE::PrintRE(x));
+    UnsupportedRE("Unsupported Intersect operands: " + Printer_RE::PrintRE(x));
 }
 
 bool CharacteristicSubexpressionAnalysis(RE * repeated, RE * &E1, RE * &C, RE * &E2) {
@@ -803,10 +803,6 @@ Marker RE_Compiler::compileRE(RE * const re, Marker initialMarkers) {
     nested.createAssign(m, m1.stream());
     pb.createIf(initialMarkers.stream(), nested);
     return Marker(m, m1.offset());
-}
-
-LLVM_ATTRIBUTE_NORETURN void RE_Compiler::UnsupportedRE(std::string errmsg) {
-    llvm::report_fatal_error(errmsg);
 }
 
 RE_Compiler::RE_Compiler(PabloBlock * scope,

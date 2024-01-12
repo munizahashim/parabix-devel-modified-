@@ -20,9 +20,6 @@ constexpr static unsigned BUFFER_SIZE_GA_MAX_TIME_SECONDS = 15;
 constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
 
 // Intel spatial prefetcher pulls cache line pairs, aligned to 128 bytes.
-constexpr static unsigned SPATIAL_PREFETCHER_ALIGNMENT = 128;
-
-constexpr static unsigned NON_HUGE_PAGE_SIZE = 4096;
 
 using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
 
@@ -30,6 +27,7 @@ using IntervalSet = interval_set<unsigned>;
 
 using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
 
+using Vertex = unsigned;
 
 struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
 
@@ -256,11 +254,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
                     Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                    const auto typeSize = DL.getTypeAllocSize(type);
-                    #else
-                    const auto typeSize = DL.getTypeAllocSize(type).getFixedSize();
-                    #endif
+                    const auto typeSize = b->getTypeSize(DL, type);
                     const ProcessingRate & rate = outputRate.getRate();
                     assert (rate.isFixed());
                     const auto j = mapping[streamSet - FirstStreamSet];

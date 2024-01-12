@@ -39,9 +39,12 @@ public:
     FixedSpanNamer(const cc::Alphabet * a);
 protected:
     RE * transform (RE * r) override;
+    void processOneAlt(RE * r);
 private:
     const cc::Alphabet * mAlphabet;
     std::string mLgthPrefix;
+    std::map<int, std::vector<RE *>> mFixedLengthAlts;
+    std::vector<RE *> mNewAlts;
 };
 
 class UniquePrefixNamer final : public NameIntroduction {

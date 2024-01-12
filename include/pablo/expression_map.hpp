@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <boost/functional/hash.hpp>
 #include <unordered_map>
+#include <map>
 
 namespace pablo {
 

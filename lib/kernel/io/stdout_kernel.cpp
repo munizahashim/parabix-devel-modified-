@@ -63,12 +63,12 @@ void FileSink::generateInitializeMethod(BuilderRef b) {
     Value * const temporaryFileName = b->CreatePointerCast(b->CreateMalloc(b->CreateAdd(fileNameLength, suffixPlusNullLength)), b->getInt8PtrTy());
     b->CreateMemCpy(temporaryFileName, fileName, fileNameLength, 1);
     #ifdef BACKUP_OLDFILE
-    b->CreateMemCpy(b->CreateGEP(tmpFileNamePtr, fileNameLength), b->GetString(".saved"), suffixPlusNullLength, 1);
+    b->CreateMemCpy(b->CreateGEP0(tmpFileNamePtr, fileNameLength), b->GetString(".saved"), suffixPlusNullLength, 1);
     b->CreateRenameCall(fileName, tmpFileNamePtr);
     #else
     b->CreateUnlinkCall(fileName);
     #endif
-    b->CreateMemCpy(b->CreateGEP(temporaryFileName, fileNameLength), b->GetString("XXXXXX"), suffixPlusNullLength, 1);
+    b->CreateMemCpy(b->CreateGEP(b->getInt8Ty(), temporaryFileName, fileNameLength), b->GetString("XXXXXX"), suffixPlusNullLength, 1);
     Value * const temporaryFd = b->CreateMkstempCall(temporaryFileName);
     ConstantInt * const errorCodeFd = b->getInt32(-1);
     Value * failure = b->CreateICmpEQ(temporaryFd, errorCodeFd);

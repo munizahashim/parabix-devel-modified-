@@ -39,7 +39,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/ADT/STLExtras.h> // for make_unique
 #include <boost/container/flat_set.hpp>
-
+#include <kernel/core/streamset.h>
 #include <pablo/printer_pablos.h>
 #include <tuple>
 
@@ -64,10 +64,6 @@ inline static unsigned getAlignment(const Type * const type) {
 
 inline static unsigned getAlignment(const Value * const expr) {
     return getAlignment(expr->getType());
-}
-
-inline static unsigned getPointerElementAlignment(const Value * const ptr) {
-    return getAlignment(ptr->getType()->getPointerElementType());
 }
 
 void PabloCompiler::initializeKernelData(BuilderRef b) {
@@ -157,7 +153,7 @@ void PabloCompiler::examineBlock(BuilderRef b, const PabloBlock * const block) {
                         raw_string_ostream out(tmp);
                         array->print(out);
                         out << " must have a lookahead attribute of at least " << la->getAmount();
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                     notFound = false;
                     break;
@@ -180,11 +176,12 @@ void PabloCompiler::examineBlock(BuilderRef b, const PabloBlock * const block) {
 
 void PabloCompiler::addBranchCounter(BuilderRef b) {
     if (CompileOptionIsSet(PabloCompilationFlags::EnableProfiling)) {
-        Value * ptr = b->getScalarFieldPtr("profile");
-        assert (mBasicBlock.size() < ptr->getType()->getPointerElementType()->getArrayNumElements());
-        ptr = b->CreateGEP(ptr, {b->getInt32(0), b->getInt32(mBasicBlock.size())});
-        const auto alignment = getPointerElementAlignment(ptr);
-        Value * value = b->CreateAlignedLoad(ptr, alignment, false, "branchCounter");
+        Value * ptr; Type * ty;
+        std::tie(ptr, ty) = b->getScalarFieldPtr("profile");
+        assert (mBasicBlock.size() < ty->getArrayNumElements());
+        ptr = b->CreateGEP(ty, ptr, {b->getInt32(0), b->getInt32(mBasicBlock.size())});
+        const auto alignment = getAlignment(ty);
+        Value * value = b->CreateAlignedLoad(ty, ptr, alignment, false, "branchCounter");
         value = b->CreateAdd(value, ConstantInt::get(cast<IntegerType>(value->getType()), 1));
         b->CreateAlignedStore(value, ptr, alignment);
         mBasicBlock.push_back(b->GetInsertBlock());
@@ -250,7 +247,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
                 var->print(out);
                 out << " is uninitialized prior to entering ";
                 ifStatement->print(out);
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
             incoming.emplace_back(var, f->second);
         }
@@ -295,7 +292,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
             out << "PHINode creation error: ";
             var->print(out);
             out << " was not assigned an outgoing value.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         Value * const outgoing = f->second;
@@ -314,7 +311,7 @@ void PabloCompiler::compileIf(BuilderRef b, const If * const ifStatement) {
             outgoing->getType()->print(out);
             out << ") within ";
             ifStatement->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         SmallVector<char, 64> tmp;
         raw_svector_ostream name(tmp);
@@ -384,7 +381,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
                 var->print(out);
                 out << " is uninitialized prior to entering ";
                 whileStatement->print(out);
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
             Value * entryValue = f->second;
             SmallVector<char, 64> tmp;
@@ -435,7 +432,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
             out << "PHINode creation error: ";
             var->print(out);
             out << " is no longer assigned a value.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         Value * const outgoingValue = f->second;
@@ -451,7 +448,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
             outgoingValue->getType()->print(out);
             out << ") within ";
             whileStatement->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
 
         // update the final outgoing value for the loop
@@ -483,6 +480,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
 }
 
 void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt) {
+
     if (LLVM_UNLIKELY(isa<If>(stmt))) {
         compileIf(b, cast<If>(stmt));
     } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
@@ -508,7 +506,10 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value* ifFalse = b->simd_and(b->simd_not(ifMask), compileExpression(b, sel->getFalseExpr()));
             value = b->simd_or(ifTrue, ifFalse, stmt->getName());
         } else if (isa<Not>(stmt)) {
-            value = b->simd_not(compileExpression(b, stmt->getOperand(0)), stmt->getName());
+            Value * const op = compileExpression(b, stmt->getOperand(0));
+            assert (op->getType()->isVectorTy());
+            assert (cast<FixedVectorType>(op->getType())->getElementCount().getFixedValue() > 0);
+            value = b->simd_not(op, stmt->getName());
         } else if (isa<Advance>(stmt)) {
             const Advance * const adv = cast<Advance>(stmt);
             // If our expr is an Extract op on a mutable Var then we need to pass the index value to the carry
@@ -569,8 +570,16 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             value = compileExpression(b, cast<Assign>(stmt)->getValue());
             if (cast<Var>(expr)->isKernelParameter()) {
                 Value * const ptr = compileExpression(b, expr, false);
-                Type * const elemTy = ptr->getType()->getPointerElementType();
-                b->CreateAlignedStore(b->CreateZExt(value, elemTy), ptr, getAlignment(elemTy));
+
+                size_t align = 0;
+                Type * type = expr->getType();
+                if (type->isIntegerTy()) {
+                    align = cast<IntegerType>(type)->getBitWidth() / 8;
+                } else {
+                    type = b->getBitBlockType();
+                    align = b->getBitBlockWidth() / 8;
+                }
+                b->CreateAlignedStore(b->CreateZExt(value, type), ptr, align);
                 value = ptr;
             }
         } else if (const InFile * e = dyn_cast<InFile>(stmt)) {
@@ -583,9 +592,10 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value * EOFbit = b->getScalarField("EOFbit");
             Value * EOFmask = b->getScalarField("EOFmask");
             Value * const to_count = b->simd_and(b->simd_or(b->simd_not(EOFmask), EOFbit), compileExpression(b, c->getExpr()));
-            Value * const ptr = b->getScalarFieldPtr(stmt->getName().str());
-            const auto alignment = getPointerElementAlignment(ptr);
-            Value * const countSoFar = b->CreateAlignedLoad(ptr, alignment, c->getName() + "_accumulator");
+            Value * ptr; Type * ty;
+            std::tie(ptr, ty) = b->getScalarFieldPtr(stmt->getName().str());
+            const auto alignment = getAlignment(ty);
+            Value * const countSoFar = b->CreateAlignedLoad(ty, ptr, alignment, c->getName() + "_accumulator");
             const auto fieldWidth = b->getSizeTy()->getBitWidth();
             Value * bitBlockCount = b->simd_popcount(b->getBitBlockWidth(), to_count);
             value = b->CreateAdd(b->mvmd_extract(fieldWidth, bitBlockCount, 0), countSoFar, "countSoFar");
@@ -594,9 +604,10 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value * EOFbit = b->getScalarField("EOFbit");
             Value * EOFmask = b->getScalarField("EOFmask");
             Value * const to_count = b->simd_and(b->simd_or(b->simd_not(EOFmask), EOFbit), compileExpression(b, e->getExpr()));
-            Value * const ptr = b->getScalarFieldPtr(stmt->getName().str());
-            const auto alignment = getPointerElementAlignment(ptr);
-            Value * const pending = b->CreateAlignedLoad(ptr, alignment, e->getName() + "_accumulator");
+            Value * ptr; Type * ty;
+            std::tie(ptr, ty) = b->getScalarFieldPtr(stmt->getName().str());
+            const auto alignment = getAlignment(ty);
+            Value * const pending = b->CreateAlignedLoad(ty, ptr, alignment, e->getName() + "_accumulator");
             const auto fieldWidth = b->getSizeTy()->getBitWidth();
             const auto blockWidth = b->getBitBlockWidth();
             const auto hiBlock = (blockWidth / fieldWidth) - 1;
@@ -630,12 +641,12 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             const auto block_shift = (l->getAmount() / b->getBitBlockWidth());
             Value * ptr = b->getInputStreamBlockPtr(stream->getName(), index, b->getSize(block_shift));
             // Value * base = b->CreatePointerCast(b->getBaseAddress(cast<Var>(stream)->getName()), ptr->getType());
-            Value * lookAhead = b->CreateBlockAlignedLoad(ptr);
+            Value * lookAhead = b->CreateBlockAlignedLoad(b->getBitBlockType(), ptr);
             if (LLVM_UNLIKELY(bit_shift == 0)) {  // Simple case with no intra-block shifting.
                 value = lookAhead;
             } else { // Need to form shift result from two adjacent blocks.
                 Value * ptr1 = b->getInputStreamBlockPtr(stream->getName(), index, b->getSize(block_shift + 1));
-                Value * lookAhead1 = b->CreateBlockAlignedLoad(ptr1);
+                Value * lookAhead1 = b->CreateBlockAlignedLoad(b->getBitBlockType(), ptr1);
                 // TODO: Investigate why this optimization is buggy.
                 //if (LLVM_UNLIKELY((bit_shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
                 //    value = b->mvmd_dslli(8, lookAhead1, lookAhead, (bit_shift / 8));
@@ -662,19 +673,21 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             assert (sourceWidth == packWidth);
             Value * const base = compileExpression(b, p->getValue(), false);
             const auto result_packs = sourceWidth/2;
+            Type * bt = b->getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b->CreateAlloca(ArrayType::get(b->getBitBlockType(), result_packs));
+                value = b->CreateAlloca(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b->getInt32(0);
+
             for (unsigned i = 0; i < result_packs; ++i) {
-                Value * A = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2)}));
-                Value * B = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2 + 1)}));
+                Value * A = b->CreateLoad(bt, b->CreateGEP(bt, base, {ZERO, b->getInt32(i * 2)}));
+                Value * B = b->CreateLoad(bt, b->CreateGEP(bt, base, {ZERO, b->getInt32(i * 2 + 1)}));
                 Value * P = b->bitCast(b->hsimd_packh(packWidth, A, B));
                 if (LLVM_UNLIKELY(result_packs == 1)) {
                     value = P;
                     break;
                 }
-                b->CreateStore(P, b->CreateGEP(value, {ZERO, b->getInt32(i)}));
+                b->CreateStore(P, b->CreateGEP(bt, value, {ZERO, b->getInt32(i)}));
             }
         } else if (const PackL * const p = dyn_cast<PackL>(stmt)) {
             const auto sourceWidth = cast<FixedVectorType>(p->getValue()->getType())->getElementType()->getIntegerBitWidth();
@@ -682,19 +695,20 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             assert (sourceWidth == packWidth);
             Value * const base = compileExpression(b, p->getValue(), false);
             const auto result_packs = sourceWidth/2;
+            Type * bt = b->getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b->CreateAlloca(ArrayType::get(b->getBitBlockType(), result_packs));
+                value = b->CreateAlloca(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b->getInt32(0);
             for (unsigned i = 0; i < result_packs; ++i) {
-                Value * A = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2)}));
-                Value * B = b->CreateLoad(b->CreateGEP(base, {ZERO, b->getInt32(i * 2 + 1)}));
+                Value * A = b->CreateLoad(bt, b->CreateGEP(bt, base, {ZERO, b->getInt32(i * 2)}));
+                Value * B = b->CreateLoad(bt, b->CreateGEP(bt, base, {ZERO, b->getInt32(i * 2 + 1)}));
                 Value * P = b->bitCast(b->hsimd_packl(packWidth, A, B));
                 if (LLVM_UNLIKELY(result_packs == 1)) {
                     value = P;
                     break;
                 }
-                b->CreateStore(P, b->CreateGEP(value, {ZERO, b->getInt32(i)}));
+                b->CreateStore(P, b->CreateGEP(b->getBitBlockType(), value, {ZERO, b->getInt32(i)}));
             }
         } else if (const DebugPrint * const d = dyn_cast<DebugPrint>(stmt)) {
           SmallVector<char, 64> tmp;
@@ -729,7 +743,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
                         << "invlaid number of arguments, "
                         << "expected " << expectedArgCount << ","
                         << "got " << argv.size();
-                    report_fatal_error(out.str());
+                    report_fatal_error(StringRef(out.str()));
                 }
             };
 
@@ -763,7 +777,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
                         out << "PabloCompiler: intrinsic id "
                             << (uint32_t) call->getIntrinsic()
                             << " was not recognized by the compiler";
-                        report_fatal_error(out.str());
+                        report_fatal_error(StringRef(out.str()));
                     }
                     break;
             }
@@ -774,7 +788,7 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             out << "PabloCompiler: ";
             stmt->print(out);
             out << " was not recognized by the compiler";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         assert (expr);
         assert (value);
@@ -798,6 +812,7 @@ unsigned getIntegerBitWidth(const Type * ty) {
 }
 
 Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const expr, const bool ensureLoaded) {
+
     const auto f = mMarker.find(expr);
     Value * value = nullptr;
     if (LLVM_LIKELY(f != mMarker.end())) {
@@ -823,7 +838,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                     b->SetInsertPoint(mEntryBlock, inst->getIterator());
                 }
                 if (var->isScalar()) {
-                    value = b->getScalarFieldPtr(var->getName());
+                    value = b->getScalarFieldPtr(var->getName()).first;
                 } else if (var->isReadOnly()) {
                     value = b->getInputStreamBlockPtr(var->getName(), b->getInt32(0));
                 } else if (var->isReadNone()) {
@@ -838,7 +853,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                 out << "PabloCompiler: ";
                 expr->print(out);
                 out << " is not a scalar value or was used before definition";
-                report_fatal_error(out.str());
+                report_fatal_error(StringRef(out.str()));
             }
         } else if (LLVM_UNLIKELY(isa<Operator>(expr))) {
             const Operator * const op = cast<Operator>(expr);
@@ -862,7 +877,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                     lhvStreamIndex = b->getInt32(0);
 
                 } else {
-                    baseLhv = compileExpression(b, lh);
+                    baseLhv = b->CreateBitCast(compileExpression(b, lh), vTy);
                 }
 
                 Value * baseRhv = nullptr;
@@ -873,7 +888,7 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                 } else if (isa<Var>(rh)) {
                     rhvStreamIndex = b->getInt32(0);
                 } else {
-                    baseRhv = compileExpression(b, rh);
+                    baseRhv = b->CreateBitCast(compileExpression(b, rh), vTy);
                 }
 
                 const TypeId typeId = op->getClassTypeId();
@@ -889,18 +904,18 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                             lhv = baseLhv;
                         } else {
                             lhv = getPointerToVar(b, cast<Var>(lh), lhvStreamIndex, index);
-                            lhv = b->CreateBlockAlignedLoad(lhv);
+                            lhv = b->CreateBlockAlignedLoad(vTy, lhv);
                         }
-                        lhv = b->CreateBitCast(lhv, vTy);
+
 
                         Value * rhv = nullptr;
                         if (baseRhv) {
                             rhv = baseRhv;
                         } else {
                             rhv = getPointerToVar(b, cast<Var>(rh), rhvStreamIndex, index);
-                            rhv = b->CreateBlockAlignedLoad(rhv);
+                            rhv = b->CreateBlockAlignedLoad(vTy, rhv);
                         }
-                        rhv = b->CreateBitCast(rhv, vTy);
+
 
                         Value * result = nullptr;
                         if (typeId == TypeId::Add) {
@@ -908,10 +923,12 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                         } else { // if (typeId == TypeId::Subtract) {
                             result = b->CreateSub(lhv, rhv);
                         }
-                        b->CreateAlignedStore(result, b->CreateGEP(value, {b->getInt32(0), b->getInt32(i)}), getAlignment(result));
+                        b->CreateAlignedStore(result, b->CreateGEP(vTy, value, {b->getInt32(0), b->getInt32(i)}), getAlignment(result));
                     }
 
                 } else {
+
+
 
                     value = UndefValue::get(b->fwVectorType(maskWidth));
 
@@ -922,18 +939,18 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
                             lhv = baseLhv;
                         } else {
                             lhv = getPointerToVar(b, cast<Var>(lh), lhvStreamIndex, index);
-                            lhv = b->CreateBlockAlignedLoad(lhv);
+                            lhv = b->CreateBlockAlignedLoad(vTy, lhv);
                         }
-                        lhv = b->CreateBitCast(lhv, vTy);
+
 
                         Value * rhv = nullptr;
                         if (baseRhv) {
                             rhv = baseRhv;
                         } else {
                             rhv = getPointerToVar(b, cast<Var>(rh), rhvStreamIndex, index);
-                            rhv = b->CreateBlockAlignedLoad(rhv);
+                            rhv = b->CreateBlockAlignedLoad(vTy, rhv);
                         }
-                        rhv = b->CreateBitCast(rhv, vTy);
+
                         Value * comp = nullptr;
                         switch (typeId) {
                             case TypeId::GreaterThanEquals:
@@ -992,18 +1009,31 @@ Value * PabloCompiler::compileExpression(BuilderRef b, const PabloAST * const ex
             out << "PabloCompiler: ";
             expr->print(out);
             out << " was used before definition";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         assert (value);
         // mMarker.insert({expr, value});
     }
     if (LLVM_UNLIKELY(value->getType()->isPointerTy() && ensureLoaded)) {
-        value = b->CreateAlignedLoad(value, getPointerElementAlignment(value));
+
+        size_t align = 0;
+        Type * type = expr->getType();
+        if (type->isIntegerTy()) {
+            align = cast<IntegerType>(type)->getBitWidth() / 8;
+        } else {
+            type = b->getBitBlockType();
+            align = b->getBitBlockWidth() / 8;
+        }
+
+        assert (type->getPointerTo() == value->getType());
+
+        value = b->CreateAlignedLoad(type, value, align);
     }
     return value;
 }
 
 Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * index1, Value * index2)  {
+
     assert (var && index1);
     if (LLVM_LIKELY(var->isKernelParameter())) {
         Value * ptr = nullptr;
@@ -1018,7 +1048,7 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
             out << mKernel->getName();
             out << ": cannot index scalar value ";
             var->print(out);
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         } else if (var->isReadOnly()) {
             if (index2) {
                 ptr = b->getInputStreamPackPtr(var->getName(), index1, index2);
@@ -1038,7 +1068,7 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
             out << ": stream ";
             var->print(out);
             out << " cannot be read from or written to";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
         if (inst) {
             b->restoreIP(ip);
@@ -1049,8 +1079,14 @@ Value * PabloCompiler::getPointerToVar(BuilderRef b, const Var * var, Value * in
         SmallVector<Value *, 3> offsets;
         offsets.push_back(ConstantInt::getNullValue(index1->getType()));
         offsets.push_back(index1);
-        if (index2) offsets.push_back(index2);
-        return b->CreateGEP(ptr, offsets);
+        if (index2) {
+            offsets.push_back(index2);
+        }
+        Type * type = var->getType();
+        if (type->isVectorTy()) {
+            type = kernel::StreamSetBuffer::resolveType(b, type);
+        }
+        return b->CreateGEP(type, ptr, offsets);
     }
 }
 

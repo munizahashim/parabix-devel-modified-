@@ -72,11 +72,7 @@ BinaryProperty_template = r"""
     }
 """
 
-def buffer_allocation_length(buffer_length):
-    return (max(buffer_length,1) + 255) & -256
-
-def emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map):
-    s = string.Template(r"""    namespace ${prop_enum_up}_ns {
+StringProperty_template = r"""    namespace ${prop_enum_up}_ns {
         /** Code Point Ranges for ${prop_enum} mapping to <none>
         ${null_set_ranges}**/
 
@@ -100,7 +96,34 @@ def emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map
                                                     std::move(buffer_offsets),
                                                     std::move(defined_cps));
     }
-""")
+"""
+
+CodepointProperty_template = r"""    namespace ${prop_enum_up}_ns {
+        /** Code Point Ranges for ${prop_enum} mapping to <none>
+        ${null_set_ranges}**/
+
+        ${null_set_value}
+
+        /** Code Point Ranges for ${prop_enum} mapping to <codepoint>
+        ${reflexive_set_ranges}**/
+
+        ${reflexive_set_value}
+
+        const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {
+        ${explicit_cp_data}};
+        static CodePointPropertyObject property_object(${prop_enum},
+                                                    std::move(null_codepoint_set),
+                                                    std::move(reflexive_set),
+                                                    std::move(explicit_cp_data));
+    }
+"""
+
+
+def buffer_allocation_length(buffer_length):
+    return (max(buffer_length,1) + 255) & -256
+
+def emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map, template = StringProperty_template):
+    s = string.Template(template)
     cps = sorted(cp_value_map.keys())
     string_buffer = ""
     buffer_offsets = [0]
@@ -119,6 +142,20 @@ def emit_string_property(f, property_code, null_set, reflexive_set, cp_value_map
                          reflexive_set_value = reflexive_set.generate("reflexive_set", 8),
                          explicitly_defined_cp_count = len(cps),
                          explicitly_defined_cps = cformat.multiline_fill(['0x%04x' % cp for cp in cps], ',', 8)
+                         ))
+
+def emit_codepoint_property(f, property_code, null_set, reflexive_set, cp_value_map):
+    s = string.Template(CodepointProperty_template)
+    cps = sorted(cp_value_map.keys())
+    explicit_cp_map = cformat.multiline_fill(['{0x%04x, 0x%04x}' % (cp, ord(cp_value_map[cp])) for cp in cps], ',', 8)
+    f.write(s.substitute(prop_enum = property_code,
+                         prop_enum_up = property_code.upper(),
+                         null_set_ranges = cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(null_set)], ',', 8),
+                         null_set_value = null_set.generate("null_codepoint_set", 8),
+                         reflexive_set_ranges = cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(reflexive_set)], ',', 8),
+                         reflexive_set_value = reflexive_set.generate("reflexive_set", 8),
+                         explicitly_defined_cp_count = len(cps),
+                         explicit_cp_data = explicit_cp_map
                          ))
 
 def emit_string_override_property(f, property_code, overridden_code, override_set, cp_value_map):
@@ -349,7 +386,7 @@ class UCD_generator():
 
     def add_identity_property(self):
         self.property_enum_name_list = ['identity'] + self.property_enum_name_list
-        ident_obj = StringPropertyObject()
+        ident_obj = CodePointPropertyObject()
         ident_obj.setID('identity', 'Identity')
         ident_obj.setDefaultValue("<code point>")
         ident_obj.finalizeProperty()
@@ -432,6 +469,8 @@ class UCD_generator():
             independent_prop_values = property_object.independent_prop_values
             emit_enumerated_property(f, property_code, independent_prop_values, prop_values, property_object.value_map)
             print("%s: %s bytes" % (property_object.getPropertyFullName(), sum([property_object.value_map[v].bytes() for v in property_object.value_map.keys()])))
+        elif isinstance(property_object, CodePointPropertyObject):
+            emit_codepoint_property(f, property_code, property_object.null_str_set, property_object.reflexive_set, property_object.cp_value_map)
         elif isinstance(property_object, StringPropertyObject):
             emit_string_property(f, property_code, property_object.null_str_set, property_object.reflexive_set, property_object.cp_value_map)
         elif isinstance(property_object, StringOverridePropertyObject):

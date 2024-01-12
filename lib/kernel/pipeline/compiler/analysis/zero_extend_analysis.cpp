@@ -45,7 +45,7 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
                 raw_svector_ostream msg(tmp);
                 msg << kernelObj->getName() << '.' << binding.getName();
                 msg << " cannot ZeroExtend a repeating streamset";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
             if (LLVM_UNLIKELY(zeroExtend)) {
                 add_edge(port.Number, numOfInputs, H);
@@ -58,7 +58,7 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
 //                    } else {
 //                        msg << " cannot have a Principal repeating streamset";
 //                    }
-                    report_fatal_error(msg.str());
+                    report_fatal_error(StringRef(msg.str()));
                 }
             }
 
@@ -78,14 +78,14 @@ void PipelineAnalysis::identifyZeroExtendedStreamSets() {
         }
 
         if (LLVM_UNLIKELY(in_degree(numOfInputs, H) == numOfInputs)) {
-            report_fatal_error(kernelObj->getName() + " requires at least one non-zero-extended input");
+            report_fatal_error(StringRef(kernelObj->getName()) + " requires at least one non-zero-extended input");
         }
 
         // Identify all transitive dependencies on zero-extended inputs
         transitive_closure_dag(H);
 
         if (LLVM_UNLIKELY(in_degree(numOfInputs, H) == numOfInputs)) {
-            report_fatal_error(kernelObj->getName() + " requires at least one non-zero-extended input"
+            report_fatal_error(StringRef(kernelObj->getName()) + " requires at least one non-zero-extended input"
                                                    " that does not refer to a zero-extended input");
         }
 

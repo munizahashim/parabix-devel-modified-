@@ -8,6 +8,7 @@
 
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
+#include <llvm/ADT/Twine.h>
 
 using namespace llvm;
 
@@ -30,7 +31,7 @@ RE * makeRange(RE * lo, RE * hi) {
         out << " to ";
         cc_hi->print(out);
         out << " are invalid range operands";
-        report_fatal_error(out.str());
+        report_fatal_error(Twine(out.str()));
     }
     else if (isa<Name>(lo) && (cast<Name>(lo)->getDefinition() != nullptr)) {
         return makeRange(cast<Name>(lo)->getDefinition(), hi);

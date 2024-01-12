@@ -272,7 +272,7 @@ RelationshipGraph OptimizationBranchCompiler::makeRelationshipGraph(const Relati
                         << kernel->getName()
                         << '.'
                         << binding.getName();
-                    report_fatal_error(msg.str());
+                    report_fatal_error(StringRef(msg.str()));
                 }
             }
             return f->second;
@@ -322,7 +322,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 
         if (LLVM_LIKELY(kernel->isStateful())) {
             Type * handlePtrType = nullptr;
-            if (LLVM_UNLIKELY(kernel->containsKernelFamilyCalls())) {
+            if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls())) {
                 handlePtrType = b->getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getSharedStateType()->getPointerTo();
@@ -332,7 +332,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 
         if (kernel->hasThreadLocal()) {
             Type * handlePtrType = nullptr;
-            if (LLVM_UNLIKELY(kernel->containsKernelFamilyCalls())) {
+            if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls())) {
                 handlePtrType = b->getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getThreadLocalStateType()->getPointerTo();
@@ -392,7 +392,7 @@ void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
         args.resize(firstArgIndex + in_degree(i, mScalarGraph));
         if (LLVM_LIKELY(hasSharedState)) {
             Value * handle = nullptr;
-            if (kernel->containsKernelFamilyCalls()) {
+            if (kernel->getNumOfNestedKernelFamilyCalls()) {
                 handle = b->getScalarField(SHARED_PREFIX + std::to_string(i));
             } else {
                 handle = kernel->createInstance(b);
@@ -470,7 +470,7 @@ Value * OptimizationBranchCompiler::loadSharedHandle(BuilderRef b, const unsigne
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->isStateful())) {
         handle = b->getScalarField(SHARED_PREFIX + std::to_string(branchType));
-        if (kernel->containsKernelFamilyCalls()) {
+        if (kernel->getNumOfNestedKernelFamilyCalls()) {
             handle = b->CreatePointerCast(handle, kernel->getSharedStateType()->getPointerTo());
         }
     }
@@ -485,7 +485,7 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->hasThreadLocal())) {
         handle = b->getScalarField(THREAD_LOCAL_PREFIX + std::to_string(branchType));
-        if (kernel->containsKernelFamilyCalls()) {
+        if (kernel->getNumOfNestedKernelFamilyCalls()) {
             handle = b->CreatePointerCast(handle, kernel->getThreadLocalStateType()->getPointerTo());
         }
     }
@@ -497,13 +497,6 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
-
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    Constant * const ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-
-    BasicBlock * const entry = b->GetInsertBlock();
 
     Value * const selectedBranch = b->getScalarField(CONTROL_CODE);
 
@@ -545,7 +538,7 @@ inline const RelationshipRef & getConditionRef(const RelationshipGraph & G) {
  * @brief callKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned branchType) {
-
+#if 0
     const Kernel * const kernel = mBranches[branchType];
 
     if (LLVM_UNLIKELY(kernel == nullptr)) {
@@ -601,8 +594,6 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         }
     }
 
-    PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
-
     const auto canTerminate = kernel->canSetTerminateSignal();
 
     for (const auto e : make_iterator_range(out_edges(branchType, mStreamSetGraph))) {
@@ -654,14 +645,14 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         Value * const termSignal = canTerminate ? terminated : b->getFalse();
         mTerminatedPhi->addIncoming(termSignal, b->GetInsertBlock());
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief enterBranch
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branchType) const {
-
+#if 0
     const Kernel * const kernel = mBranches[branchType];
     const auto prefix = kernel->getName();
 
@@ -727,13 +718,15 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
     return intSegNo;
-
+#endif
+    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief exitBranch
  ** ------------------------------------------------------------------------------------------------------------- */
 void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchType) const {
+#if 0
     // decrement the number of active threads count for this branch
     Constant * const sz_ONE = b->getSize(1);
 
@@ -755,7 +748,7 @@ void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchT
         Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
         b->CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
-
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -874,7 +867,7 @@ inline std::array<const Kernel *, 4> makeBranches(const OptimizationBranch * con
             out << "Branch " << kernel->getName() << " of "
                    "OptimizationBranch " << branch->getName() <<
                    " must be InternallySynchronized.";
-            report_fatal_error(out.str());
+            report_fatal_error(StringRef(out.str()));
         }
     }
 

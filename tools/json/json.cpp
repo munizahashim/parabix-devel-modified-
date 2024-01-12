@@ -285,7 +285,7 @@ int main(int argc, char ** argv) {
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto jsonSource = SourceFile::Relative("json.pablo");
     if (jsonSource == nullptr) {
-        std::cerr << "pablo-parser: error loading pablo source file: json.pablo\n";
+        report_fatal_error("pablo-parser: error loading pablo source file: json.pablo");
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {

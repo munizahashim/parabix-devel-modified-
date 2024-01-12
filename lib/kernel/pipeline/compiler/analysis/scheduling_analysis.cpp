@@ -32,6 +32,8 @@ constexpr static unsigned MAX_JUMP_POPULATION_SIZE = 20;
 
 constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
+using Vertex = unsigned;
+
 //    PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
 //    MAX_INIT_PROGRAM_POPULATION_SIZE,
     //    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
@@ -2474,7 +2476,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
             node.Size = Rational{0};
         } else {
             const RelationshipNode & rn = Relationships[producer];
-            assert (node.Type == RelationshipNode::IsKernel);
+            assert (rn.Type == RelationshipNode::IsKernel);
             const PartitionData & N = P[producerPartitionId];
             const auto & K = N.Kernels;
             const auto h = std::find(K.begin(), K.end(), producer);

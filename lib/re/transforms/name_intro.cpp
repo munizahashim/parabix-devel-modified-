@@ -52,44 +52,47 @@ RE * VariableLengthCCNamer::transformCC (CC * cc) {
 
 FixedSpanNamer::FixedSpanNamer(const cc::Alphabet * a) : NameIntroduction("FixedSpanNamer"), mAlphabet(a), mLgthPrefix("len") {}
 
-RE * FixedSpanNamer::transform(RE * r) {
+void FixedSpanNamer::processOneAlt(RE * r) {
     auto rg = getLengthRange(r, mAlphabet);
-    if ((rg.first == rg.second) && (rg.first > 0)) {
-        Name * n = createName(mLgthPrefix + std::to_string(rg.first), r);
-        return n;
+    if (rg.first == rg.second) {
+        auto f = mFixedLengthAlts.find(rg.first);
+        if (f == mFixedLengthAlts.end()) {
+            mFixedLengthAlts.emplace(rg.first, std::vector<RE *>{r});
+        } else {
+            f->second.push_back(r);
+        }
+    } else {
+        mNewAlts.push_back(r);
     }
+}
+
+RE * FixedSpanNamer::transform(RE * r) {
     if (Alt * alt = dyn_cast<Alt>(r)) {
-        std::vector<RE *> newAlts;
-        std::map<int, std::vector<RE *>> fixedLengthAlts;
         for (auto e : *alt) {
-            auto rg = getLengthRange(e, mAlphabet);
-            if (rg.first == 0) return alt;  //  zero-length REs cause problems
-            if (rg.first == rg.second) {
-                auto f = fixedLengthAlts.find(rg.first);
-                if (f == fixedLengthAlts.end()) {
-                    fixedLengthAlts.emplace(rg.first, std::vector<RE *>{e});
-                } else {
-                    f->second.push_back(e);
-                }
-            } else {
-                newAlts.push_back(e);
-            }
+            processOneAlt(e);
         }
-        if (fixedLengthAlts.empty()) return alt;
-        for (auto grp : fixedLengthAlts) {
-            RE * defn;
-            if (grp.second.size() == 1) {
-                defn = grp.second[0];
-            } else {
-                defn = makeAlt(grp.second.begin(), grp.second.end());
-            }
-            Name * n = createName(mLgthPrefix + std::to_string(grp.first), defn);
-            newAlts.push_back(n);
-        }
-        if (newAlts.size() == 1) return newAlts[0];
-        return makeAlt(newAlts.begin(), newAlts.end());
+    } else {
+        processOneAlt(r);
     }
-    return r;
+    if (mFixedLengthAlts.empty()) return r;
+    for (auto grp : mFixedLengthAlts) {
+        unsigned lgth = grp.first;
+        RE * defn;
+        if (grp.second.size() == 1) {
+            defn = grp.second[0];
+        } else {
+            defn = makeAlt(grp.second.begin(), grp.second.end());
+        }
+        if (lgth == 0) {
+            // Zero length alts do not generate spans.
+            mNewAlts.push_back(defn);
+        } else {
+            Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
+            mNewAlts.push_back(n);
+        }
+    }
+    if (mNewAlts.size() == 1) return mNewAlts[0];
+    return makeAlt(mNewAlts.begin(), mNewAlts.end());
 }
 
 UniquePrefixNamer::UniquePrefixNamer() : NameIntroduction("UniquePrefixNamer") {}
@@ -187,7 +190,7 @@ unsigned fixedCodepointCount(RE * re, CC * variableCC) {
         return countSoFar;
     } else if (Rep * rep = dyn_cast<Rep>(re)) {
         return (rep->getLB()) * fixedCodepointCount(rep->getRE(), variableCC);
-    } else if (Alt * alt = dyn_cast<Alt>(re)) {
+    } else if (isa<Alt>(re)) {
         // rule that all matchable codepoints are variable
         return 0;
     } else if (Name * n = dyn_cast<Name>(re)) {

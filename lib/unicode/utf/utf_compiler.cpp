@@ -452,7 +452,7 @@ UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
     return ranges;
 }
 
-void UTF_Compiler::addTarget(Var * theVar, CC * theCC) {
+void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
     mTarget.emplace(theCC, theVar);
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
@@ -465,8 +465,8 @@ void UTF_Compiler::compile(IfHierarchy h) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
-: mPb(pb), mLookAhead(lookAhead), mMask(mask) {
+UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned /* lookAhead */, PabloAST * mask)
+: mPb(pb), mMask(mask) { // , mLookAhead(lookAhead)
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
     if (streamCount == 1) {

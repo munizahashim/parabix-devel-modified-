@@ -42,6 +42,7 @@ case T::Type: return validate##Type(llvm::cast<Type>(re)); break
             VALIDATE(Rep);
             VALIDATE(Seq);
             VALIDATE(Start);
+            VALIDATE(Permute);
             VALIDATE(PropertyExpression);
         default: llvm_unreachable("Unknown RE type");
     }
@@ -118,6 +119,13 @@ bool RE_Validator::validateGroup(const Group * g) {
 
 bool RE_Validator::validateAssertion(const Assertion * a) {
     return validate(a->getAsserted());
+}
+
+bool RE_Validator::validatePermute(const Permute * p) {
+    for (RE * e : *p) {
+        if (!validate(e)) return false;
+    }
+    return true;
 }
 
 bool RE_Validator::validatePropertyExpression(const PropertyExpression * pe) {

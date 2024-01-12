@@ -162,6 +162,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                         // Check the attributes to see whether any impose a partition change
                         for (const Attribute & attr : b.getAttributes()) {
                             switch (attr.getKind()) {
+                                case AttrId::Add:
                                 case AttrId::LookAhead:
                                 case AttrId::BlockSize:
                                     hasInputRateChange = true;
@@ -194,6 +195,7 @@ PartitionGraph PipelineAnalysis::initialPartitioningPass() {
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
                         switch (attr.getKind()) {
+                            case AttrId::Add:
                             case AttrId::Delayed:
                             case AttrId::Deferred:
                             // A deferred output rate is closer to an bounded rate than a
