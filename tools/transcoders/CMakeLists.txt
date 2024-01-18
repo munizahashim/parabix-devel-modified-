@@ -80,3 +80,21 @@ DEPS
     re.cc
     toolchain
 )
+
+parabix_add_executable(
+NAME
+    xch
+SRC
+    xch.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
