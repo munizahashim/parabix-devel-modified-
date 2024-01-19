@@ -26,6 +26,7 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/util/debug_display.h>
+#include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
@@ -153,12 +154,41 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver, UCD::property_t prop, Pa
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
-    StreamSet * Transformed = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<ApplyTransform>(prop, U21, Transformed);
-    SHOW_BIXNUM(Transformed);
+    StreamSet * u32basis = P->CreateStreamSet(21, 1);
+    P->CreateKernelCall<ApplyTransform>(prop, U21, u32basis);
+    SHOW_BIXNUM(u32basis);
 
-    StreamSet * OutputBasis = P->CreateStreamSet(8, 1);
-    SpreadByMask(P, u8index, Transformed, OutputBasis);
+    // Buffers for calculated deposit masks.
+    StreamSet * const u8fieldMask = P->CreateStreamSet();
+    StreamSet * const u8final = P->CreateStreamSet();
+    StreamSet * const u8initial = P->CreateStreamSet();
+    StreamSet * const u8mask12_17 = P->CreateStreamSet();
+    StreamSet * const u8mask6_11 = P->CreateStreamSet();
+
+    // Intermediate buffers for deposited bits
+    StreamSet * const deposit18_20 = P->CreateStreamSet(3);
+    StreamSet * const deposit12_17 = P->CreateStreamSet(6);
+    StreamSet * const deposit6_11 = P->CreateStreamSet(6);
+    StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+
+    // Calculate the u8final deposit mask.
+    StreamSet * const extractionMask = P->CreateStreamSet();
+    P->CreateKernelCall<UTF8fieldDepositMask>(u32basis, u8fieldMask, extractionMask);
+    P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+
+    P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
+
+    SpreadByMask(P, u8initial, u32basis, deposit18_20, /* inputOffset = */ 18);
+    SpreadByMask(P, u8mask12_17, u32basis, deposit12_17, /* inputOffset = */ 12);
+    SpreadByMask(P, u8mask6_11, u32basis, deposit6_11, /* inputOffset = */ 6);
+    SpreadByMask(P, u8final, u32basis, deposit0_5, /* inputOffset = */ 0);
+
+    // Final buffers for computed UTF-8 basis bits and byte stream.
+    StreamSet * const OutputBasis = P->CreateStreamSet(8);
+
+    P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
+                                      u8initial, u8final, u8mask6_11, u8mask12_17,
+                                      OutputBasis);
     SHOW_BIXNUM(OutputBasis);
 
     StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
