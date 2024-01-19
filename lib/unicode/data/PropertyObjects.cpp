@@ -16,6 +16,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/data/PropertyObjectTable.h>
+#include <unicode/utf/utf_encoder.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/Twine.h>
 #include <util/aligned_allocator.h>
@@ -431,6 +432,55 @@ std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
         }
     }
     return bit_xform_sets;
+}
+
+void CodePointPropertyObject::compute_u8_movement() {
+    UTF_Encoder encoder;
+    for (auto & p : mExplicitCodepointMap) {
+        unsigned l1 = encoder.encoded_length(p.first);
+        unsigned l2 = encoder.encoded_length(p.second);
+        if (l2 > l1) {
+            unsigned bit = 0;
+            unsigned diff = l2 - l1;
+            while (diff > 0) {
+                if ((diff & 1UL) == 1UL) {
+                    while (u8_insertion_bixnum.size() <= bit) {
+                        u8_insertion_bixnum.push_back(UnicodeSet());
+                    }
+                    u8_insertion_bixnum[bit].insert(p.first);
+                }
+                diff >>= 1;
+                bit++;
+            }
+        } else if (l1 > l2) {
+            unsigned bit = 0;
+            unsigned diff = l1 - l2;
+            while (diff > 0) {
+                if ((diff & 1UL) == 1UL) {
+                    while (u8_deletion_bixnum.size() <= bit) {
+                        u8_deletion_bixnum.push_back(UnicodeSet());
+                    }
+                    u8_deletion_bixnum[bit].insert(p.first);
+                }
+                diff >>= 1;
+                bit++;
+            }
+        }
+    }
+}
+
+std::vector<UnicodeSet> & CodePointPropertyObject::GetUTF8insertionBixNum() {
+    if (!u8_movement_initialized) {
+        compute_u8_movement();
+    }
+    return u8_insertion_bixnum;
+}
+
+std::vector<UnicodeSet> & CodePointPropertyObject::GetUTF8deletionBixNum() {
+    if (!u8_movement_initialized) {
+        compute_u8_movement();
+    }
+    return u8_deletion_bixnum;
 }
 
 const UnicodeSet StringPropertyObject::GetCodepointSet(const std::string & value_spec) {

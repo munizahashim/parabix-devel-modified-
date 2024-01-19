@@ -219,6 +219,7 @@ public:
     , mNullCodepointSet(std::move(nullSet))
     , mSelfCodepointSet(std::move(mapsToSelf))
     , mExplicitCodepointMap(explicit_map)
+    , u8_movement_initialized(false)
     {
 
     }
@@ -234,13 +235,20 @@ public:
     // Return bit_xform_sets such that bit_xform_sets[i] includes a given
     // codepoint cp if cp and GetCodePointValue(cp) differ at bit position i.
     std::vector<UnicodeSet> & GetBitTransformSets();
+    std::vector<UnicodeSet> & GetUTF8insertionBixNum();
+    std::vector<UnicodeSet> & GetUTF8deletionBixNum();
+
 
 private:
     const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
     const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
     // Codepoints other than those in these two sets are explicitly represented.
     const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> mExplicitCodepointMap;
+    bool u8_movement_initialized;
     std::vector<UnicodeSet> bit_xform_sets;
+    std::vector<UnicodeSet> u8_insertion_bixnum;
+    std::vector<UnicodeSet> u8_deletion_bixnum;
+    void compute_u8_movement();
 };
 
 class StringPropertyObject final : public PropertyObject {
