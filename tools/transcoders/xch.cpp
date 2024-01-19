@@ -60,62 +60,64 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
-    ApplyTransform(BuilderRef b, UCD::property_t prop, StreamSet * Basis, StreamSet * Output);
+    ApplyTransform(BuilderRef b,
+                   UCD::CodePointPropertyObject * p,
+                   StreamSet * Basis, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 private:
-    UCD::property_t mProperty;
+    UCD::CodePointPropertyObject * mPropertyObject;
 };
 
-
-
-ApplyTransform::ApplyTransform (BuilderRef b, UCD::property_t prop, StreamSet * Basis, StreamSet * Output)
-: PabloKernel(b, getPropertyEnumName(prop) + "_transformer_" + std::to_string(Basis->getNumElements()) + "x1",
+ApplyTransform::ApplyTransform (BuilderRef b,
+                                UCD::CodePointPropertyObject * p,
+                                StreamSet * Basis, StreamSet * Output)
+: PabloKernel(b, getPropertyEnumName(p->getPropertyCode()) + "_transformer_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis}},
 // output
 {Binding{"output_basis", Output}}),
-    mProperty(prop) {
+    mPropertyObject(p) {
 }
 
 void ApplyTransform::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
-    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
-        //const UCD::UnicodeSet & nullSet = p->GetNullSet();
-        std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
-        std::vector<re::CC *> xfrm_ccs;
-        for (auto & b : xfrms) xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-        UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-        std::vector<Var *> xfrm_vars;
-        for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
-            xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
-            unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
-        }
-        if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
-            unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-        } else {
-            unicodeCompiler.compile();
-        }
-        std::vector<PabloAST *> basis = getInputStreamSet("basis");
-        std::vector<PabloAST *> transformed(basis.size());
-        Var * const out = getOutputStreamVar("output_basis");
-        for (unsigned i = 0; i < basis.size(); i++) {
-            if (i < xfrm_vars.size()) {
-                transformed[i] = pb.createXor(xfrm_vars[i], basis[i]);
-            } else {
-                transformed[i] = basis[i];
-            }
-            pb.createAssign(pb.createExtract(out, pb.getInteger(i)), transformed[i]);
-        }
+    //const UCD::UnicodeSet & nullSet = mPropertyObject->GetNullSet();
+    std::vector<UCD::UnicodeSet> & xfrms = mPropertyObject->GetBitTransformSets();
+    std::vector<re::CC *> xfrm_ccs;
+    for (auto & b : xfrms) {
+        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
+    }
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    std::vector<Var *> xfrm_vars;
+    for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
+        xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
+        unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
+    }
+    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
+        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
     } else {
-        llvm::report_fatal_error("Expecting codepoint property");
+        unicodeCompiler.compile();
+    }
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::vector<PabloAST *> transformed(basis.size());
+    Var * const out = getOutputStreamVar("output_basis");
+    for (unsigned i = 0; i < basis.size(); i++) {
+        if (i < xfrm_vars.size()) {
+            transformed[i] = pb.createXor(xfrm_vars[i], basis[i]);
+        } else {
+            transformed[i] = basis[i];
+        }
+        pb.createAssign(pb.createExtract(out, pb.getInteger(i)), transformed[i]);
     }
 }
 
+
 typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
-XfrmFunctionType generatePipeline(CPUDriver & pxDriver, UCD::property_t prop, ParabixIllustrator & illustrator) {
+XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
+                                  UCD::CodePointPropertyObject * p,
+                                  ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
@@ -155,7 +157,7 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver, UCD::property_t prop, Pa
     SHOW_BIXNUM(U21);
 
     StreamSet * u32basis = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<ApplyTransform>(prop, U21, u32basis);
+    P->CreateKernelCall<ApplyTransform>(p, U21, u32basis);
     SHOW_BIXNUM(u32basis);
 
     // Buffers for calculated deposit masks.
@@ -206,23 +208,27 @@ int main(int argc, char *argv[]) {
     ParabixIllustrator illustrator(codegen::IllustratorDisplay);
 
     UCD::property_t prop = UCD::getPropertyCode(XfrmProperty);
-    
-    CPUDriver driver("xfrm_function");
-    //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    XfrmFunctionType fn = generatePipeline(driver, prop, illustrator);
-    //  The compile function "fn"  can now be used.   It takes a file
-    //  descriptor as an input, which is specified by the filename given by
-    //  the inputFile command line option.]
+    UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
+    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
+        CPUDriver driver("xfrm_function");
+        //  Build and compile the Parabix pipeline by calling the Pipeline function above.
+        XfrmFunctionType fn = generatePipeline(driver, p, illustrator);
+        //  The compile function "fn"  can now be used.   It takes a file
+        //  descriptor as an input, which is specified by the filename given by
+        //  the inputFile command line option.]
 
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-    } else {
-        fn(fd, &illustrator);
-        close(fd);
-        if (codegen::IllustratorDisplay > 0) {
-            illustrator.displayAllCapturedData();
+        const int fd = open(inputFile.c_str(), O_RDONLY);
+        if (LLVM_UNLIKELY(fd == -1)) {
+            llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+        } else {
+            fn(fd, &illustrator);
+            close(fd);
+            if (codegen::IllustratorDisplay > 0) {
+                illustrator.displayAllCapturedData();
+            }
         }
-   }
+    } else {
+        llvm::report_fatal_error("Expecting codepoint property");
+    }
     return 0;
 }
