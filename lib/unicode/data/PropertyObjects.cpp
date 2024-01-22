@@ -467,6 +467,7 @@ void CodePointPropertyObject::compute_u8_movement() {
             }
         }
     }
+    u8_movement_initialized = true;
 }
 
 std::vector<UnicodeSet> & CodePointPropertyObject::GetUTF8insertionBixNum() {
