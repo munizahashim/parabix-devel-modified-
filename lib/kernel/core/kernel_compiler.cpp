@@ -15,6 +15,7 @@
 #include <boost/container/flat_set.hpp>
 #include <kernel/core/streamsetptr.h>
 #include <codegen/TypeBuilder.h>
+#include <kernel/illustrator/illustrator.h>
 
 using namespace llvm;
 using namespace boost;
@@ -29,9 +30,9 @@ using RateId = ProcessingRate::KindId;
 using StreamSetPort = Kernel::StreamSetPort;
 using PortType = Kernel::PortType;
 
-const static std::string BUFFER_HANDLE_SUFFIX = "_buffer";
-const static std::string TERMINATION_SIGNAL = "__termination_signal";
-const static std::string INTERNAL_COMMON_THREAD_LOCAL_PREFIX = "!__ctl__";
+constexpr static auto BUFFER_HANDLE_SUFFIX = "_buffer";
+constexpr static auto TERMINATION_SIGNAL = "__termination_signal";
+constexpr static auto INTERNAL_COMMON_THREAD_LOCAL_PREFIX = "!__ctl__";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
@@ -798,6 +799,13 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
         }
     }
 
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        Value * ptr; Type * ty;
+        std::tie(ptr, ty) = b->getScalarFieldPtr(KERNEL_ILLUSTRATOR_STRIDE_NUM);
+        Value * val = b->CreateAdd(b->CreateLoad(ty, ptr), b->getSize(1));
+        b->CreateStore(val, ptr);
+    }
+
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {
         assert (isFromCurrentFunction(b, mTerminationSignalPtr, true));
@@ -1483,6 +1491,82 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
 
 
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief registerIllustrator
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::registerIllustrator(BuilderRef b, Value * kernelName, Value * streamName, Value * handle) const {
+    auto init = mTarget->getInitializeFunction(b);
+    assert (init);
+    auto arg = init->arg_begin();
+    auto nextArg = [&]() {
+        assert (arg != init->arg_end());
+        Value * const v = &*arg;
+        std::advance(arg, 1);
+        return v;
+    };
+    assert (mTarget->isStateful());
+    Value * handle = nextArg();
+    Instruction * ret = nullptr;
+    for (auto & bb : *init) {
+        if (isa<ReturnInst>(bb.getTerminator())) {
+            ret = bb.getTerminator();
+            break;
+        }
+    }
+    assert (ret && "no return statement found?");
+    Value * illustratorObject = nullptr;
+    for (const auto & binding : mInputScalars) {
+        Value * inputArg = nextArg();
+        if (binding.getName() == KERNEL_ILLUSTRATOR_CALLBACK_OBJECT) {
+            illustratorObject = inputArg;
+            break;
+        }
+    }
+    assert (illustratorObject && "no illustrator object found?");
+
+    Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
+    FixedArray<Value *, 4> args;
+    args[0] = illustratorObject;
+    args[1] = kernelName;
+    args[2] = streamName;
+    args[3] = handle;
+    CallInst::Create(regFunc->getFunctionType(), regFunc, args, "", ret);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBitstream
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::captureBitstream(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+                                      Value * strideNum,
+                                      Type * type,
+                                      Value * bitstream, Value * from, Value * to,
+                                      Value * zeroCh, Value * oneCh)  const {
+    registerIllustrator(b, kernelName, streamName, handle);
+
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBixNum
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::captureBixNum(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+                                   Value * strideNum,
+                                   Type * type,
+                                   Value * bixnum, Value * from, Value * to, Value * hexBase) const {
+    registerIllustrator(b, kernelName, streamName, handle);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureByteData
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::captureByteData(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+                                     Value * strideNum,
+                                     Type * type,
+                                     llvm::Value * byteData, Value * from, Value * to, Value * nonASCIIsubstitute) const {
+    registerIllustrator(b, kernelName, streamName, handle);
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor

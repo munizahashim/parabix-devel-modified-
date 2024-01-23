@@ -101,6 +101,7 @@ public:
         , PackH
         , PackL
         , DebugPrint
+        , Illustrator
         // Intrinsics
         , IntrinsicCall
     };

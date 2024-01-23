@@ -109,6 +109,7 @@ extern const char * ProgramName;
 extern llvm::TargetOptions target_Options;
 extern bool TimeKernelsIsEnabled;
 extern unsigned Z3_Timeout;
+extern bool EnableIllustrator;
 extern int IllustratorDisplay;
 extern float DynamicMultithreadingAddThreshold;
 extern float DynamicMultithreadingRemoveThreshold;

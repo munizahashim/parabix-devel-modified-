@@ -8,6 +8,7 @@
 #include <kernel/core/relationship.h>
 #include <util/slab_allocator.h>
 #include <boost/integer.hpp>
+#include <kernel/illustrator/illustrator.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -80,6 +81,10 @@ public:
         mPreservesKernels = value;
     }
 
+    kernel::ParabixIllustrator * getIllustrator() const final {
+        return mIllustrator.get();
+    }
+
 protected:
 
     BaseDriver(std::string && moduleName);
@@ -95,6 +100,7 @@ protected:
     llvm::Module * const                                    mMainModule;
     std::unique_ptr<kernel::KernelBuilder>                  mBuilder;
     std::unique_ptr<ParabixObjectCache>                     mObjectCache;
+    std::unique_ptr<kernel::ParabixIllustrator>             mIllustrator;
 
     bool                                                    mPreservesKernels = false;
     KernelSet                                               mUncachedKernel;

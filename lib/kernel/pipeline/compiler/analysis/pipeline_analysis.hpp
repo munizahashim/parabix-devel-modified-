@@ -68,7 +68,6 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
-
         P.identifyTerminationChecks();
 
         P.determinePartitionJumpIndices();
@@ -83,7 +82,9 @@ public:
         P.identifyOwnedBuffers();
         P.identifyZeroExtendedStreamSets();
         P.identifyLinearBuffers();
-
+        if (codegen::EnableIllustrator) {
+            P.identifyIllustratedStreamSets();
+        }
         P.determineBufferSize(b);
 
         P.makeConsumerGraph();
@@ -98,6 +99,7 @@ public:
 
         // Finish the buffer graph
         P.determineInitialThreadLocalBufferLayout(b, rng);
+
         P.addStreamSetsToBufferGraph(b);
 
         P.scanFamilyKernelBindings();
@@ -200,6 +202,8 @@ private:
 
     void identifyPortsThatModifySegmentLength();
 
+    void identifyIllustratedStreamSets();
+
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng);
@@ -263,7 +267,6 @@ public:
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
     const bool                      mTraceIndividualConsumedItemCounts;
-
     const bool                      IsNestedPipeline;
 
     static const unsigned           PipelineInput = 0U;

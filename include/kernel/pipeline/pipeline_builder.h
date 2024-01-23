@@ -160,6 +160,12 @@ public:
         mTarget->mSignature.swap(name);
     }
 
+    void captureByteData(llvm::StringRef streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
+
+    void captureBitstream(llvm::StringRef streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
+
+    void captureBixNum(llvm::StringRef streamName, StreamSet * bixnum, char hexBase = 'A');
+
 protected:
 
     PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel);

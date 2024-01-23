@@ -163,7 +163,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 
     addFamilyKernelProperties(b, kernelId, groupId);
 
-    if (LLVM_UNLIKELY(isInternallySynchronized)) {
+    if (LLVM_UNLIKELY(isInternallySynchronized || mUsesIllustrator)) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire
         mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);
     }

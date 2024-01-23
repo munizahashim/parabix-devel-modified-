@@ -88,6 +88,7 @@ protected:
 
 class StreamSet : public Relationship {
 public:
+
     static bool classof(const Relationship * e) {
         return e->getClassTypeId() == ClassTypeId::StreamSet;
     }

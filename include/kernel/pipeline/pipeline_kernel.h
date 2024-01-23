@@ -6,6 +6,7 @@
 #include <functional>
 #include <kernel/pipeline/driver/driver.h>
 #include <boost/container/flat_map.hpp>
+#include <kernel/illustrator/illustrator_binding.h>
 
 namespace llvm { class Value; }
 
@@ -81,6 +82,8 @@ public:
     };
 
     using CallBindings = std::vector<CallBinding>;
+
+    using IllustratorBindings = std::vector<std::pair<IllustratorBinding, StreamSet *>>;
 
     using LengthAssertion = std::array<const StreamSet *, 2>;
 
@@ -203,6 +206,8 @@ protected:
 
     ParamMap::PairEntry createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const size_t maxStrideLength) const;
 
+    const IllustratorBindings & getIllustratorBindings() const;
+
 protected:
 
     unsigned                            mNumOfKernelFamilyCalls;
@@ -211,7 +216,7 @@ protected:
     Kernels                             mKernels;
     CallBindings                        mCallBindings;
     LengthAssertions                    mLengthAssertions;
-
+    IllustratorBindings                 mIllustratorBindings;
 
 };
 

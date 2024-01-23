@@ -33,6 +33,10 @@ class BlockKernelCompiler;
 class StreamSetBuffer;
 class StreamSet;
 
+constexpr static auto KERNEL_ILLUSTRATOR_CALLBACK_OBJECT = "__illustrator";
+constexpr static auto KERNEL_REGISTER_ILLUSTRATOR_CALLBACK = "__illustrator_register";
+constexpr static auto KERNEL_ILLUSTRATOR_STRIDE_NUM = "__illustrator_sn";
+
 class Kernel : public AttributeSet {
     friend class KernelCompiler;
     friend class PipelineAnalysis;
@@ -541,7 +545,7 @@ protected:
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
 
-    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
+    static std::string annotateKernelNameWithDebugFlags(BuilderRef & b, TypeId id, std::string && name);
 
 protected:
 
@@ -551,6 +555,7 @@ protected:
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
     bool                        mGenerated = false;
+    bool                        mUsesIllustrator = false;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;

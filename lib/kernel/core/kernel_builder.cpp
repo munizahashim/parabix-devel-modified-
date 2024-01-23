@@ -587,6 +587,101 @@ Value * KernelBuilder::CreateRoundUpRational(Value * const number, const Rationa
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief makeAddressableValue
+ ** ------------------------------------------------------------------------------------------------------------- */
+KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Value * value, Value * from, Value * to) {
+    if (LLVM_UNLIKELY(!!from ^ !!to)) {
+        report_fatal_error("capture functions require either both or neither of the from/to positions to be set");
+    }
+
+    AddressableValue cv;
+
+    Type * const ty = value->getType();
+    DataLayout DL(getModule());
+
+    Type * vTy = ty;
+    if (isa<ArrayType>(ty)) {
+        vTy = cast<ArrayType>(ty);
+    }
+    // TODO: what if we write more than one value? the array would refer to a fixed value rather than streams of
+    // a streamset but if we have an array of arrays, we need to indicate whether this is row or column oriented.
+    const auto a = getTypeSize(DL, vTy);
+    uintptr_t b = 1;
+    if (LLVM_LIKELY(isa<VectorType>(vTy))) {
+        b = getTypeSize(DL, cast<VectorType>(vTy)->getElementType());
+        assert (b > 0);
+    }
+    Rational R{a, b};
+    assert (R.denominator() == 1);
+    if (from && to) {
+        cv.From = CreateURemRational(from, R);
+        cv.To = CreateURemRational(to, R);
+    } else if (from || to) {
+        report_fatal_error("capture functions require either both or neither of the from/to positions to be set");
+    } else {
+        cv.From = getSize(0);
+        cv.To = getSize(R.numerator());
+    }
+    cv.Address = CreateAllocaAtEntryPoint(ty);
+    CreateStore(value, cv.Address);
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureByteData
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelBuilder::captureByteData(llvm::StringRef streamName, llvm::Value * byteData, llvm::Value * from, llvm::Value * to, const char nonASCIIsubstitute) {
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        const auto cv = makeAddressableValue(byteData, from, to);
+        // to capture this value, we want to automatically register it in the init phase
+        std::unique_ptr<KernelBuilder> tmp(this);
+        mCompiler->captureByteData(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
+                                   getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                   byteData->getType(), cv.Address, cv.From, cv.To, getInt8(nonASCIIsubstitute));
+        tmp.release();
+    }
+}
+
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBitstream
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelBuilder::captureBitstream(llvm::StringRef streamName, llvm::Value * bitstream, llvm::Value * from, llvm::Value * to, const char zeroCh, const char oneCh) {
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+
+        // TODO: should these be varadic functions that accept "indices" to allow users to decide how to name
+        // capture functions that occur within loops? Problem with this is we cannot support this in general
+        // and allow multi-threaded accesses since we cannot identify all of the streamNames at initialization.
+
+        // Moreover, it would be difficult to display said iterated values logically without assuming a
+        // format.
+
+        const auto cv = makeAddressableValue(bitstream, from, to);
+
+        std::unique_ptr<KernelBuilder> tmp(this);
+        mCompiler->captureBitstream(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
+                                    getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                    bitstream->getType(), cv.Address, cv.From, cv.To, getInt8(zeroCh), getInt8(oneCh));
+        tmp.release();
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBixNum
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelBuilder::captureBixNum(llvm::StringRef streamName, llvm::Value * bixnum, llvm::Value * from, llvm::Value * to, const char hexBase) {
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        const auto cv = makeAddressableValue(bixnum, from, to);
+        std::unique_ptr<KernelBuilder> tmp(this);
+        mCompiler->captureBixNum(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
+                                 getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                 bixnum->getType(), cv.Address, cv.From, cv.To, getInt8(hexBase));
+        tmp.release();
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelName
  ** ------------------------------------------------------------------------------------------------------------- */
 std::string KernelBuilder::getKernelName() const noexcept {

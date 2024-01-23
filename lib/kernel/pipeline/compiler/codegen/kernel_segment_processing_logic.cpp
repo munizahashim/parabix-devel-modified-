@@ -21,8 +21,9 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
     mExecuteStridesIndividually =
-        mKernel->hasAttribute(AttrId::ExecuteStridesIndividually) || (mRecordHistogramData && !hasAnyGreedyInput(mKernelId));
-    mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
+        mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
+            || ((mRecordHistogramData || mUsesIllustrator) && !hasAnyGreedyInput(mKernelId));
+    mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId) && !mUsesIllustrator;
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL

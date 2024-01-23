@@ -26,6 +26,7 @@
 #include <pablo/pe_repeat.h>
 #include <pablo/pe_pack.h>
 #include <pablo/pe_var.h>
+#include <pablo/pe_illustrator.h>
 #include <pablo/ps_assign.h>
 #include <pablo/ps_terminate.h>
 #include <pablo/carry_manager.h>
@@ -726,6 +727,25 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value * const op1 = compileExpression(b, stmt->getOperand(2));
             Value * const op2 = compileExpression(b, stmt->getOperand(3));
             value = b->simd_ternary(mask, b->bitCast(op0), b->bitCast(op1), b->bitCast(op2));
+        } else if (const Illustrate * const illustrator = dyn_cast<Illustrate>(stmt)) {
+
+            Value * const op = compileExpression(b, stmt->getOperand(0));
+
+            switch (illustrator->getIllustratorType()) {
+                case Illustrate::IllustratorTypeId::Bitstream:
+
+                    break;
+                case Illustrate::IllustratorTypeId::BixNum:
+
+
+                    break;
+                case Illustrate::IllustratorTypeId::ByteStream:
+
+                    break;
+            }
+
+
+
         } else if (const IntrinsicCall * const call = dyn_cast<IntrinsicCall>(stmt)) {
             const auto n = call->getNumOperands();
             SmallVector<Value *, 2> argv;

@@ -268,6 +268,17 @@ void Kernel::linkExternalMethods(BuilderRef b) {
     for (const LinkedFunction & linked : mLinkedFunctions) {
         driver.addLinkFunction(m, linked.Name, linked.Type, linked.FunctionPtr);
     }
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        PointerType * voidPtrTy = b->getVoidPtrTy();
+        PointerType * int8PtrTy = b->getInt8PtrTy();
+        FixedArray<Type *, 4> params;
+        params[0] = voidPtrTy;
+        params[1] = int8PtrTy;
+        params[2] = int8PtrTy;
+        params[3] = voidPtrTy;
+        FunctionType * regFunc = FunctionType::get(b->getVoidTy(), params, false);
+        driver.addLinkFunction(m, KERNEL_REGISTER_ILLUSTRATOR_CALLBACK, regFunc, (void*)&registerIllustrator);
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1380,7 +1391,7 @@ std::string Kernel::getFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(TypeId id, std::string && name) {
+/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(BuilderRef & b, TypeId id, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
@@ -1402,6 +1413,9 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        buffer << "_Illustrator";
+    }
     buffer.flush();
     return name;
 }
@@ -1422,8 +1436,11 @@ Kernel::Kernel(BuilderRef b,
 , mInputScalars(std::move(scalar_inputs))
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
-, mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
-
+, mKernelName(annotateKernelNameWithDebugFlags(b, typeId, std::move(kernelName))) {
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        mInputScalars.emplace_back(Binding{b->getVoidPtrTy(), KERNEL_ILLUSTRATOR_CALLBACK_OBJECT});
+        mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
+    }
 }
 
 Kernel::Kernel(BuilderRef b,
@@ -1440,7 +1457,10 @@ Kernel::Kernel(BuilderRef b,
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars()
 , mKernelName() {
-
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        mInputScalars.emplace_back(Binding{b->getVoidPtrTy(), KERNEL_ILLUSTRATOR_CALLBACK_OBJECT});
+        mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
+    }
 }
 
 Kernel::~Kernel() { }

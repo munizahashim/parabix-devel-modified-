@@ -23,7 +23,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         b->CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
-    if (mKernelIsInternallySynchronized) {
+    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mUsesIllustrator)) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
         // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
@@ -267,6 +267,8 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         updateTransferredItemsForHistogramData(b);
     }
 
+    assert (!mUsesIllustrator || mExecuteStridesIndividually);
+
     if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
 
         BasicBlock * const individualStrideBodyExit = b->GetInsertBlock();
@@ -289,6 +291,24 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             if (LLVM_UNLIKELY(mCurrentProducedDeferredItemCountPhi[br.Port] )) {
                 outerProducedDeferredPhis[br.Port.Number]->addIncoming(mProducedDeferredItemCount[br.Port], individualStrideBodyExit);
             }
+        }
+
+        if (LLVM_UNLIKELY(mUsesIllustrator)) {
+
+            for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+                const BufferPort & br = mBufferGraph[e];
+                if (LLVM_UNLIKELY(br.isIllustrated())) {
+                    Value * initial = outerProducedPhis[br.Port.Number];
+                    Value * produced = mProducedItemCount[br.Port];
+                    if (LLVM_UNLIKELY(mCurrentProducedDeferredItemCountPhi[br.Port] )) {
+                        initial = outerProcessedDeferredPhis[br.Port.Number];
+                        produced = mProducedDeferredItemCount[br.Port];
+                    }
+                    illustrateStreamSet(b, target(e, mBufferGraph), initial, produced);
+                }
+            }
+
+
         }
 
         Value * done = b->CreateICmpEQ(nextIndividualStrideIndexPhi, mNumOfLinearStrides);
@@ -718,6 +738,76 @@ void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b,
         b->CreateStore(ic, mProducedItemCountPtr[outputPort]);
     }
 
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief illustrateStreamSet
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const {
+
+    assert (mInternallySynchronizedSubsegmentNumber);
+    const auto & illustratorBindings = cast<PipelineKernel>(mTarget)->getIllustratorBindings();
+    const StreamSet * const ss = cast<StreamSet>(mStreamGraph[streamSet].Relationship);
+    for (const auto & set : illustratorBindings) {
+        if (set.second == ss) {
+            const auto & bind = set.first;
+
+            const auto & bn = mBufferGraph[streamSet];
+
+            assert (bn.IsLinear);
+
+            StreamSetBuffer * const buffer = bn.Buffer;
+
+            const auto & rt = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+
+            Value * baseProduced = nullptr;
+            if (rt.isDeferred()) {
+                baseProduced = mAlreadyProducedDeferredPhi[rt.Port];
+            } else {
+                baseProduced = mAlreadyProducedPhi[rt.Port];
+            }
+
+            Value * const vba = getVirtualBaseAddress(b, rt, bn, baseProduced, bn.isNonThreadLocal(), true);
+
+            ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+            Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+            Value * const blockIndex = b->CreateLShr(initial, LOG_2_BLOCK_WIDTH);
+            Value * const addr = tmp.getStreamBlockPtr(b, vba, b->getSize(0), blockIndex);
+
+            Value * const kernelName = b->GetString(mKernel->getName());
+            Value * const streamName = b->GetString(bind.Name);
+
+            switch (bind.IllustratorType) {
+                case IllustratorTypeId::None:
+                    break;
+                case IllustratorTypeId::Bitstream:
+                    captureBitstream(b, kernelName, streamName, mKernelSharedHandle,
+                                     mInternallySynchronizedSubsegmentNumber,
+                                     buffer->getType(),
+                                     addr, initial, current,
+                                     b->getInt8(bind.ReplacementCharacter[0]), b->getInt8(bind.ReplacementCharacter[1]));
+                    break;
+                case IllustratorTypeId::BixNum:
+                    captureBixNum(b, kernelName, streamName, mKernelSharedHandle,
+                                  mInternallySynchronizedSubsegmentNumber,
+                                  buffer->getType(),
+                                  addr, initial, current,
+                                  b->getInt8(bind.ReplacementCharacter[0]));
+                    break;
+                case IllustratorTypeId::ByteStream:
+                    captureByteData(b, kernelName, streamName, mKernelSharedHandle,
+                                    mInternallySynchronizedSubsegmentNumber,
+                                    buffer->getType(),
+                                    addr, initial, current,
+                                    b->getInt8(bind.ReplacementCharacter[0]));
+                    break;
+            }
+
+
+            return;
+        }
+    }
+    llvm_unreachable("could not find illustrated streamset in binding list?");
 }
 
 }

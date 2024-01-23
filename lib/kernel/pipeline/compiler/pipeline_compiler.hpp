@@ -546,6 +546,10 @@ public:
 
     static void linkHistogramFunctions(BuilderRef b);
 
+// streamset illustration function
+
+    void illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const;
+
 // dynamic multithreading functions
 
     void addDynamicThreadingReportProperties(BuilderRef b, const unsigned groupId);
@@ -620,6 +624,7 @@ protected:
     const bool                                  mGenerateDeferredItemCountHistogram;
     const bool                                  mIsNestedPipeline;
     const bool                                  mUseDynamicMultithreading;
+    const bool                                  mUsesIllustrator;
 
     const LengthAssertions &                    mLengthAssertions;
 
@@ -858,6 +863,7 @@ protected:
     OverflowItemCounts                          mInternalWritableOutputItems;
     OutputPortVector<PHINode *>                 mLinearOutputItemsPhi;
     OutputPortVector<Value *>                   mReturnedOutputVirtualBaseAddressPtr; // written by the kernel
+    OutputPortVector<Value *>                   mOutputVirtualBaseAddress;
     OutputPortVector<Value *>                   mReturnedProducedItemCountPtr; // written by the kernel
     OutputPortVector<Value *>                   mProducedItemCountPtr; // exiting the segment loop
     OutputPortVector<Value *>                   mProducedItemCount;
@@ -945,6 +951,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
 , mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline)
+, mUsesIllustrator(codegen::EnableIllustrator)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , LastKernel(P.LastKernel)
 , PipelineOutput(P.PipelineOutput)
@@ -1048,6 +1055,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mFirstOutputStrideLength(P.MaxNumOfOutputPorts, mAllocator)
 , mLinearOutputItemsPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedOutputVirtualBaseAddressPtr(P.MaxNumOfOutputPorts, mAllocator)
+, mOutputVirtualBaseAddress(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedItemCount(P.MaxNumOfOutputPorts, mAllocator)

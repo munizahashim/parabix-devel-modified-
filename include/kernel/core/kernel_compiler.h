@@ -14,6 +14,7 @@ namespace kernel {
 class KernelCompiler {
 
     friend class PipelineCompiler;
+    friend class KernelBuilder;
 
 public:
 
@@ -373,6 +374,17 @@ public:
     void callGenerateFinalizeMethod(BuilderRef b);
 
     static Rational getLCMOfFixedRateInputs(const Kernel * const target);
+
+    void registerIllustrator(BuilderRef b, llvm::Value * kernelName, llvm::Value *streamName, llvm::Value * handle) const;
+
+protected:
+
+    void captureBitstream(BuilderRef b, llvm::Value * kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value * strideNum, llvm::Type * type, llvm::Value * bitstream, llvm::Value * from, llvm::Value * to, llvm::Value *zeroCh, llvm::Value *oneCh) const;
+
+    void captureBixNum(BuilderRef b, llvm::Value *kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type *type, llvm::Value * bixnum, llvm::Value *from, llvm::Value *to, llvm::Value *hexBase) const;
+
+    void captureByteData(BuilderRef b, llvm::Value *kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type *type, llvm::Value * byteData, llvm::Value *from, llvm::Value *to, llvm::Value *nonASCIIsubstitute) const;
+
 
 protected:
 

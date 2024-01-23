@@ -221,8 +221,12 @@ std::string TraceOption = "";
 static cl::opt<std::string, true> TraceValueOption("trace", cl::location(TraceOption),
                                             cl::desc("Trace the values of variables beginning with the given prefix."), cl::value_desc("prefix"), cl::cat(CodeGenOptions));
 
+bool EnableIllustrator;
+static cl::opt<bool, true> OptEnableIllustrator("enable-illustrator", cl::location(EnableIllustrator),
+                                                 cl::desc("Enable bitstream illustrator with the default display width."), cl::init(0), cl::cat(CodeGenOptions));
+
 int IllustratorDisplay;
-static cl::opt<int, true> OptIllustrator("illustrator-width", cl::location(IllustratorDisplay),
+static cl::opt<int, true> OptIllustratorWidth("illustrator-width", cl::location(IllustratorDisplay),
                                                  cl::desc("Enable bitstream illustrator with the given display width."), cl::init(0), cl::cat(CodeGenOptions));
 
 std::string CCCOption = "";

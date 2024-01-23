@@ -855,4 +855,27 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyIllustratedStreamSets
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyIllustratedStreamSets() {
+    const auto & illustratorBindings = mPipelineKernel->getIllustratorBindings();
+
+    if (illustratorBindings.empty()) return;
+
+    flat_set<const StreamSet *> M;
+    M.reserve(illustratorBindings.size());
+    for (const auto & p : illustratorBindings) {
+        M.emplace(p.second);
+    }
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const auto & node = mStreamGraph[streamSet];
+        assert (node.Type == RelationshipNode::IsStreamSet);
+        if (LLVM_UNLIKELY(M.count(cast<StreamSet *>(node.Relationship)))) {
+            auto & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+            bp.Flags |= BufferPortType::Illustrated;
+        }
+    }
+}
+
 }

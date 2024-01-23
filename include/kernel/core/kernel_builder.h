@@ -245,6 +245,22 @@ public:
 
     std::string getKernelName() const noexcept final;
 
+    void captureByteData(llvm::StringRef streamName, llvm::Value * byteData, const char nonASCIIsubstitute = '.') const;
+
+    void captureBitstream(llvm::StringRef streamName, llvm::Value * bitstream, const char zeroCh = '.', const char oneCh = '1') const;
+
+    void captureBixNum(llvm::StringRef streamName, llvm::Value * bixnum, const char hexBase = 'A') const;
+
+private:
+
+    struct AddressableValue {
+        llvm::Value * Address;
+        llvm::Value * From;
+        llvm::Value * To;
+    };
+
+    AddressableValue makeAddressableValue(llvm::Value * value, llvm::Value * from, llvm::Value * to);
+
 protected:
 
     KernelBuilder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth)
