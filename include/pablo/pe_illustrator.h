@@ -26,12 +26,16 @@ public:
     inline PabloAST * getExpr() const {
         return getOperand(0);
     }
-    inline Integer * getN() const {
-        return llvm::cast<Integer>(getOperand(1));
-    }
+
+
+
     inline IllustratorTypeId getIllustratorType() const {
         return IllustratorType;
     }
+    inline char getReplacementCharacter(const size_t i) const {
+        return ReplacementCharacter[i];
+    }
+
 protected:
     explicit Illustrate(PabloAST * expr, PabloAST * n, const String * name, Allocator & allocator)
     : Statement(ClassTypeId::Illustrator, expr->getType(), {expr, n}, name, allocator) {

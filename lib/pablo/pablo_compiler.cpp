@@ -727,25 +727,21 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value * const op1 = compileExpression(b, stmt->getOperand(2));
             Value * const op2 = compileExpression(b, stmt->getOperand(3));
             value = b->simd_ternary(mask, b->bitCast(op0), b->bitCast(op1), b->bitCast(op2));
-        } else if (const Illustrate * const illustrator = dyn_cast<Illustrate>(stmt)) {
-
+        } else if (const Illustrate * const il = dyn_cast<Illustrate>(stmt)) {
+            // Should we use the name as the streamName? what if this is in a loop?
+            // TODO: need to fix pablo printer still
             Value * const op = compileExpression(b, stmt->getOperand(0));
-
-            switch (illustrator->getIllustratorType()) {
+            switch (il->getIllustratorType()) {
                 case Illustrate::IllustratorTypeId::Bitstream:
-
+                    b->captureBitstream(il->getName(), op, il->getReplacementCharacter(0), il->getReplacementCharacter(1));
                     break;
                 case Illustrate::IllustratorTypeId::BixNum:
-
-
+                    b->captureBixNum(il->getName(), op, il->getReplacementCharacter(0));
                     break;
                 case Illustrate::IllustratorTypeId::ByteStream:
-
+                    b->captureByteData(il->getName(), op, il->getReplacementCharacter(0));
                     break;
             }
-
-
-
         } else if (const IntrinsicCall * const call = dyn_cast<IntrinsicCall>(stmt)) {
             const auto n = call->getNumOperands();
             SmallVector<Value *, 2> argv;

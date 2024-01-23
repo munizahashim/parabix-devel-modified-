@@ -1514,7 +1514,7 @@ void KernelCompiler::registerIllustrator(BuilderRef b, Value * kernelName, Value
             break;
         }
     }
-    assert (ret && "no return statement found?");
+    assert (ret && "no return statement found in initialize kernel function?");
     Value * illustratorObject = nullptr;
     for (const auto & binding : mInputScalars) {
         Value * inputArg = nextArg();
