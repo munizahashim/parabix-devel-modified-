@@ -446,6 +446,7 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
     unsigned bix_bits = insertion_bixnum.size();
 
     StreamSet * ExpandedBasis = BasisBits;
+    StreamSet * SpreadMask = nullptr;
     if (bix_bits > 0) {
         std::vector<re::CC *> insertion_ccs;
         for (auto & b : insertion_bixnum) {
@@ -459,16 +460,13 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
         P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
         SHOW_BIXNUM(AdjustedBixNum);
 
-        StreamSet * SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
+        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
         SHOW_STREAM(SpreadMask);
 
-        /*
         ExpandedBasis = P->CreateStreamSet(8, 1);
         SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
         SHOW_BIXNUM(ExpandedBasis);
-         */
     }
-
     /*
     std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
     unsigned del_bix_bits = deletion_bixnum.size();
