@@ -26,6 +26,7 @@ option(ENABLE_PAPI "Enable PAPI support if available" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(LLVM_PATH "LLVM root directory")
 option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
+option(USE_LIBBACKTRACE "Allows framework to provide more detailed backtraces in JIT compiled code. Library available from github.com/ianlancetaylor/libbacktrace" OFF)
 
 # Build Artifact Configuration
 set(ARTIFACT_MODE "Multiple" CACHE STRING "Build framework into a single artifact (Single) or multiple artifacts (Multiple)")
@@ -125,6 +126,7 @@ endif()
 ###   Import Dependency: LibBacktrace   ###
 
 IF (CMAKE_BUILD_TYPE MATCHES Debug)
+if (USE_LIBBACKTRACE)
 # MacOS stores debug info in dSYM files but the source of this information is
 # not accessible by libbacktrace without first running dsymutil on the executable.
     find_package(Libbacktrace)
@@ -154,6 +156,7 @@ IF (CMAKE_BUILD_TYPE MATCHES Debug)
             UNSET(LIBBACKTRACE_FOUND)
         endif()
     endif()
+endif()
 endif()
 
 ###   Project Configuration   ###
