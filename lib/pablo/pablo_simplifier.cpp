@@ -75,6 +75,19 @@ struct VariableTable {
         }
     }
 
+    bool dominates(const Var * a, const Var * b) const {
+        const auto fa = mMap.find(a) != mMap.end();
+        const auto fb = mMap.find(b) != mMap.end();
+        if (fa || fb) {
+            return fa ^ fb;
+        } else {
+            assert (mOuter);
+            return mOuter->dominates(a, b);
+        }
+    }
+
+
+#if 0
     KeySet keySet() const {
         KeySet keySet;
         const Map & M = mMap;
@@ -106,7 +119,7 @@ struct VariableTable {
         }
         return keySet;
     }
-
+#endif
     void clear() {
         mMap.clear();
     }
@@ -323,7 +336,13 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
     // Construct the nested variable table
     VariableTable nestedVariables(variables);
     EscapedVars escaped = br->getEscaped();
-    std::sort(escaped.begin(), escaped.end());
+
+    std::sort(escaped.begin(), escaped.end(), [&](const Var * a, const Var * b) {
+        if (variables.dominates(a, b)) {
+            return true;
+        }
+        return (a < b);
+    });
 
     if (LLVM_UNLIKELY(isa<While>(br))) {
         for (Var * const var : escaped) {
@@ -447,7 +466,7 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
         for (unsigned j = 0; j < i; ++j) {
             if (LLVM_UNLIKELY((outgoing[i] == outgoing[j]) && (incoming[i] == incoming[j]))) {
                 initial[i] = escaped[j];
-                final[i] = outgoing[j];
+                final[i] = escaped[j];
                 modified = true;
                 break;
             }

@@ -14,6 +14,9 @@
 #include <llvm/ADT/SmallBitVector.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/DerivedTypes.h>  // for get getArrayNumElements
+#include <pablo/pe_zeroes.h>
+#include <pablo/pe_ones.h>
+#include <pablo/pe_integer.h>
 
 using namespace llvm;
 
@@ -335,7 +338,7 @@ void verifyAllPathsDominate(const PabloKernel * kernel) {
 struct AssignmentSet {
     AssignmentSet() : mParent(nullptr), mSet() {}
     AssignmentSet(const AssignmentSet & parent) : mParent(&parent) {}
-    bool contains(const Var * expr) const {
+    bool contains(const PabloAST * expr) const {
         if (mSet.count(expr)) {
             return true;
         } else if (mParent) {
@@ -344,88 +347,56 @@ struct AssignmentSet {
         return false;
     }
 
-    void insert_full(const Var * expr) {
-        const auto n = getNumOfElements(expr);
-        auto f = mAssignment.find(expr);
-        if (LLVM_LIKELY(f == mAssignment.end())) {
-            mAssignment.insert(std::make_pair(expr, SmallBitVector(n, true)));
-        } else {
-            f->second.resize(n, true);
-        }
-    }
-
-    void insert(const Var * expr, const unsigned i) {
+    void insert(const PabloAST * expr) {
         mSet.insert(expr);
-    }
-protected:
-
-    static unsigned getNumOfElements(const Var * expr) {
-        const Type * const ty = expr->getType();
-        if (ty->isArrayTy()) {
-            return ty->getArrayNumElements();
-        }
-        return 1;
     }
 
 private:
     const AssignmentSet * const mParent;
-    DenseMap<const Var *, SmallBitVector> mAssignment;
-
-    SmallSet<const Var *, 16> mSet;
+    SmallSet<const PabloAST *, 32> mSet;
 };
 
-//void verifyVariableUsages(const PabloBlock * block, const AssignmentSet & parent) {
-//    AssignmentSet A(parent);
-//    for (const Statement * stmt : *block) {
-//        if (isa<Assign>(stmt)) {
-//            PabloAST * var = cast<Assign>(stmt)->getVariable();
-//            if (isa<Extract>(var)) {
-//                var = cast<Extract>(var)->getArray();
-//            }
-//            A.insert(cast<Var>(var));
-//        } else if (isa<Extract>(stmt)) {
-//            Var * const var = cast<Var>(cast<Extract>(var)->getArray());
-//            if (A.contains(var)) {
-//                continue;
-//            }
-//        } else {
-//            for (unsigned i = 0; i != stmt->getNumOperands(); ++i) {
-//                const PabloAST * const op = stmt->getOperand(i);
-//                if (isa<Var>(op)) {
+void verifyVariableUsages(const PabloBlock * block, const AssignmentSet & parent) {
+    AssignmentSet A(parent);
+    for (const Statement * stmt : *block) {
+        if (isa<Assign>(stmt)) {
+            PabloAST * var = cast<Assign>(stmt)->getVariable();
+            A.insert(cast<Var>(var));
+        } else {
+            for (unsigned i = 0; i != stmt->getNumOperands(); ++i) {
+                const PabloAST * op = stmt->getOperand(i);
+                if (LLVM_LIKELY(isa<Var>(op) || isa<Extract>(op))) {
+                    while (isa<Extract>(op)) {
+                        op = cast<Extract>(op)->getArray();
+                    }
+                    if (LLVM_UNLIKELY(!A.contains(op))) {
+                        std::string tmp;
+                        raw_string_ostream out(tmp);
+                        PabloPrinter::print(op, out);
+                        out << " does not dominate ";
+                        PabloPrinter::print(stmt, out);
+                        throw std::runtime_error(out.str());
+                    }
+                }
+            }
+        }
 
-//                }
-//            }
-//        }
+        if (LLVM_UNLIKELY(isa<Branch>(stmt))) {
+            verifyVariableUsages(cast<Branch>(stmt)->getBody(), A);
+        }
+    }
+}
 
-
-
-//        for (unsigned i = 0; i != stmt->getNumOperands(); ++i) {
-//            const PabloAST * const op = stmt->getOperand(i);
-//            if (LLVM_UNLIKELY(!dominates(op, stmt))) {
-//                std::string tmp;
-//                raw_string_ostream out(tmp);
-//                PabloPrinter::print(cast<Statement>(op), out);
-//                out << " does not dominate ";
-//                PabloPrinter::print(stmt, out);
-//                throw std::runtime_error(out.str());
-//            }
-//        }
-//        if (LLVM_UNLIKELY(isa<Branch>(stmt))) {
-//            verifyAllPathsDominate(cast<Branch>(stmt)->getBody());
-//        }
-//    }
-//}
-
-//void verifyVariableUsages(const PabloKernel * kernel) {
-//    AssignmentSet A;
-//    for (unsigned i = 0; i != kernel->getNumOfInputs(); ++i) {
-//        A.insert(kernel->getInput(i));
-//    }
-//    for (unsigned i = 0; i != kernel->getNumOfOutputs(); ++i) {
-//        A.insert(kernel->getOutput(i));
-//    }
-//    verifyVariableUsages(kernel->getEntryScope(), A);
-//}
+void verifyVariableUsages(const PabloKernel * kernel) {
+    AssignmentSet A;
+    for (unsigned i = 0; i != kernel->getNumOfInputs(); ++i) {
+        A.insert(kernel->getInput(i));
+    }
+    for (unsigned i = 0; i != kernel->getNumOfOutputs(); ++i) {
+        A.insert(kernel->getOutput(i));
+    }
+    verifyVariableUsages(kernel->getEntryScope(), A);
+}
 
 
 
@@ -433,7 +404,7 @@ void PabloVerifier::verify(const PabloKernel * kernel, const std::string & locat
     try {
         verifyProgramStructure(kernel);
         verifyUseDefInformation(kernel);
-        // verifyAllPathsDominate(kernel);
+        verifyVariableUsages(kernel);
     } catch(std::runtime_error & err) {
         PabloPrinter::print(kernel, errs());
         errs().flush();
