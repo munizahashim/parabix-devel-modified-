@@ -127,7 +127,7 @@ endif()
 IF (CMAKE_BUILD_TYPE MATCHES Debug)
 # MacOS stores debug info in dSYM files but the source of this information is
 # not accessible by libbacktrace without first running dsymutil on the executable.
-    find_package(Libbacktrace REQUIRED)
+    find_package(Libbacktrace)
     if (LIBBACKTRACE_FOUND)
         find_package(Libunwind)
         if (NOT LIBUNWIND_FOUND)

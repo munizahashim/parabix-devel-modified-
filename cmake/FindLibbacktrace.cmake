@@ -45,3 +45,35 @@ mark_as_advanced(
     LIBBACKTRACE_LIBRARIES
     LIBBACKTRACE_INCLUDE_DIRS
 )
+
+function(check_libbacktrace)
+  file(WRITE ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/testlibbacktrace.c
+       "#include <backtrace-supported.h>
+        #if BACKTRACE_SUPPORTED != 1
+        #error not supported
+        #endif
+        #include <backtrace.h>
+        #include <stdio.h>
+        int main() {
+            return 0;
+        }")
+endfunction(check_libbacktrace)
+
+set(LIBBACKTRACE_FOUND OFF)
+
+check_libbacktrace()
+
+if(LIBBACKTRACE_INCLUDE_DIRS AND LIBBACKTRACE_LIBRARIES)
+  try_run(
+    LIBBACKTRACE_RETURNCODE
+    LIBBACKTRACE_COMPILED
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/testlibbacktrace.c
+    COMPILE_DEFINITIONS -I"${LIBBACKTRACE_INCLUDE_DIRS}"
+    LINK_LIBRARIES -L${LIBBACKTRACE_LIBRARIES}
+    RUN_OUTPUT_VARIABLE SRC_OUTPUT
+  )
+  set(LIBBACKTRACE_FOUND ${LIBBACKTRACE_COMPILED})
+endif()
+
+
