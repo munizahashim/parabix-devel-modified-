@@ -285,7 +285,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
     PabloAST * prefix_next = pb.createAnd(bit7_ahead1, bit6_ahead1);
     PabloAST * prefix2_next = pb.createAnd(prefix_next, pb.createNot(bit5_ahead1));
     PabloAST * inserted_prefix3 = pb.createAnd(inserted_prefix, pb.createOr(ASCII_ahead2, prefix2_next));
-    PabloAST * inserted_prefix4 = pb.createAnd(inserted_prefix, pb.createNot(pb.createAnd(inserted_prefix2, inserted_prefix3)));
+    PabloAST * inserted_prefix4 = pb.createAnd(inserted_prefix, pb.createNot(pb.createOr(inserted_prefix2, inserted_prefix3)));
 
     //
     //  Initial ASCII bit movement:
@@ -298,6 +298,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
     basis[7] = pb.createAnd(basis[7], pb.createNot(suffix_to_ASCII));
     //  Set bit 7 of newly inserted suffix and prefix bytes.
     basis[7] = pb.createOr3(basis[7], inserted, ASCII_to_suffix);
+    //pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {basis[7]});
     //  Clear bit 6 of newly converted suffix bytes.
     basis[6] = pb.createAnd(basis[6], pb.createNot(newSuffix));
     //  Set bit 6 of new prefix bytes.
@@ -324,9 +325,11 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
     PabloAST * tgt_prefix4 = pb.createOr(inserted_prefix4, src_prefix4);
 
     //  Translate Unicode bits 0 through 5 at the u8last position.
-    for (unsigned i = 0; i < 6; i++) {
-        if (i < xfrm_vars.size()) {
-            basis[i] = pb.createSel(tgt_u8last, pb.createXor(xfrm_vars[i], basis[i]), basis[i]);
+    for (unsigned U_bit = 0; U_bit < 6; U_bit++) {
+        if (U_bit < xfrm_vars.size()) {
+            unsigned u8_bit = U_bit;
+            basis[u8_bit] = pb.createSel(tgt_u8last,
+                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
         }
     }
     // Translate bit 6 at ASCII positions.
@@ -334,21 +337,27 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
         basis[6] = pb.createSel(tgt_ASCII, pb.createXor(xfrm_vars[6], basis[6]), basis[6]);
     }
     //  Translate Unicode bits 6 through 11 at the second last UTF-8 byte position.
-    for (unsigned i = 6; i < 11; i++) {
-        if (i < xfrm_vars.size()) {
-            basis[i] = pb.createSel(tgt_secondlast, pb.createXor(xfrm_vars[i], basis[i-6]), basis[i-6]);
+    for (unsigned U_bit = 6; U_bit < 11; U_bit++) {
+        if (U_bit < xfrm_vars.size()) {
+            unsigned u8_bit = U_bit - 6;
+            basis[u8_bit] = pb.createSel(tgt_secondlast,
+                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
         }
     }
     //  Translate Unicode bits 12 through 17 at the third last UTF-8 byte position.
-    for (unsigned i = 12; i < 17; i++) {
-        if (i < xfrm_vars.size()) {
-            basis[i] = pb.createSel(tgt_thirdlast, pb.createXor(xfrm_vars[i], basis[i-12]), basis[i-12]);
+    for (unsigned U_bit = 12; U_bit < 17; U_bit++) {
+        if (U_bit < xfrm_vars.size()) {
+            unsigned u8_bit = U_bit - 12;
+            basis[u8_bit] = pb.createSel(tgt_thirdlast,
+                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
         }
     }
     //  Translate Unicode bits 18 through 20 at the UTF-8 prefix4 byte position.
-    for (unsigned i = 18; i < 20; i++) {
-        if (i < xfrm_vars.size()) {
-            basis[i] = pb.createSel(tgt_prefix4, pb.createXor(xfrm_vars[i], basis[i-18]), basis[i-18]);
+    for (unsigned U_bit = 18; U_bit < 20; U_bit++) {
+        if (U_bit < xfrm_vars.size()) {
+            unsigned u8_bit = U_bit - 18;
+            basis[u8_bit] = pb.createSel(tgt_prefix4,
+                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
         }
     }
     Var * translatedVar = getOutputStreamVar("output_basis");
@@ -466,8 +475,10 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
         ExpandedBasis = P->CreateStreamSet(8, 1);
         SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
         SHOW_BIXNUM(ExpandedBasis);
+    } else {
+        llvm::errs() << "bit_bits = 0\n";
     }
-    /*
+    StreamSet * SelectionMask = nullptr;
     std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
     unsigned del_bix_bits = deletion_bixnum.size();
     if (del_bix_bits > 0) {
@@ -480,29 +491,28 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
         P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
         SHOW_BIXNUM(DeletionBixNum);
 
-        StreamSet * SelectionMask = P->CreateStreamSet(1);
+        SelectionMask = P->CreateStreamSet(1);
         P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
         SHOW_STREAM(SelectionMask);
 
         StreamSet * ExpandedSelectionMask = P->CreateStreamSet(1);
         SpreadByMask(P, SpreadMask, SelectionMask, ExpandedSelectionMask);
         SHOW_STREAM(ExpandedSelectionMask);
+        SelectionMask = ExpandedSelectionMask;
+    } else {
+        llvm::errs() << "del_bit_bits = 0\n";
     }
-     */
-
-    /*
     StreamSet * Translated = P->CreateStreamSet(8);
     P->CreateKernelCall<UTF8_CharacterTranslator>(p, ExpandedBasis, SpreadMask, SelectionMask, Translated);
     SHOW_BIXNUM(Translated);
 
     StreamSet * OutputBasis = P->CreateStreamSet(8);
-    FilterByMask(P, ExpandedSelectionMask, Translated, OutputBasis);
+    FilterByMask(P, SelectionMask, Translated, OutputBasis);
     SHOW_BIXNUM(OutputBasis);
 
-    */
     StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ExpandedBasis, OutputBytes);
-    SHOW_BYTES(OutputBytes);
+    P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
+    //SHOW_BYTES(OutputBytes);
 
     P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
