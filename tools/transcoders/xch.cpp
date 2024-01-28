@@ -175,189 +175,219 @@ void CreateU8delMask::generatePabloMethod() {
     pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
 }
 
+class UTF8_BytePosition : public pablo::PabloKernel {
+public:
+    UTF8_BytePosition(BuilderRef b, StreamSet * Basis, StreamSet * Positions);
+protected:
+    void generatePabloMethod() override;
+};
+
+UTF8_BytePosition::UTF8_BytePosition(BuilderRef b, StreamSet * Basis, StreamSet * Positions)
+: PabloKernel(b, "UTF8_BytePosition",
+{Binding{"basis", Basis, FixedRate(1), LookAhead(2)}},
+// output
+{Binding{"positions", Positions}}) {
+}
+
+void UTF8_BytePosition::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    // Classify the input data based on source information.
+    PabloAST * prefix = pb.createAnd(basis[7], basis[6]);
+    PabloAST * prefix2 = pb.createAnd(prefix, pb.createNot(basis[5]));
+    PabloAST * prefix34 = pb.createAnd(prefix, basis[5]);
+    PabloAST * prefix3 = pb.createAnd(prefix34, pb.createNot(basis[4]));
+    PabloAST * prefix4 = pb.createAnd(prefix34, basis[4]);
+    PabloAST * scope22 = pb.createAdvance(prefix2, 1);
+    PabloAST * scope32 = pb.createAdvance(prefix3, 1);
+    PabloAST * scope33 = pb.createAdvance(scope32, 1);
+    PabloAST * scope42 = pb.createAdvance(prefix4, 1);
+    PabloAST * scope43 = pb.createAdvance(scope42, 1);
+    PabloAST * scope44 = pb.createAdvance(scope43, 1);
+    PabloAST * ASCII = pb.createNot(basis[7]);
+    PabloAST * u8_last = pb.createOr(ASCII, pb.createOr3(scope44, scope33, scope22));
+    PabloAST * u8_secondlast = pb.createOr3(scope43, scope32, prefix2);
+    PabloAST * u8_thirdlast = pb.createOr(scope42, prefix3);
+    Var * positionsVar = getOutputStreamVar("positions");
+    pb.createAssign(pb.createExtract(positionsVar, pb.getInteger(0)), u8_last);
+    pb.createAssign(pb.createExtract(positionsVar, pb.getInteger(1)), u8_secondlast);
+    pb.createAssign(pb.createExtract(positionsVar, pb.getInteger(2)), u8_thirdlast);
+}
+
+class UTF8_Target_Class : public pablo::PabloKernel {
+public:
+    UTF8_Target_Class
+        (BuilderRef b,
+         StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
+         StreamSet * TargetClass);
+protected:
+    void generatePabloMethod() override;
+};
+
+UTF8_Target_Class::UTF8_Target_Class
+    (BuilderRef b,
+     StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
+     StreamSet * TargetClass)
+: PabloKernel(b, "UTF8_Target_Class",
+{Binding{"positions", Positions, FixedRate(1), LookAhead(2)},
+ Binding{"spreadmask", SpreadMask, FixedRate(1), LookAhead(2)},
+ Binding{"filtermask", FilterMask}},
+// output
+{Binding{"target_class", TargetClass}}) {
+}
+
+void UTF8_Target_Class::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * src_u8last = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(0));
+    Var * src_secondlast = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(1));
+    Var * src_thirdlast = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(2));
+    PabloAST * src_prefix4 = pb.createNot(pb.createOr3(src_u8last, src_secondlast, src_thirdlast));
+    Var * spreadmask = pb.createExtract(getInputStreamVar("spreadmask"), pb.getInteger(0));
+    Var * filtermask = pb.createExtract(getInputStreamVar("filtermask"), pb.getInteger(0));
+    // Insertions add up to 3 new UTF-8 bytes:
+    // 1-3 bytes prior to a source ASCII byte to create a multibyte sequence,
+    // 1-2 bytes prior to a 2-byte sequence to create a 3-4 byte sequence, or
+    // 1 byte prior to a 3-byte sequence to create a 4-byte sequence.
+    // Classify the new bytes.
+    PabloAST * inserted = pb.createNot(spreadmask);
+    PabloAST * new_secondlast = pb.createAnd(inserted, pb.createLookahead(src_u8last, 1));
+    // Insertions can generate a new third last UTF-8 byte in two ways:
+    // (a) Insertion of immediately before a second last UTF-8 position in the source.
+    // (b) Insertion of two bytes before a last UTF-8 position in the source.
+    PabloAST * i3a = pb.createAnd(inserted, pb.createLookahead(src_secondlast, 1));
+    PabloAST * i3b = pb.createAnd3(inserted,
+                                   pb.createNot(pb.createLookahead(spreadmask, 1)),
+                                   pb.createLookahead(src_u8last, 2));
+    PabloAST * new_thirdlast = pb.createOr(i3a, i3b);
+    //
+    // All other insertions are for a new prefix4.
+    PabloAST * new_prefix4 = pb.createAnd(inserted,
+                                          pb.createNot(pb.createOr(new_secondlast, new_thirdlast)));
+    //
+    PabloAST * secondlast = pb.createOr(pb.createAnd(filtermask, src_secondlast), new_secondlast);
+    PabloAST * thirdlast = pb.createOr(pb.createAnd(filtermask, src_thirdlast), new_thirdlast);
+    PabloAST * prefix4 = pb.createOr(pb.createAnd(filtermask, src_prefix4), new_prefix4);
+    Var * targetClassVar = getOutputStreamVar("target_class");
+    pb.createAssign(pb.createExtract(targetClassVar, pb.getInteger(0)), secondlast);
+    pb.createAssign(pb.createExtract(targetClassVar, pb.getInteger(1)), thirdlast);
+    pb.createAssign(pb.createExtract(targetClassVar, pb.getInteger(2)), prefix4);
+}
+
 class UTF8_CharacterTranslator : public pablo::PabloKernel {
 public:
     UTF8_CharacterTranslator
         (BuilderRef b,
-         UCD::CodePointPropertyObject * p,
-         StreamSet * Basis, StreamSet * SpreadMask, StreamSet * FilterMask,
+         StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 private:
-    UCD::CodePointPropertyObject * mPropertyObject;
+    unsigned mXfrmBits;
 };
 
 UTF8_CharacterTranslator::UTF8_CharacterTranslator
     (BuilderRef b,
-     UCD::CodePointPropertyObject * p,
-     StreamSet * Basis, StreamSet * SpreadMask, StreamSet * FilterMask,
+     StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * Output)
-: PabloKernel(b, "u8_" + getPropertyEnumName(p->getPropertyCode()) + "_transformer",
+: PabloKernel(b, "u8_transform_bits_" + std::to_string(XfrmBasis->getNumElements()) + "x1",
 {Binding{"basis", Basis, FixedRate(1), LookAhead(2)},
- Binding{"spreadmask", SpreadMask, FixedRate(1), LookAhead(2)},
+ Binding{"xfrm_basis", XfrmBasis, FixedRate(1), LookAhead(3)},
+ Binding{"positions", TargetPositions},
+ Binding{"spreadmask", SpreadMask},
  Binding{"filtermask", FilterMask}},
 // output
 {Binding{"output_basis", Output}}),
-    mPropertyObject(p) {
+    mXfrmBits(XfrmBasis->getNumElements()) {
 }
 
 void UTF8_CharacterTranslator::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<UCD::UnicodeSet> & xfrms = mPropertyObject->GetBitTransformSets();
-    std::vector<re::CC *> xfrm_ccs;
-    for (auto & b : xfrms) {
-        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-    }
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-    std::vector<Var *> xfrm_vars;
-    for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
-        xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
-        unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
-    }
-    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
     Var * basisVar = getInputStreamVar("basis");
     std::vector<PabloAST *> basis(8);
     for (unsigned i = 0; i < 8; i++) {
         basis[i] = pb.createExtract(basisVar, pb.getInteger(i));
     }
+    Var * xfrmVar = getInputStreamVar("xfrm_basis");
+    std::vector<PabloAST *> xfrm_basis(mXfrmBits);
+    for (unsigned i = 0; i < mXfrmBits; i++) {
+        xfrm_basis[i] = pb.createExtract(xfrmVar, pb.getInteger(i));
+    }
     Var * spreadmask = pb.createExtract(getInputStreamVar("spreadmask"), pb.getInteger(0));
     Var * filtermask = pb.createExtract(getInputStreamVar("filtermask"), pb.getInteger(0));
-
-    // Classify the input data based on source information.
-    PabloAST * src_prefix = pb.createAnd(basis[7], basis[6]);
-    PabloAST * src_prefix2 = pb.createAnd(src_prefix, pb.createNot(basis[5]));
-    PabloAST * src_prefix34 = pb.createAnd(src_prefix, basis[5]);
-    PabloAST * src_prefix3 = pb.createAnd(src_prefix34, pb.createNot(basis[4]));
-    PabloAST * src_prefix4 = pb.createAnd(src_prefix34, basis[4]);
-    PabloAST * src_scope22 = pb.createAdvance(src_prefix2, 1);
-    PabloAST * src_scope32 = pb.createAdvance(src_prefix3, 1);
-    PabloAST * src_scope33 = pb.createAdvance(src_scope32, 1);
-    PabloAST * src_scope42 = pb.createAdvance(src_prefix4, 1);
-    PabloAST * src_scope43 = pb.createAdvance(src_scope42, 1);
-    PabloAST * src_scope44 = pb.createAdvance(src_scope43, 1);
-    PabloAST * src_ASCII = pb.createNot(basis[7]);
-
-    // Bit transformations can be unified based on counting from the
-    // end of the UTF-8 sequence.
-    PabloAST * src_u8last = pb.createOr(src_ASCII, pb.createOr3(src_scope44, src_scope33, src_scope22));
-    PabloAST * src_secondlast = pb.createOr3(src_scope43, src_scope32, src_prefix2);
-    PabloAST * src_thirdlast = pb.createOr(src_scope42, src_prefix3);
-
-    // Now compute the target classifications.
-    //
-    // After any byte position to be deleted, the following byte must be
-    // converted from a UTF-8 suffix byte to the initial byte of a
-    // a UTF-8 sequence (either an ASCII byte or a prefix byte).
-    PabloAST * afterDeletion = pb.createNot(pb.createAdvance(filtermask, 1));
-    PabloAST * suffix_to_ASCII = pb.createAnd(afterDeletion, src_u8last);
-    PabloAST * suffix_to_prefix2 = pb.createAnd(afterDeletion, src_secondlast);
-    PabloAST * suffix_to_prefix3 = pb.createAnd(afterDeletion, src_thirdlast);
-    //
-    // After any position to be inserted, the following byte must
-    // be converted from the initial byte of a UTF-8 sequence to a suffix.
-    PabloAST * inserted = pb.createNot(spreadmask);
-    PabloAST * afterInsertion = pb.createAdvance(inserted, 1);
-    PabloAST * ASCII_to_suffix = pb.createAnd(afterInsertion, src_ASCII);
-    PabloAST * prefix2_to_suffix = pb.createAnd(afterInsertion, src_prefix2);
-    PabloAST * prefix3_to_suffix = pb.createAnd(afterInsertion, src_prefix3);
-    PabloAST * newSuffix = pb.createOr3(ASCII_to_suffix, prefix2_to_suffix, prefix3_to_suffix);
-    //
-    // Newly inserted bytes must also be classified.
-    //
-    PabloAST * inserted_prefix = pb.createAnd(inserted, pb.createNot(afterInsertion));
-    PabloAST * inserted_suffix = pb.createAnd(inserted, afterInsertion);
-    PabloAST * ins_ahead1 = pb.createNot(pb.createLookahead(spreadmask, 1));
-    PabloAST * ins_ahead2 = pb.createNot(pb.createLookahead(spreadmask, 2));
-    PabloAST * last_insertion = pb.createAnd(inserted, pb.createNot(ins_ahead1));
-    PabloAST * secondlast_insertion = pb.createAnd3(inserted, ins_ahead1, pb.createNot(ins_ahead2));
-    PabloAST * bit7_ahead1 = pb.createLookahead(basis[7], 1);
-    PabloAST * bit7_ahead2 = pb.createLookahead(basis[7], 2);
-    PabloAST * bit6_ahead1 = pb.createLookahead(basis[6], 1);
-    PabloAST * bit5_ahead1 = pb.createLookahead(basis[5], 1);
-    PabloAST * ASCII_next = pb.createAnd(last_insertion, pb.createNot(bit7_ahead1));
-    PabloAST * ASCII_ahead2 = pb.createAnd(secondlast_insertion, pb.createNot(bit7_ahead2));
-    PabloAST * inserted_prefix2 = pb.createAnd(inserted_prefix, ASCII_next);
-    PabloAST * prefix_next = pb.createAnd(bit7_ahead1, bit6_ahead1);
-    PabloAST * prefix2_next = pb.createAnd(prefix_next, pb.createNot(bit5_ahead1));
-    PabloAST * inserted_prefix3 = pb.createAnd(inserted_prefix, pb.createOr(ASCII_ahead2, prefix2_next));
-    PabloAST * inserted_prefix4 = pb.createAnd(inserted_prefix, pb.createNot(pb.createOr(inserted_prefix2, inserted_prefix3)));
-
+    Var * tgt_secondlast = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(0));
+    Var * tgt_thirdlast = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(1));
+    Var * tgt_prefix4 = pb.createExtract(getInputStreamVar("positions"), pb.getInteger(2));
+    PabloAST * tgt_u8last = pb.createNot(pb.createOr3(tgt_secondlast, tgt_thirdlast, tgt_prefix4));
     //
     //  Initial ASCII bit movement:
+    PabloAST * inserted = pb.createNot(spreadmask);
+    PabloAST * deleted = pb.createNot(filtermask);
+    PabloAST * bit6_ahead1 = pb.createLookahead(basis[6], 1);
+    basis[0] = pb.createSel(pb.createAnd(tgt_secondlast, inserted), bit6_ahead1, basis[0]);
+    PabloAST * suffix_to_ASCII = pb.createAnd(pb.createAdvance(deleted, 1), tgt_u8last);
     basis[6] = pb.createSel(suffix_to_ASCII, pb.createAdvance(basis[0], 1), basis[6]);
-    basis[0] = pb.createSel(inserted_prefix2, bit6_ahead1, basis[0]);
-
+    //
     //  Now proceed to set up the correct UTF-8 bits encoding ASCII, prefixes
     //  and suffixes appropriately.
-    //  Clear bit 7 of new ASCII bytes
-    basis[7] = pb.createAnd(basis[7], pb.createNot(suffix_to_ASCII));
-    //  Set bit 7 of newly inserted suffix and prefix bytes.
-    basis[7] = pb.createOr3(basis[7], inserted, ASCII_to_suffix);
-    //pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {basis[7]});
-    //  Clear bit 6 of newly converted suffix bytes.
-    basis[6] = pb.createAnd(basis[6], pb.createNot(newSuffix));
-    //  Set bit 6 of new prefix bytes.
-    basis[6] = pb.createOr(basis[6], pb.createOr3(suffix_to_prefix2, suffix_to_prefix3, inserted_prefix));
+    //
+    PabloAST * last_suffix = pb.createAdvance(tgt_secondlast, 1);
+    PabloAST * tgt_ASCII = pb.createAnd(tgt_u8last, pb.createNot(last_suffix));
+    PabloAST * tgt_prefix2 = pb.createAnd(tgt_secondlast,
+                                          pb.createNot(pb.createAdvance(tgt_thirdlast, 1)));
+    PabloAST * tgt_prefix3 = pb.createAnd(tgt_thirdlast,
+                                          pb.createNot(pb.createAdvance(tgt_prefix4, 1)));
+    PabloAST * tgt_prefix = pb.createOr3(tgt_prefix2, tgt_prefix3, tgt_prefix4);
+    //
+    //  Set bit 7 to 1 for prefix/suffix, 0 for ASCII
+    basis[7] = pb.createNot(tgt_ASCII);
+    //  Set bit 6 to 1 for prefix bytes, 0 for suffix bytes, unchanged for ASCII.
+    basis[6] = pb.createSel(tgt_ASCII, basis[6], tgt_prefix);
     //  Clear bit 5 of prefix3 bytes converted to suffix bytes.
+    PabloAST * prefix3_to_suffix =
+        pb.createAnd3(tgt_thirdlast, spreadmask, pb.createAdvance(inserted, 1));
     basis[5] = pb.createAnd(basis[5], pb.createNot(prefix3_to_suffix));
     //  Set bit 5 of new prefix3/4 bytes bytes.
-    basis[5] = pb.createOr(basis[5], pb.createOr3(suffix_to_prefix3, inserted_prefix3, inserted_prefix4));
+    basis[5] = pb.createOr3(basis[5], tgt_prefix3, tgt_prefix4);
     //  Set bit 4 of new prefix4 bytes bytes.
-    basis[4] = pb.createOr(basis[4], inserted_prefix4);
+    basis[4] = pb.createOr(basis[4], tgt_prefix4);
     //
-    // Now prepare for character translation
-    PabloAST * new_prefix2 = pb.createOr(inserted_prefix2, suffix_to_prefix2);
-    PabloAST * new_prefix3 = pb.createOr(inserted_prefix3, suffix_to_prefix3);
-    PabloAST * new_scope32 = pb.createAdvance(new_prefix3, 1);
-    PabloAST * new_scope42 = pb.createAdvance(inserted_prefix4, 1);
-    PabloAST * new_scope43 = pb.createAdvance(inserted_prefix4, 2);
-
-    PabloAST * tgt_ASCII = pb.createOr(suffix_to_ASCII, pb.createAnd(src_ASCII, pb.createNot(ASCII_to_suffix)));
-    PabloAST * tgt_u8last = src_u8last;
-    PabloAST * new_secondlast = pb.createOr3(new_prefix2, new_scope32, new_scope43);
-    PabloAST * tgt_secondlast = pb.createOr(src_secondlast, new_secondlast);
-    PabloAST * tgt_thirdlast = pb.createOr3(src_thirdlast, new_prefix3, new_scope42);
-    PabloAST * tgt_prefix4 = pb.createOr(inserted_prefix4, src_prefix4);
-
     //  Translate Unicode bits 0 through 5 at the u8last position.
     for (unsigned U_bit = 0; U_bit < 6; U_bit++) {
-        if (U_bit < xfrm_vars.size()) {
+        if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit;
-            basis[u8_bit] = pb.createSel(tgt_u8last,
-                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
+            PabloAST * translated = pb.createXor(xfrm_basis[U_bit], basis[u8_bit]);
+            basis[u8_bit] = pb.createSel(tgt_u8last, translated, basis[u8_bit]);
         }
     }
     // Translate bit 6 at ASCII positions.
-    if (xfrm_vars.size() > 6) {
-        basis[6] = pb.createSel(tgt_ASCII, pb.createXor(xfrm_vars[6], basis[6]), basis[6]);
+    if (mXfrmBits > 6) {
+        basis[6] = pb.createSel(tgt_ASCII, pb.createXor(xfrm_basis[6], basis[6]), basis[6]);
     }
     //  Translate Unicode bits 6 through 11 at the second last UTF-8 byte position.
     for (unsigned U_bit = 6; U_bit < 11; U_bit++) {
-        if (U_bit < xfrm_vars.size()) {
+        if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 6;
-            basis[u8_bit] = pb.createSel(tgt_secondlast,
-                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
+            PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 1);
+            PabloAST * translated = pb.createXor(xfrm_bit, basis[u8_bit]);
+            basis[u8_bit] = pb.createSel(tgt_secondlast, translated, basis[u8_bit]);
         }
     }
     //  Translate Unicode bits 12 through 17 at the third last UTF-8 byte position.
     for (unsigned U_bit = 12; U_bit < 17; U_bit++) {
-        if (U_bit < xfrm_vars.size()) {
+        if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 12;
-            basis[u8_bit] = pb.createSel(tgt_thirdlast,
-                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
+            PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 2);
+            PabloAST * translated = pb.createXor(xfrm_bit, basis[u8_bit]);
+            basis[u8_bit] = pb.createSel(tgt_thirdlast, translated, basis[u8_bit]);
         }
     }
     //  Translate Unicode bits 18 through 20 at the UTF-8 prefix4 byte position.
     for (unsigned U_bit = 18; U_bit < 20; U_bit++) {
-        if (U_bit < xfrm_vars.size()) {
+        if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 18;
-            basis[u8_bit] = pb.createSel(tgt_prefix4,
-                                         pb.createXor(xfrm_vars[U_bit], basis[u8_bit]), basis[u8_bit]);
+            PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 3);
+            PabloAST * translated = pb.createXor(xfrm_bit, basis[u8_bit]);
+            basis[u8_bit] = pb.createSel(tgt_prefix4, translated, basis[u8_bit]);
         }
     }
     Var * translatedVar = getOutputStreamVar("output_basis");
@@ -478,6 +508,11 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
     } else {
         llvm::errs() << "bit_bits = 0\n";
     }
+
+    StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
+    P->CreateKernelCall<UTF8_BytePosition>(ExpandedBasis, U8_Positions);
+    SHOW_BIXNUM(U8_Positions);
+
     StreamSet * SelectionMask = nullptr;
     std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
     unsigned del_bix_bits = deletion_bixnum.size();
@@ -488,22 +523,30 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
         }
 
         StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
-        P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
+        P->CreateKernelCall<CharClassesKernel>(deletion_ccs, ExpandedBasis, DeletionBixNum);
         SHOW_BIXNUM(DeletionBixNum);
 
         SelectionMask = P->CreateStreamSet(1);
-        P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
+        P->CreateKernelCall<CreateU8delMask>(ExpandedBasis, DeletionBixNum, SelectionMask);
         SHOW_STREAM(SelectionMask);
-
-        StreamSet * ExpandedSelectionMask = P->CreateStreamSet(1);
-        SpreadByMask(P, SpreadMask, SelectionMask, ExpandedSelectionMask);
-        SHOW_STREAM(ExpandedSelectionMask);
-        SelectionMask = ExpandedSelectionMask;
     } else {
         llvm::errs() << "del_bit_bits = 0\n";
     }
+    StreamSet * TargetClass = P->CreateStreamSet(3, 1);
+    P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
+    SHOW_BIXNUM(TargetClass);
+
+    std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
+    std::vector<re::CC *> xfrm_ccs;
+    for (auto & b : xfrms) {
+        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
+    }
+    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
+    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, ExpandedBasis, XfrmBasis);
+    SHOW_BIXNUM(XfrmBasis);
+
     StreamSet * Translated = P->CreateStreamSet(8);
-    P->CreateKernelCall<UTF8_CharacterTranslator>(p, ExpandedBasis, SpreadMask, SelectionMask, Translated);
+    P->CreateKernelCall<UTF8_CharacterTranslator>(ExpandedBasis, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
     SHOW_BIXNUM(Translated);
 
     StreamSet * OutputBasis = P->CreateStreamSet(8);
@@ -511,7 +554,7 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
     SHOW_BIXNUM(OutputBasis);
 
     StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
+    P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
     //SHOW_BYTES(OutputBytes);
 
     P->CreateKernelCall<StdOutKernel>(OutputBytes);
