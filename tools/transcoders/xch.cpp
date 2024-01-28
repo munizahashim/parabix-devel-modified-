@@ -364,7 +364,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
         basis[6] = pb.createSel(tgt_ASCII, pb.createXor(xfrm_basis[6], basis[6]), basis[6]);
     }
     //  Translate Unicode bits 6 through 11 at the second last UTF-8 byte position.
-    for (unsigned U_bit = 6; U_bit < 11; U_bit++) {
+    for (unsigned U_bit = 6; U_bit < 12; U_bit++) {
         if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 6;
             PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 1);
@@ -373,7 +373,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
         }
     }
     //  Translate Unicode bits 12 through 17 at the third last UTF-8 byte position.
-    for (unsigned U_bit = 12; U_bit < 17; U_bit++) {
+    for (unsigned U_bit = 12; U_bit < 18; U_bit++) {
         if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 12;
             PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 2);
@@ -382,7 +382,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
         }
     }
     //  Translate Unicode bits 18 through 20 at the UTF-8 prefix4 byte position.
-    for (unsigned U_bit = 18; U_bit < 20; U_bit++) {
+    for (unsigned U_bit = 18; U_bit < 21; U_bit++) {
         if (U_bit < mXfrmBits) {
             unsigned u8_bit = U_bit - 18;
             PabloAST * xfrm_bit = pb.createLookahead(xfrm_basis[U_bit], 3);
