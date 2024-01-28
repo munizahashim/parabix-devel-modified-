@@ -1,5 +1,6 @@
 #include "pipeline_analysis.hpp"
 #include "lexographic_ordering.hpp"
+#include <boost/container/flat_set.hpp>
 
 // TODO: any buffers that exist only to satisfy the output dependencies are unnecessary.
 // We could prune away kernels if none of their outputs are needed but we'd want some
@@ -861,17 +862,17 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 void PipelineAnalysis::identifyIllustratedStreamSets() {
     const auto & illustratorBindings = mPipelineKernel->getIllustratorBindings();
 
-    if (illustratorBindings.empty()) return;
+    if (LLVM_UNLIKELY(illustratorBindings.empty())) return;
 
-    flat_set<const StreamSet *> M;
+    flat_set<Relationship *> M;
     M.reserve(illustratorBindings.size());
     for (const auto & p : illustratorBindings) {
-        M.emplace(p.second);
+        M.emplace(p.StreamSet);
     }
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto & node = mStreamGraph[streamSet];
         assert (node.Type == RelationshipNode::IsStreamSet);
-        if (LLVM_UNLIKELY(M.count(cast<StreamSet *>(node.Relationship)))) {
+        if (LLVM_UNLIKELY(M.count(node.Relationship))) {
             auto & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
             bp.Flags |= BufferPortType::Illustrated;
         }

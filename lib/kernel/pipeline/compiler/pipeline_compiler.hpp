@@ -904,9 +904,8 @@ protected:
     Value *                                     mDebugFileName = nullptr;
     Value *                                     mDebugFdPtr = nullptr;
     Value *                                     mDebugActualNumOfStrides;
-    Value *                                     mCurrentKernelName = nullptr;    
-    FixedVector<Value *>                        mKernelName;
-
+    Constant *                                  mCurrentKernelName = nullptr;
+    FixedVector<Constant *>                     mKernelName;
 
     #ifndef NDEBUG
     FunctionType *                              mKernelDoSegmentFunctionType = nullptr;

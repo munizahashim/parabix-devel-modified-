@@ -99,6 +99,8 @@ Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcep
         case CommandLineScalarType::PAPIEventList:
             scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
         #endif
+        case CommandLineScalarType::ParabixIllustratorObject:
+            scalarTy = mBuilder->getVoidPtrTy(); break;
         case CommandLineScalarType::DynamicMultithreadingAddSynchronizationThreshold:
         case CommandLineScalarType::DynamicMultithreadingRemoveSynchronizationThreshold:
             scalarTy = mBuilder->getFloatTy(); break;
@@ -126,6 +128,13 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
             input.setRelationship(CreateScalar(input.getType()));
         }
     }
+
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        // TODO: temporary design choice; need to rethink how we should handle implicit scalars
+        auto illustratorObject = CreateCommandLineScalar(CommandLineScalarType::ParabixIllustratorObject);
+        kernel->getInputScalarBindings().emplace_back(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT, illustratorObject);
+    }
+
     for (Binding & input : kernel->getInputStreamSetBindings()) {
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
             report_fatal_error(StringRef(kernel->getName()) + "." + input.getName() + " must be set upon construction");

@@ -27,24 +27,27 @@ public:
         return getOperand(0);
     }
 
-
-
     inline IllustratorTypeId getIllustratorType() const {
         return IllustratorType;
     }
+
     inline char getReplacementCharacter(const size_t i) const {
         return ReplacementCharacter[i];
     }
 
 protected:
-    explicit Illustrate(PabloAST * expr, PabloAST * n, const String * name, Allocator & allocator)
-    : Statement(ClassTypeId::Illustrator, expr->getType(), {expr, n}, name, allocator) {
-        assert(llvm::isa<Integer>(n) && llvm::cast<Integer>(n)->value() != 0);
+    explicit Illustrate(PabloAST * expr, IllustratorTypeId illustratorType, const char replacement0, const char replacement1, const String * name, Allocator & allocator)
+    : Statement(ClassTypeId::Illustrator, expr->getType(), {expr}, name, allocator)
+    , IllustratorType(illustratorType)
+    , ReplacementCharacter({replacement0, replacement1})
+    {
+
     }
 private:
     const IllustratorTypeId IllustratorType;
     const std::array<char, 2> ReplacementCharacter;
 };
 
+}
 
 #endif // PE_ILLUSTRATOR_H

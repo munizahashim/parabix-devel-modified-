@@ -5,6 +5,7 @@
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/kernel_compiler.h>
+#include <kernel/pipeline/driver/driver.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <boost/container/flat_set.hpp>
@@ -270,14 +271,68 @@ void Kernel::linkExternalMethods(BuilderRef b) {
     }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         PointerType * voidPtrTy = b->getVoidPtrTy();
+        IntegerType * int8Ty = b->getInt8Ty();
         PointerType * int8PtrTy = b->getInt8PtrTy();
-        FixedArray<Type *, 4> params;
+        IntegerType * sizeTy = b->getSizeTy();
+
+        BEGIN_SCOPED_REGION
+        FixedArray<Type *, 7> params;
         params[0] = voidPtrTy;
         params[1] = int8PtrTy;
         params[2] = int8PtrTy;
         params[3] = voidPtrTy;
+        params[4] = int8Ty;
+        params[5] = sizeTy;
+        params[6] = sizeTy;
         FunctionType * regFunc = FunctionType::get(b->getVoidTy(), params, false);
-        driver.addLinkFunction(m, KERNEL_REGISTER_ILLUSTRATOR_CALLBACK, regFunc, (void*)&registerIllustrator);
+        driver.addLinkFunction(m, KERNEL_REGISTER_ILLUSTRATOR_CALLBACK, regFunc, (void*)&illustratorRegisterCapturedData);
+        END_SCOPED_REGION
+
+        BEGIN_SCOPED_REGION
+        FixedArray<Type *, 10> params;
+        params[0] = voidPtrTy;
+        params[1] = int8PtrTy;
+        params[2] = int8PtrTy;
+        params[3] = voidPtrTy;
+        params[4] = sizeTy;
+        params[5] = voidPtrTy;
+        params[6] = sizeTy;
+        params[7] = sizeTy;
+        params[8] = int8Ty;
+        params[9] = int8Ty;
+        FunctionType * func = FunctionType::get(b->getVoidTy(), params, false);
+        driver.addLinkFunction(m, KERNEL_CAPTURE_BITSTREAM_ILLUSTRATOR_CALLBACK, func, (void*)&illustratorCaptureBitstream);
+        END_SCOPED_REGION
+
+        BEGIN_SCOPED_REGION
+        FixedArray<Type *, 9> params;
+        params[0] = voidPtrTy;
+        params[1] = int8PtrTy;
+        params[2] = int8PtrTy;
+        params[3] = voidPtrTy;
+        params[4] = sizeTy;
+        params[5] = voidPtrTy;
+        params[6] = sizeTy;
+        params[7] = sizeTy;
+        params[8] = int8Ty;
+        FunctionType * func = FunctionType::get(b->getVoidTy(), params, false);
+        driver.addLinkFunction(m, KERNEL_CAPTURE_BIXNUM_ILLUSTRATOR_CALLBACK, func, (void*)&illustratorCaptureBixNum);
+        END_SCOPED_REGION
+
+        BEGIN_SCOPED_REGION
+        FixedArray<Type *, 9> params;
+        params[0] = voidPtrTy;
+        params[1] = int8PtrTy;
+        params[2] = int8PtrTy;
+        params[3] = voidPtrTy;
+        params[4] = sizeTy;
+        params[5] = voidPtrTy;
+        params[6] = sizeTy;
+        params[7] = sizeTy;
+        params[8] = int8Ty;
+        FunctionType * func = FunctionType::get(b->getVoidTy(), params, false);
+        driver.addLinkFunction(m, KERNEL_CAPTURE_BYTEDATA_ILLUSTRATOR_CALLBACK, func, (void*)&illustratorCaptureByteData);
+        END_SCOPED_REGION
     }
 }
 
@@ -1391,7 +1446,7 @@ std::string Kernel::getFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(BuilderRef & b, TypeId id, std::string && name) {
+/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(TypeId id, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
@@ -1436,9 +1491,8 @@ Kernel::Kernel(BuilderRef b,
 , mInputScalars(std::move(scalar_inputs))
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
-, mKernelName(annotateKernelNameWithDebugFlags(b, typeId, std::move(kernelName))) {
+, mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        mInputScalars.emplace_back(Binding{b->getVoidPtrTy(), KERNEL_ILLUSTRATOR_CALLBACK_OBJECT});
         mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
     }
 }
@@ -1458,7 +1512,8 @@ Kernel::Kernel(BuilderRef b,
 , mInternalScalars()
 , mKernelName() {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        mInputScalars.emplace_back(Binding{b->getVoidPtrTy(), KERNEL_ILLUSTRATOR_CALLBACK_OBJECT});
+        // TODO: make stride num a passed in input? we cannot locally determine whether the outer
+        // pipeline skipped calls to this
         mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
     }
 }
@@ -1468,10 +1523,10 @@ Kernel::~Kernel() { }
 // CONSTRUCTOR
 SegmentOrientedKernel::SegmentOrientedKernel(BuilderRef b,
                                              std::string && kernelName,
-                                             Bindings &&stream_inputs,
-                                             Bindings &&stream_outputs,
-                                             Bindings &&scalar_parameters,
-                                             Bindings &&scalar_outputs,
+                                             Bindings && stream_inputs,
+                                             Bindings && stream_outputs,
+                                             Bindings && scalar_parameters,
+                                             Bindings && scalar_outputs,
                                              InternalScalars && internal_scalars)
 : Kernel(b,
 TypeId::SegmentOriented, std::move(kernelName),

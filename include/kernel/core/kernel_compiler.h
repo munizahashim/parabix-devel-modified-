@@ -46,6 +46,8 @@ public:
 
     using ArgIterator = llvm::Function::arg_iterator;
 
+    using MemoryOrdering = KernelBuilder::MemoryOrdering;
+
     template <typename T, unsigned n = 16>
     using Vec = llvm::SmallVector<T, n>;
 
@@ -375,15 +377,15 @@ public:
 
     static Rational getLCMOfFixedRateInputs(const Kernel * const target);
 
-    void registerIllustrator(BuilderRef b, llvm::Value * kernelName, llvm::Value *streamName, llvm::Value * handle) const;
+    void registerIllustrator(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Type * type, const MemoryOrdering ordering) const;
 
 protected:
 
-    void captureBitstream(BuilderRef b, llvm::Value * kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value * strideNum, llvm::Type * type, llvm::Value * bitstream, llvm::Value * from, llvm::Value * to, llvm::Value *zeroCh, llvm::Value *oneCh) const;
+    void captureBitstream(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value *handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * bitstream, llvm::Value * from, llvm::Value * to, llvm::Value *zeroCh, llvm::Value *oneCh) const;
 
-    void captureBixNum(BuilderRef b, llvm::Value *kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type *type, llvm::Value * bixnum, llvm::Value *from, llvm::Value *to, llvm::Value *hexBase) const;
+    void captureBixNum(BuilderRef b, llvm::Constant *kernelName, llvm::Constant *streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * bixnum, llvm::Value *from, llvm::Value *to, llvm::Value *hexBase) const;
 
-    void captureByteData(BuilderRef b, llvm::Value *kernelName, llvm::Value * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type *type, llvm::Value * byteData, llvm::Value *from, llvm::Value *to, llvm::Value *nonASCIIsubstitute) const;
+    void captureByteData(BuilderRef b, llvm::Constant *kernelName, llvm::Constant * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * byteData, llvm::Value *from, llvm::Value *to, llvm::Value *nonASCIIsubstitute) const;
 
 
 protected:

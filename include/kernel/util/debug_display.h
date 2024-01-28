@@ -121,48 +121,4 @@ private:
     unsigned mMaxStreamNameSize;
 };
 
-/* Helper classes for ParabixIllustrator. */
-
-class CaptureBlock : public kernel::BlockOrientedKernel {
-public:
-    CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream);
-protected:
-    void generateDoBlockMethod(BuilderRef b) override;
-    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingByte) override;
-};
-
-class BitstreamIllustrator : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
-public:
-    BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh = '.', char oneCh = '1');
-protected:
-    void generatePabloMethod() override;
-
-private:
-    char mZeroCh;
-    char mOneCh;
-};
-
-class PrintableASCII : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
-public:
-    PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute = '.');
-protected:
-    void generatePabloMethod() override;
-
-private:
-    char mNonASCIIsubstitute;
-};
-
-class PrintableBixNum : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
-public:
-    PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printable, char hexBase = 'A');
-protected:
-    void generatePabloMethod() override;
-
-private:
-    char mHexBase;
-};
-
 } // namespace kernel

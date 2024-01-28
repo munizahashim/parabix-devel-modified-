@@ -222,6 +222,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkHistogramFunctions(b);
         PipelineCompiler::linkDynamicThreadingReport(b);
     }
+    Kernel::linkExternalMethods(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -582,6 +583,11 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         params.push_back(input.getType());
     }
 
+    Function * createIllustrator = nullptr;
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        createIllustrator = b->LinkFunction("__createParabixIllustrator", FunctionType::get(b->getVoidPtrTy(), false), (void*)&createParabixIllustrator);
+    }
+
     const auto linkageType = (method == AddInternal) ? Function::InternalLinkage : Function::ExternalLinkage;
 
     SmallVector<char, 256> tmp;
@@ -711,6 +717,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                     break;
                 case C::DynamicMultithreadingRemoveSynchronizationThreshold:
                     value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingRemoveThreshold); // %
+                    break;
+                case C::ParabixIllustratorObject:
+                    assert (createIllustrator);
+                    value = b->CreateCall(createIllustrator->getFunctionType(), createIllustrator);
                     break;
                 #ifdef ENABLE_PAPI
                 case C::PAPIEventSet:

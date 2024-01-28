@@ -1,7 +1,7 @@
 # Copyright (c) 2019 International Characters.
 # This software is licensed to the public under the Open Software License 3.0.
 
-# module: kerenl.core
+# module: kernel.core
 
 parabix_add_module(
 NAME    
@@ -22,4 +22,5 @@ SRC
     streamset.cpp
 DEPS
     idisa
+    kernel.illustrator
 )

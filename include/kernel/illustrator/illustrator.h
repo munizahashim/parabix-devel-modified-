@@ -1,43 +1,40 @@
 #ifndef ILLUSTRATOR_H
 #define ILLUSTRATOR_H
 
-#include <kernel/core/kernel.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <stdlib.h>
 
 namespace kernel {
 
-class ParabixIllustrator {
-    using ProgramBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
-public:
-    ParabixIllustrator(unsigned displayWidth) :  mDisplayWidth(displayWidth), mMaxStreamNameSize(0) {}
+class ParabixIllustrator;
 
-    //
-    void registerIllustrator(const void * stateObject, const char * displayName);
-
-
-    void captureByteData(ProgramBuilderRef P, std::string streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
-    void captureBitstream(ProgramBuilderRef P, std::string streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
-    void captureBixNum(ProgramBuilderRef P, std::string streamName, StreamSet * bixnum, char hexBase = 'A');
-
-    void appendStreamText(unsigned streamNo, std::string streamText);
-    void displayAllCapturedData();
-
-protected:
-    unsigned addStream(std::string streamName);
-
-private:
-    Scalar * mIllustrator;
-    std::vector<std::string> mStreamNames;
-    std::vector<std::string> mStreamData;
-    unsigned mDisplayWidth;
-    unsigned mMaxStreamNameSize;
-};
+extern "C"
+ParabixIllustrator * createParabixIllustrator();
 
 // Each kernel can verify that the display Name of every illustrated value is locally unique but since multiple instances
 // of a kernel can be instantiated, we also need the address of the state object to identify each value. Additionally, the
 // presence of family kernels means we cannot guarantee that all kernels will be compiled at the same time so we cannot
 // number the illustrated values at compile time.
-void registerIllustrator(ParabixIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject);
+extern "C"
+void illustratorRegisterCapturedData(ParabixIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject);
+
+
+extern "C"
+void illustratorCaptureBitstream(ParabixIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
+                                 const size_t strideNum, const void * bitstream, const size_t from, const size_t to, const char zeroCh, const char oneCh);
+
+
+extern "C"
+void illustratorCaptureBixNum(ParabixIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
+                              const size_t strideNum, const void * bitstream, const size_t from, const size_t to, const char hexBase);
+extern "C"
+void illustratorCaptureByteData(ParabixIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
+                                const size_t strideNum, const void * bitstream, const size_t from, const size_t to, const char nonASCIIsubstitute);
+
+extern "C"
+void illustratorDisplayCapturedData(const ParabixIllustrator * illustrator);
+
+extern "C"
+void destroyParabixIllustrator(ParabixIllustrator *);
 
 }
 

@@ -246,28 +246,27 @@ public:
     std::string getKernelName() const noexcept final;
 
     enum class MemoryOrdering {
-        None
-        , ColumMajor
+        ColumnMajor
         , RowMajor
     };
 
-    void captureByteData(llvm::StringRef streamName, llvm::Value * byteData, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char nonASCIIsubstitute = '.') {
+    void captureByteData(llvm::StringRef streamName, llvm::Value * byteData, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char nonASCIIsubstitute = '.') {
         return captureByteData(streamName, byteData->getType(), byteData, from, to, ordering, nonASCIIsubstitute);
     }
 
-    void captureByteData(llvm::StringRef streamName, llvm::Type * type, llvm::Value * byteData, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char nonASCIIsubstitute = '.');
+    void captureByteData(llvm::StringRef streamName, llvm::Type * type, llvm::Value * byteData, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char nonASCIIsubstitute = '.');
 
-    void captureBitstream(llvm::StringRef streamName, llvm::Value * bitstream, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char zeroCh = '.', const char oneCh = '1') {
+    void captureBitstream(llvm::StringRef streamName, llvm::Value * bitstream, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char zeroCh = '.', const char oneCh = '1') {
         return captureBitstream(streamName, bitstream->getType(), bitstream, from, to, ordering, zeroCh, oneCh);
     }
 
-    void captureBitstream(llvm::StringRef streamName, llvm::Type * type, llvm::Value * bitstream, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char zeroCh = '.', const char oneCh = '1');
+    void captureBitstream(llvm::StringRef streamName, llvm::Type * type, llvm::Value * bitstream, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char zeroCh = '.', const char oneCh = '1');
 
-    void captureBixNum(llvm::StringRef streamName, llvm::Value * bixnum, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char hexBase = 'A') {
+    void captureBixNum(llvm::StringRef streamName, llvm::Value * bixnum, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char hexBase = 'A') {
         captureBixNum(streamName, bixnum->getType(), bixnum, from, to, ordering, hexBase);
     }
 
-    void captureBixNum(llvm::StringRef streamName, llvm::Type * type, llvm::Value * bixnum, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumMajor, const char hexBase = 'A');
+    void captureBixNum(llvm::StringRef streamName, llvm::Type * type, llvm::Value * bixnum, llvm::Value * from = nullptr, llvm::Value * to = nullptr, const MemoryOrdering ordering = MemoryOrdering::ColumnMajor, const char hexBase = 'A');
 
 
 private:

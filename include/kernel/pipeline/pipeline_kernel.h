@@ -83,7 +83,7 @@ public:
 
     using CallBindings = std::vector<CallBinding>;
 
-    using IllustratorBindings = std::vector<std::pair<IllustratorBinding, StreamSet *>>;
+    using IllustratorBindings = std::vector<IllustratorBinding>;
 
     using LengthAssertion = std::array<const StreamSet *, 2>;
 
@@ -206,7 +206,9 @@ protected:
 
     ParamMap::PairEntry createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const size_t maxStrideLength) const;
 
-    const IllustratorBindings & getIllustratorBindings() const;
+    const IllustratorBindings & getIllustratorBindings() const {
+        return mIllustratorBindings;
+    }
 
 protected:
 

@@ -405,6 +405,7 @@ add_subdirectory(lib/kernel/scan)
 add_subdirectory(lib/kernel/streamutils)
 add_subdirectory(lib/kernel/unicode)
 add_subdirectory(lib/kernel/util)
+add_subdirectory(lib/kernel/illustrator)
 
 # Executables
 if (GENERATE_TOOLS)

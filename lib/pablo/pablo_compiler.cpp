@@ -733,13 +733,13 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
             Value * const op = compileExpression(b, stmt->getOperand(0));
             switch (il->getIllustratorType()) {
                 case Illustrate::IllustratorTypeId::Bitstream:
-                    b->captureBitstream(il->getName(), op, il->getReplacementCharacter(0), il->getReplacementCharacter(1));
+                    b->captureBitstream(il->getName(), op, nullptr, nullptr, MemoryOrdering::ColumnMajor, il->getReplacementCharacter(0), il->getReplacementCharacter(1));
                     break;
                 case Illustrate::IllustratorTypeId::BixNum:
-                    b->captureBixNum(il->getName(), op, il->getReplacementCharacter(0));
+                    b->captureBixNum(il->getName(), op, nullptr, nullptr, MemoryOrdering::ColumnMajor, il->getReplacementCharacter(0));
                     break;
                 case Illustrate::IllustratorTypeId::ByteStream:
-                    b->captureByteData(il->getName(), op, il->getReplacementCharacter(0));
+                    b->captureByteData(il->getName(), op, nullptr, nullptr, MemoryOrdering::ColumnMajor, il->getReplacementCharacter(0));
                     break;
             }
         } else if (const IntrinsicCall * const call = dyn_cast<IntrinsicCall>(stmt)) {

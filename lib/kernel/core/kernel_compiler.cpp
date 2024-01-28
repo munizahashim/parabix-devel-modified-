@@ -607,6 +607,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         }
         mWritableOutputItems[i] = writable;
     }
+
     assert (arg == args.end());
 
     // initialize the termination signal if this kernel can set it
@@ -1495,7 +1496,7 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::registerIllustrator(BuilderRef b, Value * kernelName, Value * streamName, Value * handle) const {
+void KernelCompiler::registerIllustrator(BuilderRef b, Constant * kernelName, Constant * streamName, Type * type, const MemoryOrdering ordering) const {
     auto init = mTarget->getInitializeFunction(b);
     assert (init);
     auto arg = init->arg_begin();
@@ -1525,46 +1526,103 @@ void KernelCompiler::registerIllustrator(BuilderRef b, Value * kernelName, Value
     }
     assert (illustratorObject && "no illustrator object found?");
 
+    size_t A = 1;
+    Type  * innerTy = type;
+    if (LLVM_LIKELY(isa<ArrayType>(type))) {
+        ArrayType * outerTy = cast<ArrayType>(type);
+        A = outerTy->getArrayNumElements();
+        innerTy = outerTy->getArrayElementType();
+    }
+    DataLayout DL(b->getModule());
+    const auto B = b->getTypeSize(DL, innerTy);
+
     Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
-    FixedArray<Value *, 4> args;
+    FixedArray<Value *, 7> args;
     args[0] = illustratorObject;
     args[1] = kernelName;
     args[2] = streamName;
     args[3] = handle;
+    args[4] = b->getInt8((unsigned)ordering);
+    args[5] = b->getSize(A);
+    args[6] = b->getSize(B);
+
     CallInst::Create(regFunc->getFunctionType(), regFunc, args, "", ret);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief captureBitstream
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::captureBitstream(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+void KernelCompiler::captureBitstream(BuilderRef b, Constant * kernelName, Constant * streamName, Value * handle,
                                       Value * strideNum,
-                                      Type * type,
+                                      Type * type, const MemoryOrdering ordering,
                                       Value * bitstream, Value * from, Value * to,
                                       Value * zeroCh, Value * oneCh)  const {
-    registerIllustrator(b, kernelName, streamName, handle);
 
+    registerIllustrator(b, kernelName, streamName, type, ordering);
+
+    FixedArray<Value *, 10> args;
+    args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+    args[1] = kernelName;
+    args[2] = streamName;
+    args[3] = handle;
+    args[4] = strideNum;
+    args[5] = bitstream;
+    args[6] = from;
+    args[7] = to;
+    args[8] = zeroCh;
+    args[9] = oneCh;
+
+    Function * func = b->getModule()->getFunction(KERNEL_CAPTURE_BITSTREAM_ILLUSTRATOR_CALLBACK); assert (func);
+    b->CreateCall(func->getFunctionType(), func, args);
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief captureBixNum
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::captureBixNum(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+void KernelCompiler::captureBixNum(BuilderRef b, Constant * kernelName, Constant * streamName, Value * handle,
                                    Value * strideNum,
-                                   Type * type,
+                                   Type * type, const MemoryOrdering ordering,
                                    Value * bixnum, Value * from, Value * to, Value * hexBase) const {
-    registerIllustrator(b, kernelName, streamName, handle);
+    registerIllustrator(b, kernelName, streamName, type, ordering);
+
+    FixedArray<Value *, 9> args;
+    args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+    args[1] = kernelName;
+    args[2] = streamName;
+    args[3] = handle;
+    args[4] = strideNum;
+    args[5] = bixnum;
+    args[6] = from;
+    args[7] = to;
+    args[8] = hexBase;
+
+    Function * func = b->getModule()->getFunction(KERNEL_CAPTURE_BIXNUM_ILLUSTRATOR_CALLBACK); assert (func);
+    b->CreateCall(func->getFunctionType(), func, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief captureByteData
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::captureByteData(BuilderRef b, Value * kernelName, Value * streamName, Value * handle,
+void KernelCompiler::captureByteData(BuilderRef b, Constant * kernelName, Constant * streamName, Value * handle,
                                      Value * strideNum,
-                                     Type * type,
-                                     llvm::Value * byteData, Value * from, Value * to, Value * nonASCIIsubstitute) const {
-    registerIllustrator(b, kernelName, streamName, handle);
+                                     Type * type, const MemoryOrdering ordering,
+                                     Value * byteData, Value * from, Value * to, Value * nonASCIIsubstitute) const {
+    registerIllustrator(b, kernelName, streamName, type, ordering);
+
+    FixedArray<Value *, 9> args;
+    args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+    args[1] = kernelName;
+    args[2] = streamName;
+    args[3] = handle;
+    args[4] = strideNum;
+    args[5] = byteData;
+    args[6] = from;
+    args[7] = to;
+    args[8] = nonASCIIsubstitute;
+
+    Function * func = b->getModule()->getFunction(KERNEL_CAPTURE_BYTEDATA_ILLUSTRATOR_CALLBACK); assert (func);
+    b->CreateCall(func->getFunctionType(), func, args);
 }
 
 

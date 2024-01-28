@@ -3,9 +3,6 @@
 
 # module: kernel.pipeline
 
-if (ROOT_FOUND)
-    set(CERN_ROOT_LIB kernel.pipeline.cernroot)
-endif()
 if (ENABLE_PAPI)
     set(PAPI_CPP compiler/statistics/papi_instrumentation_logic.cpp)
 endif()
@@ -65,5 +62,4 @@ SRC
     pipeline_kernel.cpp
 DEPS
     objcache
-    ${CERN_ROOT_LIB}
 )

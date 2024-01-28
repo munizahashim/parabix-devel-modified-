@@ -28,7 +28,7 @@ public:
     using Kernel = kernel::Kernel;
     using Relationship = kernel::Relationship;
     using Bindings = kernel::Bindings;
-    using BuilderRef = Kernel::BuilderRef;
+    using BuilderRef = kernel::Kernel::BuilderRef;
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
@@ -81,10 +81,6 @@ public:
         mPreservesKernels = value;
     }
 
-    kernel::ParabixIllustrator * getIllustrator() const final {
-        return mIllustrator.get();
-    }
-
 protected:
 
     BaseDriver(std::string && moduleName);
@@ -100,7 +96,6 @@ protected:
     llvm::Module * const                                    mMainModule;
     std::unique_ptr<kernel::KernelBuilder>                  mBuilder;
     std::unique_ptr<ParabixObjectCache>                     mObjectCache;
-    std::unique_ptr<kernel::ParabixIllustrator>             mIllustrator;
 
     bool                                                    mPreservesKernels = false;
     KernelSet                                               mUncachedKernel;

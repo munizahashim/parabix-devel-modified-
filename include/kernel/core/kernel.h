@@ -15,10 +15,12 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Support/Compiler.h>
+#include <kernel/illustrator/illustrator.h>
 #include <codegen/FunctionTypeBuilder.h>
 #include <memory>
 #include <string>
 #include <vector>
+
 
 namespace llvm { class IndirectBrInst; }
 namespace llvm { class PHINode; }
@@ -32,9 +34,13 @@ class KernelCompiler;
 class BlockKernelCompiler;
 class StreamSetBuffer;
 class StreamSet;
+class ParabixIllustrator;
 
 constexpr static auto KERNEL_ILLUSTRATOR_CALLBACK_OBJECT = "__illustrator";
 constexpr static auto KERNEL_REGISTER_ILLUSTRATOR_CALLBACK = "__illustrator_register";
+constexpr static auto KERNEL_CAPTURE_BITSTREAM_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bitstream";
+constexpr static auto KERNEL_CAPTURE_BIXNUM_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bixnum";
+constexpr static auto KERNEL_CAPTURE_BYTEDATA_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bytedata";
 constexpr static auto KERNEL_ILLUSTRATOR_STRIDE_NUM = "__illustrator_sn";
 
 class Kernel : public AttributeSet {
@@ -545,7 +551,7 @@ protected:
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
 
-    static std::string annotateKernelNameWithDebugFlags(BuilderRef & b, TypeId id, std::string && name);
+    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
 
 protected:
 
@@ -555,7 +561,6 @@ protected:
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
     bool                        mGenerated = false;
-    bool                        mUsesIllustrator = false;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;

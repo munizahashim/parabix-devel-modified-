@@ -6,6 +6,8 @@
 
 namespace kernel {
 
+class StreamSet;
+
 enum class IllustratorTypeId : unsigned {
     None
     , Bitstream
@@ -16,7 +18,14 @@ enum class IllustratorTypeId : unsigned {
 struct IllustratorBinding {
     const IllustratorTypeId IllustratorType;
     std::string Name;
+    StreamSet * StreamSet;
     const std::array<char, 2> ReplacementCharacter;
+
+    IllustratorBinding(IllustratorTypeId type, std::string name, kernel::StreamSet * streamSet, char rep0 = '\0', char rep1 = '\0')
+    : IllustratorType(type), Name(std::move(name)), StreamSet(streamSet), ReplacementCharacter({rep0, rep1}) {
+
+    }
+
 };
 
 }

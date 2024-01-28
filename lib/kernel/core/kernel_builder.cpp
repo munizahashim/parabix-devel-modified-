@@ -608,7 +608,7 @@ KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Type * type,
         size_t rowCount = 1;
         assert (type->canLosslesslyBitCastTo(value->getType()));
         if (isa<ArrayType>(type)) {
-            if (ordering == MemoryOrdering::ColumMajor) {
+            if (ordering == MemoryOrdering::ColumnMajor) {
                 ArrayType * colTy = cast<ArrayType>(type);
                 Type * rowTy = colTy->getArrayElementType();
                 if (isa<ArrayType>(rowTy)) {
@@ -630,7 +630,7 @@ KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Type * type,
             assert (rowCount > 0);
         }
 
-        const auto a = getTypeSize(DL, vecTy) * rowCount * 8;
+        const auto a = getTypeSize(DL, vecTy) * 8;
         Type * elemTy = vecTy;
         if (LLVM_LIKELY(isa<VectorType>(vecTy))) {
             elemTy = cast<VectorType>(vecTy)->getElementType();
@@ -650,13 +650,13 @@ KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Type * type,
             av.From = CreateURemRational(from, R);
             av.To = CreateAdd(CreateSub(to, from), av.From);
             if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-                CreateAssert(CreateICmpULT(av.To, getSize(R.numerator())), "from/to distance exceeds value size");
+                CreateAssert(CreateICmpULT(av.To, getSize(R.numerator() * rowCount)), "from/to distance exceeds value size");
             }
         } else if (from || to) {
             report_fatal_error("capture functions require either both or neither of the from/to positions to be set");
         } else {
             av.From = getSize(0);
-            av.To = getSize(R.numerator());
+            av.To = getSize(R.numerator() * rowCount);
         }
         av.Address = CreateAllocaAtEntryPoint(type);
         CreateStore(value, av.Address);
@@ -675,7 +675,7 @@ void KernelBuilder::captureByteData(StringRef streamName, Type * type, Value * b
         std::unique_ptr<KernelBuilder> tmp(this);
         mCompiler->captureByteData(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
                                    getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                   type, av.Address, av.From, av.To, getInt8(nonASCIIsubstitute));
+                                   type, ordering, av.Address, av.From, av.To, getInt8(nonASCIIsubstitute));
         tmp.release();
     }
 }
@@ -699,7 +699,7 @@ void KernelBuilder::captureBitstream(StringRef streamName, Type * type, Value * 
         std::unique_ptr<KernelBuilder> tmp(this);
         mCompiler->captureBitstream(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
                                     getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                    type, av.Address, av.From, av.To, getInt8(zeroCh), getInt8(oneCh));
+                                    type, ordering, av.Address, av.From, av.To, getInt8(zeroCh), getInt8(oneCh));
         tmp.release();
     }
 }
@@ -713,7 +713,7 @@ void KernelBuilder::captureBixNum(StringRef streamName, Type * type, Value * bix
         std::unique_ptr<KernelBuilder> tmp(this);
         mCompiler->captureBixNum(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
                                  getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                 type, av.Address, av.From, av.To, getInt8(hexBase));
+                                 type, ordering, av.Address, av.From, av.To, getInt8(hexBase));
         tmp.release();
     }
 }

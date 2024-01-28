@@ -91,6 +91,9 @@ PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * cons
     return pk;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief CreateRepeatingBixNum
+ ** ------------------------------------------------------------------------------------------------------------- */
 StreamSet * PipelineBuilder::CreateRepeatingBixNum(unsigned bixNumBits, pattern_t nums, bool isDynamic) {
     std::vector<std::vector<uint64_t>> templatePattern;
     templatePattern.resize(bixNumBits);
@@ -103,6 +106,27 @@ StreamSet * PipelineBuilder::CreateRepeatingBixNum(unsigned bixNumBits, pattern_
         }
     }
     return CreateRepeatingStreamSet(1, templatePattern, isDynamic);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBitstream
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineBuilder::captureBitstream(llvm::StringRef streamName, StreamSet * bitstream, char zeroCh, char oneCh) {
+    mTarget->mIllustratorBindings.emplace_back(IllustratorTypeId::Bitstream, streamName.str(), bitstream, zeroCh, oneCh);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureBixNum
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineBuilder::captureBixNum(llvm::StringRef streamName, StreamSet * bixnum, char hexBase) {
+    mTarget->mIllustratorBindings.emplace_back(IllustratorTypeId::BixNum, streamName.str(), bixnum, hexBase);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureByteData
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineBuilder::captureByteData(llvm::StringRef streamName, StreamSet * byteData, char nonASCIIsubstitute) {
+    mTarget->mIllustratorBindings.emplace_back(IllustratorTypeId::ByteStream, streamName.str(), byteData, nonASCIIsubstitute);
 }
 
 using Kernels = PipelineBuilder::Kernels;
@@ -184,7 +208,6 @@ Kernel * ProgramBuilder::makeKernel() {
     } else {
         ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
     }
-
     return PipelineBuilder::makeKernel();
 
 }
