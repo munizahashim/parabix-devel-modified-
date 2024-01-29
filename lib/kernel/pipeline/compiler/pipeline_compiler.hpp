@@ -548,6 +548,7 @@ public:
 
 // streamset illustration function
 
+    void registerStreamSetIllustrator(BuilderRef b, const size_t streamSet) const;
     void illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const;
 
 // dynamic multithreading functions

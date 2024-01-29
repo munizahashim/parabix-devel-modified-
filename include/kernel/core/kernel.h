@@ -38,9 +38,7 @@ class ParabixIllustrator;
 
 constexpr static auto KERNEL_ILLUSTRATOR_CALLBACK_OBJECT = "__illustrator";
 constexpr static auto KERNEL_REGISTER_ILLUSTRATOR_CALLBACK = "__illustrator_register";
-constexpr static auto KERNEL_CAPTURE_BITSTREAM_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bitstream";
-constexpr static auto KERNEL_CAPTURE_BIXNUM_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bixnum";
-constexpr static auto KERNEL_CAPTURE_BYTEDATA_ILLUSTRATOR_CALLBACK = "__illustrator_capture_bytedata";
+constexpr static auto KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK = "__illustrator_capture";
 constexpr static auto KERNEL_ILLUSTRATOR_STRIDE_NUM = "__illustrator_sn";
 
 class Kernel : public AttributeSet {

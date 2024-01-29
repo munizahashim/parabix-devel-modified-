@@ -8,11 +8,11 @@ namespace kernel {
 
 class StreamSet;
 
-enum class IllustratorTypeId : unsigned {
+enum class IllustratorTypeId : uint8_t {
     None
     , Bitstream
     , BixNum
-    , ByteStream
+    , ByteData
 };
 
 struct IllustratorBinding {

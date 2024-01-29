@@ -302,6 +302,15 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
             }
         }
 
+        if (LLVM_UNLIKELY(mUsesIllustrator)) {
+            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+                const BufferPort & br = mBufferGraph[e];
+                if (LLVM_UNLIKELY(br.isIllustrated())) {
+                    registerStreamSetIllustrator(b, target(e, mBufferGraph));
+                }
+            }
+        }
+
         // Is this the last kernel in a partition? If so, store the accumulated
         // termination signal.
         if (terminated && HasTerminationSignal[mKernelId]) {
@@ -309,8 +318,10 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
             writeTerminationSignal(b, mKernelId, signal);
             terminated = nullptr;
         }
-
     }
+
+
+
     if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
         initDynamicThreadingReportProperties(b);
     }

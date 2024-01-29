@@ -666,23 +666,6 @@ KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Type * type,
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief captureByteData
- ** ------------------------------------------------------------------------------------------------------------- */
-void KernelBuilder::captureByteData(StringRef streamName, Type * type, Value * byteData,  Value * from, Value * to, const MemoryOrdering ordering, const char nonASCIIsubstitute) {
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        const auto av = makeAddressableValue(type, byteData, from, to, ordering);
-        // to capture this value, we want to automatically register it in the init phase
-        std::unique_ptr<KernelBuilder> tmp(this);
-        mCompiler->captureByteData(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
-                                   getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                   type, ordering, av.Address, av.From, av.To, getInt8(nonASCIIsubstitute));
-        tmp.release();
-    }
-}
-
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief captureBitstream
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::captureBitstream(StringRef streamName, Type * type, Value * bitstream, Value * from, Value * to, const MemoryOrdering ordering, const char zeroCh, const char oneCh) {
@@ -694,12 +677,19 @@ void KernelBuilder::captureBitstream(StringRef streamName, Type * type, Value * 
 
         // Moreover, it would be difficult to display said iterated values logically without assuming a format.
 
-        const auto av = makeAddressableValue(type, bitstream, from, to, ordering);
+        Constant * kernelName = GetString(mCompiler->getName());
+        Constant * dataName = GetString(streamName);
 
         std::unique_ptr<KernelBuilder> tmp(this);
-        mCompiler->captureBitstream(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
-                                    getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                    type, ordering, av.Address, av.From, av.To, getInt8(zeroCh), getInt8(oneCh));
+        mCompiler->registerIllustrator(tmp, kernelName, dataName,
+                                       type, ordering,
+                                       IllustratorTypeId::Bitstream, zeroCh, oneCh);
+
+        const auto av = makeAddressableValue(type, bitstream, from, to, ordering);
+
+        mCompiler->captureStreamData(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
+                                     getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                     type, ordering, av.Address, av.From, av.To);
         tmp.release();
     }
 }
@@ -709,14 +699,47 @@ void KernelBuilder::captureBitstream(StringRef streamName, Type * type, Value * 
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::captureBixNum(StringRef streamName, Type * type, Value * bixnum, Value * from, Value * to, const MemoryOrdering ordering, const char hexBase) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        const auto av = makeAddressableValue(type, bixnum, from, to, ordering);
+        Constant * kernelName = GetString(mCompiler->getName());
+        Constant * dataName = GetString(streamName);
+
         std::unique_ptr<KernelBuilder> tmp(this);
-        mCompiler->captureBixNum(tmp, GetString(mCompiler->getName()), GetString(streamName), getHandle(),
-                                 getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
-                                 type, ordering, av.Address, av.From, av.To, getInt8(hexBase));
+        mCompiler->registerIllustrator(tmp, kernelName, dataName,
+                                       type, ordering,
+                                       IllustratorTypeId::BixNum, hexBase, '\0');
+
+        const auto av = makeAddressableValue(type, bixnum, from, to, ordering);
+
+        mCompiler->captureStreamData(tmp, kernelName, dataName, getHandle(),
+                                     getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                     type, ordering, av.Address, av.From, av.To);
         tmp.release();
     }
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief captureByteData
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelBuilder::captureByteData(StringRef streamName, Type * type, Value * byteData,  Value * from, Value * to, const MemoryOrdering ordering, const char nonASCIIsubstitute) {
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        // to capture this value, we want to automatically register it in the init phase
+        std::unique_ptr<KernelBuilder> tmp(this);
+
+        Constant * kernelName = GetString(mCompiler->getName());
+        Constant * dataName = GetString(streamName);
+
+        mCompiler->registerIllustrator(tmp, kernelName, dataName,
+                                       type, ordering,
+                                       IllustratorTypeId::ByteData, nonASCIIsubstitute, 0);
+
+        const auto av = makeAddressableValue(type, byteData, from, to, ordering);
+        mCompiler->captureStreamData(tmp, kernelName, dataName, getHandle(),
+                                    getScalarField(KERNEL_ILLUSTRATOR_STRIDE_NUM),
+                                    type, ordering, av.Address, av.From, av.To);
+        tmp.release();
+    }
+}
+
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelName

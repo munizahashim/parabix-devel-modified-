@@ -864,6 +864,9 @@ void PipelineAnalysis::identifyIllustratedStreamSets() {
 
     if (LLVM_UNLIKELY(illustratorBindings.empty())) return;
 
+    // TODO: we need to move this up in the analysis phase and mark kernels with illustrated bindings as implicitly
+    // side effecting. Otherwise we may end up not reporting streamsets that the user expects.
+
     flat_set<Relationship *> M;
     M.reserve(illustratorBindings.size());
     for (const auto & p : illustratorBindings) {
@@ -873,7 +876,8 @@ void PipelineAnalysis::identifyIllustratedStreamSets() {
         const auto & node = mStreamGraph[streamSet];
         assert (node.Type == RelationshipNode::IsStreamSet);
         if (LLVM_UNLIKELY(M.count(node.Relationship))) {
-            auto & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+            const auto output = in_edge(streamSet, mBufferGraph);
+            auto & bp = mBufferGraph[output];
             bp.Flags |= BufferPortType::Illustrated;
         }
     }

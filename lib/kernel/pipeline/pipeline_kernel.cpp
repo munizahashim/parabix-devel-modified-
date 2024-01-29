@@ -584,8 +584,16 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     }
 
     Function * createIllustrator = nullptr;
+    Function * displayCapturedData = nullptr;
+    Function * destroyIllustrator = nullptr;
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        createIllustrator = b->LinkFunction("__createParabixIllustrator", FunctionType::get(b->getVoidPtrTy(), false), (void*)&createParabixIllustrator);
+        PointerType * voidPtrTy = b->getVoidPtrTy();
+        createIllustrator = b->LinkFunction("__createStreamDataxIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
+        FixedArray<Type *, 1> args;
+        args[0] = voidPtrTy;
+        FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
+        displayCapturedData = b->LinkFunction("__displayCapturedData", funTy, (void*)&illustratorDisplayCapturedData);
+        destroyIllustrator = b->LinkFunction("__destroyStreamDataIllustrator", funTy, (void*)&destroyStreamDataIllustrator);
     }
 
     const auto linkageType = (method == AddInternal) ? Function::InternalLinkage : Function::ExternalLinkage;
@@ -697,6 +705,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     }
     #endif
 
+    Value * illustratorObj = nullptr;
+
     for (const auto & input : getInputScalarBindings()) {
         const auto scalar = input.getRelationship(); assert (scalar);
         Value * value = nullptr;
@@ -720,7 +730,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                     break;
                 case C::ParabixIllustratorObject:
                     assert (createIllustrator);
-                    value = b->CreateCall(createIllustrator->getFunctionType(), createIllustrator);
+                    assert (illustratorObj == nullptr);
+                    illustratorObj = b->CreateCall(createIllustrator->getFunctionType(), createIllustrator);
+                    value = illustratorObj;
                     break;
                 #ifdef ENABLE_PAPI
                 case C::PAPIEventSet:
@@ -819,6 +831,12 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         successPhi->addIncoming(b->getFalse(), afterCatch);
     } else {
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
+    }
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        FixedArray<Value *, 1> args;
+        args[0] = illustratorObj;
+        b->CreateCall(displayCapturedData->getFunctionType(), displayCapturedData, args);
+        b->CreateCall(destroyIllustrator->getFunctionType(), displayCapturedData, args);
     }
     SmallVector<Value *, 3> finalizeArgs;
     if (LLVM_LIKELY(isStateful())) {

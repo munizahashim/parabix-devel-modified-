@@ -49,6 +49,7 @@ SRC
     compiler/codegen/pipeline_optimization_logic.cpp
     compiler/codegen/repeatingstreamset_logic.cpp
     compiler/codegen/scalar_logic.cpp
+    compiler/codegen/streamdata_illustrator_logic.cpp
     compiler/codegen/synchronization_logic.cpp
     compiler/codegen/termination_logic.cpp
     compiler/internal/popcount_kernel.cpp
@@ -62,4 +63,5 @@ SRC
     pipeline_kernel.cpp
 DEPS
     objcache
+    kernel.illustrator
 )

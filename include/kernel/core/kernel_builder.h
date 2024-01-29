@@ -245,7 +245,7 @@ public:
 
     std::string getKernelName() const noexcept final;
 
-    enum class MemoryOrdering {
+    enum class MemoryOrdering : uint8_t {
         ColumnMajor
         , RowMajor
     };

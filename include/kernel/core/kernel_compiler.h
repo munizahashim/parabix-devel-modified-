@@ -8,6 +8,7 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Support/Compiler.h>
+#include <kernel/illustrator/illustrator_binding.h>
 
 namespace kernel {
 
@@ -377,16 +378,13 @@ public:
 
     static Rational getLCMOfFixedRateInputs(const Kernel * const target);
 
-    void registerIllustrator(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Type * type, const MemoryOrdering ordering) const;
-
 protected:
 
-    void captureBitstream(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value *handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * bitstream, llvm::Value * from, llvm::Value * to, llvm::Value *zeroCh, llvm::Value *oneCh) const;
+    void registerIllustrator(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Type * type, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1) const;
 
-    void captureBixNum(BuilderRef b, llvm::Constant *kernelName, llvm::Constant *streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * bixnum, llvm::Value *from, llvm::Value *to, llvm::Value *hexBase) const;
+    void registerIllustrator(BuilderRef b, llvm::Value * illustratorObject, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Type * type, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1) const;
 
-    void captureByteData(BuilderRef b, llvm::Constant *kernelName, llvm::Constant * streamName, llvm::Value *handle, llvm::Value *strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * byteData, llvm::Value *from, llvm::Value *to, llvm::Value *nonASCIIsubstitute) const;
-
+    void captureStreamData(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
 
 protected:
 

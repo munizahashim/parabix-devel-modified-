@@ -126,7 +126,7 @@ void PipelineBuilder::captureBixNum(llvm::StringRef streamName, StreamSet * bixn
  * @brief captureByteData
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineBuilder::captureByteData(llvm::StringRef streamName, StreamSet * byteData, char nonASCIIsubstitute) {
-    mTarget->mIllustratorBindings.emplace_back(IllustratorTypeId::ByteStream, streamName.str(), byteData, nonASCIIsubstitute);
+    mTarget->mIllustratorBindings.emplace_back(IllustratorTypeId::ByteData, streamName.str(), byteData, nonASCIIsubstitute);
 }
 
 using Kernels = PipelineBuilder::Kernels;
