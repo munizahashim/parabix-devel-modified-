@@ -53,6 +53,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory Xch_Options("Character transformation Options", "Character transformation Options.");
 static cl::opt<std::string> XfrmProperty(cl::Positional, cl::desc("transformation kind (Unicode property)"), cl::Required, cl::cat(Xch_Options));
+static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(Xch_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(Xch_Options));
 
 #define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
@@ -527,86 +528,148 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    std::vector<UCD::UnicodeSet> & insertion_bixnum = p->GetUTF8insertionBixNum();
-    unsigned bix_bits = insertion_bixnum.size();
+    if (U21) {
+        StreamSet * u8index = P->CreateStreamSet(1, 1);
+        P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+        SHOW_STREAM(u8index);
 
-    StreamSet * SpreadMask = nullptr;
-    if (bix_bits > 0) {
-        std::vector<re::CC *> insertion_ccs;
-        for (auto & b : insertion_bixnum) {
-            insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
-        }
-        StreamSet * InsertBixNum = P->CreateStreamSet(bix_bits);
-        P->CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
-        SHOW_BIXNUM(InsertBixNum);
+        StreamSet * U21_u8indexed = P->CreateStreamSet(21, 1);
+        P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
-        StreamSet * AdjustedBixNum = P->CreateStreamSet(bix_bits);
-        P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
-        SHOW_BIXNUM(AdjustedBixNum);
+        StreamSet * U21 = P->CreateStreamSet(21, 1);
+        FilterByMask(P, u8index, U21_u8indexed, U21);
+        SHOW_BIXNUM(U21);
 
-        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
-        SHOW_STREAM(SpreadMask);
+        StreamSet * u32basis = P->CreateStreamSet(21, 1);
+        P->CreateKernelCall<ApplyTransform>(p, U21, u32basis);
+        SHOW_BIXNUM(u32basis);
 
-        StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
-        SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
-        SHOW_BIXNUM(ExpandedBasis);
-        BasisBits = ExpandedBasis;
+        // Buffers for calculated deposit masks.
+        StreamSet * const u8fieldMask = P->CreateStreamSet();
+        StreamSet * const u8final = P->CreateStreamSet();
+        StreamSet * const u8initial = P->CreateStreamSet();
+        StreamSet * const u8mask12_17 = P->CreateStreamSet();
+        StreamSet * const u8mask6_11 = P->CreateStreamSet();
+
+        // Intermediate buffers for deposited bits
+        StreamSet * const deposit18_20 = P->CreateStreamSet(3);
+        StreamSet * const deposit12_17 = P->CreateStreamSet(6);
+        StreamSet * const deposit6_11 = P->CreateStreamSet(6);
+        StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+
+        // Calculate the u8final deposit mask.
+        StreamSet * const extractionMask = P->CreateStreamSet();
+        P->CreateKernelCall<UTF8fieldDepositMask>(u32basis, u8fieldMask, extractionMask);
+        P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+
+        P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
+        SHOW_STREAM(u8final);
+        SHOW_STREAM(u8initial);
+        SHOW_STREAM(u8mask12_17);
+        SHOW_STREAM(u8mask6_11);
+
+        SpreadByMask(P, u8initial, u32basis, deposit18_20, /* inputOffset = */ 18);
+        SpreadByMask(P, u8mask12_17, u32basis, deposit12_17, /* inputOffset = */ 12);
+        SpreadByMask(P, u8mask6_11, u32basis, deposit6_11, /* inputOffset = */ 6);
+        SpreadByMask(P, u8final, u32basis, deposit0_5, /* inputOffset = */ 0);
+        SHOW_BIXNUM(deposit18_20);
+        SHOW_BIXNUM(deposit12_17);
+        SHOW_BIXNUM(deposit6_11);
+        SHOW_BIXNUM(deposit0_5);
+
+        // Final buffers for computed UTF-8 basis bits and byte stream.
+        StreamSet * const OutputBasis = P->CreateStreamSet(8);
+
+        P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
+                                          u8initial, u8final, u8mask6_11, u8mask12_17,
+                                          OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+
+        StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+        P->CreateKernelCall<StdOutKernel>(OutputBytes);
+
     } else {
-        llvm::errs() << "bit_bits = 0\n";
-    }
+        std::vector<UCD::UnicodeSet> & insertion_bixnum = p->GetUTF8insertionBixNum();
+        unsigned bix_bits = insertion_bixnum.size();
 
-    StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
-    P->CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
-    SHOW_BIXNUM(U8_Positions);
+        StreamSet * SpreadMask = nullptr;
+        if (bix_bits > 0) {
+            std::vector<re::CC *> insertion_ccs;
+            for (auto & b : insertion_bixnum) {
+                insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
+            }
+            StreamSet * InsertBixNum = P->CreateStreamSet(bix_bits);
+            P->CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
+            SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * SelectionMask = nullptr;
-    std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
-    unsigned del_bix_bits = deletion_bixnum.size();
-    if (del_bix_bits > 0) {
-        std::vector<re::CC *> deletion_ccs;
-        for (auto & b : deletion_bixnum) {
-            deletion_ccs.push_back(re::makeCC(b, &cc::Unicode));
+            StreamSet * AdjustedBixNum = P->CreateStreamSet(bix_bits);
+            P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
+            SHOW_BIXNUM(AdjustedBixNum);
+
+            SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
+            SHOW_STREAM(SpreadMask);
+
+            StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
+            SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
+            SHOW_BIXNUM(ExpandedBasis);
+            BasisBits = ExpandedBasis;
+        } else {
+            //llvm::errs() << "bit_bits = 0\n";
         }
 
-        StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
-        P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
-        SHOW_BIXNUM(DeletionBixNum);
+        StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
+        P->CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
+        SHOW_BIXNUM(U8_Positions);
 
-        SelectionMask = P->CreateStreamSet(1);
-        P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
-        SHOW_STREAM(SelectionMask);
-    } else {
-        llvm::errs() << "del_bit_bits = 0\n";
+        StreamSet * SelectionMask = nullptr;
+        std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
+        unsigned del_bix_bits = deletion_bixnum.size();
+        if (del_bix_bits > 0) {
+            std::vector<re::CC *> deletion_ccs;
+            for (auto & b : deletion_bixnum) {
+                deletion_ccs.push_back(re::makeCC(b, &cc::Unicode));
+            }
+
+            StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
+            P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
+            SHOW_BIXNUM(DeletionBixNum);
+
+            SelectionMask = P->CreateStreamSet(1);
+            P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
+            SHOW_STREAM(SelectionMask);
+        } else {
+            //llvm::errs() << "del_bit_bits = 0\n";
+        }
+        StreamSet * TargetClass = P->CreateStreamSet(3, 1);
+        P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
+        SHOW_BIXNUM(TargetClass);
+
+        std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
+        std::vector<re::CC *> xfrm_ccs;
+        for (auto & b : xfrms) {
+            xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
+        }
+        StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
+        P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
+        SHOW_BIXNUM(XfrmBasis);
+
+        StreamSet * Translated = P->CreateStreamSet(8, 1);
+        P->CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
+        SHOW_BIXNUM(Translated);
+
+        if (del_bix_bits > 0) {
+            StreamSet * CompressedBasis = P->CreateStreamSet(8);
+            FilterByMask(P, SelectionMask, Translated, CompressedBasis);
+            SHOW_BIXNUM(CompressedBasis);
+            Translated = CompressedBasis;
+        }
+
+        StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
+        P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
+        P->CreateKernelCall<StdOutKernel>(OutputBytes);
     }
-    StreamSet * TargetClass = P->CreateStreamSet(3, 1);
-    P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
-    SHOW_BIXNUM(TargetClass);
 
-    std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
-    std::vector<re::CC *> xfrm_ccs;
-    for (auto & b : xfrms) {
-        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-    }
-    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
-    SHOW_BIXNUM(XfrmBasis);
-
-    StreamSet * Translated = P->CreateStreamSet(8);
-    P->CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
-    SHOW_BIXNUM(Translated);
-
-    if (del_bix_bits > 0) {
-        StreamSet * CompressedBasis = P->CreateStreamSet(8);
-        FilterByMask(P, SelectionMask, Translated, CompressedBasis);
-        SHOW_BIXNUM(CompressedBasis);
-        Translated = CompressedBasis;
-    }
-
-    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    //SHOW_BYTES(OutputBytes);
-
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 
