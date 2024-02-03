@@ -12,7 +12,7 @@
 #include <unicode/core/unicode_set.h>
 #include <string>
 #include <vector>
-#include <unordered_map>
+#include <unicode/utf/transchar.h>
 
 namespace re { class RE; }
 
@@ -243,11 +243,11 @@ private:
     const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
     const UnicodeSet mSelfCodepointSet;  // codepoints for which the property value is the codepoint itself.
     // Codepoints other than those in these two sets are explicitly represented.
-    const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t> mExplicitCodepointMap;
+    unicode::TranslationMap mExplicitCodepointMap;
     bool u8_movement_initialized;
-    std::vector<UnicodeSet> bit_xform_sets;
-    std::vector<UnicodeSet> u8_insertion_bixnum;
-    std::vector<UnicodeSet> u8_deletion_bixnum;
+    unicode::BitTranslationSets bit_xform_sets;
+    unicode::BitTranslationSets u8_insertion_bixnum;
+    unicode::BitTranslationSets u8_deletion_bixnum;
     void compute_u8_movement();
 };
 
