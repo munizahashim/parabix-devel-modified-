@@ -15,6 +15,7 @@ SRC
     utf16gen.cpp
 DEPS
     kernel.pipeline
+    kernel.streamutils
     re.unicode
     pablo
     pablo.bixnum
