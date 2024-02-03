@@ -10,7 +10,7 @@ using namespace UCD;
 
 namespace unicode {
 
-BitTranslationSets ComputeBitTranslationSets(TranslationMap & map) {
+BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map) {
     BitTranslationSets bit_xform_sets;
     // Otherwise compute and return.
     //
@@ -33,7 +33,7 @@ BitTranslationSets ComputeBitTranslationSets(TranslationMap & map) {
     return bit_xform_sets;
 }
 
-BitTranslationSets ComputeUTF8_insertionBixNum(TranslationMap & map) {
+BitTranslationSets ComputeUTF8_insertionBixNum(const TranslationMap & map) {
     BitTranslationSets u8_insertion_bixnum;
     UTF_Encoder encoder;
     for (auto & p : map) {
@@ -56,7 +56,7 @@ BitTranslationSets ComputeUTF8_insertionBixNum(TranslationMap & map) {
     }
     return u8_insertion_bixnum;
 }
-BitTranslationSets ComputeUTF8_deletionBixNum(TranslationMap & map) {
+BitTranslationSets ComputeUTF8_deletionBixNum(const TranslationMap & map) {
     BitTranslationSets u8_deletion_bixnum;
     UTF_Encoder encoder;
     for (auto & p : map) {

@@ -16,7 +16,7 @@ namespace unicode {
 // and other translations in which source Unicode characters
 // are mapped to target Unicode characters.
 //
-using TranslationMap = const std::unordered_map<UCD::codepoint_t, UCD::codepoint_t>;
+using TranslationMap = std::unordered_map<UCD::codepoint_t, UCD::codepoint_t>;
 
 //
 // Unicode characters translations can be implemented in parallel
@@ -39,7 +39,7 @@ using BitTranslationSets = std::vector<UCD::UnicodeSet>;
 //  between the source and target codepoints in at least one
 //  instance).
 //
-BitTranslationSets ComputeBitTranslationSets(TranslationMap & map);
+BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map);
 //
 //  Unicode character translation may be performed directly on
 //  a UTF-8 basis bit representation, with the possible insertion
@@ -56,7 +56,7 @@ BitTranslationSets ComputeBitTranslationSets(TranslationMap & map);
 //  one position is required.    If a translation requires no
 //  insertions at all, an empty vector is returned.
 //
-BitTranslationSets ComputeUTF8_insertionBixNum(TranslationMap & map);
+BitTranslationSets ComputeUTF8_insertionBixNum(const TranslationMap & map);
 //
 //  Compute the UTF-8 deletion bixnum, which for each codepoint
 //  cp is either 00, 01, 10, or 11 indicating that the trans[cp]
@@ -67,6 +67,6 @@ BitTranslationSets ComputeUTF8_insertionBixNum(TranslationMap & map);
 //  one position is required.    If a translation requires no
 //  deletions at all, an empty vector is returned.
 //
-BitTranslationSets ComputeUTF8_deletionBixNum(TranslationMap & map);
+BitTranslationSets ComputeUTF8_deletionBixNum(const TranslationMap & map);
 }
 
