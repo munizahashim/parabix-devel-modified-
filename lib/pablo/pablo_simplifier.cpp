@@ -207,7 +207,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
 
         if (LLVM_UNLIKELY(isa<Assign>(stmt))) {
 
-            if (isRedundantAssign(cast<Assign>(stmt), variables)) {
+            if (evaluateAssign(cast<Assign>(stmt), variables)) {
                 stmt = stmt->eraseFromParent();
                 continue;
             }
@@ -623,23 +623,38 @@ static Assign * getSafePostDominatingAssignment(const Var * const var, Statement
 #endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isRedundantAssign
+ * @brief evaluateAssign
  ** ------------------------------------------------------------------------------------------------------------- */
-static bool isRedundantAssign(Assign * const assign, VariableTable & variables) {
+static bool evaluateAssign(Assign * const assign, VariableTable & variables) {
     Var * const var = assign->getVariable();
     PabloAST * const prior = variables.get(var);
-    PabloAST * value = assign->getValue();
-    while (LLVM_UNLIKELY(isa<Var>(value))) {
-        if (LLVM_UNLIKELY(var == value || prior == value)) {
-            return true;
-        }
-        PabloAST * const next = variables.get(cast<Var>(value));
-        if (LLVM_LIKELY(next == nullptr || next == value)) {
-            break;
-        }
-        value = next;
-        assign->setValue(value);
+    PabloAST * const value = assign->getValue();
+
+    if (LLVM_UNLIKELY(var == value || prior == value)) {
+        return true;
     }
+
+    PabloBlock * scope = assign->getParent();
+    PabloKernel * kernel = scope->getParent();
+    SmallVector<Var *, 4> toCopy;
+    const auto n = kernel->getNumOfVariables();
+    for (size_t i = 0; i != n; ++i) {
+        Var * other = kernel->getVariable(i); assert (other);
+        PabloAST * otherVal = variables.get(other);
+        if (otherVal == var) {
+            toCopy.push_back(other);
+        }
+    }
+    if (toCopy.size() > 0) {
+        scope->setInsertPoint(assign->getPrevNode());
+        Var * newVar = scope->createVar(var->getName().str() + "'");
+        scope->createAssign(newVar, var);
+        variables.put(newVar, newVar);
+        for (Var * other : toCopy) {
+            variables.put(other, newVar);
+        }
+    }
+
     variables.put(var, value);
     return false;
 }
