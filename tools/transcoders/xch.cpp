@@ -43,6 +43,8 @@
 #include <unicode/data/PropertyObjects.h>
 #include <unicode/data/PropertyObjectTable.h>
 #include <unicode/utf/utf_compiler.h>
+#include <unicode/utf/transchar.h>
+#include <codecvt>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -52,7 +54,9 @@ using namespace pablo;
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory Xch_Options("Character transformation Options", "Character transformation Options.");
-static cl::opt<std::string> XfrmProperty(cl::Positional, cl::desc("transformation kind (Unicode property)"), cl::Required, cl::cat(Xch_Options));
+static cl::opt<std::string> SrcChars("src", cl::desc("input characters to translate"), cl::cat(Xch_Options), cl::init(""));
+static cl::opt<std::string> TgtChars("tgt", cl::desc("target characters to be generated"), cl::cat(Xch_Options), cl::init(""));
+static cl::opt<std::string> XfrmProperty("prop", cl::desc("transformation kind (Unicode property)"), cl::cat(Xch_Options), cl::init(""));
 static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(Xch_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(Xch_Options));
 
@@ -446,50 +450,31 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
 class ApplyTransform : public pablo::PabloKernel {
 public:
     ApplyTransform(BuilderRef b,
-                   UCD::CodePointPropertyObject * p,
-                   StreamSet * Basis, StreamSet * Output);
+                   StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
-private:
-    UCD::CodePointPropertyObject * mPropertyObject;
 };
 
 ApplyTransform::ApplyTransform (BuilderRef b,
-                                UCD::CodePointPropertyObject * p,
-                                StreamSet * Basis, StreamSet * Output)
-: PabloKernel(b, getPropertyEnumName(p->getPropertyCode()) + "_transformer_" + std::to_string(Basis->getNumElements()) + "x1",
+                                StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
+: PabloKernel(b, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
 // inputs
-{Binding{"basis", Basis}},
+{Binding{"basis", Basis},
+ Binding{"xfrms", Xfrms}
+},
 // output
-{Binding{"output_basis", Output}}),
-    mPropertyObject(p) {
+{Binding{"output_basis", Output}}) {
 }
 
 void ApplyTransform::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    //const UCD::UnicodeSet & nullSet = mPropertyObject->GetNullSet();
-    std::vector<UCD::UnicodeSet> & xfrms = mPropertyObject->GetBitTransformSets();
-    std::vector<re::CC *> xfrm_ccs;
-    for (auto & b : xfrms) {
-        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-    }
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-    std::vector<Var *> xfrm_vars;
-    for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
-        xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
-        unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
-    }
-    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
     std::vector<PabloAST *> transformed(basis.size());
     Var * const out = getOutputStreamVar("output_basis");
     for (unsigned i = 0; i < basis.size(); i++) {
-        if (i < xfrm_vars.size()) {
-            transformed[i] = pb.createXor(xfrm_vars[i], basis[i]);
+        if (i < xfrms.size()) {
+            transformed[i] = pb.createXor(xfrms[i], basis[i]);
         } else {
             transformed[i] = basis[i];
         }
@@ -499,14 +484,14 @@ void ApplyTransform::generatePabloMethod() {
 
 typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
-XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
-                                  UCD::CodePointPropertyObject * p,
-                                  ParabixIllustrator & illustrator) {
+XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
+                                      unicode::BitTranslationSets tr,
+                                      ParabixIllustrator & illustrator) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                    Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+        Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     //   If the --illustrator-width= parameter is specified, bitstream
@@ -528,148 +513,142 @@ XfrmFunctionType generatePipeline(CPUDriver & pxDriver,
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    if (U21) {
-        StreamSet * u8index = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
-        SHOW_STREAM(u8index);
+    StreamSet * u8index = P->CreateStreamSet(1, 1);
+    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
 
-        StreamSet * U21_u8indexed = P->CreateStreamSet(21, 1);
-        P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+    StreamSet * U21_u8indexed = P->CreateStreamSet(21, 1);
+    P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
-        StreamSet * U21 = P->CreateStreamSet(21, 1);
-        FilterByMask(P, u8index, U21_u8indexed, U21);
-        SHOW_BIXNUM(U21);
+    StreamSet * U21 = P->CreateStreamSet(21, 1);
+    FilterByMask(P, u8index, U21_u8indexed, U21);
+    SHOW_BIXNUM(U21);
 
-        StreamSet * u32basis = P->CreateStreamSet(21, 1);
-        P->CreateKernelCall<ApplyTransform>(p, U21, u32basis);
-        SHOW_BIXNUM(u32basis);
+    std::vector<re::CC *> xfrm_ccs;
+    for (auto & b : tr) {
+        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
+    }
+    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
+    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, U21, XfrmBasis);
+    SHOW_BIXNUM(XfrmBasis);
 
-        // Buffers for calculated deposit masks.
-        StreamSet * const u8fieldMask = P->CreateStreamSet();
-        StreamSet * const u8final = P->CreateStreamSet();
-        StreamSet * const u8initial = P->CreateStreamSet();
-        StreamSet * const u8mask12_17 = P->CreateStreamSet();
-        StreamSet * const u8mask6_11 = P->CreateStreamSet();
+    StreamSet * u32basis = P->CreateStreamSet(21, 1);
+    P->CreateKernelCall<ApplyTransform>(U21, XfrmBasis, u32basis);
+    SHOW_BIXNUM(u32basis);
 
-        // Intermediate buffers for deposited bits
-        StreamSet * const deposit18_20 = P->CreateStreamSet(3);
-        StreamSet * const deposit12_17 = P->CreateStreamSet(6);
-        StreamSet * const deposit6_11 = P->CreateStreamSet(6);
-        StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+    StreamSet * const OutputBasis = P->CreateStreamSet(8);
+    U21_to_UTF8(P, u32basis, OutputBasis);
 
-        // Calculate the u8final deposit mask.
-        StreamSet * const extractionMask = P->CreateStreamSet();
-        P->CreateKernelCall<UTF8fieldDepositMask>(u32basis, u8fieldMask, extractionMask);
-        P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+    SHOW_BIXNUM(OutputBasis);
 
-        P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
-        SHOW_STREAM(u8final);
-        SHOW_STREAM(u8initial);
-        SHOW_STREAM(u8mask12_17);
-        SHOW_STREAM(u8mask6_11);
+    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    return reinterpret_cast<XfrmFunctionType>(P->compile());
+}
 
-        SpreadByMask(P, u8initial, u32basis, deposit18_20, /* inputOffset = */ 18);
-        SpreadByMask(P, u8mask12_17, u32basis, deposit12_17, /* inputOffset = */ 12);
-        SpreadByMask(P, u8mask6_11, u32basis, deposit6_11, /* inputOffset = */ 6);
-        SpreadByMask(P, u8final, u32basis, deposit0_5, /* inputOffset = */ 0);
-        SHOW_BIXNUM(deposit18_20);
-        SHOW_BIXNUM(deposit12_17);
-        SHOW_BIXNUM(deposit6_11);
-        SHOW_BIXNUM(deposit0_5);
+XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
+                                       unicode::BitTranslationSets tr,
+                                       unicode::BitTranslationSets ins_bixnum,
+                                       unicode::BitTranslationSets del_bixnum,
+                                       ParabixIllustrator & illustrator) {
+    // A Parabix program is build as a set of kernel calls called a pipeline.
+    // A pipeline is construction using a Parabix driver object.
+    auto & b = pxDriver.getBuilder();
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
+        Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+    //  The program will use a file descriptor as an input.
+    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    //   If the --illustrator-width= parameter is specified, bitstream
+    //   data is to be displayed.
+    Scalar * illustratorAddr = nullptr;
+    if (codegen::IllustratorDisplay > 0) {
+        illustratorAddr = P->getInputScalar("illustratorAddr");
+        illustrator.registerIllustrator(illustratorAddr);
+    }
+    // File data from mmap
+    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  from a file descriptor.
+    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
 
-        // Final buffers for computed UTF-8 basis bits and byte stream.
-        StreamSet * const OutputBasis = P->CreateStreamSet(8);
+    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
+    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
 
-        P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
-                                          u8initial, u8final, u8mask6_11, u8mask12_17,
-                                          OutputBasis);
-        SHOW_BIXNUM(OutputBasis);
+    unsigned bix_bits = ins_bixnum.size();
 
-        StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-        P->CreateKernelCall<StdOutKernel>(OutputBytes);
-
-    } else {
-        std::vector<UCD::UnicodeSet> & insertion_bixnum = p->GetUTF8insertionBixNum();
-        unsigned bix_bits = insertion_bixnum.size();
-
-        StreamSet * SpreadMask = nullptr;
-        if (bix_bits > 0) {
-            std::vector<re::CC *> insertion_ccs;
-            for (auto & b : insertion_bixnum) {
-                insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
-            }
-            StreamSet * InsertBixNum = P->CreateStreamSet(bix_bits);
-            P->CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
-            SHOW_BIXNUM(InsertBixNum);
-
-            StreamSet * AdjustedBixNum = P->CreateStreamSet(bix_bits);
-            P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
-            SHOW_BIXNUM(AdjustedBixNum);
-
-            SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
-            SHOW_STREAM(SpreadMask);
-
-            StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
-            SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
-            SHOW_BIXNUM(ExpandedBasis);
-            BasisBits = ExpandedBasis;
-        } else {
-            //llvm::errs() << "bit_bits = 0\n";
+    StreamSet * SpreadMask = nullptr;
+    if (bix_bits > 0) {
+        std::vector<re::CC *> insertion_ccs;
+        for (auto & b : ins_bixnum) {
+            insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
         }
+        StreamSet * InsertBixNum = P->CreateStreamSet(bix_bits);
+        P->CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
+        SHOW_BIXNUM(InsertBixNum);
 
-        StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
-        P->CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
-        SHOW_BIXNUM(U8_Positions);
+        StreamSet * AdjustedBixNum = P->CreateStreamSet(bix_bits);
+        P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
+        SHOW_BIXNUM(AdjustedBixNum);
 
-        StreamSet * SelectionMask = nullptr;
-        std::vector<UCD::UnicodeSet> & deletion_bixnum = p->GetUTF8deletionBixNum();
-        unsigned del_bix_bits = deletion_bixnum.size();
-        if (del_bix_bits > 0) {
-            std::vector<re::CC *> deletion_ccs;
-            for (auto & b : deletion_bixnum) {
-                deletion_ccs.push_back(re::makeCC(b, &cc::Unicode));
-            }
+        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
+        SHOW_STREAM(SpreadMask);
 
-            StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
-            P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
-            SHOW_BIXNUM(DeletionBixNum);
-
-            SelectionMask = P->CreateStreamSet(1);
-            P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
-            SHOW_STREAM(SelectionMask);
-        } else {
-            //llvm::errs() << "del_bit_bits = 0\n";
-        }
-        StreamSet * TargetClass = P->CreateStreamSet(3, 1);
-        P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
-        SHOW_BIXNUM(TargetClass);
-
-        std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
-        std::vector<re::CC *> xfrm_ccs;
-        for (auto & b : xfrms) {
-            xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-        }
-        StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
-        P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
-        SHOW_BIXNUM(XfrmBasis);
-
-        StreamSet * Translated = P->CreateStreamSet(8, 1);
-        P->CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
-        SHOW_BIXNUM(Translated);
-
-        if (del_bix_bits > 0) {
-            StreamSet * CompressedBasis = P->CreateStreamSet(8);
-            FilterByMask(P, SelectionMask, Translated, CompressedBasis);
-            SHOW_BIXNUM(CompressedBasis);
-            Translated = CompressedBasis;
-        }
-
-        StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-        P->CreateKernelCall<StdOutKernel>(OutputBytes);
+        StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
+        SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
+        SHOW_BIXNUM(ExpandedBasis);
+        BasisBits = ExpandedBasis;
     }
 
+    StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
+    P->CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
+    SHOW_BIXNUM(U8_Positions);
+
+    StreamSet * SelectionMask = nullptr;
+    unsigned del_bix_bits = del_bixnum.size();
+    if (del_bix_bits > 0) {
+        std::vector<re::CC *> deletion_ccs;
+        for (auto & b : del_bixnum) {
+            deletion_ccs.push_back(re::makeCC(b, &cc::Unicode));
+        }
+
+        StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
+        P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
+        SHOW_BIXNUM(DeletionBixNum);
+
+        SelectionMask = P->CreateStreamSet(1);
+        P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
+        SHOW_STREAM(SelectionMask);
+    }
+    StreamSet * TargetClass = P->CreateStreamSet(3, 1);
+    P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
+    SHOW_BIXNUM(TargetClass);
+
+    std::vector<re::CC *> xfrm_ccs;
+    for (auto & b : tr) {
+        xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
+    }
+    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
+    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
+    SHOW_BIXNUM(XfrmBasis);
+
+    StreamSet * Translated = P->CreateStreamSet(8, 1);
+    P->CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
+    SHOW_BIXNUM(Translated);
+
+    if (del_bix_bits > 0) {
+        StreamSet * CompressedBasis = P->CreateStreamSet(8);
+        FilterByMask(P, SelectionMask, Translated, CompressedBasis);
+        SHOW_BIXNUM(CompressedBasis);
+        Translated = CompressedBasis;
+    }
+
+    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
+    P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 
@@ -679,28 +658,55 @@ int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     ParabixIllustrator illustrator(codegen::IllustratorDisplay);
 
-    UCD::property_t prop = UCD::getPropertyCode(XfrmProperty);
-    UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
-    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
-        CPUDriver driver("xfrm_function");
-        //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-        XfrmFunctionType fn = generatePipeline(driver, p, illustrator);
-        //  The compile function "fn"  can now be used.   It takes a file
-        //  descriptor as an input, which is specified by the filename given by
-        //  the inputFile command line option.]
-
-        const int fd = open(inputFile.c_str(), O_RDONLY);
-        if (LLVM_UNLIKELY(fd == -1)) {
-            llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-        } else {
-            fn(fd, &illustrator);
-            close(fd);
-            if (codegen::IllustratorDisplay > 0) {
-                illustrator.displayAllCapturedData();
+    unicode::BitTranslationSets xfrms;
+    unicode::BitTranslationSets insertion_bixnum;
+    unicode::BitTranslationSets deletion_bixnum;
+    if (XfrmProperty != "") {
+        UCD::property_t prop = UCD::getPropertyCode(XfrmProperty);
+        UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
+        if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
+            xfrms = p->GetBitTransformSets();
+            if (!U21) {
+                insertion_bixnum = p->GetUTF8insertionBixNum();
+                deletion_bixnum = p->GetUTF8deletionBixNum();
+            }
+        }
+    } else if (SrcChars != "" && TgtChars != "") {
+        unicode::TranslationMap charmap;
+        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+        std::u32string src = conv.from_bytes(SrcChars);
+        std::u32string tgt = conv.from_bytes(TgtChars);
+        for (unsigned i = 0; i < src.size(); i++) {
+            if (i < tgt.size()) {
+                charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[i]));
+            } else {
+                charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[tgt.size()-1]));
+            }
+            xfrms = unicode::ComputeBitTranslationSets(charmap);
+            if (!U21) {
+                insertion_bixnum = unicode::ComputeUTF8_insertionBixNum(charmap);
+                deletion_bixnum = unicode::ComputeUTF8_deletionBixNum(charmap);
             }
         }
     } else {
-        llvm::report_fatal_error("Expecting codepoint property");
+        llvm::report_fatal_error("Need either a codepoint property (prop=...) or a source-target (src=..., tgt=...) mapping.");
+    }
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+    }
+    CPUDriver driver("xfrm_function");
+    //  Build and compile the Parabix pipeline by calling the Pipeline function above.
+    XfrmFunctionType fn;
+    if (U21) {
+        fn = generateU21_pipeline(driver, xfrms, illustrator);
+    } else {
+        fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum, illustrator);
+    }
+    fn(fd, &illustrator);
+    close(fd);
+    if (codegen::IllustratorDisplay > 0) {
+        illustrator.displayAllCapturedData();
     }
     return 0;
 }

@@ -16,7 +16,6 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_encoder.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/Twine.h>
 #include <util/aligned_allocator.h>
@@ -412,61 +411,14 @@ const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const 
 std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
     // Return the previously computed vector of bit transformation sets, if it exists.
     if (bit_xform_sets.empty()) {
-        // Otherwise compute and return.
-        //
-        // Basis set i is the set of all codepoints whose numerical enumeration code e
-        // has bit i set, i.e., (e >> i) & 1 == 1.
-        for (auto & p : mExplicitCodepointMap) {
-            codepoint_t bit_diff = p.second ^ p.first;
-            unsigned bit = 0;
-            while (bit_diff > 0) {
-                if ((bit_diff & 1UL) == 1UL) {
-                    while (bit_xform_sets.size() <= bit) {
-                        bit_xform_sets.push_back(UnicodeSet());
-                    }
-                    bit_xform_sets[bit].insert(p.first);
-                }
-                bit_diff >>= 1;
-                bit++;
-            }
-        }
+        bit_xform_sets = unicode::ComputeBitTranslationSets(mExplicitCodepointMap);
     }
     return bit_xform_sets;
 }
 
 void CodePointPropertyObject::compute_u8_movement() {
-    UTF_Encoder encoder;
-    for (auto & p : mExplicitCodepointMap) {
-        unsigned l1 = encoder.encoded_length(p.first);
-        unsigned l2 = encoder.encoded_length(p.second);
-        if (l2 > l1) {
-            unsigned bit = 0;
-            unsigned diff = l2 - l1;
-            while (diff > 0) {
-                if ((diff & 1UL) == 1UL) {
-                    while (u8_insertion_bixnum.size() <= bit) {
-                        u8_insertion_bixnum.push_back(UnicodeSet());
-                    }
-                    u8_insertion_bixnum[bit].insert(p.first);
-                }
-                diff >>= 1;
-                bit++;
-            }
-        } else if (l1 > l2) {
-            unsigned bit = 0;
-            unsigned diff = l1 - l2;
-            while (diff > 0) {
-                if ((diff & 1UL) == 1UL) {
-                    while (u8_deletion_bixnum.size() <= bit) {
-                        u8_deletion_bixnum.push_back(UnicodeSet());
-                    }
-                    u8_deletion_bixnum[bit].insert(p.first);
-                }
-                diff >>= 1;
-                bit++;
-            }
-        }
-    }
+    u8_insertion_bixnum = unicode::ComputeUTF8_insertionBixNum(mExplicitCodepointMap);
+    u8_deletion_bixnum = unicode::ComputeUTF8_deletionBixNum(mExplicitCodepointMap);
     u8_movement_initialized = true;
 }
 
