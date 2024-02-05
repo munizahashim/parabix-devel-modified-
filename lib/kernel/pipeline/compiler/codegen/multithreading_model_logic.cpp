@@ -1017,15 +1017,40 @@ Value * PipelineCompiler::isProcessThread(BuilderRef b, StructType * const threa
  * @brief linkPThreadLibrary
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::linkPThreadLibrary(BuilderRef b) {
-    b->LinkFunction("pthread_self", pthread_self);
-   // b->LinkFunction("pthread_setaffinity_np", pthread_setaffinity_np);
-    b->LinkFunction("pthread_create", pthread_create);
-    b->LinkFunction("pthread_join", pthread_join);
-    // pthread_exit seems difficult to resolve in MacOS? manually doing it here but should be looked into
+
+    Type * const voidPtrTy = b->getVoidPtrTy();
+    IntegerType * const intTy = IntegerType::getIntNTy(b->getContext(), sizeof(int) * CHAR_BIT);
+    IntegerType * const pthreadTy = IntegerType::getIntNTy(b->getContext(), sizeof(pthread_t) * CHAR_BIT);
+
+    BEGIN_SCOPED_REGION
+    FunctionType * funTy = FunctionType::get(pthreadTy, false);
+    b->LinkFunction("pthread_self", funTy, (void*)&pthread_self);
+    END_SCOPED_REGION
+
+    BEGIN_SCOPED_REGION
+    FixedArray<Type *, 4> params;
+    params[0] = pthreadTy->getPointerTo();
+    params[1] = voidPtrTy;
+    params[2] = voidPtrTy;
+    params[3] = voidPtrTy;
+    FunctionType * funTy = FunctionType::get(intTy, params, false);
+    b->LinkFunction("pthread_create", funTy, (void*)&pthread_create);
+    END_SCOPED_REGION
+
+    BEGIN_SCOPED_REGION
+    FixedArray<Type *, 2> params;
+    params[0] = pthreadTy;
+    params[1] = voidPtrTy->getPointerTo();
+    FunctionType * funTy = FunctionType::get(intTy, params, false);
+    b->LinkFunction("pthread_join", funTy, (void*)&pthread_join);
+    END_SCOPED_REGION
+
+    BEGIN_SCOPED_REGION
     FixedArray<Type *, 1> pthreadExitArgs;
-    pthreadExitArgs[0] = b->getVoidPtrTy();
+    pthreadExitArgs[0] = voidPtrTy;
     FunctionType * pthreadExitFnTy = FunctionType::get(b->getVoidTy(), pthreadExitArgs, false);
     b->LinkFunction("pthread_exit", pthreadExitFnTy, (void*)pthread_exit); // ->addAttribute(0, llvm::Attribute::AttrKind::NoReturn);
+    END_SCOPED_REGION
 }
 
 
