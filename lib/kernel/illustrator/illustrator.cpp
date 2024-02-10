@@ -169,7 +169,7 @@ inline void doStreamDataCapture(const char * kernelName, const char * streamName
         std::memcpy(E.Data, start, length);
     } else {
         // each "block" of streamData will contain blockWidth items, regardless of the item width.
-        const size_t blockSize = group.Rows * group.Cols * group.ItemWidth * blockWidth / CHAR_BIT;
+        const size_t blockSize = (group.Rows * group.Cols * group.ItemWidth * blockWidth) / CHAR_BIT;
         const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
         const auto end = (from & (blockWidth - 1)) + (to - from);
         const auto length = ceil_udiv(end, blockWidth) * blockSize;
@@ -382,7 +382,7 @@ next_entry:
 
     for (;;) {
 
-        bool noneFound = true;
+        bool noRowCompletelyFilled = true;
         for (size_t groupNum = 0; groupNum < n; ++groupNum) {
 
             auto & R = record[groupNum];
@@ -393,12 +393,12 @@ next_entry:
 
             assert (G.Ordering == MemoryOrdering::RowMajor);
 
-            size_t scale = G.ItemWidth;
-            if (G.IllustratorType == IllustratorTypeId::ByteData) {
-                scale /= CHAR_BIT;
-            }
+            size_t scale = 1; // G.ItemWidth;
+//            if (G.IllustratorType == IllustratorTypeId::ByteData) {
+//                scale /= CHAR_BIT;
+//            }
 
-            const auto rowSize = G.Cols * blockWidth * scale;
+            const auto rowSize = G.Cols * (blockWidth * G.ItemWidth) / CHAR_BIT;
 
             const auto chunkSize = G.Rows * rowSize;
 
@@ -436,11 +436,13 @@ get_more_data:
 
                 // each chunk is aligned in blockWidth x itemWidth bits
 
-                const uint8_t * blockData = E->Data + ((position / chunkSize) * chunkSize);
+                assert (E->From <= position);
 
+                const auto pos = position - E->From;
 
+                const uint8_t * blockData = E->Data + ((pos / blockWidth) * chunkSize);
 
-                const size_t readStart = (position & (blockWidth - 1));
+                const size_t readStart = (pos & (blockWidth - 1));
                 const size_t writeStart = (position % charsPerRow);
                 const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
                 const auto to = (E->To * scale);
@@ -551,12 +553,12 @@ get_more_data:
                 }
 
                 position += length;
-                noneFound = false;
                 end = (writeStart + length);
                 assert (end == (position - startPosition));
                 if (end < charsPerRow) {
                     goto get_more_data;
                 }
+                noRowCompletelyFilled = false;
             }
 
             assert (end <= charsPerRow);
@@ -572,7 +574,7 @@ get_more_data:
             }
         }
 
-        if (noneFound) {
+        if (noRowCompletelyFilled) {
             break;
         }
 
