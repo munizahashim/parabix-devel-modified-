@@ -294,7 +294,7 @@ void Kernel::linkExternalMethods(BuilderRef b) {
         END_SCOPED_REGION
 
         BEGIN_SCOPED_REGION
-        FixedArray<Type *, 8> params;
+        FixedArray<Type *, 9> params;
         params[0] = voidPtrTy;
         params[1] = int8PtrTy;
         params[2] = int8PtrTy;
@@ -303,6 +303,7 @@ void Kernel::linkExternalMethods(BuilderRef b) {
         params[5] = voidPtrTy;
         params[6] = sizeTy;
         params[7] = sizeTy;
+        params[8] = sizeTy;
         FunctionType * func = FunctionType::get(voidTy, params, false);
         driver.addLinkFunction(m, KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK, func, (void*)&illustratorCaptureStreamData);
         END_SCOPED_REGION

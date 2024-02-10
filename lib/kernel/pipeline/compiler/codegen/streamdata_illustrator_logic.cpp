@@ -29,7 +29,7 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
                                 b->GetString(mKernel->getName()),
                                 b->GetString(bind.Name),
                                 mKernelSharedHandle,
-                                buffer->getType(), MemoryOrdering::ColumnMajor,
+                                ss->getNumElements(), 1, ss->getFieldWidth(), MemoryOrdering::RowMajor,
                                 bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1]);
             return;
         }
@@ -57,19 +57,9 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
 
             const auto & rt = mBufferGraph[in_edge(streamSet, mBufferGraph)];
 
-            Value * baseProduced = nullptr;
-            if (rt.isDeferred()) {
-                baseProduced = mAlreadyProducedDeferredPhi[rt.Port];
-            } else {
-                baseProduced = mAlreadyProducedPhi[rt.Port];
-            }
+            Value * produced = mCurrentProducedItemCountPhi[rt.Port];
 
-            Value * const vba = getVirtualBaseAddress(b, rt, bn, baseProduced, bn.isNonThreadLocal(), true);
-
-            ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
-            Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
-            Value * const blockIndex = b->CreateLShr(initial, LOG_2_BLOCK_WIDTH);
-            Value * const addr = tmp.getStreamBlockPtr(b, vba, b->getSize(0), blockIndex);
+            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
 
             // TODO: if this kernel is state-free, we need to pass in some other value for the handle.
             // We can easily use kernel # for it here but what if we capture a value in the kernel itself?
@@ -78,10 +68,10 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
             // TODO: should we pass the values of the min repetition vector to better group the output?
 
             // TODO: should buffers have row major streamsets?
-            captureStreamData(b, mCurrentKernelName, b->GetString(bind.Name), mKernelSharedHandle,
+            captureStreamData(b, b->GetString(mKernel->getName()), b->GetString(bind.Name), mKernelSharedHandle,
                               mInternallySynchronizedSubsegmentNumber,
-                              buffer->getType(), MemoryOrdering::ColumnMajor,
-                              addr, initial, current);
+                              buffer->getType(), MemoryOrdering::RowMajor,
+                              vba, initial, current);
             return;
         }
     }

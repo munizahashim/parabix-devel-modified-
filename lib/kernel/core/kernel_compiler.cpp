@@ -1495,7 +1495,7 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::registerIllustrator(BuilderRef b,
                                          llvm::Constant * kernelName, llvm::Constant * streamName,
-                                         llvm::Type * type, const MemoryOrdering ordering,
+                                         const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
                                          IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1) const {
 
     auto init = mTarget->getInitializeFunction(b);
@@ -1533,7 +1533,7 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
 
     b->SetInsertPoint(ret->getPrevNode());
 
-    registerIllustrator(b, illustratorObject, kernelName, streamName, handle, type, ordering, illustratorTypeId, replacement0, replacement1);
+    registerIllustrator(b, illustratorObject, kernelName, streamName, handle, rows, cols, itemWidth, ordering, illustratorTypeId, replacement0, replacement1);
 
     b->restoreIP(ip);
 }
@@ -1545,30 +1545,12 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
 void KernelCompiler::registerIllustrator(BuilderRef b,
                                          Value * illustratorObject,
                                          Constant * kernelName, Constant * streamName, Value * handle,
-                                         Type * type, const MemoryOrdering ordering,
+                                         const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
                                          IllustratorTypeId illustratorTypeId,
                                          const char replacement0, const char replacement1) const {
 
     assert (isFromCurrentFunction(b, illustratorObject));
     assert (isFromCurrentFunction(b, handle));
-
-    size_t A = 1;
-    Type  * innerTy = type;
-    if (LLVM_LIKELY(isa<ArrayType>(type))) {
-        ArrayType * outerTy = cast<ArrayType>(type);
-        A = outerTy->getArrayNumElements();
-        innerTy = outerTy->getArrayElementType();
-    }
-    DataLayout DL(b->getModule());
-    const auto B = b->getTypeSize(DL, innerTy);
-    Type * elemTy = innerTy;
-    if (isa<ArrayType>(elemTy)) {
-        elemTy = elemTy->getArrayElementType();
-    }
-    if (isa<VectorType>(elemTy)) {
-        elemTy = cast<VectorType>(elemTy)->getElementType();
-    }
-    const auto itemWidth = elemTy->getPrimitiveSizeInBits();
 
     Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
     FixedArray<Value *, 11> args;
@@ -1576,8 +1558,8 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
     args[1] = kernelName;
     args[2] = streamName;
     args[3] = handle;
-    args[4] = b->getSize(A);
-    args[5] = b->getSize(B);
+    args[4] = b->getSize(rows);
+    args[5] = b->getSize(cols);
     args[6] = b->getSize(itemWidth);
     args[7] = b->getInt8((unsigned)ordering);
     args[8] = b->getInt8((unsigned)illustratorTypeId);
@@ -1594,7 +1576,7 @@ void KernelCompiler::captureStreamData(BuilderRef b, Constant * kernelName, Cons
                                        Type * type, const MemoryOrdering ordering,
                                        Value * streamData, Value * from, Value * to)  const {
 
-    FixedArray<Value *, 8> args;
+    FixedArray<Value *, 9> args;
     args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
     args[1] = kernelName;
     args[2] = streamName;
@@ -1603,6 +1585,7 @@ void KernelCompiler::captureStreamData(BuilderRef b, Constant * kernelName, Cons
     args[5] = streamData;
     args[6] = from;
     args[7] = to;
+    args[8] = b->getSize(b->getBitBlockWidth());
 
     Function * func = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK); assert (func);
     b->CreateCall(func->getFunctionType(), func, args);

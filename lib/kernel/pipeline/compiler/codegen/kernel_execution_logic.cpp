@@ -40,6 +40,8 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
+        assert (!mUsesIllustrator);
+
         if (mCurrentKernelIsStateFree) {
             updateProcessedAndProducedItemCounts(b);
         }
@@ -267,8 +269,6 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         updateTransferredItemsForHistogramData(b);
     }
 
-    assert (!mUsesIllustrator || mExecuteStridesIndividually);
-
     if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
 
         BasicBlock * const individualStrideBodyExit = b->GetInsertBlock();
@@ -295,6 +295,10 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         if (LLVM_UNLIKELY(mUsesIllustrator)) {
 
+            auto isCountableType = [](const Value * const ptr, const Binding & binding) {
+                return ptr ? isCountable(binding) : false;
+            };
+
             for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
                 const BufferPort & br = mBufferGraph[e];
                 if (LLVM_UNLIKELY(br.isIllustrated())) {
@@ -304,6 +308,14 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
                         initial = mCurrentProducedDeferredItemCountPhi[br.Port];
                         produced = mProducedDeferredItemCount[br.Port];
                     }
+                    // Normally when a kernel terminates early, we just read the values in the termination block. Since we may need that
+                    // value here, however, read it here.
+                    if (mKernelCanTerminateEarly && isCountableType(mReturnedProducedItemCountPtr[br.Port], getOutputBinding(br.Port))) {
+                        Value * finalItemCount = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[br.Port]);
+                        Value * const isFinal = b->CreateICmpNE(mTerminatedExplicitly, b->getSize(0));
+                        produced = b->CreateSelect(isFinal, finalItemCount, produced);
+                    }
+
                     illustrateStreamSet(b, target(e, mBufferGraph), initial, produced);
                 }
             }

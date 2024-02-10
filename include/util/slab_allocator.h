@@ -3,10 +3,10 @@
 
 #include <llvm/Support/Allocator.h>
 
-template <typename T = uint8_t>
+template <typename T = uint8_t, size_t SlabSize = 16 * 1024>
 class SlabAllocator {
     template <typename U> friend class ProxyAllocator;
-    using LLVMAllocator = llvm::BumpPtrAllocatorImpl<llvm::MallocAllocator, 16 * 1024>;
+    using LLVMAllocator = llvm::BumpPtrAllocatorImpl<llvm::MallocAllocator, SlabSize>;
 public:
 
     using value_type = T;
@@ -32,7 +32,16 @@ public:
     }
 
     template<typename Type = T>
-    inline void deallocate(Type * /* p */, size_type /* size */ = 0) noexcept {
+    inline Type * aligned_allocate(const size_type n, const size_t align, const_pointer = nullptr) noexcept {
+        static_assert(sizeof(Type) > 0, "Cannot allocate a zero-length type.");
+        assert ("A memory leak will occur whenever the SlabAllocator allocates 0 items" && n > 0);
+        auto ptr = static_cast<Type *>(mAllocator.Allocate(n * sizeof(Type), align));
+        assert ("allocator returned a null pointer. Function was likely called before Allocator creation!" && ptr);
+        return ptr;
+    }
+
+    template<typename Type = T>
+    inline void deallocate(Type * /*p */, size_type /* size */ = 0) noexcept {
 
     }
 

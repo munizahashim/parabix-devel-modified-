@@ -15,19 +15,20 @@ StreamDataIllustrator * createStreamDataIllustrator();
 // presence of family kernels means we cannot guarantee that all kernels will be compiled at the same time so we cannot
 // number the illustrated values at compile time.
 extern "C"
-void illustratorRegisterCapturedData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject, const size_t dim0, const size_t dim1, const size_t itemWidth,
-                                     const uint8_t memoryOrdering, const uint8_t illustratorTypeId, const char replacement0, const char replacement1);
+void illustratorRegisterCapturedData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
+                                     const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
+                                     const uint8_t illustratorTypeId, const char replacement0, const char replacement1);
 
 
 extern "C"
 void illustratorCaptureStreamData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
-                                 const size_t strideNum, const void * streamData, const size_t from, const size_t to);
+                                 const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth);
 
 extern "C"
-void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator);
+void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator, const size_t blockWidth);
 
 extern "C"
-void destroyStreamDataIllustrator(StreamDataIllustrator *);
+void destroyStreamDataIllustrator(StreamDataIllustrator * illustrator);
 
 }
 

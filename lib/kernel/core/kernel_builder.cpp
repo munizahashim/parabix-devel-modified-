@@ -682,7 +682,7 @@ void KernelBuilder::captureBitstream(StringRef streamName, Type * type, Value * 
 
         std::unique_ptr<KernelBuilder> tmp(this);
         mCompiler->registerIllustrator(tmp, kernelName, dataName,
-                                       type, ordering,
+                                       1, 1, 1, ordering,
                                        IllustratorTypeId::Bitstream, zeroCh, oneCh);
 
         const auto av = makeAddressableValue(type, bitstream, from, to, ordering);
@@ -704,7 +704,7 @@ void KernelBuilder::captureBixNum(StringRef streamName, Type * type, Value * bix
 
         std::unique_ptr<KernelBuilder> tmp(this);
         mCompiler->registerIllustrator(tmp, kernelName, dataName,
-                                       type, ordering,
+                                       1, 1, 1, ordering,
                                        IllustratorTypeId::BixNum, hexBase, '\0');
 
         const auto av = makeAddressableValue(type, bixnum, from, to, ordering);
@@ -728,7 +728,7 @@ void KernelBuilder::captureByteData(StringRef streamName, Type * type, Value * b
         Constant * dataName = GetString(streamName);
 
         mCompiler->registerIllustrator(tmp, kernelName, dataName,
-                                       type, ordering,
+                                       1, 1, 1, ordering,
                                        IllustratorTypeId::ByteData, nonASCIIsubstitute, 0);
 
         const auto av = makeAddressableValue(type, byteData, from, to, ordering);

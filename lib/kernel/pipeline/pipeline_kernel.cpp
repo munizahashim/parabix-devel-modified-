@@ -589,8 +589,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         PointerType * voidPtrTy = b->getVoidPtrTy();
         createIllustrator = b->LinkFunction("__createStreamDataxIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
-        FixedArray<Type *, 1> args;
+        FixedArray<Type *, 2> args;
         args[0] = voidPtrTy;
+        args[1] = b->getSizeTy();
         FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
         displayCapturedData = b->LinkFunction("__displayCapturedData", funTy, (void*)&illustratorDisplayCapturedData);
         destroyIllustrator = b->LinkFunction("__destroyStreamDataIllustrator", funTy, (void*)&destroyStreamDataIllustrator);
@@ -833,10 +834,17 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        BEGIN_SCOPED_REGION
+        FixedArray<Value *, 2> args;
+        args[0] = illustratorObj;
+        args[1] = b->getSize(b->getBitBlockWidth());
+        b->CreateCall(displayCapturedData->getFunctionType(), displayCapturedData, args);
+        END_SCOPED_REGION
+        BEGIN_SCOPED_REGION
         FixedArray<Value *, 1> args;
         args[0] = illustratorObj;
-        b->CreateCall(displayCapturedData->getFunctionType(), displayCapturedData, args);
-        b->CreateCall(destroyIllustrator->getFunctionType(), displayCapturedData, args);
+        b->CreateCall(destroyIllustrator->getFunctionType(), destroyIllustrator, args);
+        END_SCOPED_REGION
     }
     SmallVector<Value *, 3> finalizeArgs;
     if (LLVM_LIKELY(isStateful())) {
