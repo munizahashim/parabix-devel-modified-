@@ -25,6 +25,7 @@
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/core/streamsetptr.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
@@ -58,6 +59,7 @@ static cl::opt<std::string> SrcChars("src", cl::desc("input characters to transl
 static cl::opt<std::string> TgtChars("tgt", cl::desc("target characters to be generated"), cl::cat(Xch_Options), cl::init(""));
 static cl::opt<std::string> XfrmProperty("prop", cl::desc("transformation kind (Unicode property)"), cl::cat(Xch_Options), cl::init(""));
 static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(Xch_Options));
+static cl::opt<bool> Buffering("buf", cl::desc("buffer pipeline output"),  cl::cat(Xch_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(Xch_Options));
 
 #define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
@@ -482,16 +484,21 @@ void ApplyTransform::generatePabloMethod() {
     }
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+//typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+
+typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd, ParabixIllustrator * illustrator);
+
 
 XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
                                       unicode::BitTranslationSets tr,
                                       ParabixIllustrator & illustrator) {
-    // A Parabix program is build as a set of kernel calls called a pipeline.
-    // A pipeline is construction using a Parabix driver object.
+    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-        Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer())},
+                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"},
+                                              Binding{b->getIntAddrTy(), "illustratorAddr"}});
+    //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
+        //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     //   If the --illustrator-width= parameter is specified, bitstream
@@ -541,9 +548,8 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
 
     SHOW_BIXNUM(OutputBasis);
 
-    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    //P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 
@@ -552,11 +558,13 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
                                        unicode::BitTranslationSets ins_bixnum,
                                        unicode::BitTranslationSets del_bixnum,
                                        ParabixIllustrator & illustrator) {
-    // A Parabix program is build as a set of kernel calls called a pipeline.
-    // A pipeline is construction using a Parabix driver object.
+    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-        Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer())},
+                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"},
+                                              Binding{b->getIntAddrTy(), "illustratorAddr"}});
+    //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
+        //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     //   If the --illustrator-width= parameter is specified, bitstream
@@ -646,9 +654,8 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
         Translated = CompressedBasis;
     }
 
-    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    //P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 
@@ -698,12 +705,14 @@ int main(int argc, char *argv[]) {
     CPUDriver driver("xfrm_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
+    StreamSetPtr xlated;
     if (U21) {
         fn = generateU21_pipeline(driver, xfrms, illustrator);
     } else {
         fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum, illustrator);
     }
-    fn(fd, &illustrator);
+    fn(xlated, fd, &illustrator);
+    llvm::errs() << "xlated buffer length: " << xlated.length() << "\n";
     close(fd);
     if (codegen::IllustratorDisplay > 0) {
         illustrator.displayAllCapturedData();
