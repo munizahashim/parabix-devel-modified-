@@ -2,7 +2,6 @@
 
 namespace kernel {
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerStreamSetIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -31,10 +30,8 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
                                 mKernelSharedHandle,
                                 ss->getNumElements(), 1, ss->getFieldWidth(), MemoryOrdering::RowMajor,
                                 bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1]);
-            return;
         }
     }
-    llvm_unreachable("could not find illustrated streamset in binding list?");
 }
 
 
@@ -68,14 +65,15 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
             // TODO: should we pass the values of the min repetition vector to better group the output?
 
             // TODO: should buffers have row major streamsets?
-            captureStreamData(b, b->GetString(mKernel->getName()), b->GetString(bind.Name), mKernelSharedHandle,
+            captureStreamData(b,
+                              b->GetString(mKernel->getName()),
+                              b->GetString(bind.Name),
+                              mKernelSharedHandle,
                               mInternallySynchronizedSubsegmentNumber,
                               buffer->getType(), MemoryOrdering::RowMajor,
                               vba, initial, current);
-            return;
         }
     }
-    llvm_unreachable("could not find illustrated streamset in binding list?");
 }
 
 

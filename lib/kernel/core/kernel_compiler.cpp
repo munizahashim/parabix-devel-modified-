@@ -800,13 +800,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
         }
     }
 
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        Value * ptr; Type * ty;
-        std::tie(ptr, ty) = b->getScalarFieldPtr(KERNEL_ILLUSTRATOR_STRIDE_NUM);
-        Value * val = b->CreateAdd(b->CreateLoad(ty, ptr), b->getSize(1));
-        b->CreateStore(val, ptr);
-    }
-
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {
         assert (isFromCurrentFunction(b, mTerminationSignalPtr, true));
@@ -1509,7 +1502,6 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
     };
     assert (mTarget->isStateful());
     Value * handle = nextArg();
-    assert (isFromCurrentFunction(b, handle));
     Instruction * ret = nullptr;
     for (auto & bb : *init) {
         assert (bb.getTerminator());

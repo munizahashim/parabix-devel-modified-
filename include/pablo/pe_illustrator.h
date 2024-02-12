@@ -10,13 +10,10 @@ namespace pablo {
 class Illustrate final : public Statement {
     friend class PabloBlock;
 public:
-    enum class IllustratorTypeId : unsigned {
-        Bitstream
-        , BixNum
-        , ByteStream
-    };
+    using IllustratorTypeId = kernel::IllustratorTypeId;
+
     static inline bool classof(const PabloAST * e) {
-        return e->getClassTypeId() == ClassTypeId::EveryNth;
+        return e->getClassTypeId() == ClassTypeId::Illustrator;
     }
     static inline bool classof(const void *) {
         return false;
@@ -36,12 +33,11 @@ public:
     }
 
 protected:
-    explicit Illustrate(PabloAST * expr, IllustratorTypeId illustratorType, const char replacement0, const char replacement1, const String * name, Allocator & allocator)
+    explicit Illustrate(IllustratorTypeId illustratorType, const char replacement0, const char replacement1, PabloAST * expr, const String * name, Allocator & allocator)
     : Statement(ClassTypeId::Illustrator, expr->getType(), {expr}, name, allocator)
     , IllustratorType(illustratorType)
-    , ReplacementCharacter({replacement0, replacement1})
-    {
-
+    , ReplacementCharacter({replacement0, replacement1}) {
+        setSideEffecting(true);
     }
 private:
     const IllustratorTypeId IllustratorType;

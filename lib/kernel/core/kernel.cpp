@@ -1466,9 +1466,7 @@ Kernel::Kernel(BuilderRef b,
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
 , mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
-    }
+
 }
 
 Kernel::Kernel(BuilderRef b,
@@ -1485,11 +1483,7 @@ Kernel::Kernel(BuilderRef b,
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars()
 , mKernelName() {
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        // TODO: make stride num a passed in input? we cannot locally determine whether the outer
-        // pipeline skipped calls to this
-        mInternalScalars.emplace_back(InternalScalar{b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM});
-    }
+
 }
 
 Kernel::~Kernel() { }

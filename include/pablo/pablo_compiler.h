@@ -41,6 +41,8 @@ protected:
 
     void initializeKernelData(BuilderRef b);
 
+    void initializeIllustrator(BuilderRef b);
+
     void compile(BuilderRef b);
 
     void releaseKernelData(BuilderRef b);
@@ -48,6 +50,8 @@ protected:
     void clearCarryData(BuilderRef b);
 
 private:
+
+    void compileInitializeIllustratorBlock(BuilderRef b, const PabloBlock * const block);
 
     void examineBlock(BuilderRef b, const PabloBlock * const block);
 
@@ -72,6 +76,7 @@ private:
 private:
 
     PabloKernel * const                 mKernel;
+    llvm::Value *                       mIllustratorStrideNum;
     std::unique_ptr<CarryManager> const mCarryManager;
     TranslationMap                      mMarker;
     unsigned                            mBranchCount;

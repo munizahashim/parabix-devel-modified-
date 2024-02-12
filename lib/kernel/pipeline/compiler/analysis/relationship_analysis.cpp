@@ -4,6 +4,7 @@
 #include "../internal/regionselectionkernel.h"
 #include <boost/graph/topological_sort.hpp>
 #include <llvm/Support/ErrorHandling.h>
+#include <toolchain/toolchain.h>
 
 namespace kernel {
 
@@ -37,6 +38,8 @@ struct TruncatedStreamSetData {
 using TruncatedStreamSetVec = SmallVector<TruncatedStreamSetData, 2>;
 
 using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineScalarType::CommandLineScalarCount>;
+
+using RedundantStreamSetMap = PipelineAnalysis::RedundantStreamSetMap;
 
 //TODO: change enum tag to distinguish relationships and streamsets
 
@@ -642,6 +645,8 @@ void combineDuplicateKernels(BuilderRef /* b */) {
                                 break;
                             }
 
+                            RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
+
                             for (const auto e : make_iterator_range(out_edges(original, G))) {
                                 add_edge(replacement, target(e, G), G[e], G);
                             }
@@ -757,7 +762,8 @@ RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
 , mKernels(P.mKernels)
 , mInternalKernels(P.mInternalKernels)
 , mInternalBindings(P.mInternalBindings)
-, mInternalBuffers(P.mInternalBuffers) {
+, mInternalBuffers(P.mInternalBuffers)
+, RedundantStreamSets(P.RedundantStreamSets) {
     std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
 }
 
@@ -767,6 +773,7 @@ Kernels & mKernels;
 OwningVector<Kernel> &          mInternalKernels;
 OwningVector<Binding> &         mInternalBindings;
 OwningVector<StreamSetBuffer> & mInternalBuffers;
+RedundantStreamSetMap &         RedundantStreamSets;
 CommandLineScalarVec            CommandLineScalars;
 TruncatedStreamSetVec           TruncatedStreamSets;
 };
@@ -853,6 +860,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     // Pipeline optimizations
     B.combineDuplicateKernels(b);
     B.removeUnusedKernels(p_in, p_out);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

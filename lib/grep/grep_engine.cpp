@@ -511,10 +511,12 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         mNullMode = NullCharMode::Break;
     }
     mLineBreakStream = P->CreateStreamSet(1, 1);
+    if (mIllustrator && hasComponent(mExternalComponents, Component::S2P)) {
+        mIllustrator->captureBixNum(P, "basis", SourceStream);
+    }
     if (codegen::EnableIllustrator && hasComponent(mExternalComponents, Component::S2P)) {
         P->captureBixNum("basis", SourceStream);
     }
-    if (mIllustrator && hasComponent(mExternalComponents, Component::S2P)) mIllustrator->captureBixNum(P, "basis", SourceStream);
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
         mU8index = P->CreateStreamSet(1, 1);
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
@@ -590,7 +592,9 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
             if (codegen::EnableIllustrator) {
                 P->captureBixNum(basisName, alphabetBasis);
             }
-            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
+            if (mIllustrator) {
+                mIllustrator->captureBixNum(P, basisName, alphabetBasis);
+            }
             options->addAlphabet(mpx, alphabetBasis);
         } else {
             StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, "basis");
@@ -993,16 +997,15 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
         SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
         if (mIllustrator) mIllustrator->captureBixNum(E, "ExpandedMarks", ExpandedMarks);
         if (codegen::EnableIllustrator) {
-            E->captureBitstream("ExpandedMarks", ExpandedMarks);
+            E->captureBixNum("ExpandedMarks", ExpandedMarks);
         }
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
         if (mIllustrator) mIllustrator->captureBixNum(E, "ColorizedBasis", ColorizedBasis);
         if (codegen::EnableIllustrator) {
-            E->captureBitstream("ColorizedBasis", ColorizedBasis);
+            E->captureBixNum("ColorizedBasis", ColorizedBasis);
         }
-
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
 
@@ -1073,7 +1076,9 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
             E->captureBitstream("Matches", Matches);
         }
         if (mIllustrator) mIllustrator->captureBixNum(E, "Filtered", Filtered);
-
+        if (codegen::EnableIllustrator) {
+            E->captureBixNum("Filtered", Filtered);
+        }
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
 

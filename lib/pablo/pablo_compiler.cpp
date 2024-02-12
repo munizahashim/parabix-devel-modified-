@@ -45,10 +45,12 @@
 #include <tuple>
 
 using namespace llvm;
+using namespace kernel;
 
 namespace pablo {
 
 using TypeId = PabloAST::ClassTypeId;
+using IllustratorTypeId = Illustrate::IllustratorTypeId;
 
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(12, 0, 0)
 using FixedVectorType = llvm::VectorType;
@@ -86,9 +88,49 @@ void PabloCompiler::clearCarryData(BuilderRef b) {
     mCarryManager->clearCarryData(b);
 }
 
+void PabloCompiler::initializeIllustrator(BuilderRef b) {
+    compileInitializeIllustratorBlock(b, mKernel->getEntryScope());
+}
+
+void PabloCompiler::compileInitializeIllustratorBlock(BuilderRef b, const PabloBlock * const block) {
+    for (const Statement * statement : *block) {
+        if (const Illustrate * il = dyn_cast<Illustrate>(statement)) {
+            Constant * kernelName = b->GetString(getName());
+            Constant * streamName = b->GetString(il->getName());
+
+
+            Type * ty = il->getExpr()->getType();
+            size_t rowCount = 1;
+            if (LLVM_LIKELY(isa<ArrayType>(ty))) {
+                rowCount = ty->getArrayNumElements();
+                ty = ty->getArrayElementType();
+            }
+            if (LLVM_LIKELY(isa<VectorType>(ty))) {
+                ty = cast<VectorType>(ty)->getElementType();
+            }
+            const size_t fieldWidth = ty->getPrimitiveSizeInBits();
+            registerIllustrator(b, b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT),
+                                kernelName, streamName, getHandle(),
+                                rowCount, 1, fieldWidth, MemoryOrdering::RowMajor,
+                                il->getIllustratorType(), il->getReplacementCharacter(0), il->getReplacementCharacter(1));
+
+        } else if (isa<Branch>(statement)) {
+            compileInitializeIllustratorBlock(b, cast<Branch>(statement)->getBody());
+        }
+    }
+}
+
+
 void PabloCompiler::compile(BuilderRef b) {
     assert (mCarryManager);
     mCarryManager->initializeCodeGen(b);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        Value * ptr; Type * ty;
+        std::tie(ptr, ty) = b->getScalarFieldPtr(KERNEL_ILLUSTRATOR_STRIDE_NUM);
+        mIllustratorStrideNum = b->CreateLoad(ty, ptr);
+        Value * val = b->CreateAdd(mIllustratorStrideNum, b->getSize(1));
+        b->CreateStore(val, ptr);
+    }
     assert (mKernel);
     PabloBlock * const entryBlock = mKernel->getEntryScope(); assert (entryBlock);
     mMarker.emplace(entryBlock->createZeroes(), b->allZeroes());
@@ -730,18 +772,23 @@ void PabloCompiler::compileStatement(BuilderRef b, const Statement * const stmt)
         } else if (const Illustrate * const il = dyn_cast<Illustrate>(stmt)) {
             // Should we use the name as the streamName? what if this is in a loop?
             // TODO: need to fix pablo printer still
-            Value * const op = compileExpression(b, stmt->getOperand(0));
-            switch (il->getIllustratorType()) {
-                case Illustrate::IllustratorTypeId::Bitstream:
-                    b->captureBitstream(il->getName(), op, nullptr, nullptr, MemoryOrdering::RowMajor, il->getReplacementCharacter(0), il->getReplacementCharacter(1));
-                    break;
-                case Illustrate::IllustratorTypeId::BixNum:
-                    b->captureBixNum(il->getName(), op, nullptr, nullptr, MemoryOrdering::RowMajor, il->getReplacementCharacter(0));
-                    break;
-                case Illustrate::IllustratorTypeId::ByteStream:
-                    b->captureByteData(il->getName(), op, nullptr, nullptr, MemoryOrdering::RowMajor, il->getReplacementCharacter(0));
-                    break;
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                Value * const op = compileExpression(b, stmt->getOperand(0));
+                Constant * const blockWidth = b->getSize(b->getBitBlockWidth());
+                Value * const from = b->CreateMul(mIllustratorStrideNum, blockWidth);
+                Value * const length = b->CreateSub(blockWidth, b->getScalarField("EOFUnnecessaryData"));
+                Value * const to = b->CreateAdd(from, length);
+
+                Constant * kernelName = b->GetString(getName());
+                Constant * streamName = b->GetString(il->getName());
+
+                Value * addr = b->CreateAllocaAtEntryPoint(op->getType());
+                b->CreateStore(op, addr);
+
+                captureStreamData(b, kernelName, streamName, getHandle(),
+                                  mIllustratorStrideNum, op->getType(), MemoryOrdering::RowMajor, addr, from, to);
             }
+            return;
         } else if (const IntrinsicCall * const call = dyn_cast<IntrinsicCall>(stmt)) {
             const auto n = call->getNumOperands();
             SmallVector<Value *, 2> argv;

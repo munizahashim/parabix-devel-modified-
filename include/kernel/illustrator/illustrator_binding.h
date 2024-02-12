@@ -9,8 +9,7 @@ namespace kernel {
 class StreamSet;
 
 enum class IllustratorTypeId : uint8_t {
-    None
-    , Bitstream
+    Bitstream
     , BixNum
     , ByteData
 };

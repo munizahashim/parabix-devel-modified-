@@ -121,7 +121,6 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
 
     StreamDataGroup * newGroup = GroupAllocator.allocate(1);
     newGroup = new (newGroup) StreamDataGroup{rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1};
-
     RegisteredCaptures.emplace(std::make_tuple(kernelName, streamName, stateObject), newGroup);
     InstallOrderCaptures.emplace_back(kernelName, streamName, stateObject, newGroup);
 }
@@ -209,6 +208,8 @@ inline void displayCapturedData(const size_t blockWidth) const {
     };
 
     const auto n = InstallOrderCaptures.size();
+
+    assert (n == RegisteredCaptures.size());
 
     std::vector<StreamNameNode> roots;
 
@@ -298,8 +299,8 @@ updated_trie:
             } else {
                 for (unsigned j = 0; j < bixNumRows; ++j) {
                     const auto a = (j * 4);
-                    const auto b = std::min<size_t>(a + 4, r);
-                    R.SubField[j] = "[" + std::to_string(a) + "-" +  + "]";
+                    const auto b = std::min<size_t>(a + 3, r);
+                    R.SubField[j] = "[" + std::to_string(a) + "-" + std::to_string(b) + "]";
                 }
             }
         } else {
@@ -393,10 +394,10 @@ next_entry:
 
             assert (G.Ordering == MemoryOrdering::RowMajor);
 
-            size_t scale = 1; // G.ItemWidth;
-//            if (G.IllustratorType == IllustratorTypeId::ByteData) {
-//                scale /= CHAR_BIT;
-//            }
+            size_t scale = G.ItemWidth;
+            if (G.IllustratorType == IllustratorTypeId::ByteData) {
+                scale /= CHAR_BIT;
+            }
 
             const auto rowSize = G.Cols * (blockWidth * G.ItemWidth) / CHAR_BIT;
 
@@ -441,7 +442,6 @@ get_more_data:
                 const auto pos = position - E->From;
 
                 const uint8_t * blockData = E->Data + ((pos / blockWidth) * chunkSize);
-
                 const size_t readStart = (pos & (blockWidth - 1));
                 const size_t writeStart = (position % charsPerRow);
                 const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
@@ -524,7 +524,6 @@ get_more_data:
                 } else if (G.IllustratorType == IllustratorTypeId::ByteData) {
 
                     const char nonAsciiRep = G.Replacement0;
-
                     for (size_t j = 0; j < m; ++j) {
 
                         assert (j < FormattedOutput.size());

@@ -12,6 +12,8 @@ public:
 
     using KernelPartitionIds = flat_map<ProgramGraph::vertex_descriptor, unsigned>;
 
+    using RedundantStreamSetMap = flat_map<const StreamSet *, StreamSet *>;
+
     static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
 
         PipelineAnalysis P(pipelineKernel);
@@ -304,6 +306,7 @@ public:
     BufferGraph                     mBufferGraph;
 
     std::vector<unsigned>           PartitionJumpTargetId;
+    RedundantStreamSetMap           RedundantStreamSets;
 
     ConsumerGraph                   mConsumerGraph;
 

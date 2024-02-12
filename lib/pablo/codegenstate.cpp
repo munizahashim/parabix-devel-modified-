@@ -16,6 +16,7 @@
 #include <pablo/pe_count.h>
 #include <pablo/pe_debugprint.h>
 #include <pablo/pe_everynth.h>
+#include <pablo/pe_illustrator.h>
 #include <pablo/pe_infile.h>
 #include <pablo/pe_integer.h>
 #include <pablo/pe_lookahead.h>
@@ -92,6 +93,11 @@ AtEOF * PabloBlock::createAtEOF(PabloAST * expr, const String * const name) {
 TerminateAt * PabloBlock::createTerminateAt(PabloAST * strm, Integer *  code, const String * const name) {
     assert (strm); assert(code);
     return insertAtInsertionPoint(new (mAllocator) TerminateAt(strm, code, name, mAllocator));
+}
+
+Illustrate * PabloBlock::createIllustrateBitstream(PabloAST * value, const String * const name) {
+    assert (value); assert(name);
+    return insertAtInsertionPoint(new (mAllocator) Illustrate(Illustrate::IllustratorTypeId::Bitstream, '.', '1', value, name, mAllocator));
 }
 
 DebugPrint * PabloBlock::createDebugPrint(PabloAST * expr, const String * const name) {

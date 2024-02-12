@@ -115,6 +115,14 @@ public:
 
     PabloAST * createLookahead(PabloAST * expr, not_null<Integer *> shiftAmount, const llvm::StringRef prefix);
 
+    Illustrate * createIllustrateBitstream(PabloAST * value, const llvm::StringRef prefix) {
+        return mPb->createIllustrateBitstream(value, prefix);
+    }
+
+    Illustrate * createIllustrateBitstream(PabloAST * value, const String * const name) {
+        return mPb->createIllustrateBitstream(value, name);
+    }
+
     Assign * createAssign(Var * const variable, PabloAST * const value){
         return mPb->createAssign(variable, value);
     }

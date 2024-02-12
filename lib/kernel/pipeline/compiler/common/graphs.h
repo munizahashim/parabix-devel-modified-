@@ -56,6 +56,7 @@ using StreamSetId = unsigned;
 enum RelationshipNodeFlag {
     IndirectFamily = 1
     , ImplicitlyAdded = 2
+    , IsSideEffecting = 4
 };
 
 struct RelationshipNode {

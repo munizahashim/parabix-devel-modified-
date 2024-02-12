@@ -177,7 +177,11 @@ void PabloKernel::addInternalProperties(BuilderRef b) {
 }
 
 void PabloKernel::generateInitializeMethod(BuilderRef b) {
-
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
+        mPabloCompiler->initializeIllustrator(b);
+        mPabloCompiler = nullptr;
+    }
 }
 
 void PabloKernel::generateDoBlockMethod(BuilderRef b) {
@@ -195,6 +199,9 @@ void PabloKernel::generateFinalBlockMethod(BuilderRef b, Value * const remaining
     // the position just past EOF, as well as a mask marking all positions past EOF.
     assert (remainingBytes);
     assert (remainingBytes->getType()->isIntegerTy());
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        b->setScalarField("EOFUnnecessaryData", b->CreateSub(b->getSize(b->getBitBlockWidth()), remainingBytes));
+    }
     b->setScalarField("EOFbit", b->bitblock_set_bit(remainingBytes));
     b->setScalarField("EOFmask", b->bitblock_mask_from(remainingBytes));
     RepeatDoBlockLogic(b);
@@ -316,6 +323,10 @@ PabloKernel::PabloKernel(BuilderRef b,
 , mContext(nullptr) {
     addNonPersistentScalar(b->getBitBlockType(), "EOFbit");
     addNonPersistentScalar(b->getBitBlockType(), "EOFmask");
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        addNonPersistentScalar(b->getSizeTy(), "EOFUnnecessaryData");
+        addInternalScalar(b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
+    }
 }
 
 PabloKernel::~PabloKernel() { }

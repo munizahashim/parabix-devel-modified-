@@ -586,6 +586,8 @@ Value * KernelBuilder::CreateRoundUpRational(Value * const number, const Rationa
     return CreateUDiv(CBuilder::CreateRoundUp(CreateMul(number, d), n, Name), d);
 }
 
+#if 0
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeAddressableValue
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -647,8 +649,8 @@ KernelBuilder::AddressableValue KernelBuilder::makeAddressableValue(Type * type,
         Rational R{a, b};
         assert (R.denominator() == 1);
         if (from && to) {
-            av.From = CreateURemRational(from, R);
-            av.To = CreateAdd(CreateSub(to, from), av.From);
+            av.From = from;
+            av.To = to;
             if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
                 CreateAssert(CreateICmpULT(av.To, getSize(R.numerator() * rowCount)), "from/to distance exceeds value size");
             }
@@ -739,7 +741,7 @@ void KernelBuilder::captureByteData(StringRef streamName, Type * type, Value * b
     }
 }
 
-
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getKernelName

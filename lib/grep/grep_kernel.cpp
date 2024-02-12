@@ -180,6 +180,13 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
                 mIllustrator->captureBixNum(b, mStreamIndices[c].name + "_" + ssname, s);
             }
         }
+        if (codegen::EnableIllustrator) {
+            if (s->getNumElements() == 1) {
+                b->captureBitstream(mStreamIndices[c].name + "_" + ssname, s);
+            } else {
+                b->captureBixNum(mStreamIndices[c].name + "_" + ssname, s);
+            }
+        }
     }
     return ext->getStreamSet();
 }
@@ -511,6 +518,7 @@ void UTF8_index::generatePabloMethod() {
     it.createAssign(nonFinal, it.createAnd(nonFinal, u8valid));
 
     Var * const u8index = getOutputStreamVar("u8index");
+    pb.createIllustrateBitstream(u8index, "u8");
     PabloAST * u8final = pb.createInFile(pb.createNot(nonFinal));
     if (getNumOfStreamInputs() > 1) {
         u8final = pb.createOr(u8final, getInputStreamSet("u8_LB")[0]);

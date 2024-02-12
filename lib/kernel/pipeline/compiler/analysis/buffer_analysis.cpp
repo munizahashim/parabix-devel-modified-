@@ -860,17 +860,28 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
  * @brief identifyIllustratedStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyIllustratedStreamSets() {
-    const auto & illustratorBindings = mPipelineKernel->getIllustratorBindings();
+    auto & illustratorBindings = mPipelineKernel->mIllustratorBindings;
 
     if (LLVM_UNLIKELY(illustratorBindings.empty())) return;
 
     // TODO: we need to move this up in the analysis phase and mark kernels with illustrated bindings as implicitly
     // side effecting. Otherwise we may end up not reporting streamsets that the user expects.
 
+    // TODO: this shouldn't modify the pipeline kernel's state
+
     flat_set<Relationship *> M;
     M.reserve(illustratorBindings.size());
-    for (const auto & p : illustratorBindings) {
-        M.emplace(p.StreamSet);
+    for (auto & p : illustratorBindings) {
+        StreamSet * ss = p.StreamSet;
+check_for_additional_remapping:
+        auto f = RedundantStreamSets.find(ss);
+        if (LLVM_UNLIKELY(f != RedundantStreamSets.end())) {
+            ss = f->second;
+            assert (ss != p.StreamSet);
+            p.StreamSet = ss;
+            goto check_for_additional_remapping;
+        }
+        M.emplace(ss);
     }
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto & node = mStreamGraph[streamSet];
