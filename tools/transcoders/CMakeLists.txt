@@ -98,3 +98,20 @@ DEPS
     grep
 )
 
+parabix_add_executable(
+NAME
+    nfd
+SRC
+    nfd.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
