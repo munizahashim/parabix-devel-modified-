@@ -185,7 +185,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     fieldIndex[1] = b->getInt32(CURRENT_THREAD_ID);
     pthreadCreateArgs[0] = b->CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex);
     pthreadCreateArgs[1] = ConstantPointerNull::get(cast<PointerType>(pthreadCreateFnTy->getParamType(1)));
-    pthreadCreateArgs[2] = threadFunc;
+    pthreadCreateArgs[2] = b->CreatePointerCast(threadFunc, pthreadCreateFnTy->getParamType(2));
     pthreadCreateArgs[3] = b->CreatePointerCast(cThreadState, voidPtrTy);
     b->CreateCall(pthreadCreateFnTy, pthreadCreateFn, pthreadCreateArgs);
     if (mUseDynamicMultithreading) {
