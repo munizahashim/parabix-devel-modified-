@@ -370,19 +370,20 @@ int main(int argc, char *argv[]) {
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     ParabixIllustrator illustrator(codegen::IllustratorDisplay);
-
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-    }
     CPUDriver driver("NFD_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
     fn = generate_pipeline(driver, illustrator);
-    fn(fd, &illustrator);
-    close(fd);
-    if (codegen::IllustratorDisplay > 0) {
-        illustrator.displayAllCapturedData();
+    //
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
+    } else {
+        fn(fd, &illustrator);
+        close(fd);
+        if (codegen::IllustratorDisplay > 0) {
+            illustrator.displayAllCapturedData();
+        }
     }
     return 0;
 }
