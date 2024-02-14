@@ -162,10 +162,11 @@ void Hangul_VT_Indices::generatePabloMethod() {
     for (unsigned i = 0; i < 5; i++) {
         T_indexVar[i] = pb.createVar("T_index" + std::to_string(i), pb.createZeroes());
     }
+
     auto nested = pb.createScope();
-    //pb.createIf(precomposed, nested);
-    //BixNumCompiler bnc(nested);
-    BixNumCompiler bnc(pb);
+    pb.createIf(precomposed, nested);
+    BixNumCompiler bnc(nested);
+
     //
     // For each distinct Hangul L prefix, there is a block of
     // Hangul_NCount entries.  The relative offset of the block
@@ -184,19 +185,18 @@ void Hangul_VT_Indices::generatePabloMethod() {
     // Given the VT_index value as a basis, we can compute
     // the V_index from a set of five CCs.
     std::vector<re::CC *> V_CCs = VIndexBixNumCCs();
-    cc::Parabix_CC_Compiler ccc(getEntryScope(), VT_index);
-    //cc::Parabix_CC_Compiler ccc(nested.getPabloBlock(), VT_index);
+    cc::Parabix_CC_Compiler ccc(nested.getPabloBlock(), VT_index);
     std::vector<PabloAST *> V_index(5);
     for (unsigned i = 0; i < 5; i++) {
         V_index[i] = ccc.compileCC(V_CCs[i]);
-        pb.createAssign(V_indexVar[i], V_index[i]);
+        nested.createAssign(V_indexVar[i], V_index[i]);
     }
     BixNum V_offset = bnc.ZeroExtend(V_index, 10);
     V_offset = bnc.MulModular(V_index, Hangul_TCount);
     BixNum T_index = bnc.SubModular(VT_index, V_offset);
     // Only 5 significant bits
     for (unsigned i = 0; i < 5; i++) {
-        pb.createAssign(T_indexVar[i], T_index[i]);
+        nested.createAssign(T_indexVar[i], T_index[i]);
     }
     //
     Var * V_out = getOutputStreamVar("V_index");
@@ -370,19 +370,20 @@ int main(int argc, char *argv[]) {
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     ParabixIllustrator illustrator(codegen::IllustratorDisplay);
-
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-    }
     CPUDriver driver("NFD_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
     fn = generate_pipeline(driver, illustrator);
-    fn(fd, &illustrator);
-    close(fd);
-    if (codegen::IllustratorDisplay > 0) {
-        illustrator.displayAllCapturedData();
+    //
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
+    } else {
+        fn(fd, &illustrator);
+        close(fd);
+        if (codegen::IllustratorDisplay > 0) {
+            illustrator.displayAllCapturedData();
+        }
     }
     return 0;
 }

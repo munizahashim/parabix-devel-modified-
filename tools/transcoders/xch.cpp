@@ -698,10 +698,6 @@ int main(int argc, char *argv[]) {
     } else {
         llvm::report_fatal_error("Need either a codepoint property (prop=...) or a source-target (src=..., tgt=...) mapping.");
     }
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-    }
     CPUDriver driver("xfrm_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
@@ -711,11 +707,16 @@ int main(int argc, char *argv[]) {
     } else {
         fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum, illustrator);
     }
-    fn(xlated, fd, &illustrator);
-    llvm::errs() << "xlated buffer length: " << xlated.length() << "\n";
-    close(fd);
-    if (codegen::IllustratorDisplay > 0) {
-        illustrator.displayAllCapturedData();
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+    } else {
+        fn(xlated, fd, &illustrator);
+        llvm::errs() << "xlated buffer length: " << xlated.length() << "\n";
+        close(fd);
+        if (codegen::IllustratorDisplay > 0) {
+            illustrator.displayAllCapturedData();
+        }
     }
     return 0;
 }

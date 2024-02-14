@@ -76,16 +76,25 @@ struct VariableTable {
     }
 
     size_t depth(const Var * a) const {
-        if (mMap.find(a) != mMap.end()) {
-            return 0;
-        } else {
-            assert (mOuter);
-            return mOuter->depth(a) + 1UL;
+        if (LLVM_UNLIKELY(a->isKernelParameter() && isa<Extract>(a))) {
+            a = cast<Extract>(a)->getArray();
         }
+        return __depth(a);
     }
 
     void clear() {
         mMap.clear();
+    }
+
+private:
+
+    size_t __depth(const Var * a) const {
+        if (mMap.find(a) != mMap.end()) {
+            return 0;
+        } else {
+            assert (mOuter);
+            return mOuter->__depth(a) + 1UL;
+        }
     }
 
 private:
