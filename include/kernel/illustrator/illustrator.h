@@ -25,6 +25,15 @@ void illustratorCaptureStreamData(StreamDataIllustrator * illustrator, const cha
                                  const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth);
 
 extern "C"
+void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject);
+
+extern "C"
+void illustratorIterateLoop(StreamDataIllustrator * illustrator, const void * stateObject);
+
+extern "C"
+void illustratorExitLoop(StreamDataIllustrator * illustrator, const void * stateObject);
+
+extern "C"
 void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator, const size_t blockWidth);
 
 extern "C"

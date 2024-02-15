@@ -588,13 +588,20 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     Function * destroyIllustrator = nullptr;
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         PointerType * voidPtrTy = b->getVoidPtrTy();
-        createIllustrator = b->LinkFunction("__createStreamDataxIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
+        createIllustrator = b->LinkFunction("__createStreamDataIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
+        BEGIN_SCOPED_REGION
         FixedArray<Type *, 2> args;
         args[0] = voidPtrTy;
         args[1] = b->getSizeTy();
         FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
         displayCapturedData = b->LinkFunction("__displayCapturedData", funTy, (void*)&illustratorDisplayCapturedData);
+        END_SCOPED_REGION
+        BEGIN_SCOPED_REGION
+        FixedArray<Type *, 1> args;
+        args[0] = voidPtrTy;
+        FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
         destroyIllustrator = b->LinkFunction("__destroyStreamDataIllustrator", funTy, (void*)&destroyStreamDataIllustrator);
+        END_SCOPED_REGION
     }
 
     const auto linkageType = (method == AddInternal) ? Function::InternalLinkage : Function::ExternalLinkage;

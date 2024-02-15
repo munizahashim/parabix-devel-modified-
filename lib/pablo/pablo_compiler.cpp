@@ -89,10 +89,12 @@ void PabloCompiler::clearCarryData(BuilderRef b) {
 }
 
 void PabloCompiler::initializeIllustrator(BuilderRef b) {
-    compileInitializeIllustratorBlock(b, mKernel->getEntryScope());
+    identifyIllustratedValues(b, mKernel->getEntryScope());
+    std::sort(mContainsIllustratedValue.begin(), mContainsIllustratedValue.end());
 }
 
-void PabloCompiler::compileInitializeIllustratorBlock(BuilderRef b, const PabloBlock * const block) {
+bool PabloCompiler::identifyIllustratedValues(BuilderRef b, const PabloBlock * const block) {
+    bool containsAnyIllustratedValue = false;
     for (const Statement * statement : *block) {
         if (const Illustrate * il = dyn_cast<Illustrate>(statement)) {
             Constant * kernelName = b->GetString(getName());
@@ -113,11 +115,17 @@ void PabloCompiler::compileInitializeIllustratorBlock(BuilderRef b, const PabloB
                                 kernelName, streamName, getHandle(),
                                 rowCount, 1, fieldWidth, MemoryOrdering::RowMajor,
                                 il->getIllustratorType(), il->getReplacementCharacter(0), il->getReplacementCharacter(1));
+            containsAnyIllustratedValue = true;
 
         } else if (isa<Branch>(statement)) {
-            compileInitializeIllustratorBlock(b, cast<Branch>(statement)->getBody());
+            const bool any = identifyIllustratedValues(b, cast<Branch>(statement)->getBody());
+            if (LLVM_UNLIKELY(any && isa<While>(statement))) {
+                mContainsIllustratedValue.push_back(cast<While>(statement));
+            }
+            containsAnyIllustratedValue |= any;
         }
     }
+    return containsAnyIllustratedValue;
 }
 
 
@@ -389,6 +397,30 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
         }
     }
 
+    Value * illustratorObj = nullptr;
+
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        const auto f = std::find(mContainsIllustratedValue.begin(), mContainsIllustratedValue.end(), whileStatement);
+        if (LLVM_UNLIKELY(f != mContainsIllustratedValue.end())) {
+            illustratorObj = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+            Module * m = b->getModule();
+            Function * fIllustratorEnterLoop = m->getFunction("__illustratorEnterLoop");
+            if (fIllustratorEnterLoop == nullptr) {
+                FixedArray<Type *, 2> args;
+                args[0] = illustratorObj->getType();
+                args[1] = getHandle()->getType();
+                FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
+                fIllustratorEnterLoop = b->LinkFunction("__illustratorEnterLoop", funTy, (void*)&illustratorEnterLoop);
+                b->LinkFunction("__illustratorIterateLoop", funTy, (void*)&illustratorIterateLoop);
+                b->LinkFunction("__illustratorExitLoop", funTy, (void*)&illustratorExitLoop);
+            }
+            FixedArray<Value *, 2> args;
+            args[0] = illustratorObj;
+            args[1] = getHandle();
+            b->CreateCall(fIllustratorEnterLoop, args);
+        }
+    }
+
     mCarryManager->enterLoopScope(b);
 
     BasicBlock * whileBodyBlock = b->CreateBasicBlock("while.body_" + std::to_string(mBranchCount));
@@ -451,6 +483,15 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
 
     mCarryManager->enterLoopBody(b, whileEntryBlock);
     addBranchCounter(b);
+    if (LLVM_UNLIKELY(illustratorObj)) {
+        Module * m = b->getModule();
+        Function * fIllustratorIterateLoop = m->getFunction("__illustratorIterateLoop");
+        assert (fIllustratorIterateLoop);
+        FixedArray<Value *, 2> args;
+        args[0] = illustratorObj;
+        args[1] = getHandle();
+        b->CreateCall(fIllustratorIterateLoop, args);
+    }
     compileBlock(b, whileStatement->getBody());
     mCarryManager->leaveLoopBody(b);
     // After the whileBody has been compiled, we may be in a different basic block.
@@ -519,6 +560,16 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
         f->second = escapedValue;
     }
     mCarryManager->leaveLoopScope(b, whileEntryBlock, whileExitBlock);
+    if (LLVM_UNLIKELY(illustratorObj)) {
+        Module * m = b->getModule();
+        Function * fIllustratorExitLoop = m->getFunction("__illustratorExitLoop");
+        assert (fIllustratorExitLoop);
+        FixedArray<Value *, 2> args;
+        args[0] = illustratorObj;
+        args[1] = getHandle();
+        b->CreateCall(fIllustratorExitLoop, args);
+    }
+
     addBranchCounter(b);
 }
 

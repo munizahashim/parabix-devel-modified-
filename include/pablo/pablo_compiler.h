@@ -51,7 +51,7 @@ protected:
 
 private:
 
-    void compileInitializeIllustratorBlock(BuilderRef b, const PabloBlock * const block);
+    bool identifyIllustratedValues(BuilderRef b, const PabloBlock * const block);
 
     void examineBlock(BuilderRef b, const PabloBlock * const block);
 
@@ -82,6 +82,7 @@ private:
     unsigned                            mBranchCount;
     llvm::BasicBlock *                  mEntryBlock;
     std::vector<llvm::BasicBlock *>     mBasicBlock;
+    llvm::SmallVector<const While *, 0> mContainsIllustratedValue;
 };
 
 }

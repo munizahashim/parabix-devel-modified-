@@ -65,7 +65,7 @@ namespace kernel {
 
 using MemoryOrdering = KernelBuilder::MemoryOrdering;
 
-using StreamDataKey = std::tuple<const char *, const char *, const void *>;
+using StreamDataKey = const void *;
 
 struct StreamDataElement {
     size_t StrideNum;
@@ -79,33 +79,110 @@ struct StreamDataChunk {
     StreamDataChunk * Next = nullptr;
 };
 
-struct StreamDataGroup {
-    size_t Rows;
-    size_t Cols;
-    size_t ItemWidth;
-    MemoryOrdering Ordering;
-    IllustratorTypeId IllustratorType;
-    char Replacement0;
-    char Replacement1;
+using StreamDataAllocator = SlabAllocator<uint8_t, 1024 * 1024>;
 
-    size_t CurrentIndex;
+using LoopVector = SmallVector<size_t, 4>;
+
+struct StreamDataCapture {
+    const char * const StreamName;
+    StreamDataCapture * Next = nullptr;
+
+    size_t CurrentIndex = 0;
 
     StreamDataChunk Root;
-    StreamDataChunk * Current;
+    StreamDataChunk * Current = nullptr;
 
-    SlabAllocator<uint8_t, 1024 * 1024> InternalAllocator;
+    const size_t Rows;
+    const size_t Cols;
+    const size_t ItemWidth;
+    const MemoryOrdering Ordering;
+    const IllustratorTypeId IllustratorType;
+    const char Replacement0;
+    const char Replacement1;
 
-    StreamDataGroup(size_t rows, size_t cols, size_t iw, uint8_t ordering, uint8_t illustratorType, char rep0, char rep1)
-    : Rows(rows), Cols(cols), ItemWidth(iw), Ordering((MemoryOrdering)ordering)
-    , IllustratorType((IllustratorTypeId)illustratorType), Replacement0(rep0), Replacement1(rep1)
-    , CurrentIndex(0), Current(&Root) {
+    inline void append(StreamDataAllocator & A,
+                       const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth) {
+        assert (to >= from);
+
+        StreamDataChunk * C = Current;
+        if (LLVM_UNLIKELY(CurrentIndex == ELEMENTS_PER_ALLOCATION)) {
+            StreamDataChunk * N = new (A.aligned_allocate(sizeof(StreamDataChunk), sizeof(size_t))) StreamDataChunk{};
+            assert (N);
+            C->Next = N;
+            Current = N;
+            CurrentIndex = 0;
+            C = N;
+        }
+        assert (CurrentIndex < ELEMENTS_PER_ALLOCATION);
+        StreamDataElement & E = C->Data[CurrentIndex++];
+        E.StrideNum = strideNum;
+        E.From = from;
+        E.To = to;
+
+        assert (from <= to);
+
+        if (LLVM_UNLIKELY(from == to)) {
+            E.Data = nullptr;
+        } else if (LLVM_UNLIKELY(ItemWidth >= CHAR_BIT && Rows == 1 && Cols == 1)) {
+            // may be unsafe; do not memcpy any data that isn't explicitly given
+            const auto offset = udiv(from * ItemWidth, CHAR_BIT);
+            const uint8_t * start = streamData + offset;
+            const size_t length  = (to - from) * ItemWidth / CHAR_BIT;
+            assert (length > 0);
+            assert (ItemWidth % CHAR_BIT == 0);
+            E.Data = A.aligned_allocate(length, ItemWidth / CHAR_BIT);
+            std::memcpy(E.Data, start, length);
+        } else {
+            // each "block" of streamData will contain blockWidth items, regardless of the item width.
+            const size_t blockSize = (Rows * Cols * ItemWidth * blockWidth) / CHAR_BIT;
+            const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
+            const auto end = (from & (blockWidth - 1)) + (to - from);
+            const auto length = ceil_udiv(end, blockWidth) * blockSize;
+            assert (length > 0);
+            E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
+            std::memcpy(E.Data, start, length);
+        }
+
+    }
+
+
+    StreamDataCapture(const char * streamName, size_t rows, size_t cols, size_t iw, uint8_t ordering,
+                      IllustratorTypeId typeId, const char rep0, const char rep1)
+    : StreamName(streamName), Current(&Root)
+    , Rows(rows), Cols(cols), ItemWidth(iw), Ordering((MemoryOrdering)ordering)
+    , IllustratorType(typeId), Replacement0(rep0), Replacement1(rep1) {
         assert (Ordering == MemoryOrdering::ColumnMajor || Ordering == MemoryOrdering::RowMajor);
-        assert (IllustratorType == IllustratorTypeId::Bitstream || IllustratorType == IllustratorTypeId::BixNum || IllustratorType == IllustratorTypeId::ByteData);
         assert (is_pow2(ItemWidth));
     }
 };
 
-using StreamDataEntry = std::tuple<const char *, const char *, const void *, const StreamDataGroup *>;
+struct StreamDataStateObject {
+    const char * KernelName;
+    StreamDataCapture First;
+    LoopVector LoopIteration;
+
+    inline void enterLoop() {
+        LoopIteration.emplace_back(0);
+    }
+
+    inline void iterateLoop() {
+        assert (!LoopIteration.empty());
+        LoopIteration.back()++;
+    }
+
+    inline void exitLoop() {
+        assert (!LoopIteration.empty());
+        LoopIteration.pop_back();
+    }
+
+    // Even when executed in multi-threaded mode, each kernel instance is guaranteed to be executed
+    // in lock step manner. To ensure this, the pipeline disables state-free/data-parallel execution
+    // when anything is illustrated. Thus we can safely use a single allocator per instance.
+    StreamDataAllocator InternalAllocator;
+};
+
+
+using StreamDataEntry = std::tuple<const char *, const void *, const StreamDataCapture *>;
 
 class StreamDataIllustrator {
 public:
@@ -115,69 +192,101 @@ public:
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void registerStreamDataCapture(const char * kernelName, const char * streamName, const void * stateObject,
                                       const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
-                                      const uint8_t illustratorType, const char replacement0, const char replacement1) {
+                                      const IllustratorTypeId illustratorType, const char replacement0, const char replacement1) {
 
  //   std::lock_guard<std::mutex> L(AllocatorLock);
+    StreamDataCapture * newCapture = nullptr;
 
-    StreamDataGroup * newGroup = GroupAllocator.allocate(1);
-    newGroup = new (newGroup) StreamDataGroup{rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1};
-    RegisteredCaptures.emplace(std::make_tuple(kernelName, streamName, stateObject), newGroup);
-    InstallOrderCaptures.emplace_back(kernelName, streamName, stateObject, newGroup);
+    auto r = RegisteredCaptures.find(stateObject);
+    if (r == RegisteredCaptures.end()) {
+        StreamDataStateObject * newStateObjectEntry = GroupAllocator.allocate<StreamDataStateObject>(1);
+        newStateObjectEntry->KernelName = kernelName;
+        RegisteredCaptures.emplace(stateObject, newStateObjectEntry);
+        newCapture = &newStateObjectEntry->First;
+    } else {
+        StreamDataStateObject * existingStateObjectEntry = r->second;
+        StreamDataCapture * current = &existingStateObjectEntry->First;
+        for (;;) {
+            if (current->StreamName == streamName) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream msg(tmp);
+                msg << "Illustrator error: multiple instances of " << streamName << " was registered for " << kernelName << "\n";
+                errs().write_hex((uintptr_t)stateObject) << "\n";
+                report_fatal_error(msg.str());
+            }
+            assert (strcmp(current->StreamName, streamName) != 0);
+            StreamDataCapture * next = current->Next;
+            if (next == nullptr) {
+                break;
+            }
+            current = next;
+        }
+        newCapture = GroupAllocator.allocate<StreamDataCapture>(1);
+        current->Next = newCapture;
+    }
+    assert (newCapture);
+
+    new (newCapture) StreamDataCapture(streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1);
+
+alreadyRegistered:
+
+    // return id instead and force kernel to store it?
+    InstallOrderCaptures.emplace_back(streamName, stateObject, newCapture);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief doStreamDataCapture
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void doStreamDataCapture(const char * kernelName, const char * streamName, const void * stateObject,
+inline void doStreamDataCapture(const char * streamName, const void * stateObject,
                                 const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to,
                                 const size_t blockWidth) {
 
-    auto capture = RegisteredCaptures.find(std::make_tuple(kernelName, streamName, stateObject));
-    assert (capture != RegisteredCaptures.end());
-    StreamDataGroup & group = *capture->second;
-    assert (to >= from);
-
-    StreamDataChunk * C = group.Current;
-    auto & A = group.InternalAllocator;
-    if (LLVM_UNLIKELY(group.CurrentIndex == ELEMENTS_PER_ALLOCATION)) {
-        StreamDataChunk * N = new (A.aligned_allocate(sizeof(StreamDataChunk), sizeof(size_t))) StreamDataChunk{};
-        assert (N);
-        C->Next = N;
-        group.Current = N;
-        group.CurrentIndex = 0;
-        C = N;
-    }
-    assert (group.CurrentIndex < ELEMENTS_PER_ALLOCATION);
-    StreamDataElement & E = C->Data[group.CurrentIndex++];
-    E.StrideNum = strideNum;
-    E.From = from;
-    E.To = to;
-
-    assert (from <= to);
-
-    if (LLVM_UNLIKELY(from == to)) {
-        E.Data = nullptr;
-    } else if (LLVM_UNLIKELY(group.ItemWidth >= CHAR_BIT && group.Rows == 1 && group.Cols == 1)) {
-        // may be unsafe; do not memcpy any data that isn't explicitly given
-        const auto offset = udiv(from * group.ItemWidth, CHAR_BIT);
-        const uint8_t * start = streamData + offset;
-        const size_t length  = (to - from) * group.ItemWidth / CHAR_BIT;
-        assert (length > 0);
-        assert (group.ItemWidth % CHAR_BIT == 0);
-        E.Data = A.aligned_allocate(length, group.ItemWidth / CHAR_BIT);
-        std::memcpy(E.Data, start, length);
-    } else {
-        // each "block" of streamData will contain blockWidth items, regardless of the item width.
-        const size_t blockSize = (group.Rows * group.Cols * group.ItemWidth * blockWidth) / CHAR_BIT;
-        const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
-        const auto end = (from & (blockWidth - 1)) + (to - from);
-        const auto length = ceil_udiv(end, blockWidth) * blockSize;
-        assert (length > 0);
-        E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
-        std::memcpy(E.Data, start, length);
+    auto r = RegisteredCaptures.find(stateObject);
+    assert (r != RegisteredCaptures.end());
+    StreamDataStateObject * stateObjectEntry = r->second;
+    StreamDataCapture * current = &stateObjectEntry->First;
+    for (;;) {
+        if (current->StreamName == streamName) {
+            break;
+        }
+        assert (strcmp(current->StreamName, streamName) != 0);
+        current = current->Next;
+        assert (current);
     }
 
+    auto & A = stateObjectEntry->InternalAllocator;
+    current->append(A, strideNum, streamData, from, to, blockWidth);
 };
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief enterLoop
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void enterLoop(const void * stateObject) {
+    getStateObject(stateObject)->enterLoop();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief iterateLoop
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void iterateLoop(const void * stateObject) {
+    getStateObject(stateObject)->iterateLoop();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief exitLoop
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void exitLoop(const void * stateObject) {
+    getStateObject(stateObject)->exitLoop();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getStateObject
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline StreamDataStateObject * getStateObject(const void * address) const {
+    auto r = RegisteredCaptures.find(address);
+    assert (r != RegisteredCaptures.end());
+    return r->second;
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief displayCapturedData
@@ -209,8 +318,6 @@ inline void displayCapturedData(const size_t blockWidth) const {
 
     const auto n = InstallOrderCaptures.size();
 
-    assert (n == RegisteredCaptures.size());
-
     std::vector<StreamNameNode> roots;
 
     assert (is_pow2(blockWidth));
@@ -219,15 +326,16 @@ inline void displayCapturedData(const size_t blockWidth) const {
     // so that we can make it easier for the user to read the output.
 
     for (size_t i = 0; i < n; ++i) {
-        const char * kernelName; const char * streamName; const void * stateObject;
-        const StreamDataGroup * group;
-        std::tie(kernelName, streamName, stateObject, group) = InstallOrderCaptures[i];
+        const char * streamName; const void * stateObject;
+        const StreamDataCapture * capture;
+        std::tie(streamName, stateObject, capture) = InstallOrderCaptures[i];
+        StreamDataStateObject * const stateObjectEntry = getStateObject(stateObject);
 
         // determine if the streamName is unique or if we need
         const auto m = roots.size();
 
         StringRef curStreamName{streamName};
-        StringRef curKernelName{kernelName};
+        StringRef curKernelName{stateObjectEntry->KernelName};
 
         for (size_t j = 0; j < m; ++j) {
             auto & A = roots[j];
@@ -259,20 +367,22 @@ updated_trie:
 
     struct CurrentRecord {
         std::string Name;
-        const StreamDataGroup * Group;
+        const StreamDataCapture & Capture;
         const StreamDataChunk * Current;
         size_t Index;
         std::vector<std::string> SubField;
 
-        CurrentRecord()
-        : Current(nullptr)
+        CurrentRecord(const StreamDataCapture * capture)
+        : Capture(*capture)
+        , Current(&capture->Root)
         , Index(0) {
 
         }
     };
 
 
-    std::vector<CurrentRecord> record(n);
+    std::vector<CurrentRecord> record;
+    record.reserve(n);
 
     const auto m = roots.size();
 
@@ -280,31 +390,29 @@ updated_trie:
     size_t maxNumOfRows = 0;
 
     for (size_t i = 0; i < n; ++i) {
-        const char * kernelName; const char * streamName; const void * stateObject;
-        const StreamDataGroup * group;
-        std::tie(kernelName, streamName, stateObject, group) = InstallOrderCaptures[i];
+        const char * streamName; const void * stateObject;
+        const StreamDataCapture * capture;
+        std::tie(streamName, stateObject, capture) = InstallOrderCaptures[i];
+        StreamDataStateObject * const stateObjectEntry = getStateObject(stateObject);
 
-        auto & R = record[i];
-        R.Group = group;
-        R.Current = &group->Root;
+        const char * kernelName = stateObjectEntry->KernelName;
 
-        if (group->IllustratorType == IllustratorTypeId::BixNum) {
-            const auto r = group->Rows;
+        record.emplace_back(capture);
+
+        auto & R = record.back();
+
+        if (capture->IllustratorType == IllustratorTypeId::BixNum) {
+            const auto r = capture->Rows;
             const auto bixNumRows = ceil_udiv(r, 4);
             R.SubField.resize(bixNumRows);
             maxNumOfRows = std::max(maxNumOfRows, bixNumRows);
-
-            if (bixNumRows == 1) {
-                R.SubField[0] = "";
-            } else {
-                for (unsigned j = 0; j < bixNumRows; ++j) {
-                    const auto a = (j * 4);
-                    const auto b = std::min<size_t>(a + 3, r);
-                    R.SubField[j] = "[" + std::to_string(a) + "-" + std::to_string(b) + "]";
-                }
+            for (unsigned j = 0; j < bixNumRows; ++j) {
+                const auto a = (bixNumRows - j - 1) * 4;
+                const auto b = std::min<size_t>(a + 3, r);
+                R.SubField[j] = "[" + std::to_string(a) + "-" + std::to_string(b) + "]";
             }
         } else {
-            const auto r = group->Rows;
+            const auto r = capture->Rows;
             R.SubField.resize(r);
             maxNumOfRows = std::max(maxNumOfRows, r);
             if (r == 1) {
@@ -387,7 +495,7 @@ next_entry:
         for (size_t groupNum = 0; groupNum < n; ++groupNum) {
 
             auto & R = record[groupNum];
-            const auto & G = *R.Group;
+            const auto & G = R.Capture;
             const auto & F = R.SubField;
 
             size_t position = startPosition;
@@ -479,14 +587,13 @@ get_more_data:
 
                     const char hexBase = G.Replacement0 - 10;
 
-                    for (size_t j = 0; j < m; ++j) {
+                    for (unsigned j = 0; j < m; ++j) {
 
                         const auto s = (j * 4);
                         assert (s < G.Rows);
                         const auto t = std::min(G.Rows - s, 3UL);
-
                         assert (j < FormattedOutput.size());
-                        auto & toFill = FormattedOutput[j];
+                        auto & toFill = FormattedOutput[m - j - 1];
                         assert (toFill.size() == charsPerRow);
 
                         for (size_t k = 0; k < length; ++k) {
@@ -589,14 +696,14 @@ get_more_data:
 ~StreamDataIllustrator() {
     // slab allocated but group deconstructor needs to be called too
     for (auto & rc : RegisteredCaptures) {
-        rc.second->~StreamDataGroup();
+        rc.second->~StreamDataStateObject();
     }
 }
 
 private:
 
-SlabAllocator<StreamDataGroup, sizeof(StreamDataGroup) * 64> GroupAllocator;
-flat_map<StreamDataKey, StreamDataGroup *> RegisteredCaptures;
+SlabAllocator<StreamDataStateObject, sizeof(StreamDataStateObject) * 64> GroupAllocator;
+flat_map<StreamDataKey, StreamDataStateObject *> RegisteredCaptures;
 std::vector<StreamDataEntry> InstallOrderCaptures;
 
 };
@@ -610,18 +717,36 @@ StreamDataIllustrator * createStreamDataIllustrator() {
 // of a kernel can be instantiated, we also need the address of the state object to identify each value. Additionally, the
 // presence of family kernels means we cannot guarantee that all kernels will be compiled at the same time so we cannot
 // number the illustrated values at compile time.
+
 extern "C"
 void illustratorRegisterCapturedData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
                                      const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
                                      const uint8_t illustratorTypeId, const char replacement0, const char replacement1) {
-    illustrator->registerStreamDataCapture(kernelName, streamName, stateObject, rows, cols, itemWidth, memoryOrdering, illustratorTypeId, replacement0, replacement1);
+    illustrator->registerStreamDataCapture(kernelName, streamName, stateObject, rows, cols, itemWidth, memoryOrdering, (IllustratorTypeId)illustratorTypeId, replacement0, replacement1);
 }
 
 extern "C"
 void illustratorCaptureStreamData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
                                   const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth) {
-    illustrator->doStreamDataCapture(kernelName, streamName, stateObject, strideNum, streamData, from, to, blockWidth);
+    illustrator->doStreamDataCapture(streamName, stateObject, strideNum, streamData, from, to, blockWidth);
 }
+
+extern "C"
+void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject) {
+    illustrator->enterLoop(stateObject);
+}
+
+extern "C"
+void illustratorIterateLoop(StreamDataIllustrator * illustrator, const void * stateObject) {
+    illustrator->iterateLoop(stateObject);
+}
+
+
+extern "C"
+void illustratorExitLoop(StreamDataIllustrator * illustrator, const void * stateObject) {
+    illustrator->exitLoop(stateObject);
+}
+
 
 extern "C"
 void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator, const size_t blockWidth) {

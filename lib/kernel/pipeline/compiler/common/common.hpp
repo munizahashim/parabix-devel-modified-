@@ -456,6 +456,22 @@ inline bool PipelineCommonGraphFunctions::isKernelFamilyCall(const size_t index)
     return (mStreamGraphRef[index].Flags & RelationshipNodeFlag::IndirectFamily) != 0;
 }
 
+struct IllustratedStreamSet {
+    const size_t StreamSet;
+    const IllustratorTypeId IllustratorType;
+    std::string Name;
+    const std::array<char, 2> ReplacementCharacter;
+    IllustratedStreamSet(const size_t streamSet, const IllustratorBinding & bind)
+    : StreamSet(streamSet)
+    , IllustratorType(bind.IllustratorType)
+    , Name(bind.Name)
+    , ReplacementCharacter(bind.ReplacementCharacter) {
+
+    }
+};
+
+using IllustratedStreamSetMap = std::vector<IllustratedStreamSet>;
+
 }
 
 #endif // COMMON_HPP

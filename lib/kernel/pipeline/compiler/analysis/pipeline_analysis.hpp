@@ -322,6 +322,8 @@ public:
 
     FamilyScalarGraph               mFamilyScalarGraph;
 
+    IllustratedStreamSetMap         mIllustratedStreamSetBindings;
+
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;
     OwningVector<StreamSetBuffer>   mInternalBuffers;

@@ -7,16 +7,12 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t streamSet) const {
 
-    const auto & illustratorBindings = cast<PipelineKernel>(mTarget)->getIllustratorBindings();
-    const StreamSet * const ss = cast<StreamSet>(mStreamGraph[streamSet].Relationship);
-    for (const auto & bind : illustratorBindings) {
-        if (bind.StreamSet == ss) {
+    for (const auto & bind : mIllustratedStreamSetBindings) {
+        if (bind.StreamSet == streamSet) {
 
-            const auto & bn = mBufferGraph[streamSet];
-
-            assert (bn.IsLinear);
-
-            StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
+            const auto & entry = mStreamGraph[streamSet];
+            assert (entry.Type == RelationshipNode::IsStreamSet);
+            const StreamSet * const ss = cast <StreamSet>(entry.Relationship);
 
             assert (mKernelSharedHandle);
 
@@ -41,10 +37,8 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
 void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const {
 
     assert (mInternallySynchronizedSubsegmentNumber);
-    const auto & illustratorBindings = cast<PipelineKernel>(mTarget)->getIllustratorBindings();
-    const StreamSet * const ss = cast<StreamSet>(mStreamGraph[streamSet].Relationship);
-    for (const auto & bind : illustratorBindings) {
-        if (bind.StreamSet == ss) {
+    for (const auto & bind : mIllustratedStreamSetBindings) {
+        if (bind.StreamSet == streamSet) {
 
             const auto & bn = mBufferGraph[streamSet];
 

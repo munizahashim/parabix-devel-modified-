@@ -678,6 +678,7 @@ protected:
     const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
     const FamilyScalarGraph                     mFamilyScalarGraph;
+    const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
 
 
     // pipeline state
@@ -1004,6 +1005,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
 
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
+
+, mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

@@ -860,17 +860,17 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
  * @brief identifyIllustratedStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyIllustratedStreamSets() {
-    auto & illustratorBindings = mPipelineKernel->mIllustratorBindings;
+    const auto & illustratorBindings = mPipelineKernel->getIllustratorBindings();
 
-    if (LLVM_UNLIKELY(illustratorBindings.empty())) return;
+    if (LLVM_LIKELY(illustratorBindings.empty())) return;
 
     // TODO: we need to move this up in the analysis phase and mark kernels with illustrated bindings as implicitly
     // side effecting. Otherwise we may end up not reporting streamsets that the user expects.
 
-    // TODO: this shouldn't modify the pipeline kernel's state
+    const auto n = illustratorBindings.size();
+    assert (mIllustratedStreamSetBindings.empty());
+    mIllustratedStreamSetBindings.reserve(n);
 
-    flat_set<Relationship *> M;
-    M.reserve(illustratorBindings.size());
     for (auto & p : illustratorBindings) {
         StreamSet * ss = p.StreamSet;
 check_for_additional_remapping:
@@ -878,20 +878,30 @@ check_for_additional_remapping:
         if (LLVM_UNLIKELY(f != RedundantStreamSets.end())) {
             ss = f->second;
             assert (ss != p.StreamSet);
-            p.StreamSet = ss;
             goto check_for_additional_remapping;
         }
-        M.emplace(ss);
-    }
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const auto & node = mStreamGraph[streamSet];
-        assert (node.Type == RelationshipNode::IsStreamSet);
-        if (LLVM_UNLIKELY(M.count(node.Relationship))) {
-            const auto output = in_edge(streamSet, mBufferGraph);
-            auto & bp = mBufferGraph[output];
-            bp.Flags |= BufferPortType::Illustrated;
+
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            const auto & node = mStreamGraph[streamSet];
+            assert (node.Type == RelationshipNode::IsStreamSet);
+            if (node.Relationship == ss) {
+                const auto output = in_edge(streamSet, mBufferGraph);
+                auto & bp = mBufferGraph[output];
+                if (LLVM_UNLIKELY((bp.Flags & BufferPortType::Illustrated) != 0)) {
+                    for (const auto & E : mIllustratedStreamSetBindings) {
+                        if (E.Name.compare(p.Name) == 0) {
+                            goto ignore_duplicate_entry;
+                        }
+                    }
+                }
+                bp.Flags |= BufferPortType::Illustrated;
+                mIllustratedStreamSetBindings.emplace_back(streamSet, p);
+ignore_duplicate_entry:
+                break;
+            }
         }
     }
+
 }
 
 }
