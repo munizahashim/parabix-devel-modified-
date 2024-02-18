@@ -1,13 +1,11 @@
 /*
- *  Copyright (c) 2018 International Characters.
+ *  Copyright (c) 2024 Parabix Group.
  *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
  */
 
-#ifndef DECOMPOSITION_H
-#define DECOMPOSITION_H
+#pragma once
 
-enum DecompositionOptions : int { NFD = 0, CaseFold = 1, NFKD = 2 };
+#include <unicode/algo/decomposition.h>
 
 namespace re { class RE; }
 
@@ -23,6 +21,3 @@ namespace UCD {
 re::RE * toNFD(re::RE * re, const DecompositionOptions opt = DecompositionOptions::NFD);
 
 }
-
-
-#endif

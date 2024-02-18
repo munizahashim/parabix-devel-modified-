@@ -20,4 +20,5 @@ DEPS
     re.parse
     re.printer
     unicode.data
+    unicode.algo
 )
