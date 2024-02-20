@@ -10,14 +10,16 @@ using namespace UCD;
 
 namespace unicode {
 
-BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map) {
+BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map,
+                                             XlateMode mode) {
     BitTranslationSets bit_xform_sets;
     // Otherwise compute and return.
     //
     // Basis set i is the set of all codepoints whose numerical enumeration code e
     // has bit i set, i.e., (e >> i) & 1 == 1.
     for (auto & p : map) {
-        codepoint_t bit_diff = p.second ^ p.first;
+        codepoint_t bit_diff =
+            (mode == XlateMode::XorBit) ? p.second ^ p.first : p.second;
         unsigned bit = 0;
         while (bit_diff > 0) {
             if ((bit_diff & 1UL) == 1UL) {

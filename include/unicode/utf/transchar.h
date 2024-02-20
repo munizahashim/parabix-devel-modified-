@@ -21,10 +21,14 @@ using TranslationMap = std::unordered_map<UCD::codepoint_t, UCD::codepoint_t>;
 //
 // Unicode characters translations can be implemented in parallel
 // using bit translation sets.   For each bit in the Unicode
-// representation of source and target characters, the bit translation
-// set is the set of all codepoints such that the codepoint value
-// at the given bit position differs from the target codepoint value
-// at the same bit position.
+// representation of source and target characters, the default bit
+// translation set is the set of all codepoints such that the codepoint
+// value at the given bit position differs from the target codepoint
+// value at the same bit position.  Alternatively in LiteralBit
+// mode, the bit translation set is based on the bits of the
+// target codepoint only.
+enum XlateMode {XorBit, LiteralBit};
+
 //
 // Unicode potentially requires 21 bit translation sets for each
 // of the bit positions in Unicode.   However, if the higher
@@ -39,7 +43,8 @@ using BitTranslationSets = std::vector<UCD::UnicodeSet>;
 //  between the source and target codepoints in at least one
 //  instance).
 //
-BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map);
+BitTranslationSets ComputeBitTranslationSets(const TranslationMap & map,
+                                             XlateMode mode = XlateMode::XorBit);
 //
 //  Unicode character translation may be performed directly on
 //  a UTF-8 basis bit representation, with the possible insertion

@@ -25,18 +25,6 @@ using namespace re;
 
 namespace UCD {
     
-// Constants for computation of Hangul decompositions, see Unicode Standard, section 3.12.
-const codepoint_t Hangul_SBase = 0xAC00;
-const codepoint_t Hangul_LBase = 0x1100;
-//const codepoint_t Hangul_LMax = 0x1112;
-const codepoint_t Hangul_VBase = 0x1161;
-//const codepoint_t Hangul_VMax = 0x1175;
-const codepoint_t Hangul_TBase = 0x11A7;
-//const codepoint_t Hangul_TMax = 0x11C2;
-const unsigned Hangul_TCount = 28;
-const unsigned Hangul_NCount = 588;
-const unsigned Hangul_SCount = 11172;
-
 static inline std::u32string getStringPiece(Seq * s, unsigned position) {
     unsigned pos = position;
     unsigned size = s->size();

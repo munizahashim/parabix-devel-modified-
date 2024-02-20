@@ -30,7 +30,7 @@ public:
     void NFD_append1(std::u32string & NFD_string, codepoint_t cp);
     void NFD_append(std::u32string & NFD_string, std::u32string & to_convert);
     bool reordering_needed(std::u32string & prefix, codepoint_t suffix_cp);
-private:
+protected:
     DecompositionOptions mOptions;
     EnumeratedPropertyObject * decompTypeObj;
     StringPropertyObject * decompMappingObj;
