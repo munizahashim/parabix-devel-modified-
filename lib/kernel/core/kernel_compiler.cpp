@@ -70,6 +70,9 @@ void KernelCompiler::generateKernel(BuilderRef b) {
     mTarget->constructStateTypes(b);
     mTarget->addKernelDeclarations(b);
     callGenerateInitializeMethod(b);
+    if (LLVM_UNLIKELY(mStreamSetInputBuffers.empty())) {
+        callGenerateExpectedOutputSizeMethod(b);
+    }
     callGenerateAllocateSharedInternalStreamSets(b);
     callGenerateInitializeThreadLocalMethod(b);
     callGenerateAllocateThreadLocalInternalStreamSets(b);
@@ -196,6 +199,38 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
         b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
     }
     b->CreateRet(b->CreateLoad(termSignalTy, mTerminationSignalPtr));
+    clearInternalStateAfterCodeGen();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief bindFamilyInitializationArguments
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::callGenerateExpectedOutputSizeMethod(BuilderRef b) {
+    assert (mTarget->getNumOfStreamInputs() == 0);
+    mCurrentMethod = mTarget->getExpectedOutputSizeFunction(b);
+    mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
+    b->SetInsertPoint(mEntryPoint);
+    auto arg = mCurrentMethod->arg_begin();
+    const auto arg_end = mCurrentMethod->arg_end();
+    auto nextArg = [&]() {
+        assert (arg != arg_end);
+        Value * const v = &*arg;
+        std::advance(arg, 1);
+        return v;
+    };
+    if (LLVM_LIKELY(mTarget->isStateful())) {
+        setHandle(nextArg());
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
+            b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+        }
+    }
+    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+    Value * const retVal = mTarget->generateExpectedOutputSizeMethod(b);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
+        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
+    }
+    assert (retVal);
+    b->CreateRet(retVal);
     clearInternalStateAfterCodeGen();
 }
 

@@ -225,6 +225,16 @@ std::pair<Value *, FunctionType *> PipelineCompiler::getKernelDoSegmentFunction(
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief callExpectedOutputSizeFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::callKernelExpectedSourceOutputSizeFunction(BuilderRef b, ArrayRef<Value *> args) const {
+    // TODO: need to make this support a family function call
+    Function * const func = mKernel->getExpectedOutputSizeFunction(b);
+    assert (func->getFunctionType()->getNumParams() == args.size());
+    return b->CreateCall(func->getFunctionType(), func, args);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInitializationThreadLocalFunction
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const {

@@ -559,7 +559,7 @@ void combineAttributes(const Binding & S, AttributeCombineSet & C) {
             C.emplace(s.getKind(), s.amount());
         } else {
             // TODO: we'll need some form of attribute combination function
-            f->second = std::max(f->second, s.amount());
+            f->second = std::max<unsigned>(f->second, s.amount());
         }
     }
 }

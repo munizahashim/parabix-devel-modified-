@@ -354,6 +354,8 @@ public:
 
     void callGenerateInitializeMethod(BuilderRef b);
 
+    virtual void callGenerateExpectedOutputSizeMethod(BuilderRef b);
+
     virtual void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end);
 
     void callGenerateInitializeThreadLocalMethod(BuilderRef b);

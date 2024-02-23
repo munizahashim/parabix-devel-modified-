@@ -494,7 +494,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
                                       ParabixIllustrator & illustrator) {
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer())},
+    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
                                              {Binding{b->getInt32Ty(), "inputFileDecriptor"},
                                               Binding{b->getIntAddrTy(), "illustratorAddr"}});
     //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
@@ -560,7 +560,7 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
                                        ParabixIllustrator & illustrator) {
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer())},
+    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
                                              {Binding{b->getInt32Ty(), "inputFileDecriptor"},
                                               Binding{b->getIntAddrTy(), "illustratorAddr"}});
     //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
