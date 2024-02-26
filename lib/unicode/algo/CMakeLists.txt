@@ -1,0 +1,9 @@
+parabix_add_module(
+NAME
+    unicode.algo
+SRC
+    decomposition.cpp
+DEPS
+    unicode.core
+    unicode.data
+)

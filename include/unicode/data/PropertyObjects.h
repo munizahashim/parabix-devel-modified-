@@ -276,6 +276,7 @@ public:
     const UnicodeSet GetReflexiveSet() const override;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
+    const std::vector<UCD::codepoint_t> & GetExplicitCps() {return mExplicitCps;}
 
 private:
     const UnicodeSet mNullCodepointSet;  // codepoints for which the property value is the null string.
