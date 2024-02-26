@@ -339,7 +339,37 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef
         Value * const threadCount = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
         bufferSize = b->CreateMul(bufferSize, threadCount);
     }
-    allocateOwnedBuffers(b, bufferSize, true);
+
+
+
+
+    bool hasAnyReturnedBuffer = false;
+    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+        const auto streamSet = source(output, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isReturned())) {
+            if (getReturnedBufferScaleFactor(streamSet) > 0) {
+                hasAnyReturnedBuffer = true;
+                break;
+            }
+        }
+    }
+
+    Value * expectedSourceOutputSize = nullptr;
+    if (LLVM_UNLIKELY(hasAnyReturnedBuffer)) {
+        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+            if (LLVM_UNLIKELY(in_degree(kernel, mBufferGraph) == 0)) {
+                setActiveKernel(b, kernel, false);
+                assert (mKernel->isGenerated());
+                FixedArray<Value *, 1> args;
+                args[0] = mKernelSharedHandle;
+                Value * eosVal = callKernelExpectedSourceOutputSizeFunction(b, args);
+                expectedSourceOutputSize = b->CreateUMax(eosVal, expectedSourceOutputSize);
+            }
+        }
+        expectedSourceOutputSize = b->CreateCeilUDiv(expectedSourceOutputSize, b->getSize(b->getBitBlockWidth()));
+    }
+    allocateOwnedBuffers(b, bufferSize, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
 }
@@ -376,7 +406,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
     }
-    allocateOwnedBuffers(b, expectedNumOfStrides, false);
+    allocateOwnedBuffers(b, expectedNumOfStrides, nullptr, false);
     resetInternalBufferHandles();
 }
 

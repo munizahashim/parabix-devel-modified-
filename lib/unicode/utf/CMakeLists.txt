@@ -9,6 +9,7 @@ NAME
 SRC
     utf_encoder.cpp
     utf_compiler.cpp
+    transchar.cpp
 DEPS
     re.cc
     unicode.core

@@ -166,9 +166,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
         //if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || bn.isTruncated() || bn.isConstant())) {
 
-            const auto itemWidth = getItemWidth(buffer->getBaseType());
 
-            if (LLVM_UNLIKELY(itemWidth == 0)) {
+
+            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
                 continue;
             }
 
@@ -195,6 +195,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             const auto prefix = makeBufferName(mKernelId, inputPort);
 
+            const auto itemWidth = getItemWidth(buffer->getBaseType());
             Constant * const ITEM_WIDTH = b->getSize(itemWidth);
 
             PointerType * const bufferType = buffer->getPointerType();
@@ -454,11 +455,15 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         // stream, any clearing of data is the responsibility of the owner.
         // Simply ignore any external buffers for the purpose of zeroing out
         // unnecessary data.
-        if (LLVM_UNLIKELY(bn.isUnowned() || bn.isTruncated() || bn.isConstant())) {
+        if (LLVM_UNLIKELY(bn.isUnowned() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth())) {
             continue;
         }
 
         const StreamSetBuffer * const buffer = bn.Buffer;
+
+        Value * const numOfStreams = buffer->getStreamSetCount(b);
+
+
         const BufferPort & rt = mBufferGraph[e];
         assert (rt.Port.Type == PortType::Output);
         const auto port = rt.Port;
@@ -486,7 +491,8 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
         BasicBlock * const maskLoop = b->CreateBasicBlock(prefix + "_zeroUnwrittenLoop", mKernelLoopExit);
         BasicBlock * const maskExit = b->CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
-        Value * const numOfStreams = buffer->getStreamSetCount(b);
+
+
         Value * const baseAddress = buffer->getBaseAddress(b);
 
         DataLayout DL(b->getModule());

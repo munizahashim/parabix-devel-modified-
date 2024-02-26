@@ -93,22 +93,22 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
                     case AttrId::Add:                        
-                        bp.Add = std::max(bp.Add, attr.amount());
+                        bp.Add = std::max<unsigned>(bp.Add, attr.amount());
                         break;
                     case AttrId::Delayed:
-                        bp.Delay = std::max(bp.Delay, attr.amount());
+                        bp.Delay = std::max<unsigned>(bp.Delay, attr.amount());
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookAhead:
-                        bp.LookAhead = std::max(bp.LookAhead, attr.amount());
+                        bp.LookAhead = std::max<unsigned>(bp.LookAhead, attr.amount());
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookBehind:
-                        bp.LookBehind = std::max(bp.LookBehind, attr.amount());
+                        bp.LookBehind = std::max<unsigned>(bp.LookBehind, attr.amount());
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::Truncate:
-                        bp.Truncate = std::max(bp.Truncate, attr.amount());
+                        bp.Truncate = std::max<unsigned>(bp.Truncate, attr.amount());
                         break;
                     case AttrId::Principal:
                         bp.Flags |= BufferPortType::IsPrincipal;
@@ -142,12 +142,20 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     default: break;
                 }
             }
-            const auto r = mStreamGraph[streamSet].Relationship;
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
+
+            const RelationshipNode & sn = mStreamGraph[streamSet];
+            assert (sn.Type == RelationshipNode::IsStreamSet);
+            assert (sn.Relationship);
+            const StreamSet * ss = static_cast<const StreamSet *>(sn.Relationship);
+
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(ss))) {
                 bn.Locality = BufferLocality::ConstantShared;
                 bn.IsLinear = true;
+            } else if (LLVM_UNLIKELY(ss->getNumElements() == 0 || ss->getFieldWidth() == 0)) {
+                bn.Locality = BufferLocality::ZeroElementsOrWidth;
+                bn.IsLinear = true;
             } else {
-                if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(ss))) {
                     bn.Type |= BufferType::Truncated;
                     cannotBePlacedIntoThreadLocalMemory = true;
                 }
@@ -652,7 +660,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         BufferNode & bn = mBufferGraph[streamSet];
 
-        if (bn.isThreadLocal() || bn.isUnowned()) {
+        if (bn.isThreadLocal() || bn.isUnowned() || bn.hasZeroElementsOrWidth()) {
             continue;
         }
 
@@ -797,7 +805,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
-            if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal())) {
+            if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
                 buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
             } else { // is internal buffer
 

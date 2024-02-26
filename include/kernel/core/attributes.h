@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <llvm/ADT/StringRef.h>
+#include <boost/rational.hpp>
 #include <llvm/Support/Compiler.h>
 #include <assert.h>
 
@@ -13,6 +14,8 @@ namespace kernel {
 struct Attribute {
 
     friend struct AttributeSet;
+
+    using Rational = boost::rational<size_t>;
 
     enum class KindId {
 
@@ -325,7 +328,11 @@ struct Attribute {
         return mKind == KindId::BlockSize;
     }
 
-    unsigned amount() const {
+    size_t amount() const {
+        return mAmount.numerator();
+    }
+
+    Rational ratio() const {
         return mAmount;
     }
 
@@ -339,12 +346,12 @@ struct Attribute {
 
     void print(llvm::raw_ostream & out) const noexcept;
 
-    Attribute(const KindId kind, const unsigned k) : mKind(kind), mAmount(k) { }
+    Attribute(const KindId kind, const size_t a = 0, const size_t b = 1) : mKind(kind), mAmount(a, b) { }
 
 private:
 
     const KindId    mKind;
-    unsigned        mAmount;
+    Rational        mAmount;
 };
 
 #if 0
@@ -429,8 +436,8 @@ inline Attribute SharedManagedBuffer() {
     return Attribute(Attribute::KindId::SharedManagedBuffer, 0);
 }
 
-inline Attribute ReturnedBuffer() {
-    return Attribute(Attribute::KindId::ReturnedBuffer, 0);
+inline Attribute ReturnedBuffer(const size_t numerator = 0, const size_t denominator = 1) {
+    return Attribute(Attribute::KindId::ReturnedBuffer, numerator, denominator);
 }
 
 inline Attribute Principal() {

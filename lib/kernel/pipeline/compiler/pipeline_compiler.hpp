@@ -135,9 +135,6 @@ const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 
-
-
-
 using ArgVec = Vec<Value *, 64>;
 
 using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;
@@ -402,13 +399,14 @@ public:
 // buffer management codegen functions
 
     void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index, const unsigned groupId);
-    void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
+    void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
     void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
     void remapThreadLocalBufferMemory(BuilderRef b);
     void releaseOwnedBuffers(BuilderRef b);
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
+    Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
@@ -575,6 +573,7 @@ public:
     void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
     std::pair<Value *, FunctionType *> getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
     std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(BuilderRef b) const;
+    Value * callKernelExpectedSourceOutputSizeFunction(BuilderRef b, ArrayRef<Value *> args) const;
     Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
     Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
 

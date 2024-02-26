@@ -385,7 +385,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
         knownOverheads += intExecTime;
         assert (knownOverheads <= intSubTotal);
 
-        const auto intOverhead = (knownOverheads < intSubTotal) ? 0UL : (intSubTotal - knownOverheads);
+        const auto intOverhead = (knownOverheads > intSubTotal) ? 0UL : (intSubTotal - knownOverheads);
 
         subtotals[KERNEL_EXECUTION] += intOverhead;
         subtotals[KERNEL_EXECUTION + 1] += intExecTime;
@@ -415,7 +415,7 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
     assert (k == REQ_INTEGERS);
 
     out << "\n";
-    out.indent(maxKernelIdLength + maxNameLength + maxItemCountLength + maxCyclesPerItemLength);
+    out.indent(maxKernelIdLength + maxNameLength + maxItemCountLength + maxCycleCountLength + maxCyclesPerItemLength - 2);
     out << "TOTAL:";
 
     for (unsigned j = KERNEL_SYNCHRONIZATION; j < (KERNEL_EXECUTION + 3); ++j) {
@@ -446,7 +446,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
             FixedArray<Value *, 2> tmp;
             tmp[0] = ZERO;
             tmp[1] = ZERO;
-            return b->CreateInBoundsGEP(type, gv, tmp);
+            return b->CreateInBoundsGEP(arTy, gv, tmp);
         };
 
         std::vector<Constant *> kernelNames;
@@ -515,10 +515,12 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
                 Value * sumCycles = INT64_ZERO;
                 if (isRoot || j != PARTITION_JUMP_SYNCHRONIZATION) {
                     index[1] = b->getInt32(j);
-                    sumCycles = b->CreateLoad(b->getInt64Ty(), b->CreateGEP(cycleCountTy, cycleCountPtr, index));
+                    sumCycles = b->CreateLoad(int64Ty, b->CreateGEP(cycleCountTy, cycleCountPtr, index));
+                } else {
+                    assert (cycleCountTy->getStructElementType(j)->isEmptyTy());
                 }
                 assert (k < REQ_INTEGERS);
-                b->CreateStore(sumCycles, b->CreateGEP(b->getInt64Ty(), values, b->getInt32(k++)));
+                b->CreateStore(sumCycles, b->CreateGEP(int64Ty, values, b->getInt32(k++)));
             }
 
             if (isRoot) {

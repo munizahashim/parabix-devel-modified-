@@ -37,6 +37,7 @@ using PortType = Kernel::PortType;
 
 const static auto INITIALIZE_SUFFIX = "_Initialize";
 const static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
+const static auto GET_EXPECTED_OUTPUT_SIZE_SUFFIX = "_GetExpectedOutputSize";
 const static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
 const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
 const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
@@ -531,6 +532,9 @@ void Kernel::generateOrLoadKernel(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::addKernelDeclarations(BuilderRef b) {
     addInitializeDeclaration(b);
+    if (LLVM_UNLIKELY(mInputStreamSets.empty())) {
+        addExpectedOutputSizeDeclaration(b);
+    }
     addAllocateSharedInternalStreamSetsDeclaration(b);
     addInitializeThreadLocalDeclaration(b);
     addAllocateThreadLocalInternalStreamSetsDeclaration(b);
@@ -600,6 +604,39 @@ Function * Kernel::addInitializeDeclaration(BuilderRef b) const {
     return initFunc;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getExpectedOutputSizeFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::getExpectedOutputSizeFunction(BuilderRef b, const bool alwayReturnDeclaration) const {
+    const Module * const module = b->getModule();
+    SmallVector<char, 256> tmp;
+    Function * f = module->getFunction(concat(getName(), GET_EXPECTED_OUTPUT_SIZE_SUFFIX, tmp));
+    if (LLVM_UNLIKELY(f == nullptr && alwayReturnDeclaration)) {
+        f = addExpectedOutputSizeDeclaration(b);
+    }
+    return f;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addExpectedOutputSizeDeclaration
+ ** ------------------------------------------------------------------------------------------------------------- */
+Function * Kernel::addExpectedOutputSizeDeclaration(BuilderRef b) const {
+    SmallVector<char, 256> tmp;
+    const auto funcName = concat(getName(), GET_EXPECTED_OUTPUT_SIZE_SUFFIX, tmp);
+    Module * const m = b->getModule();
+    Function * eosFunc = m->getFunction(funcName);
+    if (LLVM_LIKELY(eosFunc == nullptr)) {
+        SmallVector<Type *, 1> params;
+        if (LLVM_LIKELY(isStateful())) {
+            params.push_back(getSharedStateType()->getPointerTo());
+        }
+        FunctionType * const funcType = FunctionType::get(b->getSizeTy(), params, false);
+        eosFunc = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
+        eosFunc->setCallingConv(CallingConv::C);
+        eosFunc->setDoesNotRecurse();
+    }
+    return eosFunc;
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyInitializationArgTypes
@@ -744,6 +781,13 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) 
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateAllocateSharedInternalStreamSetsMethod(BuilderRef /* b */, Value * /* expectedNumOfStrides */) {
     report_fatal_error("Kernel::generateAllocateSharedInternalStreamSetsMethod is not handled yet");
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief generateAllocateSharedInternalStreamSetsMethod
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * Kernel::generateExpectedOutputSizeMethod(BuilderRef b) {
+    return b->getSize(0);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -1569,7 +1569,7 @@ ColorizedReporter::ColorizedReporter(BuilderRef b, StreamSet * ByteStream, Strea
                         // output scalars
 {},
                         // kernel state
-{}), mColorizedLineNumberIndex(SourceCoords->getNumElements() == 3 ? LINE_NUMBERS : BATCH_LINE_NUMBERS) {
+{}), mColorizedLineNumberIndex(SourceCoords->getNumElements() == 3 ? (unsigned)LINE_NUMBERS : (unsigned)BATCH_LINE_NUMBERS) {
     setStride(1);
     addAttribute(SideEffecting());
 }

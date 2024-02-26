@@ -389,7 +389,10 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
     for (;;) {
 
         for (const auto streamSet : mNonThreadLocalStreamSets) {
-
+            BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
+                continue;
+            }
             const auto producer = parent(streamSet, mBufferGraph);
             const auto partId = KernelPartitionId[producer];
             auto type = BufferLocality::PartitionLocal;
@@ -400,7 +403,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                     break;
                 }
             }
-            BufferNode & bn = mBufferGraph[streamSet];
+
             bn.Locality = type;
         }
 
@@ -438,7 +441,6 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
         }
 
     }
-
 }
 
 

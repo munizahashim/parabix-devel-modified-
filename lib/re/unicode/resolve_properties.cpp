@@ -182,15 +182,12 @@ struct PropertyReferencePromotion : public RE_Transformer {
     RE * transformPropertyExpression (PropertyExpression * exp) override {
         int prop_code = exp->getPropertyCode();
         if (prop_code < 0) return exp;  // No property code - leave unchanged.
-        const auto & propObj = getPropertyObject(static_cast<UCD::property_t>(prop_code));
-        //if (isa<EnumeratedPropertyObject>(propObj) || isa<CodePointPropertyObject>(propObj)) {
-            RE * defn = exp->getResolvedRE();
-            if (defn == nullptr) return exp;
-            if (Reference * ref = dyn_cast<Reference>(defn)) {
-                ref -> setReferencedProperty(static_cast<UCD::property_t>(prop_code));
-                return ref;
-            }
-        //}
+        RE * defn = exp->getResolvedRE();
+        if (defn == nullptr) return exp;
+        if (Reference * ref = dyn_cast<Reference>(defn)) {
+            ref -> setReferencedProperty(static_cast<UCD::property_t>(prop_code));
+            return ref;
+        }
         return exp;
     }
 };

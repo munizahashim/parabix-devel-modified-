@@ -447,6 +447,10 @@ protected:
 
     llvm::Function * addInitializeDeclaration(BuilderRef b) const;
 
+    llvm::Function * getExpectedOutputSizeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+
+    llvm::Function * addExpectedOutputSizeDeclaration(BuilderRef b) const;
+
     llvm::Function * getAllocateSharedInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
 
     llvm::Function * addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) const;
@@ -528,6 +532,8 @@ protected:
     void generateOrLoadKernel(BuilderRef b);
 
     virtual void generateInitializeMethod(BuilderRef) { }
+
+    virtual llvm::Value * generateExpectedOutputSizeMethod(BuilderRef);
 
     virtual void generateInitializeThreadLocalMethod(BuilderRef) { }
 

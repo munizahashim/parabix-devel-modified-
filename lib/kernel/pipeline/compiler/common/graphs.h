@@ -276,6 +276,7 @@ enum BufferLocality {
     , PartitionLocal
     , GloballyShared
     , ConstantShared
+    , ZeroElementsOrWidth
 };
 
 struct BufferNode {
@@ -338,6 +339,10 @@ struct BufferNode {
 
     bool isConstant() const {
         return (Locality == BufferLocality::ConstantShared);
+    }
+
+    bool hasZeroElementsOrWidth() const {
+        return (Locality == BufferLocality::ZeroElementsOrWidth);
     }
 
     bool isDeallocatable() const {

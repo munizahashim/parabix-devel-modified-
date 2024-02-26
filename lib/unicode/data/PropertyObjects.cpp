@@ -411,26 +411,29 @@ const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const 
 std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
     // Return the previously computed vector of bit transformation sets, if it exists.
     if (bit_xform_sets.empty()) {
-        // Otherwise compute and return.
-        //
-        // Basis set i is the set of all codepoints whose numerical enumeration code e
-        // has bit i set, i.e., (e >> i) & 1 == 1.
-        for (auto & p : mExplicitCodepointMap) {
-            codepoint_t bit_diff = p.second ^ p.first;
-            unsigned bit = 0;
-            while (bit_diff > 0) {
-                if ((bit_diff & 1UL) == 1UL) {
-                    while (bit_xform_sets.size() <= bit) {
-                        bit_xform_sets.push_back(UnicodeSet());
-                    }
-                    bit_xform_sets[bit].insert(p.first);
-                }
-                bit_diff >>= 1;
-                bit++;
-            }
-        }
+        bit_xform_sets = unicode::ComputeBitTranslationSets(mExplicitCodepointMap);
     }
     return bit_xform_sets;
+}
+
+void CodePointPropertyObject::compute_u8_movement() {
+    u8_insertion_bixnum = unicode::ComputeUTF8_insertionBixNum(mExplicitCodepointMap);
+    u8_deletion_bixnum = unicode::ComputeUTF8_deletionBixNum(mExplicitCodepointMap);
+    u8_movement_initialized = true;
+}
+
+std::vector<UnicodeSet> & CodePointPropertyObject::GetUTF8insertionBixNum() {
+    if (!u8_movement_initialized) {
+        compute_u8_movement();
+    }
+    return u8_insertion_bixnum;
+}
+
+std::vector<UnicodeSet> & CodePointPropertyObject::GetUTF8deletionBixNum() {
+    if (!u8_movement_initialized) {
+        compute_u8_movement();
+    }
+    return u8_deletion_bixnum;
 }
 
 const UnicodeSet StringPropertyObject::GetCodepointSet(const std::string & value_spec) {

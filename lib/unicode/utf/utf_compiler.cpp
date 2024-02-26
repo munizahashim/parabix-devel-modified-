@@ -15,6 +15,8 @@
 #include <re/adt/re_cc.h>
 #include <unicode/core/unicode_set.h>
 
+#include <pablo/pabloverifier.hpp>
+
 using namespace cc;
 using namespace re;
 using namespace pablo;
@@ -460,6 +462,8 @@ void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
 void UTF_Compiler::compile(IfHierarchy h) {
     if (h == IfHierarchy::None) generateRange(noIfHierachy, mPb);
     else generateRange(defaultIfHierachy, mPb);
+
+    PabloVerifier::verify(mPb.getPabloBlock()->getParent(), "after utf compiler");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

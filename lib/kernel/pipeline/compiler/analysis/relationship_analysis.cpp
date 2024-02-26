@@ -223,8 +223,11 @@ void addReferenceRelationships(const PortType portType, const unsigned index, co
             }
             // To preserve acyclicity, reference bindings always point to the binding that refers to it.
             // To simplify later I/O lookup, the edge stores the info of the reference port.
-            add_edge(G.find(RelationshipNode::IsBinding, &ref),
-                     G.find(RelationshipNode::IsBinding, &item), RelationshipType{refPort, ReasonType::Reference}, G);
+            auto I = G.find(RelationshipNode::IsBinding, &item);
+            assert (in_degree(I, G) == 1);
+            add_edge(G.find(RelationshipNode::IsBinding, &ref), I, RelationshipType{refPort, ReasonType::Reference}, G);
+            assert (G[first_in_edge(I, G)].Reason != ReasonType::Reference);
+            assert (in_degree(I, G) == 2);
         }
     }
 }
@@ -236,7 +239,9 @@ void addTruncatedStreamSetContraints() {
     for (const auto & c : TruncatedStreamSets) {
         const auto src = G.find(RelationshipNode::IsStreamSet, c.SourceData);
         const auto dst = c.TruncatedStreamSetVertex;
+        assert (in_degree(dst, G) > 0);
         add_edge(src, dst, RelationshipType{ReasonType::Reference}, G);
+        assert (G[first_in_edge(dst, G)].Reason != ReasonType::Reference);
 
         assert (G[c.Binding].Type == RelationshipNode::IsBinding);
         const Binding & output = G[c.Binding].Binding;
@@ -460,8 +465,9 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
                 mInternalBindings.emplace_back(replacement);
                 rn.Binding = replacement;
 
+                assert (in_degree(binding, G) > 0);
                 add_edge(popCountBinding, binding, RelationshipType{PortType::Input, portNum, ReasonType::Reference}, G);
-
+                assert (G[first_in_edge(binding, G)].Reason != ReasonType::Reference);
             };
 
             bool notFound = true;
@@ -647,10 +653,47 @@ void combineDuplicateKernels(BuilderRef /* b */) {
 
                             RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
 
+                            struct EdgeReplacement {
+                                ProgramGraph::vertex_descriptor Source;
+                                ProgramGraph::vertex_descriptor Target;
+                                ProgramGraph::edge_property_type EdgeType;
+
+                                EdgeReplacement(ProgramGraph::vertex_descriptor s, ProgramGraph::vertex_descriptor t, ProgramGraph::edge_property_type et)
+                                : Source(s), Target(t), EdgeType(et) {
+
+                                }
+                            };
+
+                            SmallVector<EdgeReplacement, 16> toCopy;
+
                             for (const auto e : make_iterator_range(out_edges(original, G))) {
-                                add_edge(replacement, target(e, G), G[e], G);
+                                const auto t = target(e, G);
+                                assert (G[t].Type == RelationshipNode::IsBinding);
+                                assert (G[e].Reason != ReasonType::Reference);
+                                assert (in_degree(t, G) == 1 || in_degree(t, G) == 2);
+                                toCopy.emplace_back(replacement, t, G[e]);
+                                // we need to ensure a canonical ordering. since boost won't let me insert
+                                // edges at a specific position using their exposed API, we remove the ref
+                                // edge and reinsert it in the correct position.
+                                if (LLVM_UNLIKELY(in_degree(t, G) == 2)) {
+                                    auto ei = *(++in_edges(t, G).first);
+                                    assert (G[ei].Reason == ReasonType::Reference);
+                                    const auto s = source(ei, G);
+                                    assert (G[s].Type == RelationshipNode::IsBinding);
+                                    toCopy.emplace_back(s, t, G[ei]);
+                                    remove_edge(s, t, G);
+                                }
                             }
-                            clear_out_edges(original, G);
+
+                            clear_vertex(original, G);
+                            RelationshipNode & rn = G[original];
+                            rn.Type = RelationshipNode::IsNil;
+                            rn.Relationship = nullptr;
+
+                            for (auto & E : toCopy) {
+                                add_edge(E.Source, E.Target, E.EdgeType, G);
+                            }
+
                         }
                         clear_vertex(i, G);
                         RelationshipNode & rn = G[i];
@@ -812,8 +855,6 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
     const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     PipelineOutput = p_out;
 
-
-
     // From the pipeline's perspective, a pipeline input node "produces" the inputs of the pipeline and a
     // pipeline output node "consumes" its outputs. Internally this means the inputs and outputs of the
     // pipeline are inverted from its external view but this change simplifies the analysis considerably
@@ -855,6 +896,15 @@ void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
 
     for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
         B.addConsumerCalls(PortType::Input, C);
+    }
+
+    for (auto v : make_iterator_range(vertices(B.G))) {
+        const auto & vi = B.G[v];
+        if (vi.Type == RelationshipNode::IsBinding) {
+            assert (in_degree(v, B.G) == 1 || in_degree(v, B.G) == 2);
+            const auto f = first_in_edge(v, B.G);
+            assert (B.G[f].Reason != ReasonType::Reference);
+        }
     }
 
     // Pipeline optimizations
