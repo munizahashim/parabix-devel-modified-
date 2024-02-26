@@ -277,7 +277,7 @@ void Kernel::linkExternalMethods(BuilderRef b) {
         Type * const voidTy = b->getVoidTy();
 
         BEGIN_SCOPED_REGION
-        FixedArray<Type *, 11> params;
+        FixedArray<Type *, 12> params;
         params[0] = voidPtrTy;
         params[1] = int8PtrTy;
         params[2] = int8PtrTy;
@@ -289,6 +289,7 @@ void Kernel::linkExternalMethods(BuilderRef b) {
         params[8] = int8Ty; // illustrator type
         params[9] = int8Ty; // replacement 0
         params[10] = int8Ty; // replacement 1
+        params[11] = sizeTy->getPointerTo(); // loopId array
         FunctionType * regFunc = FunctionType::get(voidTy, params, false);
         driver.addLinkFunction(m, KERNEL_REGISTER_ILLUSTRATOR_CALLBACK, regFunc, (void*)&illustratorRegisterCapturedData);
         END_SCOPED_REGION

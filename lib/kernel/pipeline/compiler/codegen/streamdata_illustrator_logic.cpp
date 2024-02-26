@@ -19,13 +19,17 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
             assert (mKernel);
 
             // TODO: should buffers have row major streamsets?
+
+            FixedArray<size_t, 0> emptyLoopVec;
+
             registerIllustrator(b,
                                 b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT),
                                 b->GetString(mKernel->getName()),
                                 b->GetString(bind.Name),
                                 mKernelSharedHandle,
                                 ss->getNumElements(), 1, ss->getFieldWidth(), MemoryOrdering::RowMajor,
-                                bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1]);
+                                bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1],
+                                emptyLoopVec);
         }
     }
 }

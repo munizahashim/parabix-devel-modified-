@@ -17,7 +17,8 @@ StreamDataIllustrator * createStreamDataIllustrator();
 extern "C"
 void illustratorRegisterCapturedData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
                                      const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
-                                     const uint8_t illustratorTypeId, const char replacement0, const char replacement1);
+                                     const uint8_t illustratorTypeId, const char replacement0, const char replacement1,
+                                     const size_t * loopIdArray);
 
 
 extern "C"
@@ -25,13 +26,19 @@ void illustratorCaptureStreamData(StreamDataIllustrator * illustrator, const cha
                                  const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth);
 
 extern "C"
-void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject);
+void illustratorEnterKernel(StreamDataIllustrator * illustrator, const void * stateObject);
+
+extern "C"
+void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject, const size_t loopId);
 
 extern "C"
 void illustratorIterateLoop(StreamDataIllustrator * illustrator, const void * stateObject);
 
 extern "C"
 void illustratorExitLoop(StreamDataIllustrator * illustrator, const void * stateObject);
+
+extern "C"
+void illustratorExitKernel(StreamDataIllustrator * illustrator, const void * stateObject);
 
 extern "C"
 void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator, const size_t blockWidth);

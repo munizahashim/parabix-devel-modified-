@@ -1489,7 +1489,8 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
 void KernelCompiler::registerIllustrator(BuilderRef b,
                                          llvm::Constant * kernelName, llvm::Constant * streamName,
                                          const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
-                                         IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1) const {
+                                         IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1,
+                                         const ArrayRef<size_t> loopIds) const {
 
     auto init = mTarget->getInitializeFunction(b);
     assert (init);
@@ -1525,7 +1526,7 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
 
     b->SetInsertPoint(ret->getPrevNode());
 
-    registerIllustrator(b, illustratorObject, kernelName, streamName, handle, rows, cols, itemWidth, ordering, illustratorTypeId, replacement0, replacement1);
+    registerIllustrator(b, illustratorObject, kernelName, streamName, handle, rows, cols, itemWidth, ordering, illustratorTypeId, replacement0, replacement1, loopIds);
 
     b->restoreIP(ip);
 }
@@ -1539,13 +1540,14 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
                                          Constant * kernelName, Constant * streamName, Value * handle,
                                          const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
                                          IllustratorTypeId illustratorTypeId,
-                                         const char replacement0, const char replacement1) const {
+                                         const char replacement0, const char replacement1,
+                                         const ArrayRef<size_t> loopIds) const {
 
     assert (isFromCurrentFunction(b, illustratorObject));
     assert (isFromCurrentFunction(b, handle));
 
     Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
-    FixedArray<Value *, 11> args;
+    FixedArray<Value *, 12> args;
     args[0] = illustratorObject;
     args[1] = kernelName;
     args[2] = streamName;
@@ -1557,6 +1559,26 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
     args[8] = b->getInt8((unsigned)illustratorTypeId);
     args[9] = b->getInt8(replacement0);
     args[10] = b->getInt8(replacement1);
+
+    IntegerType * const sizeTy = b->getSizeTy();
+    PointerType * const sizePtrTy = sizeTy->getPointerTo();
+    Constant * loopIdConstant = nullptr;
+    if (loopIds.empty()) {
+        loopIdConstant = ConstantPointerNull::get(sizePtrTy);
+    } else {
+        const auto n = loopIds.size();
+        SmallVector<Constant *, 8> ids(n + 1);
+        for (size_t i = 0; i < n; ++i) {
+            assert (loopIds[i] != 0);
+            ids[i] = b->getSize(loopIds[i]);
+        }
+        ids[n] = b->getSize(0);
+        ArrayType * arTy = ArrayType::get(sizeTy, n + 1);
+        Constant * ar = ConstantArray::get(arTy, ids);
+        GlobalVariable * const gv = new GlobalVariable(*b->getModule(), arTy, true, GlobalValue::ExternalLinkage, ar);
+        loopIdConstant = ConstantExpr::getPointerCast(gv, sizePtrTy);
+    }
+    args[11] = loopIdConstant;
     b->CreateCall(regFunc->getFunctionType(), regFunc, args);
 }
 

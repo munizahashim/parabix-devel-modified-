@@ -41,6 +41,13 @@ constexpr static auto KERNEL_REGISTER_ILLUSTRATOR_CALLBACK = "__illustrator_regi
 constexpr static auto KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK = "__illustrator_capture";
 constexpr static auto KERNEL_ILLUSTRATOR_STRIDE_NUM = "__illustrator_sn";
 
+constexpr static auto KERNEL_ILLUSTRATOR_ENTER_KERNEL = "__illustrator_enter_kernel";
+constexpr static auto KERNEL_ILLUSTRATOR_EXIT_KERNEL = "__illustrator_exit_kernel";
+
+constexpr static auto KERNEL_ILLUSTRATOR_ENTER_LOOP = "__illustrator_enter_loop";
+constexpr static auto KERNEL_ILLUSTRATOR_ITERATE_LOOP = "__illustrator_iterate_loop";
+constexpr static auto KERNEL_ILLUSTRATOR_EXIT_LOOP = "__illustrator_exit_loop";
+
 class Kernel : public AttributeSet {
     friend class KernelCompiler;
     friend class PipelineAnalysis;

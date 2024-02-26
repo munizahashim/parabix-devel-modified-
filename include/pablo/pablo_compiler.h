@@ -51,7 +51,7 @@ protected:
 
 private:
 
-    bool identifyIllustratedValues(BuilderRef b, const PabloBlock * const block);
+    bool identifyIllustratedValues(BuilderRef b, const PabloBlock * const block, llvm::SmallVector<size_t, 8> & loopIds, size_t & currentLoopId);
 
     void examineBlock(BuilderRef b, const PabloBlock * const block);
 

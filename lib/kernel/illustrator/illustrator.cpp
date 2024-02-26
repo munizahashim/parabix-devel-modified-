@@ -10,7 +10,13 @@
 #include <util/slab_allocator.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_map.hpp>
+#include <boost/container/flat_set.hpp>
+#include <boost/graph/adjacency_list.hpp>
+#include "../pipeline/compiler/analysis/lexographic_ordering.hpp" // TODO: <- move this to a util folder we use this in the final version
 #include <mutex>
+#include <stack>
+
+
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -21,6 +27,7 @@
 #include <stdio.h>
 #endif
 
+using namespace boost;
 using namespace boost::container;
 using boost::intrusive::detail::floor_log2;
 using boost::intrusive::detail::is_pow2;
@@ -61,17 +68,31 @@ inline size_t get_terminal_width(const size_t fileDefault) {
 #endif // Windows/Linux
 }
 
+#define BEGIN_SCOPED_REGION {
+#define END_SCOPED_REGION }
+
 namespace kernel {
 
 using MemoryOrdering = KernelBuilder::MemoryOrdering;
 
 using StreamDataKey = const void *;
 
+struct StreamDataStateObject;
+
+struct StreamDataCapture;
+
+struct StreamDataStateObject;
+
 struct StreamDataElement {
     size_t StrideNum;
     size_t From;
     size_t To;
     uint8_t * Data;
+    size_t * LoopIndex;
+    size_t SequenceNum;
+    #ifndef NDEBUG
+    const StreamDataCapture * Capture;
+    #endif
 };
 
 struct StreamDataChunk {
@@ -81,7 +102,7 @@ struct StreamDataChunk {
 
 using StreamDataAllocator = SlabAllocator<uint8_t, 1024 * 1024>;
 
-using LoopVector = SmallVector<size_t, 4>;
+using LoopVector = SmallVector<size_t, 8 + 1>;
 
 struct StreamDataCapture {
     const char * const StreamName;
@@ -99,58 +120,22 @@ struct StreamDataCapture {
     const IllustratorTypeId IllustratorType;
     const char Replacement0;
     const char Replacement1;
+    const size_t * const LoopIdArray;
+    #ifndef NDEBUG
+    const StreamDataStateObject * StateObject;
+    #endif
 
-    inline void append(StreamDataAllocator & A,
-                       const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth) {
-        assert (to >= from);
-
-        StreamDataChunk * C = Current;
-        if (LLVM_UNLIKELY(CurrentIndex == ELEMENTS_PER_ALLOCATION)) {
-            StreamDataChunk * N = new (A.aligned_allocate(sizeof(StreamDataChunk), sizeof(size_t))) StreamDataChunk{};
-            assert (N);
-            C->Next = N;
-            Current = N;
-            CurrentIndex = 0;
-            C = N;
-        }
-        assert (CurrentIndex < ELEMENTS_PER_ALLOCATION);
-        StreamDataElement & E = C->Data[CurrentIndex++];
-        E.StrideNum = strideNum;
-        E.From = from;
-        E.To = to;
-
-        assert (from <= to);
-
-        if (LLVM_UNLIKELY(from == to)) {
-            E.Data = nullptr;
-        } else if (LLVM_UNLIKELY(ItemWidth >= CHAR_BIT && Rows == 1 && Cols == 1)) {
-            // may be unsafe; do not memcpy any data that isn't explicitly given
-            const auto offset = udiv(from * ItemWidth, CHAR_BIT);
-            const uint8_t * start = streamData + offset;
-            const size_t length  = (to - from) * ItemWidth / CHAR_BIT;
-            assert (length > 0);
-            assert (ItemWidth % CHAR_BIT == 0);
-            E.Data = A.aligned_allocate(length, ItemWidth / CHAR_BIT);
-            std::memcpy(E.Data, start, length);
-        } else {
-            // each "block" of streamData will contain blockWidth items, regardless of the item width.
-            const size_t blockSize = (Rows * Cols * ItemWidth * blockWidth) / CHAR_BIT;
-            const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
-            const auto end = (from & (blockWidth - 1)) + (to - from);
-            const auto length = ceil_udiv(end, blockWidth) * blockSize;
-            assert (length > 0);
-            E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
-            std::memcpy(E.Data, start, length);
-        }
-
-    }
+    inline void append(StreamDataStateObject * stateObjectEntry,
+                       const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth);
 
 
     StreamDataCapture(const char * streamName, size_t rows, size_t cols, size_t iw, uint8_t ordering,
-                      IllustratorTypeId typeId, const char rep0, const char rep1)
+                      IllustratorTypeId typeId, const char rep0, const char rep1,
+                      const size_t * loopIdArray)
     : StreamName(streamName), Current(&Root)
     , Rows(rows), Cols(cols), ItemWidth(iw), Ordering((MemoryOrdering)ordering)
-    , IllustratorType(typeId), Replacement0(rep0), Replacement1(rep1) {
+    , IllustratorType(typeId), Replacement0(rep0), Replacement1(rep1)
+    , LoopIdArray(loopIdArray) {
         assert (Ordering == MemoryOrdering::ColumnMajor || Ordering == MemoryOrdering::RowMajor);
         assert (is_pow2(ItemWidth));
     }
@@ -159,10 +144,18 @@ struct StreamDataCapture {
 struct StreamDataStateObject {
     const char * KernelName;
     StreamDataCapture First;
+    size_t SequenceLength = 0;
     LoopVector LoopIteration;
+    bool InKernel = false;
+
+    inline void enterKernel() {
+        assert (!InKernel);
+        InKernel = true;
+    }
 
     inline void enterLoop() {
-        LoopIteration.emplace_back(0);
+        assert (InKernel);
+        LoopIteration.emplace_back(0); // future iteration num
     }
 
     inline void iterateLoop() {
@@ -174,6 +167,12 @@ struct StreamDataStateObject {
         assert (!LoopIteration.empty());
         LoopIteration.pop_back();
     }
+
+    inline void exitKernel() {
+        assert (InKernel);
+        InKernel = false;
+    }
+
 
     // Even when executed in multi-threaded mode, each kernel instance is guaranteed to be executed
     // in lock step manner. To ensure this, the pipeline disables state-free/data-parallel execution
@@ -192,26 +191,34 @@ public:
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void registerStreamDataCapture(const char * kernelName, const char * streamName, const void * stateObject,
                                       const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
-                                      const IllustratorTypeId illustratorType, const char replacement0, const char replacement1) {
+                                      const IllustratorTypeId illustratorType, const char replacement0, const char replacement1,
+                                      const size_t * loopIdArray) {
 
  //   std::lock_guard<std::mutex> L(AllocatorLock);
     StreamDataCapture * newCapture = nullptr;
-
-    auto r = RegisteredCaptures.find(stateObject);
-    if (r == RegisteredCaptures.end()) {
+    #ifndef NDEBUG
+    StreamDataStateObject * so = nullptr;
+    #endif
+    auto r = RegisteredStateObjects.find(stateObject);
+    if (r == RegisteredStateObjects.end()) {
         StreamDataStateObject * newStateObjectEntry = GroupAllocator.allocate<StreamDataStateObject>(1);
+        #ifndef NDEBUG
+        so = newStateObjectEntry;
+        #endif
         newStateObjectEntry->KernelName = kernelName;
-        RegisteredCaptures.emplace(stateObject, newStateObjectEntry);
+        RegisteredStateObjects.emplace(stateObject, newStateObjectEntry);
         newCapture = &newStateObjectEntry->First;
     } else {
         StreamDataStateObject * existingStateObjectEntry = r->second;
+        #ifndef NDEBUG
+        so = existingStateObjectEntry;
+        #endif
         StreamDataCapture * current = &existingStateObjectEntry->First;
         for (;;) {
             if (current->StreamName == streamName) {
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Illustrator error: multiple instances of " << streamName << " was registered for " << kernelName << "\n";
-                errs().write_hex((uintptr_t)stateObject) << "\n";
                 report_fatal_error(msg.str());
             }
             assert (strcmp(current->StreamName, streamName) != 0);
@@ -226,10 +233,10 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
     }
     assert (newCapture);
 
-    new (newCapture) StreamDataCapture(streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1);
-
-alreadyRegistered:
-
+    new (newCapture) StreamDataCapture(streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1, loopIdArray);
+    #ifndef NDEBUG
+    newCapture->StateObject = so;
+    #endif
     // return id instead and force kernel to store it?
     InstallOrderCaptures.emplace_back(streamName, stateObject, newCapture);
 }
@@ -241,22 +248,26 @@ inline void doStreamDataCapture(const char * streamName, const void * stateObjec
                                 const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to,
                                 const size_t blockWidth) {
 
-    auto r = RegisteredCaptures.find(stateObject);
-    assert (r != RegisteredCaptures.end());
-    StreamDataStateObject * stateObjectEntry = r->second;
+    StreamDataStateObject * const stateObjectEntry = getStateObject(stateObject);
     StreamDataCapture * current = &stateObjectEntry->First;
     for (;;) {
+        assert (current);
         if (current->StreamName == streamName) {
             break;
         }
         assert (strcmp(current->StreamName, streamName) != 0);
         current = current->Next;
-        assert (current);
     }
 
-    auto & A = stateObjectEntry->InternalAllocator;
-    current->append(A, strideNum, streamData, from, to, blockWidth);
+    current->append(stateObjectEntry, strideNum, streamData, from, to, blockWidth);
 };
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief enterKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void enterKernel(const void * stateObject) {
+    getStateObject(stateObject)->enterKernel();
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief enterLoop
@@ -280,12 +291,42 @@ inline void exitLoop(const void * stateObject) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief enterKernel
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline void exitKernel(const void * stateObject) {
+    getStateObject(stateObject)->exitKernel();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getStateObject
  ** ------------------------------------------------------------------------------------------------------------- */
 inline StreamDataStateObject * getStateObject(const void * address) const {
-    auto r = RegisteredCaptures.find(address);
-    assert (r != RegisteredCaptures.end());
+    auto r = RegisteredStateObjects.find(address);
+    assert (r != RegisteredStateObjects.end());
     return r->second;
+}
+
+
+// using DisplayOrderGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief printGraph
+ ** ------------------------------------------------------------------------------------------------------------- */
+template <typename Graph>
+static void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") {
+
+    out << "digraph \"" << name << "\" {\n";
+    for (auto v : make_iterator_range(vertices(G))) {
+        out << "v" << v << " [label=\"" << v << "\"];\n";
+    }
+    for (auto e : make_iterator_range(edges(G))) {
+        const auto s = source(e, G);
+        const auto t = target(e, G);
+        out << "v" << s << " -> v" << t << ";\n";
+    }
+
+    out << "}\n\n";
+    out.flush();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -318,12 +359,274 @@ inline void displayCapturedData(const size_t blockWidth) const {
 
     const auto n = InstallOrderCaptures.size();
 
+    const auto numOfStateObjects = RegisteredStateObjects.size();
+
+    // Generate the ordering of the captures
+
+    struct CaptureData {
+        std::string Name;
+        std::vector<size_t> MaxIterations;
+        const StreamDataCapture & Capture;
+        std::vector<std::string> SubField;
+
+        CaptureData(const StreamDataCapture * capture)
+        : Capture(*capture) {
+            assert (capture->Ordering == MemoryOrdering::RowMajor);
+            assert (&Capture == capture);
+        }
+    };
+
+    struct StateObjects {
+        StreamDataStateObject * StateObject;
+        std::vector<CaptureData> Capture;
+    };
+
+    std::vector<StateObjects> StateObjects(numOfStateObjects);
+
+    flat_map<const void *, size_t> M;
+    for (size_t i = 0, j = 0; i < n; ++i) {
+        const void * stateObject;
+        const StreamDataCapture * capture;
+        std::tie(std::ignore, stateObject, capture) = InstallOrderCaptures[i];
+
+        const auto f = M.find(stateObject);
+        size_t k = 0;
+        if (f == M.end()) {
+            k = j++;
+            assert (k < numOfStateObjects);
+            StateObjects[k].StateObject = getStateObject(stateObject);
+            M.emplace(stateObject, k);
+        } else {
+            k = f->second;
+            assert (k < numOfStateObjects);
+            assert (StateObjects[k].StateObject == getStateObject(stateObject));
+        }
+        assert (capture->StateObject == StateObjects[k].StateObject);
+        StateObjects[k].Capture.emplace_back(capture);
+        assert (StateObjects[k].Capture.back().Capture.Ordering == MemoryOrdering::RowMajor);
+    }
+    assert (M.size() == numOfStateObjects);
+
+    constexpr auto TREE_NODE = std::numeric_limits<size_t>::max();
+
+    struct DisplayNode {
+        size_t Index;
+        std::vector<const StreamDataElement *> Elements;
+        size_t CurrentElementPosition = 0;
+
+        DisplayNode(size_t index = TREE_NODE) : Index(index) {}
+    };
+
+    using DisplayOrderGraph = adjacency_list<vecS, vecS, bidirectionalS, DisplayNode>;
+
+    std::vector<DisplayOrderGraph> subgraphs(numOfStateObjects);
+
+    // When reassembling the output data, we must be aware that the source of the printed data could come from different
+    // strides. Moreover, "if" statements mean there could be gaps in the data and/or "whiles" may not process some
+    // iterations that prior or subsequent strides will process. Collect all of the data we can and organize it into a
+    // tree structure in which the leaves contain the data for a particular loop iteration's captured values.
+
+    for (size_t stateObjectId = 0; stateObjectId < numOfStateObjects; ++stateObjectId) {
+
+        auto & C = StateObjects[stateObjectId].Capture;
+        const auto numOfCapturedValues = C.size();
+        assert (numOfCapturedValues < TREE_NODE);
+
+        auto & D = subgraphs[stateObjectId];
+        const auto root = add_vertex(TREE_NODE, D);
+        assert (root == 0);
+        assert (D[0].Index == TREE_NODE);
+
+        std::vector<size_t> V;
+
+        flat_map<std::pair<size_t, size_t>, size_t> B;
+
+        for (size_t captureNum = 0; captureNum < numOfCapturedValues; ++captureNum) {
+            auto & R = C[captureNum];
+            const auto & G = R.Capture;
+
+
+            assert (G.Ordering == MemoryOrdering::RowMajor);
+
+            // fill in the data for the i-th illustrated streamset
+
+            const StreamDataChunk * current = &(G.Root);
+            size_t index = 0;
+
+            size_t limit = (current->Next == nullptr) ? G.CurrentIndex : ELEMENTS_PER_ALLOCATION;
+            if (LLVM_UNLIKELY(limit == 0)) {
+                continue;
+            }
+
+            std::vector<size_t> pos;
+            flat_map<std::vector<size_t>, size_t> A;
+
+            auto & maxIterations = R.MaxIterations;
+
+            for (;;) {
+
+                assert (current);
+                assert (index < limit);
+                const StreamDataElement & E = current->Data[index];
+
+                assert (E.Capture == &G);
+
+                size_t priorIndex = root;
+                if (LLVM_UNLIKELY(E.LoopIndex)) {
+                    for (size_t k = 0;;++k) {
+                        const auto j = E.LoopIndex[k];
+                        if (j || k == 0) {
+                            const auto key = std::make_pair(k, j);
+                            const auto f = B.find(key);
+                            size_t u = 0;
+                            if (f == B.end()) {
+                                u = add_vertex(TREE_NODE, D);
+                                add_edge(priorIndex, u, D);
+                                B.emplace(key, u);
+                            } else {
+                                assert (edge(priorIndex, u, D).second);
+                                u = f->second;
+                            }
+                            priorIndex = u;
+                        }
+                        if (j == 0) {
+                            break;
+                        }
+                        if (maxIterations.size() <= k) {
+                            maxIterations.resize(k + 1);
+                        }
+                        auto & M = maxIterations[k];
+                        M = std::max(M, j);
+                    }
+                }
+
+                assert (pos.empty());
+                if (LLVM_UNLIKELY(E.LoopIndex)) {
+                    for (size_t k = 0;;++k) {
+                        const auto j = E.LoopIndex[k];
+                        if (j == 0) {
+                            break;
+                        }
+                        pos.push_back(j);
+                    }
+                }
+
+                const auto f = A.find(pos);
+                size_t elemVertex = 0;
+                if (f == A.end()) {
+                    elemVertex = add_vertex(captureNum, D);
+                    add_edge(priorIndex, elemVertex, D);
+                    A.emplace(std::vector<size_t>{pos.begin(), pos.end()}, elemVertex);
+                    V.push_back(elemVertex);
+                } else {
+                    elemVertex = f->second;
+                    assert (D[elemVertex].Index == captureNum);
+                    assert (edge(priorIndex, elemVertex, D).second);
+                }
+                pos.clear();
+
+                assert (D[elemVertex].Index < numOfCapturedValues);
+                D[elemVertex].Elements.push_back(&E);
+
+                if (LLVM_UNLIKELY(++index == limit)) {
+                    current = current->Next;
+                    index = 0;
+                    if (LLVM_UNLIKELY(current == nullptr)) {
+                        break;
+                    }
+                    limit = (current->Next == nullptr) ? G.CurrentIndex : ELEMENTS_PER_ALLOCATION;
+                    assert (limit > 0);
+                }
+
+            }
+        }
+
+        // Identify disjoint loop nests as those in which every iteration of one occurs prior to
+        // any iteration of a later one.
+
+        const auto m = V.size();
+        for (size_t i = 1; i < m; ++i) {
+            const auto vi = V[i];
+            assert (D[vi].Index != TREE_NODE);
+            const auto & A = D[vi].Elements;
+            assert (!A.empty());
+            for (size_t j = 0; j < i; ++j) {
+                const auto vj = V[j];
+                assert (vi != vj);
+                const auto & B = D[vj].Elements;
+                assert (D[vj].Index != TREE_NODE);
+                assert (!B.empty());
+                assert (D[vi].Index != D[vj].Index);
+                size_t a = 0, b = 0;
+                for(;;) {
+                    assert (A[a] != B[b]);
+                    const auto sa = A[a]->StrideNum;
+                    const auto sb = B[b]->StrideNum;
+                    // We need to find the first stride that both of these process execute and compare
+                    // the sequence nums. NOTE: this only compares entries with the same loop indices
+                    // and thus should have occurred in the same program order.
+                    if (LLVM_UNLIKELY(sa < sb)) {
+                        if (++a == A.size()) {
+                            break;
+                        }
+                    } else if (LLVM_UNLIKELY(sb < sa)) {
+                        if (++b == B.size()) {
+                            break;
+                        }
+                    } else {
+                        auto va = vi, vb = vj;
+                        assert (A[a]->Data != B[b]->Data);
+                        if (A[a]->SequenceNum > B[b]->SequenceNum) {
+                            std::swap(va, vb);
+                        } else {
+                            assert (A[a]->SequenceNum < B[b]->SequenceNum);
+                        }
+                        add_edge(va, vb, D);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // compute a lexical ordering of the graph
+        std::vector<size_t> L;
+        const auto total = num_vertices(D);
+        L.reserve(total);
+        lexical_ordering(D, L);
+
+        std::vector<size_t> O(total);
+        for (size_t i = 0; i < total; ++i) {
+            O[L[i]] = i;
+        }
+
+        L.clear();
+        for (size_t i = 0; i < total; ++i) {
+            DisplayNode & Di = D[i];
+            if (Di.Index == TREE_NODE) {
+                assert (L.empty());
+                for (const auto e : make_iterator_range(out_edges(i, D))) {
+                    L.push_back(target(e, D));
+                }
+                clear_out_edges(i, D);
+                std::sort(L.begin(), L.end(), [&](const size_t a, const size_t b) {
+                    return O[a] < O[b];
+                });
+                for (auto v : L) {
+                    add_edge(i, v, D);
+                }
+                L.clear();
+            } else {
+                clear_out_edges(i, D);
+            }
+        }
+    }
+
+    // Initialize some position information and determine whether the streamNames are unique so that we can make it
+    // easier for the user to read the output.
+
     std::vector<StreamNameNode> roots;
 
     assert (is_pow2(blockWidth));
-
-    // initialize some position information and determine whether the streamNames are unique
-    // so that we can make it easier for the user to read the output.
 
     for (size_t i = 0; i < n; ++i) {
         const char * streamName; const void * stateObject;
@@ -357,126 +660,112 @@ updated_trie:
         continue;
     }
 
+
+
     // Initialize some information and construct the displayed names
-
-    struct SubField {
-        std::string Label;
-    };
-
-    // codegen::IllustratorDisplay
-
-    struct CurrentRecord {
-        std::string Name;
-        const StreamDataCapture & Capture;
-        const StreamDataChunk * Current;
-        size_t Index;
-        std::vector<std::string> SubField;
-
-        CurrentRecord(const StreamDataCapture * capture)
-        : Capture(*capture)
-        , Current(&capture->Root)
-        , Index(0) {
-
-        }
-    };
-
-
-    std::vector<CurrentRecord> record;
-    record.reserve(n);
 
     const auto m = roots.size();
 
     size_t longestNameLength = 0;
     size_t maxNumOfRows = 0;
+    size_t maxNumOfCapturesPerStateObject = 0;
 
-    for (size_t i = 0; i < n; ++i) {
-        const char * streamName; const void * stateObject;
-        const StreamDataCapture * capture;
-        std::tie(streamName, stateObject, capture) = InstallOrderCaptures[i];
-        StreamDataStateObject * const stateObjectEntry = getStateObject(stateObject);
-
+    for (size_t i = 0; i < numOfStateObjects; ++i) {
+        auto & s = StateObjects[i];
+        StreamDataStateObject * const stateObjectEntry = s.StateObject;
         const char * kernelName = stateObjectEntry->KernelName;
+        maxNumOfCapturesPerStateObject = std::max(maxNumOfCapturesPerStateObject, s.Capture.size());
 
-        record.emplace_back(capture);
+        for (CaptureData & cd : s.Capture) {
 
-        auto & R = record.back();
+            auto & capture = cd.Capture;
 
-        if (capture->IllustratorType == IllustratorTypeId::BixNum) {
-            const auto r = capture->Rows;
-            const auto bixNumRows = ceil_udiv(r, 4);
-            R.SubField.resize(bixNumRows);
-            maxNumOfRows = std::max(maxNumOfRows, bixNumRows);
-            for (unsigned j = 0; j < bixNumRows; ++j) {
-                const auto a = (bixNumRows - j - 1) * 4;
-                const auto b = std::min<size_t>(a + 3, r);
-                R.SubField[j] = "[" + std::to_string(a) + "-" + std::to_string(b) + "]";
-            }
-        } else {
-            const auto r = capture->Rows;
-            R.SubField.resize(r);
-            maxNumOfRows = std::max(maxNumOfRows, r);
-            if (r == 1) {
-                R.SubField[0] = "";
-            } else {
-                for (unsigned j = 0; j < r; ++j) {
-                    R.SubField[j] = "[" + std::to_string(j) + "]";
+            if (capture.IllustratorType == IllustratorTypeId::BixNum) {
+                const auto r = capture.Rows;
+                const auto bixNumRows = ceil_udiv(r, 4);
+                cd.SubField.resize(bixNumRows);
+                maxNumOfRows = std::max(maxNumOfRows, bixNumRows);
+                for (unsigned j = 0; j < bixNumRows; ++j) {
+                    const auto a = (bixNumRows - j - 1) * 4;
+                    const auto b = std::min<size_t>(a + 3, r);
+                    cd.SubField[j] = "[" + std::to_string(a) + "-" + std::to_string(b) + "]";
                 }
-            }
-        }
-
-        StringRef curStreamName{streamName};
-        StringRef curKernelName{kernelName};
-
-        for (size_t j = 0; j < m; ++j) {
-            auto & A = roots[j];
-            if (LLVM_UNLIKELY(curStreamName.equals(A.Label))) {
-                const auto l = A.Children.size();
-                for (size_t k = 0; k < l; ++k) {
-                    auto & B = A.Children[k];
-                    if (LLVM_UNLIKELY(curKernelName.equals(B.Label))) {
-                        const auto c = B.NumOfCopies;
-                        if (l == 1 && c == 0) {
-                            R.Name = curStreamName.str();
-                        } else {
-                            std::string name;
-                            if (LLVM_LIKELY(l != 1)) {
-                                name = curKernelName.str() + ".";
-                            }
-                            name += curStreamName.str();
-                            if (c > 0) {
-                                name += std::to_string(++B.CurrentCopyNum);
-                            }
-                            R.Name = name;
-                        }
-                        size_t maxFieldLength = 0;
-                        for (unsigned j = 0; j < R.SubField.size(); ++j) {
-                            auto & Sj = R.SubField[j];
-                            maxFieldLength = std::max(maxFieldLength, Sj.size());
-                        }
-                        auto length = R.Name.length() + maxFieldLength;
-                        longestNameLength = std::max(longestNameLength, length);
-                        goto next_entry;
+            } else {
+                const auto r = capture.Rows;
+                cd.SubField.resize(r);
+                maxNumOfRows = std::max(maxNumOfRows, r);
+                if (r == 1) {
+                    cd.SubField[0] = "";
+                } else {
+                    for (unsigned j = 0; j < r; ++j) {
+                        cd.SubField[j] = "[" + std::to_string(j) + "]";
                     }
                 }
             }
-        }
-        llvm_unreachable("Failed to locate stream group in trie?");
-next_entry:
-        continue;
-    }
 
+
+            size_t lengthOfMaxIterations = 0;
+            const auto maxIterationSize = cd.MaxIterations.size();
+            if (maxIterationSize > 0) {
+                // {#,#,...}
+                lengthOfMaxIterations = maxIterationSize + 2 - 1;
+                for (size_t j = 0; j < maxIterationSize; ++j) {
+                    lengthOfMaxIterations += (size_t)std::ceil(std::log10(cd.MaxIterations[j]));
+                }
+            }
+
+            StringRef curStreamName{capture.StreamName};
+            StringRef curKernelName{kernelName};
+
+            for (size_t j = 0; j < m; ++j) {
+                auto & A = roots[j];
+                if (LLVM_UNLIKELY(curStreamName.equals(A.Label))) {
+                    const auto l = A.Children.size();
+                    for (size_t k = 0; k < l; ++k) {
+                        auto & B = A.Children[k];
+                        if (LLVM_UNLIKELY(curKernelName.equals(B.Label))) {
+                            const auto c = B.NumOfCopies;
+                            if (l == 1 && c == 0) {
+                                cd.Name = curStreamName.str();
+                            } else {
+                                std::string name;
+                                if (LLVM_LIKELY(l != 1)) {
+                                    name = curKernelName.str() + ".";
+                                }
+                                name += curStreamName.str();
+                                if (c > 0) {
+                                    name += std::to_string(++B.CurrentCopyNum);
+                                }
+                                cd.Name = name;
+                            }
+                            size_t maxFieldLength = 0;
+                            for (unsigned j = 0; j < cd.SubField.size(); ++j) {
+                                auto & Sj = cd.SubField[j];
+                                maxFieldLength = std::max(maxFieldLength, Sj.size());
+                            }
+                            auto length = cd.Name.length() + maxFieldLength + lengthOfMaxIterations;
+                            longestNameLength = std::max(longestNameLength, length);
+                            goto calculate_max_loop_depth;
+                        }
+                    }
+                }
+            }
+            llvm_unreachable("Failed to locate stream group in trie?");
+    calculate_max_loop_depth:
+            continue;
+        }
+    }
 
     // display item aligned data
 
-    auto & out = errs();
-
     std::vector<std::vector<char>> FormattedOutput(maxNumOfRows);
 
+    const size_t consoleWidth = get_terminal_width(blockWidth);
+    assert (consoleWidth > 0);
     size_t charsPerRow = codegen::IllustratorDisplay;
     if (charsPerRow == 0) {
-        const auto max = get_terminal_width(blockWidth);
-        if (LLVM_LIKELY(longestNameLength + 3 < max)) {
-            charsPerRow = max - (longestNameLength + 3);
+        if (LLVM_LIKELY(longestNameLength + 3 < consoleWidth)) {
+            charsPerRow = consoleWidth - (longestNameLength + 3);
         } else {
             // TODO: what is a good default here for when we cannot even fit the names in the console?
             charsPerRow = 100;
@@ -487,207 +776,306 @@ next_entry:
         FormattedOutput[i].resize(charsPerRow);
     }
 
+    SmallVector<char, 32> iterationVec;
+
     size_t startPosition = 0;
+
+    auto & out = errs();
 
     for (;;) {
 
         bool noRowCompletelyFilled = true;
-        for (size_t groupNum = 0; groupNum < n; ++groupNum) {
 
-            auto & R = record[groupNum];
-            const auto & G = R.Capture;
-            const auto & F = R.SubField;
+        const auto endPosition = startPosition + charsPerRow;
 
-            size_t position = startPosition;
+        for (size_t stateObjectId = 0; stateObjectId < numOfStateObjects; ++stateObjectId) {
 
-            assert (G.Ordering == MemoryOrdering::RowMajor);
+            auto & C = StateObjects[stateObjectId].Capture;
+            auto & D = subgraphs[stateObjectId];
 
-            size_t scale = G.ItemWidth;
-            if (G.IllustratorType == IllustratorTypeId::ByteData) {
-                scale /= CHAR_BIT;
-            }
+            std::function<bool(size_t, bool, size_t)> parse_tree = [&](const size_t node, bool isFirst, const size_t depth) {
 
-            const auto rowSize = G.Cols * (blockWidth * G.ItemWidth) / CHAR_BIT;
+                assert (node < num_vertices(D));
+                DisplayNode & Di = D[node];
+                if (Di.Index == TREE_NODE) {
 
-            const auto chunkSize = G.Rows * rowSize;
-
-            size_t end = 0;
-
-get_more_data:
-
-            // fill in the data for the i-th illustrated streamset
-            const StreamDataElement * E = nullptr;
-            if (LLVM_LIKELY(R.Current)) {
-                size_t limit = (R.Current->Next == nullptr) ? G.CurrentIndex : ELEMENTS_PER_ALLOCATION;
-                for (;;) {
-                    assert (R.Current);
-                    assert (R.Index < limit);
-                    const auto & t = R.Current->Data[R.Index];
-                    if ((t.To * scale) > position) {
-                        E = &t;
-                        break;
+                    bool first = false;// (depth > 0);
+                    bool any = false;
+                    for (const auto e : make_iterator_range(out_edges(node, D))) {
+                        const auto j = target(e, D);
+                        any |= parse_tree(j, first, depth + 1);
+                        first = false;
                     }
-                    ++R.Index;
-                    if (LLVM_UNLIKELY(R.Index == limit)) {
-                        R.Current = R.Current->Next;
-                        R.Index = 0;
-                        if (LLVM_UNLIKELY(R.Current == nullptr)) {
+//                    if (depth == 1 && any) {
+//                        const char sep = '-'; // inNestedLoop ? '-' : '=';
+//                        for (size_t k = 0; k < consoleWidth; ++k) {
+//                            out << sep;
+//                        }
+//                        out << '\n';
+//                    }
+                    return any;
+
+                } else {
+
+                    assert (out_degree(node, D) == 0);
+
+                    assert (Di.Index < C.size());
+
+                    auto & R = C[Di.Index];
+                    const auto & G = R.Capture;
+                    const auto & F = R.SubField;
+
+                    const auto numOfRows = F.size();
+
+                    assert (G.Ordering == MemoryOrdering::RowMajor);
+
+                    size_t scale = G.ItemWidth;
+                    if (G.IllustratorType == IllustratorTypeId::ByteData) {
+                        scale /= CHAR_BIT;
+                    }
+
+                    for (size_t i = 0; i < numOfRows; ++i) {
+                        auto & toFill = FormattedOutput[i];
+                        std::fill(toFill.begin(), toFill.end(), ' ');
+                    }
+
+                    auto position = startPosition;
+
+                    size_t end = 0;
+                    const StreamDataElement * E = nullptr;
+
+                    while (Di.CurrentElementPosition < Di.Elements.size()) {
+
+                        E = Di.Elements[Di.CurrentElementPosition];
+
+                        // each chunk is aligned in blockWidth x itemWidth bits
+
+                        const auto from = E->From * scale;
+                        const auto to = (E->To * scale);
+
+                        if (to <= position) {
+                            Di.CurrentElementPosition++;
+                            continue;
+                        }
+
+                        if (from > endPosition) {
                             break;
                         }
-                        limit = (R.Current->Next == nullptr) ? G.CurrentIndex : ELEMENTS_PER_ALLOCATION;
-                    }
-                }
-            }
 
-            const auto m = F.size();
+//                        if (LLVM_UNLIKELY(isFirst)) {
 
-            if (LLVM_LIKELY(E)) {
+//                            const char sep = '-'; // inNestedLoop ? '-' : '=';
+//                            size_t length = 3;
+//                            char joiner = ' ';
+//                            for (size_t k = 0; k < length; ++k) {
+//                                out << sep;
+//                            }
+//                            size_t k = 0;
+//                            if (LLVM_UNLIKELY(E->LoopIndex)) {
+//                                for (;;++k) {
+//                                    assert (E);
+//                                    const auto v = E->LoopIndex[k];
+//                                    if (v == 0) {
+//                                        break;
+//                                    }
+//                                    const auto val = std::to_string(v);
+//                                    length += val.length() + 1;
+//                                    out << joiner << val;
+//                                }
+//                            }
+//                            if (k) {
+//                                out << ' ';
+//                                ++length;
+//                            }
+//                            for (size_t k = length; k < consoleWidth; ++k) {
+//                                out << sep;
+//                            }
+//                            out << '\n';
 
-                // each chunk is aligned in blockWidth x itemWidth bits
+//                            isFirst = false;
+//                        }
 
-                assert (E->From <= position);
+                        assert (position >= from);
+                        assert (position < to);
 
-                const auto pos = position - E->From;
+                        const auto rowSize = G.Cols * (blockWidth * G.ItemWidth) / CHAR_BIT;
 
-                const uint8_t * blockData = E->Data + ((pos / blockWidth) * chunkSize);
-                const size_t readStart = (pos & (blockWidth - 1));
-                const size_t writeStart = (position % charsPerRow);
-                const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
-                const auto to = (E->To * scale);
-                assert (position < to);
-                const size_t length = std::min(blockDataLimit, to - position);
-                assert (length > 0);
+                        const auto chunkSize = G.Rows * rowSize;
 
-                assert ((readStart + length) <= blockWidth);
-                assert ((writeStart + length) <= charsPerRow);
+                        const auto offset = position - from;
 
-                if (G.IllustratorType == IllustratorTypeId::Bitstream) {
+                        const uint8_t * blockData = E->Data + ((offset / blockWidth) * chunkSize);
+                        const size_t readStart = (offset & (blockWidth - 1));
+                        const size_t writeStart = (position % charsPerRow);
 
-                    const char zeroCh = G.Replacement0;
-                    const char oneCh = G.Replacement1;
-                    for (size_t j = 0; j < m; ++j) {
+                        const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
 
-                        assert (j < FormattedOutput.size());
-                        auto & toFill = FormattedOutput[j];
-                        assert (toFill.size() == charsPerRow);
 
-                        const uint8_t * rowData = blockData + (j * rowSize);
-                        for (size_t k = 0; k < length; ++k) {
-                            const auto in = (readStart + k);
-                            assert (in < blockWidth);
-                            const uint8_t v = rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1)));
-                            const auto ch = (v == 0) ? zeroCh : oneCh;
-                            const auto out = (writeStart + k);
-                            assert (out < charsPerRow);
-                            toFill[out] = ch;
-                        }
-                    }
+                        const size_t length = std::min(blockDataLimit, to - position);
+                        assert (length > 0);
 
-                } else if (G.IllustratorType == IllustratorTypeId::BixNum) {
+                        assert ((readStart + length) <= blockWidth);
+                        assert ((writeStart + length) <= charsPerRow);
 
-                    const char hexBase = G.Replacement0 - 10;
+                        if (G.IllustratorType == IllustratorTypeId::Bitstream) {
 
-                    for (unsigned j = 0; j < m; ++j) {
+                            const char zeroCh = G.Replacement0;
+                            const char oneCh = G.Replacement1;
+                            for (size_t j = 0; j < numOfRows; ++j) {
 
-                        const auto s = (j * 4);
-                        assert (s < G.Rows);
-                        const auto t = std::min(G.Rows - s, 3UL);
-                        assert (j < FormattedOutput.size());
-                        auto & toFill = FormattedOutput[m - j - 1];
-                        assert (toFill.size() == charsPerRow);
+                                assert (j < FormattedOutput.size());
+                                auto & toFill = FormattedOutput[j];
+                                assert (toFill.size() == charsPerRow);
 
-                        for (size_t k = 0; k < length; ++k) {
-                            const auto out = (writeStart + k);
-                            assert (out < charsPerRow);
-                            toFill[out] = 0;
-                        }
-
-                        for (size_t r = 0; r < t; ++r) {
-                            const uint8_t * rowData = blockData + ((s + r) * rowSize);
-                            for (size_t k = 0; k < length; ++k) {
-                                const auto in = (readStart + k);
-                                assert (in < blockWidth);
-                                const uint8_t v = (rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1)))) != 0;
-                                assert (v == 0 || v == 1);
-                                const auto out = (writeStart + k);
-                                assert (out < charsPerRow);
-                                toFill[out] |= (uint8_t)(v << r);
-                            }
-                        }
-
-                        for (size_t k = 0; k < length; ++k) {
-                            const auto out = (writeStart + k);
-                            assert (out < charsPerRow);
-                            auto & c = toFill[out];
-                            if (c < 10) {
-                                c += '0';
-                            } else {
-                                c += hexBase;
-                            }
-                        }
-
-                    }
-
-                } else if (G.IllustratorType == IllustratorTypeId::ByteData) {
-
-                    const char nonAsciiRep = G.Replacement0;
-                    for (size_t j = 0; j < m; ++j) {
-
-                        assert (j < FormattedOutput.size());
-                        auto & toFill = FormattedOutput[j];
-                        assert (toFill.size() == charsPerRow);
-
-                        const uint8_t * rowData = blockData + (j * rowSize);
-                        for (size_t k = 0; k < length; ++k) {
-                            const auto in = (readStart + k);
-                            assert (in < blockWidth);
-                            auto ch = rowData[in];
-                            const auto out = (writeStart + k);
-                            if (LLVM_UNLIKELY((ch < 32) || (ch > 126))) {
-                                switch (ch) {
-                                    case '\t': case '\n': case '\r':
-                                        ch = ' ';
-                                        break;
-                                    default:
-                                        ch = nonAsciiRep;
+                                const uint8_t * rowData = blockData + (j * rowSize);
+                                for (size_t k = 0; k < length; ++k) {
+                                    const auto in = (readStart + k);
+                                    assert (in < blockWidth);
+                                    const uint8_t v = rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1)));
+                                    const auto ch = (v == 0) ? zeroCh : oneCh;
+                                    const auto out = (writeStart + k);
+                                    assert (out < charsPerRow);
+                                    toFill[out] = ch;
                                 }
                             }
-                            assert (out < charsPerRow);
-                            toFill[out] = ch;
+
+                        } else if (G.IllustratorType == IllustratorTypeId::BixNum) {
+
+                            const char hexBase = G.Replacement0 - 10;
+
+                            for (unsigned j = 0; j < numOfRows; ++j) {
+
+                                const auto s = (j * 4);
+                                assert (s < G.Rows);
+                                const auto t = std::min(G.Rows - s, 3UL);
+                                assert (j < FormattedOutput.size());
+                                const auto x = numOfRows - j - 1;
+                                assert (x < FormattedOutput.size());
+                                auto & toFill = FormattedOutput[x];
+                                assert (toFill.size() == charsPerRow);
+
+                                for (size_t k = 0; k < length; ++k) {
+                                    const auto out = (writeStart + k);
+                                    assert (out < charsPerRow);
+                                    toFill[out] = 0;
+                                }
+
+                                for (size_t r = 0; r < t; ++r) {
+                                    const uint8_t * rowData = blockData + ((s + r) * rowSize);
+                                    for (size_t k = 0; k < length; ++k) {
+                                        const auto in = (readStart + k);
+                                        assert (in < blockWidth);
+                                        const uint8_t v = (rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1)))) != 0;
+                                        assert (v == 0 || v == 1);
+                                        const auto out = (writeStart + k);
+                                        assert (out < charsPerRow);
+                                        toFill[out] |= (uint8_t)(v << r);
+                                    }
+                                }
+
+                                for (size_t k = 0; k < length; ++k) {
+                                    const auto out = (writeStart + k);
+                                    assert (out < charsPerRow);
+                                    auto & c = toFill[out];
+                                    if (c < 10) {
+                                        c += '0';
+                                    } else {
+                                        c += hexBase;
+                                    }
+                                }
+
+                            }
+
+                        } else if (G.IllustratorType == IllustratorTypeId::ByteData) {
+
+                            const char nonAsciiRep = G.Replacement0;
+                            for (size_t j = 0; j < numOfRows; ++j) {
+
+                                assert (j < FormattedOutput.size());
+                                auto & toFill = FormattedOutput[j];
+                                assert (toFill.size() == charsPerRow);
+
+                                const uint8_t * rowData = blockData + (j * rowSize);
+                                for (size_t k = 0; k < length; ++k) {
+                                    const auto in = (readStart + k);
+                                    assert (in < blockWidth);
+                                    auto ch = rowData[in];
+                                    const auto out = (writeStart + k);
+                                    if (LLVM_UNLIKELY((ch < 32) || (ch > 126))) {
+                                        switch (ch) {
+                                            case '\t': case '\n': case '\r':
+                                                ch = ' ';
+                                                break;
+                                            default:
+                                                ch = nonAsciiRep;
+                                        }
+                                    }
+                                    assert (out < charsPerRow);
+                                    toFill[out] = ch;
+                                }
+                            }
+                        }
+
+                        position += length;
+
+                        end = writeStart + length;
+                        assert (end <= charsPerRow);
+                        if (end == charsPerRow) {
+                            noRowCompletelyFilled = false;
+                            break;
+                        }
+
+                    }
+
+                    assert (E || end == 0);
+
+                    StringRef indices;
+
+                    if (LLVM_LIKELY(E)) {
+                        const auto numIterations = R.MaxIterations.size();
+                        if (LLVM_UNLIKELY(numIterations > 0)) {
+                            iterationVec.clear();
+                            raw_svector_ostream iterationStr(iterationVec);
+                            char joiner = '{';
+                            for (size_t j = 0; j < numIterations; ++j) {
+                                const auto v = E->LoopIndex[j];
+                                assert (v);
+                                iterationStr << joiner << v;
+                                joiner = ',';
+                            }
+                            iterationStr << '}';
+                            indices = iterationStr.str();
                         }
                     }
-                }
 
-                position += length;
-                end = (writeStart + length);
-                assert (end == (position - startPosition));
-                if (end < charsPerRow) {
-                    goto get_more_data;
-                }
-                noRowCompletelyFilled = false;
-            }
+                    for (size_t j = 0; j < numOfRows; ++j) {
+                        const auto & Fj = F[j];
+                        out.indent(longestNameLength - R.Name.size() - indices.size() - Fj.size());
+                        out << R.Name << Fj << indices << " | ";
+                        auto & output = FormattedOutput[j];
+                        for (size_t i = 0; i < end; ++i) {
+                            out << output[i];
+                        }
+                        out << '\n';
+                    }
 
-            assert (end <= charsPerRow);
-            for (size_t j = 0; j < m; ++j) {
-                const auto & Fj = F[j];
-                out.indent(longestNameLength - R.Name.size() - Fj.size());
-                out << R.Name << Fj << " | ";
-                auto & output = FormattedOutput[j];
-                for (size_t i = 0; i < end; ++i) {
-                    out << output[i];
+                    return (end > 0);
                 }
-                out << '\n';
-            }
+            };
+
+            parse_tree(0, false, 0);
+
         }
+
+        startPosition = endPosition;
+
+        out << '\n';
 
         if (noRowCompletelyFilled) {
             break;
         }
-
-        out << '\n';
-
-        startPosition += charsPerRow;
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -695,7 +1083,7 @@ get_more_data:
  ** ------------------------------------------------------------------------------------------------------------- */
 ~StreamDataIllustrator() {
     // slab allocated but group deconstructor needs to be called too
-    for (auto & rc : RegisteredCaptures) {
+    for (auto & rc : RegisteredStateObjects) {
         rc.second->~StreamDataStateObject();
     }
 }
@@ -703,10 +1091,75 @@ get_more_data:
 private:
 
 SlabAllocator<StreamDataStateObject, sizeof(StreamDataStateObject) * 64> GroupAllocator;
-flat_map<StreamDataKey, StreamDataStateObject *> RegisteredCaptures;
+flat_map<StreamDataKey, StreamDataStateObject *> RegisteredStateObjects;
 std::vector<StreamDataEntry> InstallOrderCaptures;
 
 };
+
+inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
+                   const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth) {
+    assert (to >= from);
+
+    auto & A = stateObjectEntry->InternalAllocator;
+
+    StreamDataChunk * C = Current;
+    if (LLVM_UNLIKELY(CurrentIndex == ELEMENTS_PER_ALLOCATION)) {
+        StreamDataChunk * N = new (A.aligned_allocate(sizeof(StreamDataChunk), sizeof(size_t))) StreamDataChunk{};
+        assert (N);
+        C->Next = N;
+        Current = N;
+        CurrentIndex = 0;
+        C = N;
+    }
+    assert (CurrentIndex < ELEMENTS_PER_ALLOCATION);
+    StreamDataElement & E = C->Data[CurrentIndex++];
+    E.StrideNum = strideNum;
+    E.From = from;
+    E.To = to;
+    E.SequenceNum = (++stateObjectEntry->SequenceLength);
+    #ifndef NDEBUG
+    E.Capture = this;
+    #endif
+    assert (stateObjectEntry == StateObject);
+    assert (from <= to);
+
+    if (LLVM_UNLIKELY(from == to)) {
+        E.Data = nullptr;
+    } else if (LLVM_UNLIKELY(ItemWidth >= CHAR_BIT && Rows == 1 && Cols == 1)) {
+        // may be unsafe; do not memcpy any data that isn't explicitly given
+        const auto offset = udiv(from * ItemWidth, CHAR_BIT);
+        const uint8_t * start = streamData + offset;
+        const size_t length  = (to - from) * ItemWidth / CHAR_BIT;
+        assert (length > 0);
+        assert (ItemWidth % CHAR_BIT == 0);
+        E.Data = A.aligned_allocate(length, ItemWidth / CHAR_BIT);
+        std::memcpy(E.Data, start, length);
+    } else {
+        // each "block" of streamData will contain blockWidth items, regardless of the item width.
+        const size_t blockSize = (Rows * Cols * ItemWidth * blockWidth) / CHAR_BIT;
+        const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
+        const auto end = (from & (blockWidth - 1)) + (to - from);
+        const auto length = ceil_udiv(end, blockWidth) * blockSize;
+        assert (length > 0);
+        E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
+        std::memcpy(E.Data, start, length);
+    }
+
+    if (stateObjectEntry->InKernel) {
+        const auto & L = stateObjectEntry->LoopIteration;
+        const auto n = L.size();
+        size_t * V = (size_t*)A.aligned_allocate(n + 1, sizeof(size_t));
+        for (size_t i = 0; i < n; ++i) {
+            V[i] = L[i]; assert (L[i]);
+        }
+        V[n] = 0;
+        E.LoopIndex = V;
+    } else {
+        assert (stateObjectEntry->LoopIteration.empty());
+    }
+
+}
+
 
 extern "C"
 StreamDataIllustrator * createStreamDataIllustrator() {
@@ -721,18 +1174,25 @@ StreamDataIllustrator * createStreamDataIllustrator() {
 extern "C"
 void illustratorRegisterCapturedData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
                                      const size_t rows, const size_t cols, const size_t itemWidth, const uint8_t memoryOrdering,
-                                     const uint8_t illustratorTypeId, const char replacement0, const char replacement1) {
-    illustrator->registerStreamDataCapture(kernelName, streamName, stateObject, rows, cols, itemWidth, memoryOrdering, (IllustratorTypeId)illustratorTypeId, replacement0, replacement1);
+                                     const uint8_t illustratorTypeId, const char replacement0, const char replacement1, const size_t * loopIdArray) {
+    illustrator->registerStreamDataCapture(kernelName, streamName, stateObject, rows, cols, itemWidth, memoryOrdering, (IllustratorTypeId)illustratorTypeId, replacement0, replacement1, loopIdArray);
 }
 
 extern "C"
 void illustratorCaptureStreamData(StreamDataIllustrator * illustrator, const char * kernelName, const char * streamName, const void * stateObject,
                                   const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth) {
+    assert (illustrator);
+    assert (is_pow2(blockWidth));
     illustrator->doStreamDataCapture(streamName, stateObject, strideNum, streamData, from, to, blockWidth);
 }
 
 extern "C"
-void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject) {
+void illustratorEnterKernel(StreamDataIllustrator * illustrator, const void * stateObject) {
+    illustrator->enterKernel(stateObject);
+}
+
+extern "C"
+void illustratorEnterLoop(StreamDataIllustrator * illustrator, const void * stateObject, const size_t loopId) {
     illustrator->enterLoop(stateObject);
 }
 
@@ -747,9 +1207,15 @@ void illustratorExitLoop(StreamDataIllustrator * illustrator, const void * state
     illustrator->exitLoop(stateObject);
 }
 
+extern "C"
+void illustratorExitKernel(StreamDataIllustrator * illustrator, const void * stateObject) {
+    illustrator->exitKernel(stateObject);
+}
 
 extern "C"
 void illustratorDisplayCapturedData(const StreamDataIllustrator * illustrator, const size_t blockWidth) {
+    assert (illustrator);
+    assert (is_pow2(blockWidth));
     illustrator->displayCapturedData(blockWidth);
 }
 
