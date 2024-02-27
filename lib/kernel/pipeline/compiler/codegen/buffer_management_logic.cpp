@@ -107,9 +107,30 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getReturnedBufferScaleFactor
+ ** ------------------------------------------------------------------------------------------------------------- */
+Rational PipelineCompiler::getReturnedBufferScaleFactor(const size_t streamSet) const {
+    Rational scaleFactor{0, 1};
+    auto updateScaleFactorForPort = [&](BufferGraph::edge_descriptor port) {
+        const BufferPort & rd = mBufferGraph[port];
+        const Binding & bindingRef = rd.Binding;
+        const AttributeSet & attrs = bindingRef.getAttributes();
+        if (attrs.hasAttribute(AttrId::ReturnedBuffer)) {
+            const Attribute & attrRef = attrs.findAttribute(AttrId::ReturnedBuffer);
+            scaleFactor = std::max(scaleFactor, attrRef.ratio());
+        }
+    };
+    updateScaleFactorForPort(in_edge(streamSet, mBufferGraph));
+    for (const auto port : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+        updateScaleFactorForPort(port);
+    }
+    return scaleFactor;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief allocateOwnedBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal) {
+void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal) {
     assert (expectedNumOfStrides);
     if (LLVM_UNLIKELY(CheckAssertions)) {
         Value * const valid = b->CreateIsNotNull(expectedNumOfStrides);
@@ -147,12 +168,14 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
         }
     }
 
+
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.hasZeroElementsOrWidth())) continue;
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
+
             if (LLVM_UNLIKELY(bn.isConstant())) {
                 generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
             } else {
@@ -166,7 +189,26 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 }
                 if (nonLocal) {
-                    buffer->allocateBuffer(b, expectedNumOfStrides);
+
+                    Value * multiplier = expectedNumOfStrides;
+
+                    if (LLVM_UNLIKELY(bn.isReturned())) {
+                        auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
+                        if (scaleFactor > 0) {
+
+                            size_t capacity = 1;
+                            if (isa<DynamicBuffer>(buffer)) {
+                                capacity = cast<DynamicBuffer>(buffer)->getInitialCapacity();
+                            } else if (isa<MMapedBuffer>(buffer)) {
+                                capacity = cast<MMapedBuffer>(buffer)->getInitialCapacity();
+                            }
+                            multiplier = b->CreateRoundUp(expectedSourceOutputSize, expectedNumOfStrides);
+                            Value * value = b->CreateCeilUDivRational(multiplier, capacity);
+                            multiplier = b->CreateUMax(value, expectedNumOfStrides);
+                        }
+                    }
+
+                    buffer->allocateBuffer(b, multiplier);
 
                     #ifdef PRINT_DEBUG_MESSAGES
                     const auto pe = in_edge(streamSet, mBufferGraph);
@@ -553,7 +595,7 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderR
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         // owned or external buffers do not have a mutable vba
-        if (LLVM_LIKELY(bn.isOwned() || bn.isExternal())) {
+        if (LLVM_LIKELY(bn.isOwned() || bn.isExternal() || bn.hasZeroElementsOrWidth())) {
             continue;
         }
         assert (bn.Locality != BufferLocality::ThreadLocal);
@@ -891,7 +933,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     assert (isFromCurrentFunction(b, buffer->getHandle()));
 
     Value * const baseAddress = buffer->getBaseAddress(b);
-    if (bufferNode.isUnowned()) {
+    if (bufferNode.isUnowned() || bufferNode.hasZeroElementsOrWidth()) {
         assert (bufferNode.isNonThreadLocal());
         assert (!bufferNode.isConstant());
         assert (!bufferNode.isTruncated());

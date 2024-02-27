@@ -500,7 +500,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
     // of producing the output for any given input.) Just ignore them.
 
     const BufferNode & bn = mBufferGraph[streamSet];
-    if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal())) {
+    if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
         return;
     }
 
@@ -830,7 +830,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.isThreadLocal() || bn.isUnowned() || bn.isTruncated()) {
+    if (bn.isThreadLocal() || bn.isUnowned() || bn.isTruncated() || bn.hasZeroElementsOrWidth()) {
         return;
     }
 

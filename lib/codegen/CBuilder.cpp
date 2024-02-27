@@ -2146,17 +2146,25 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                         if (static_check) {
                             if (LLVM_UNLIKELY(static_check->isNullValue())) {
                                 // show any static failures with their compilation context
-                                auto extract = [](const Value * a) -> const char * {
-                                    const GlobalVariable * const g = cast<GlobalVariable>(a->stripPointerCasts());
-                                    const ConstantDataArray * const d = cast<ConstantDataArray>(g->getInitializer());
-                                    // StringRef does not "own" the data
-                                    const StringRef ref = d->getRawDataValues();
-                                    return ref.data();
+                                auto extract = [&](const Value * a) -> const char * {
+                                    assert (a);
+                                    a = a->stripPointerCasts();
+                                    if (LLVM_LIKELY(isa<GlobalVariable>(a))) {
+                                        const GlobalVariable * const g = cast<GlobalVariable>(a);
+                                        const ConstantDataArray * const d = cast<ConstantDataArray>(g->getInitializer());
+                                        // StringRef does not "own" the data
+                                        const StringRef ref = d->getRawDataValues();
+                                        return ref.data();
+                                    } else {
+                                        assert (isa<ConstantPointerNull>(a) || isa<Function>(a));
+                                        return nullptr;
+                                    }
                                 };
-                                const char * const name = extract(ci.getOperand(1)); assert (name);
-                                const char * const msg = extract(ci.getOperand(2)); assert (msg);
-                                const auto trace = reinterpret_cast<const __backtrace_data * const *>(extract(ci.getOperand(3))); assert (trace);
-                                const uint32_t n = cast<ConstantInt>(ci.getOperand(4))->getLimitedValue();
+
+                                const char * const name = extract(ci.getArgOperand(1)); assert (name);
+                                const char * const msg = extract(ci.getArgOperand(2)); assert (msg);
+                                const auto trace = reinterpret_cast<const __backtrace_data * const *>(extract(ci.getArgOperand(3)));
+                                const uint32_t n = cast<ConstantInt>(ci.getOperand(4))->getLimitedValue(); assert (trace || n == 0);
 
                                 // since we may not necessarily be able to statically evaluate every varadic param,
                                 // attempt to fill in what constants we can and report <any> for all others.
@@ -2173,8 +2181,10 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                         } else {
                                             Type * const ty = arg->getType();
                                             if (ty->isPointerTy()) {
-                                                const char * const argC = extract(arg); assert (argC);
-                                                fmt % argC;
+                                                const char * const argC = extract(arg);
+                                                if (argC) {
+                                                    fmt % argC;
+                                                }
                                             } else {
                                                 fmt % "<unknown constant type>";
                                             }
@@ -2183,6 +2193,8 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                         fmt % "<any value>";
                                     }
                                 }
+
+                                F.print(errs()); errs() << "\n\n";
 
                                 SmallVector<char, 1024> tmp;
                                 raw_svector_ostream out(tmp);
