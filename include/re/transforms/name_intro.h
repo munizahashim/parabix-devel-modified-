@@ -39,9 +39,12 @@ public:
     FixedSpanNamer(const cc::Alphabet * a);
 protected:
     RE * transform (RE * r) override;
+    void processOneAlt(RE * r);
 private:
     const cc::Alphabet * mAlphabet;
     std::string mLgthPrefix;
+    std::map<int, std::vector<RE *>> mFixedLengthAlts;
+    std::vector<RE *> mNewAlts;
 };
 
 class UniquePrefixNamer final : public NameIntroduction {
@@ -50,4 +53,20 @@ public:
 protected:
     RE * transform (RE * r) override;
 };
+
+class Repeated_CC_Seq_Namer final : public NameIntroduction {
+public:
+    Repeated_CC_Seq_Namer();
+    std::map<std::string, std::pair<const re::CC *, unsigned>> mInfoMap;
+protected:
+    RE * transform (RE * r) override;
+private:
+    std::string mPrefix;
+    unsigned mGenSym;
+    std::string genSym();
+};
+
+RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names);
+
 }
+

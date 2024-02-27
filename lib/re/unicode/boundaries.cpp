@@ -9,7 +9,6 @@
 #include <re/unicode/resolve_properties.h>
 #include <unicode/data/PropertyObjects.h>
 #include <unicode/data/PropertyObjectTable.h>
-#include <re/compile/re_compiler.h>
 
 #include <vector>                  // for vector, allocator
 #include <llvm/Support/Casting.h>  // for dyn_cast, isa
@@ -290,7 +289,7 @@ public:
         if (propExpr->getPropertyIdentifier() == "w") {
             Name * wb_name = makeZeroWidth("\\b{w}");
             wb_name->setDefinition(nullptr);
-            RE_Compiler::UnsupportedRE("\\b{w} not yet supported.");
+            re::UnsupportedRE("\\b{w} not yet supported.");
             return wb_name;
         }
         if (prop_code >= 0) {
@@ -311,7 +310,7 @@ public:
             }
             return resolved;
         }
-        RE_Compiler::UnsupportedRE(Printer_RE::PrintRE(propExpr));
+        re::UnsupportedRE(Printer_RE::PrintRE(propExpr));
     }
 
 };

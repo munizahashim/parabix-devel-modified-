@@ -21,6 +21,7 @@ DEPS
     kernel.util
     kernel.unicode
     re.parse
+    re.compile
     re.unicode
     re.transforms
     re.printer

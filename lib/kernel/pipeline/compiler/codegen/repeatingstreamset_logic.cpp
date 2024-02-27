@@ -7,71 +7,56 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateMetaDataForRepeatingStreamSets(BuilderRef b) {
 
-    const PipelineKernel * const pk = cast<PipelineKernel>(mTarget);
-    const auto & kernels = pk->getKernels();
-    const auto m = kernels.size();
+    if (mTarget->hasInternallyGeneratedStreamSets()) {
 
-    flat_set<const RepeatingStreamSet *> touched;
+        const PipelineKernel * const pk = cast<PipelineKernel>(mTarget);
+        const auto & kernels = pk->getKernels();
+        const auto m = kernels.size();
 
-    std::vector<Constant *> maxStrides;
+        flat_set<const RepeatingStreamSet *> touched;
 
-    // the ordering of the kernels may differ between the input ordering of the
-    // pipeline kernel and what was actually compiled by the program.
+        std::vector<Constant *> maxStrides;
 
-    for (unsigned i = 0; i < m; ++i) {
-        const Kernel * const kernel = kernels[i];
-        const auto m = kernel->getNumOfStreamInputs();
-        if (LLVM_UNLIKELY(kernel->generatesDynamicRepeatingStreamSets())) {
-            maxStrides.push_back(b->getSize(MaximumNumOfStrides[i]));
-        }
-        for (unsigned i = 0; i != m; ++i) {
-            const StreamSet * const input = kernel->getInputStreamSet(i);
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
-                if (cast<RepeatingStreamSet>(input)->isDynamic()) {
-                    // Since the kernel/streamset graph relationships is part of a pipeline's
-                    // signature, we do not need an entry for every shared streamset.
+        // the ordering of the kernels may differ between the input ordering of the
+        // pipeline kernel and what was actually compiled by the program.
 
-                    if (touched.emplace(cast<RepeatingStreamSet>(input)).second) {
-                        Rational ub{0U};
-                        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-                            const RelationshipNode & rn = mStreamGraph[streamSet];
-                            assert (rn.Type == RelationshipNode::IsRelationship);
-                            if (rn.Relationship == input) {
-                                for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                                    const auto consumer = target(e, mBufferGraph);
-                                    assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-                                    const BufferPort & bp = mBufferGraph[e];
-                                    const auto m = MaximumNumOfStrides[consumer];
-                                    ub = std::max(ub, bp.Maximum * m);
-                                }
-                                assert (ub.denominator() == 1);
-//                                const BufferNode & bn = mBufferGraph[streamSet];
-//                                if (bn.OverflowCapacity) {
-//                                    ub += (bn.OverflowCapacity * b->getBitBlockWidth());
-//                                }
-                                break;
-                            }
-                        }
-                        assert (ub.denominator() == 1);
-                        maxStrides.push_back(b->getSize(ub.numerator()));
-                    }
-                }
+        for (unsigned i = 0; i < m; ++i) {
+            const Kernel * const kernel = kernels[i].Object;
+            if (LLVM_UNLIKELY(kernel->hasInternallyGeneratedStreamSets())) {
+                maxStrides.push_back(b->getSize(MaximumNumOfStrides[i]));
             }
         }
+
+        // TODO: use graph for this?
+
+        Constant * sz_ZERO = b->getSize(0);
+
+        const auto & S = mTarget->getInternallyGeneratedStreamSets();
+        for (auto s : S) {
+            Constant * ms = sz_ZERO;
+            for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+                const RelationshipNode & rn = mStreamGraph[streamSet];
+                assert (rn.Type == RelationshipNode::IsStreamSet);
+                if (rn.Relationship == s) {
+                    ms = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+                    break;
+                }
+            }
+            maxStrides.push_back(ms);
+        }
+
+        Module * const module = mTarget->getModule();
+        NamedMDNode * const md = module->getOrInsertNamedMetadata("rsl");
+        assert (md->getNumOperands() == 0);
+        Constant * ar = ConstantArray::get(ArrayType::get(b->getSizeTy(), maxStrides.size()), maxStrides);
+        md->addOperand(MDNode::get(module->getContext(), {ConstantAsMetadata::get(ar)}));
     }
-
-    Module * const module = mTarget->getModule();
-    NamedMDNode * const md = module->getOrInsertNamedMetadata("rsl");
-    assert (md->getNumOperands() == 0);
-    Constant * ar = ConstantArray::get(ArrayType::get(b->getSizeTy(), maxStrides.size()), maxStrides);
-    md->addOperand(MDNode::get(module->getContext(), {ConstantAsMetadata::get(ar)}));
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getMaximumNumOfStridesForRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-Constant * PipelineCompiler::getMaximumNumOfStridesForRepeatingStreamSet(BuilderRef b, const unsigned streamSet) const {
+Constant * PipelineCompiler::getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const {
     Rational ub{0U};
     for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
         const auto consumer = target(e, mBufferGraph);
@@ -85,54 +70,86 @@ Constant * PipelineCompiler::getMaximumNumOfStridesForRepeatingStreamSet(Builder
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief readsRepeatingStreamSet
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::readsRepeatingStreamSet() const {
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isConstant()) return true;
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindRepeatingStreamSetInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const {
 
-    // NOTE: the arguments here will be relative to the external program ordering and not the
-    // pipeline's ordering.
+    if (mTarget->hasInternallyGeneratedStreamSets()) {
 
-    for (const auto streamSet : DynamicRepeatingStreamSetId) {
+        const auto & S = mTarget->getInternallyGeneratedStreamSets();
+        const auto n = S.size(); assert (n > 0);
+        assert (out_degree(PipelineInput, mInternallyGeneratedStreamSetGraph) == n);
 
-        assert (arg != arg_end);
-        Value * const addr = &*arg++;
-        assert (arg != arg_end);
-        Value * const runLength = &*arg++;
+        InternallyGeneratedStreamSetGraph::out_edge_iterator ei, ei_end;
+        std::tie(ei, ei_end) = out_edges(PipelineInput, mInternallyGeneratedStreamSetGraph);
 
-        if (streamSet) {
-            const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-            Value * const handle = b->getScalarFieldPtr(handleName);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            #ifndef NDEBUG
-            const RelationshipNode & rn = mStreamGraph[streamSet];
-            assert (rn.Type == RelationshipNode::IsRelationship);
-            assert (isa<RepeatingStreamSet>(rn.Relationship));
-            assert (cast<RepeatingStreamSet>(rn.Relationship)->isDynamic());
-            #endif
-            // external buffers already have a buffer handle
-            RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
-            buffer->setHandle(handle);
-            Value * const ba = b->CreatePointerCast(addr, buffer->getPointerType());
-            buffer->setBaseAddress(b, ba);
-            buffer->setModulus(runLength);            
-            const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
-            b->setScalarField(lengthName, runLength);
+        for (unsigned i = 0; i < n; ++i) {
+
+            assert (arg != arg_end);
+            Value * const addr = &*arg++;
+            assert (arg != arg_end);
+            Value * const runLength = &*arg++;
+
+            assert (ei != ei_end);
+
+            assert (mInternallyGeneratedStreamSetGraph[*ei] == i);
+            const auto streamSet = target(*ei++, mInternallyGeneratedStreamSetGraph);
+            auto & N = mInternallyGeneratedStreamSetGraph[streamSet];
+
+            N.StreamSet = addr;
+            N.RunLength = runLength;
+
+            assert (streamSet >= FirstStreamSet);
+            // an internally generated streamset might only be used by one of the nested kernels
+            if (streamSet <= LastStreamSet) {
+                const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
+                Value * const handle = b->getScalarFieldPtr(handleName).first;
+                const BufferNode & bn = mBufferGraph[streamSet];
+                #ifndef NDEBUG
+                const RelationshipNode & rn = mStreamGraph[streamSet];
+                assert (rn.Type == RelationshipNode::IsStreamSet);
+                assert (isa<RepeatingStreamSet>(rn.Relationship));
+                assert (cast<RepeatingStreamSet>(rn.Relationship)->isDynamic());
+                #endif
+                // external buffers already have a buffer handle
+                RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
+                buffer->setHandle(handle);
+                Value * const ba = b->CreatePointerCast(addr, buffer->getPointerType());
+                buffer->setBaseAddress(b, ba);
+                buffer->setModulus(runLength);
+                const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
+                b->setScalarField(lengthName, runLength);
+            }
         }
-
     }
+}
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addRepeatingStreamSetInitializationArguments
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::addRepeatingStreamSetInitializationArguments(const unsigned kernelId, ArgVec & args) const {
+
+    #ifndef NDEBUG
+    const auto kernel = getKernel(kernelId);
+    unsigned m = 0;
+    if (kernel->hasInternallyGeneratedStreamSets()) {
+        m = kernel->getInternallyGeneratedStreamSets().size(); assert (m > 0);
+    }
+    assert (in_degree(kernelId, mInternallyGeneratedStreamSetGraph) == m);
+    #endif
+
+    if (in_degree(kernelId, mInternallyGeneratedStreamSetGraph) > 0) {
+        #ifndef NDEBUG
+        unsigned expected = 0;
+        #endif
+        for (auto e : make_iterator_range(in_edges(kernelId, mInternallyGeneratedStreamSetGraph))) {
+            assert (mInternallyGeneratedStreamSetGraph[e] == expected++);
+            const auto streamSet = source(e, mInternallyGeneratedStreamSetGraph);
+            const auto & N = mInternallyGeneratedStreamSetGraph[streamSet];
+            args.push_back(N.StreamSet);
+            args.push_back(N.RunLength);
+        }
+    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -143,12 +160,42 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
     RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
 
     const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-    Value * const handle = b->getScalarFieldPtr(handleName);
+    Value * const handle = b->getScalarFieldPtr(handleName).first;
     buffer->setHandle(handle);
 
     const RelationshipNode & rn = mStreamGraph[streamSet];
-    assert (rn.Type == RelationshipNode::IsRelationship);
+    assert (rn.Type == RelationshipNode::IsStreamSet);
     const RepeatingStreamSet * const ss = cast<RepeatingStreamSet>(rn.Relationship);
+
+    if (ss->isUnaligned()) {
+        bool unaligned = true;
+        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const BufferPort & bp = mBufferGraph[e];
+            const auto & attrs = bp.getAttributes();
+            unaligned &= attrs.hasAttribute(AttrId::AllowsUnalignedAccess);
+        }
+        if (LLVM_UNLIKELY(!unaligned)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Repeating streamset is marked as unaligned but ";
+            bool notFirst = false;
+            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const BufferPort & bp = mBufferGraph[e];
+                const auto & attrs = bp.getAttributes();
+                if (!attrs.hasAttribute(AttrId::AllowsUnalignedAccess)) {
+                    const auto consumer = target(e, mBufferGraph);
+                    const Binding & input = bp.Binding;
+                    if (notFirst) {
+                        out << ", ";
+                    }
+                    out << getKernel(consumer)->getName() << "." << input.getName();
+                    notFirst = true;
+                }
+            }
+            out << " is not explicitly marked as allowing unaligned access";
+            report_fatal_error(StringRef(out.str()));
+        }
+    }
 
     if (ss->isDynamic()) {
         assert (isFromCurrentFunction(b, buffer->getBaseAddress(b)));
@@ -164,60 +211,11 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(BuilderRef b, con
         assert (ub.denominator() == 1);
         const auto maxStrideLength = ub.numerator();
         auto info = cast<PipelineKernel>(mTarget)->createRepeatingStreamSet(b, ss, maxStrideLength);
-        Value * const ba = b->CreatePointerCast(info.StreamSet, buffer->getPointerType());
+        Value * const ba = b->CreatePointerCast(info.first, buffer->getPointerType());
         buffer->setBaseAddress(b, ba);
-        buffer->setModulus(info.RunLength);
+        buffer->setModulus(info.second);
     }
 
-#if 0
-
-    BasicBlock * const copyAndExpandGlobal = b->CreateBasicBlock();
-    BasicBlock * const copyAndExpandGlobalLoop = b->CreateBasicBlock();
-    BasicBlock * const exit = b->CreateBasicBlock();
-
-    // if we scale our expected
-    ConstantInt * const sz_ZERO = b->getSize(0);
-    ConstantInt * const sz_ONE = b->getSize(1);
-    PointerType * const arrPtrTy = arrTy->getPointerTo();
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    Value * const noMemCpyNeeded = b->CreateICmpEQ(expectedNumOfStrides, sz_ONE);
-    b->CreateCondBr(noMemCpyNeeded, exit, copyAndExpandGlobal);
-
-    b->SetInsertPoint(copyAndExpandGlobal);
-    ConstantInt * const baseAdditionalLength = b->getSize(additionalStrides);
-    Value * const expandedAdditionalLength = b->CreateMul(expectedNumOfStrides, baseAdditionalLength);
-    Value * const totalLength = b->CreateAdd(baseLength, expandedAdditionalLength);
-    Value * const originalLength = b->CreateAdd(baseLength, baseAdditionalLength);
-    Value * const arrTySize = ConstantExpr::getSizeOf(arrTy);
-    Value * const bytesNeeded = b->CreateMul(arrTySize, totalLength);
-    Value * const data = b->CreateAlignedMalloc(bytesNeeded, align);
-    Value * const array = b->CreatePointerCast(data, arrPtrTy);
-    b->CreateMemCpy(data, patternData, b->CreateMul(arrTySize, originalLength), align);
-    b->setScalarField(REPEATING_STREAMSET_MALLOCED_DATA_PREFIX + std::to_string(streamSet), data);
-    b->CreateBr(copyAndExpandGlobalLoop);
-
-    b->SetInsertPoint(copyAndExpandGlobalLoop);
-    PHINode * const copyIndexPhi = b->CreatePHI(b->getSizeTy(), 2);
-    copyIndexPhi->addIncoming(sz_ZERO, copyAndExpandGlobal);
-    FixedArray<Value *, 2> offset;
-    offset[0] = sz_ZERO;
-    offset[1] = b->CreateAdd(b->CreateMul(copyIndexPhi, baseLength), baseAdditionalLength);
-    Value * const from = b->CreateGEP(array, offset);
-    Value * const nextCopyIndex = b->CreateAdd(copyIndexPhi, sz_ONE);
-    offset[1] = b->CreateAdd(b->CreateMul(nextCopyIndex, baseLength), baseAdditionalLength);
-    Value * const to = b->CreateGEP(array, offset);
-    b->CreateMemCpy(to, from, b->CreateMul(arrTySize, baseLength), align);
-    copyIndexPhi->addIncoming(nextCopyIndex, copyAndExpandGlobalLoop);
-    Value * const notDone = b->CreateICmpNE(nextCopyIndex, expectedNumOfStrides);
-    b->CreateCondBr(notDone, copyAndExpandGlobalLoop, exit);
-
-    b->SetInsertPoint(exit);
-    PHINode * const addr = b->CreatePHI(arrPtrTy, 2);
-    addr->addIncoming(patternData, entryBlock);
-    addr->addIncoming(array, copyAndExpandGlobalLoop);
-    Value * const ba = b->CreatePointerCast(addr, buffer->getPointerType());
-    buffer->setBaseAddress(b, ba);
-#endif
 }
 
 void PipelineCompiler::addRepeatingStreamSetBufferProperties(BuilderRef b) {
@@ -225,7 +223,7 @@ void PipelineCompiler::addRepeatingStreamSetBufferProperties(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isConstant())) {
             auto & S = mStreamGraph[streamSet];
-            assert (S.Type == RelationshipNode::IsRelationship);
+            assert (S.Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(S.Relationship));
 
             Type * const handleTy = bn.Buffer->getHandleType(b);

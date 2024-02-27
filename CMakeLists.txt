@@ -16,18 +16,17 @@
 cmake_minimum_required(VERSION 3.12)
 
 project(parabix)
+enable_testing()
 
 ###   Build Options   ###
 
 option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
-option(ENABLE_ROOT "Enable CERN ROOT support if available" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
-option(USE_2020_PIPELINE_COMPILER "Use pre-partitioning pipeline compiler" OFF)
-option(USE_2017_U8U16_ALGORITHM "Use 2017 u8u16 algorithm" OFF)
 option(LLVM_PATH "LLVM root directory")
 option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
+option(USE_LIBBACKTRACE "Allows framework to provide more detailed backtraces in JIT compiled code. Library available from github.com/ianlancetaylor/libbacktrace" OFF)
 
 # Build Artifact Configuration
 set(ARTIFACT_MODE "Multiple" CACHE STRING "Build framework into a single artifact (Single) or multiple artifacts (Multiple)")
@@ -124,24 +123,58 @@ message(STATUS "Report PAPI tests was not enabled")
 endif()
 endif()
 
-### Import dependenct: CERN ROOT   ###
+###   Import Dependency: LibBacktrace   ###
 
-if (ENABLE_ROOT)
-find_package(ROOT COMPONENTS Spectrum)
-if (ROOT_FOUND)
-message(STATUS "Found CERN ROOT in: ${ROOT_INCLUDE_DIRS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_CERN_ROOT")
-include_directories(${ROOT_INCLUDE_DIRS})
+IF (CMAKE_BUILD_TYPE MATCHES Debug)
+if (USE_LIBBACKTRACE)
+# MacOS stores debug info in dSYM files but the source of this information is
+# not accessible by libbacktrace without first running dsymutil on the executable.
+    find_package(Libbacktrace)
+    if (LIBBACKTRACE_FOUND)
+        find_package(Libunwind)
+        if (NOT LIBUNWIND_FOUND)
+            find_package(Backtrace)
+        endif()
+        if (LIBUNWIND_FOUND OR Backtrace_FOUND)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_LIBBACKTRACE -g")
+            SET (CMAKE_ENABLE_EXPORTS TRUE)
+            if(APPLE)
+            set(CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf")
+            endif()
+            include_directories(${LIBBACKTRACE_INCLUDE_DIRS})
+            if (LIBUNWIND_FOUND)
+            include_directories(${LIBUNWIND_INCLUDE_DIR})
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAS_LIBUNWIND")
+            endif()
+            if (Backtrace_FOUND)
+            include_directories(${Backtrace_INCLUDE_DIRS})
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAS_BACKTRACE")
+            endif()
+            message(STATUS "Found LibBacktrace: ${LIBBACKTRACE_INCLUDE_DIRS}")
+        else()
+            message(STATUS "Found LibBacktrace but neither libunwind nor backtrace are present.")
+            UNSET(LIBBACKTRACE_FOUND)
+        endif()
+    endif()
 endif()
 endif()
 
 ###   Project Configuration   ###
 
+if(${LLVM_VERSION_MAJOR} GREATER 15)
+# Require that compilers support all features of C17 and C++17.
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+else()
 # Require that compilers support all features of C14 and C++14.
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 14)
+endif()
+
 
 # Define `CXX_STANDARD` to enable conditional compilation based on standard version.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCXX_STANDARD=${CMAKE_CXX_STANDARD}")
@@ -206,14 +239,6 @@ if (USE_ADDRESS_SANITIZER)
     #endif()
 endif()
 
-if (USE_2020_PIPELINE_COMPILER)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2020_PIPELINE_COMPILER")
-endif()
-
-if (USE_2017_U8U16_ALGORITHM)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_2017_U8U16_ALGORITHM")
-endif()
-
 ###   Functions   ###
 
 # Sets the output name for a given target.
@@ -226,24 +251,10 @@ endfunction(parabix_set_library_name)
 
 include(CMakeParseArguments)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    include(CheckIncludeFileCXX)
-    CHECK_INCLUDE_FILE_CXX(execinfo.h HAS_EXECINFO)
-    if (HAS_EXECINFO)
-        ###   Import Dependency: DWARF   ###
-        #find_package(LibDwarf) # libelf-dev libdwarf-dev
-        #if (LIBDWARF_FOUND)
-        #    include_directories(${LIBDWARF_INCLUDE_DIRS})
-        #    link_directories(${LIBDWARF_LIBRARIES})
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_ASSERTION_TRACE")
-        #endif()
-    endif()
-endif()
-
 # Release & Debug flags
 
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -g2 -ggdb -fvisibility=default -fno-omit-frame-pointer -fno-optimize-sibling-calls")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -fvisibility=default -fno-omit-frame-pointer -fno-optimize-sibling-calls")
 
 # Disable RunTime Type Information
 if(MSVC) # using Visual Studio C++
@@ -279,25 +290,29 @@ function(parabix_add_module)
             add_library(${ARG_NAME} SHARED ${ARG_SRC})
         endif()
         parabix_set_library_name(${ARG_NAME})
-        target_link_libraries(${ARG_NAME} ${ARG_DEPS})
+        target_link_libraries(${ARG_NAME} PUBLIC ${ARG_DEPS})
         if (ARG_REQUIRES_RTTI)
-            target_compile_options(${ARG_NAME} PRIVATE ${RTTI})
+            target_compile_options(${ARG_NAME} PUBLIC ${RTTI})
         else()
-            target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
+            target_compile_options(${ARG_NAME} PUBLIC ${NO_RTTI})
         endif()
         if (ARG_USES_Z3)
-            target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
-        endif()
-        if (ARG_USES_CERNROOT AND ROOT_FOUND)
-            target_link_libraries(${ARG_NAME} ${ROOT_LIBRARIES})
-            string(REPLACE " " ";" REPLACED_FLAGS ${ROOT_CXX_FLAGS})
-            target_compile_options(${ARG_NAME} PRIVATE ${REPLACED_FLAGS})
+            target_link_libraries(${ARG_NAME} PUBLIC ${Z3_LIBRARIES})
         endif()
         if (ENABLE_PAPI)
-            target_link_libraries(${ARG_NAME} ${PAPI_LIBRARIES})
+            target_link_libraries(${ARG_NAME} PUBLIC ${PAPI_LIBRARIES})
         endif()
-        if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
-            target_link_libraries(${ARG_NAME} ${CMAKE_DL_LIBS})
+        if (LIBBACKTRACE_FOUND)
+            target_link_libraries(${ARG_NAME} PUBLIC ${LIBBACKTRACE_LIBRARIES})
+            if (LIBUNWIND_FOUND)
+            target_link_libraries(${ARG_NAME} PUBLIC ${LIBUNWIND_LIBRARIES})
+            endif()
+            if (Backtrace_FOUND)
+            target_link_libraries(${ARG_NAME} PUBLIC ${Backtrace_LIBRARIES})
+            endif()
+        endif()
+        IF (CMAKE_BUILD_TYPE MATCHES Debug)
+            target_link_libraries(${ARG_NAME} PUBLIC ${CMAKE_DL_LIBS})
         endif()
     endif()
 endfunction(parabix_add_module)
@@ -319,15 +334,15 @@ function(parabix_add_executable)
     add_executable(${ARG_NAME} ${ARG_SRC})
     target_compile_options(${ARG_NAME} PRIVATE ${NO_RTTI})
     if(ARTIFACT_MODE STREQUAL "Single")
-        target_link_libraries(${ARG_NAME} ${PARABIX_MONO_TARGET})
+        target_link_libraries(${ARG_NAME} PUBLIC ${PARABIX_MONO_TARGET})
     else()
-        target_link_libraries(${ARG_NAME} ${ARG_DEPS})
+        target_link_libraries(${ARG_NAME} PUBLIC ${ARG_DEPS})
     endif()
     if(ARTIFACT_MODE STREQUAL "Single")
-        target_link_libraries(${ARG_NAME} ${Z3_LIBRARIES})
+        target_link_libraries(${ARG_NAME} PUBLIC ${Z3_LIBRARIES})
     endif()
-    target_link_libraries(${ARG_NAME} toolchain)
-    target_link_libraries(${ARG_NAME} kernel.pipeline)
+    target_link_libraries(${ARG_NAME} PUBLIC toolchain)
+    target_link_libraries(${ARG_NAME} PUBLIC kernel.pipeline)
 endfunction(parabix_add_executable)
 
 # Creates a pablo source target which copies pablo source files to the parabix
@@ -387,6 +402,7 @@ add_subdirectory(lib/unicode/utf)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)
+add_subdirectory(lib/kernel/bitwise)
 add_subdirectory(lib/kernel/io)
 add_subdirectory(lib/kernel/scan)
 add_subdirectory(lib/kernel/streamutils)
@@ -414,7 +430,7 @@ add_subdirectory(tests)
 
 # Target definition for single library
 if(ARTIFACT_MODE STREQUAL "Single")
-    target_link_libraries(${PARABIX_MONO_TARGET} ${REQ_LLVM_LIBRARIES} ${Boost_LIBRARIES} ${Z3_LIBRARIES})
+    target_link_libraries(${PARABIX_MONO_TARGET} ${REQ_LLVM_LIBRARIES} ${Boost_LIBRARIES} ${Z3_LIBRARIES} ${LIBBACKTRACE_LIBRARIES})
 endif()
 
 ###   Test Suite   ###
@@ -539,7 +555,7 @@ add_custom_target (text_viewer
 
 add_custom_target (xml_test
     WORKING_DIRECTORY ${QA_DIR}/xml
-    COMMAND python33 run_test_suite.py "${BIN_DIR}/xml")
+    COMMAND python3 run_test_suite.py "${BIN_DIR}/xml")
 
 add_custom_target (json_test
     WORKING_DIRECTORY ${QA_DIR}/json

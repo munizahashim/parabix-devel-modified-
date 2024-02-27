@@ -108,7 +108,7 @@ UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCstream);
-    P->CreateKernelCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream);
+    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream);
 
     P->CreateKernelCall<PopcountKernel>(CCstream, P->getOutputScalar("countResult"));
 

@@ -110,7 +110,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    unsigned RunGrep(ProgBuilderRef P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Source, kernel::StreamSet * Matches);
+    unsigned RunGrep(ProgBuilderRef P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -183,7 +183,6 @@ protected:
     GrepRecordBreakKind mGrepRecordBreak;
 
     re:: RE * mRE;
-    re::CC * mBreakCC;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
     Component mExternalComponents;
@@ -297,7 +296,6 @@ private:
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
     void * mMainMethod;
-    unsigned mNumOfThreads;
 };
 
 enum class PatternKind {Include, Exclude};
@@ -321,7 +319,6 @@ private:
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
     void * mMainMethod;
-    unsigned mNumOfThreads;
 };
 
 /**

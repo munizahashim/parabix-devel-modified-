@@ -44,9 +44,15 @@ public:
 
     kernel::RepeatingStreamSet * CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet, const bool isDynamic = true) noexcept;
 
+    kernel::TruncatedStreamSet * CreateTruncatedStreamSet(const kernel::StreamSet * data) noexcept;
+
+    kernel::RepeatingStreamSet * CreateUnalignedRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t> > &&stringSet, const bool isDynamic = true) noexcept;
+
     kernel::Scalar * CreateScalar(not_null<llvm::Type *> scalarType) noexcept;
 
     kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;
+
+    kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
 
     void addKernel(not_null<Kernel *> kernel);
 
@@ -82,10 +88,6 @@ protected:
     void LinkFunction(not_null<Kernel *> kernel, llvm::StringRef name, ExternalFunctionType & functionPtr) const;
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
-
-private:
-
-    kernel::RepeatingStreamSet * __CreateRepeatingStreamSet8(const uint8_t * string, size_t length);
 
 protected:
 

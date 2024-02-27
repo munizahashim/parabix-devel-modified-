@@ -94,8 +94,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                     const auto f = first_out_edge(binding, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
-                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    if (isa<StreamSet>(Relationships[streamSet].Relationship)) {
+                    if (Relationships[streamSet].Type == RelationshipNode::IsStreamSet) {
                         const RelationshipNode & output = Relationships[binding];
                         assert (output.Type == RelationshipNode::IsBinding);
 
@@ -201,8 +200,6 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
     #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
     auto & out = errs();
-
-
 
     out << "digraph \"V\" {\n";
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
@@ -370,7 +367,6 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
     PartialSumStepFactorGraph G(LastStreamSet + 1);
 
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-
         auto checkForPopCountRef = [&](const BufferGraph::edge_descriptor io) {
             const BufferPort & port = mBufferGraph[io];
             const Binding & binding = port.Binding;
@@ -395,16 +391,14 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             checkForPopCountRef(output);
         }
-
     }
 
+    const auto bw = b->getBitBlockWidth();
+    const auto fw = b->getSizeTy()->getIntegerBitWidth();
+    assert ((bw % fw) == 0 && bw > fw);
+    const auto stepsPerBlock = bw / fw;
+
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-
-        const auto bw = b->getBitBlockWidth();
-        const auto fw = b->getSizeTy()->getIntegerBitWidth();
-        assert ((bw % fw) == 0 && bw > fw);
-        const auto stepsPerBlock = bw / fw;
-
         for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             if (out_degree(streamSet, G) != 0) {
@@ -416,8 +410,8 @@ void PipelineAnalysis::calculatePartialSumStepFactors(BuilderRef b) {
                     maxStepFactor = std::max(maxStepFactor, k);
                 }
                 maxStepFactor = round_up_to(maxStepFactor, stepsPerBlock);
-                add_edge(kernel, streamSet, maxStepFactor, G);
                 const auto spanLength = maxStepFactor / stepsPerBlock;
+                add_edge(kernel, streamSet, spanLength, G);
                 assert (spanLength > 0);
                 BufferNode & bn = mBufferGraph[streamSet];
                 bn.OverflowCapacity = std::max(bn.OverflowCapacity, spanLength + 1);

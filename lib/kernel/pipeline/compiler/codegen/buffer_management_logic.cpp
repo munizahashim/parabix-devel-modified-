@@ -12,22 +12,24 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
+
         const BufferPort & rd = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
 
-
         // external buffers already have a buffer handle
         if (LLVM_LIKELY(bn.isInternal() || bn.isConstant())) {
+
             Type * const handleType = buffer->getHandleType(b);
             // We automatically assign the buffer memory according to the buffer start position
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(buffer))) {
+            if (LLVM_UNLIKELY(bn.isConstant())) {
                 if (cast<RepeatingStreamSet>(buffer)->isDynamic()) {
                     mTarget->addInternalScalar(handleType, prefix, groupId);
                 } else {
                     mTarget->addNonPersistentScalar(handleType, prefix);
                 }
-            } else if (bn.Locality == BufferLocality::ThreadLocal) {
+            } else if (bn.isThreadLocal()) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addNonPersistentScalar(handleType, prefix);
             } else if (LLVM_LIKELY(bn.isOwned())) {
@@ -44,7 +46,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
         if (bn.isOwned() && isa<DynamicBuffer>(buffer) && isMultithreaded()) {
-            assert (bn.Locality != BufferLocality::ThreadLocal);
+            assert (bn.isNonThreadLocal());
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
         }
     }
@@ -56,14 +58,14 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but must do so to support " << kernelObj->getName() << ".";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
         if (LLVM_UNLIKELY(kernelObj->allocatesInternalStreamSets())) {
             SmallVector<char, 1024> tmp;
             raw_svector_ostream msg(tmp);
             msg << "Pipeline " << mTarget->getName() << " is not marked as allocating internal streamsets"
             << " but " << kernelObj->getName() << " must do so to be correctly initialized.";
-            report_fatal_error(msg.str());
+            report_fatal_error(StringRef(msg.str()));
         }
     }
 }
@@ -74,6 +76,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
 void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         // external buffers already have a buffer handle
         StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.isNonThreadLocal() == nonLocal) {
@@ -82,10 +85,9 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
             } else if (LLVM_UNLIKELY(bn.isConstant())) {
                 assert (nonLocal);
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
+                buffer->setHandle(b->getScalarFieldPtr(handleName));
                 const auto & sn = mStreamGraph[streamSet];
-                assert (sn.Type == RelationshipNode::IsRelationship);
+                assert (sn.Type == RelationshipNode::IsStreamSet);
                 if (cast<RepeatingStreamSet>(sn.Relationship)->isDynamic()) {
                     const auto lengthName = REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet);
                     Value * const mod = b->getScalarField(lengthName);
@@ -98,49 +100,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(BuilderRef b, const bool non
                 const auto producer = source(pe, mBufferGraph);
                 const BufferPort & rd = mBufferGraph[pe];
                 const auto handleName = makeBufferName(producer, rd.Port);
-                Value * const handle = b->getScalarFieldPtr(handleName);
-                buffer->setHandle(handle);
-#if 0
-                #ifndef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
-                if (bn.isThreadLocal()) {
-                    assert (mThreadLocalStreamSetBaseAddress);
-                    assert (RequiredThreadLocalStreamSetMemory > 0);
-                    assert (isa<ExternalBuffer>(buffer));
-                    assert ((bn.BufferStart % b->getCacheAlignment()) == 0);
-                    auto start = bn.BufferStart;
-                    #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                    start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                    #endif
-                    Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
-                    Value * const baseAddress = b->CreateGEP(mThreadLocalStreamSetBaseAddress, startOffset);
-                    if (LLVM_UNLIKELY(CheckAssertions)) {
-                        DataLayout DL(b->getModule());
-                        Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
-                        Value * const intPtrVal = b->CreatePtrToInt(baseAddress, intPtrTy);
-
-                        Constant * const bindingName = b->GetString(rd.Binding.get().getName());
-    //                    b->CreateAssert(intPtrVal, "%s.%s: thread-local base addresss cannot be null",
-    //                                    mCurrentKernelName, bindingName);
-
-                        Value * const align = b->getSize(b->getCacheAlignment());
-                        Value * const offset = b->CreateURem(intPtrVal, align);
-                        Value * const valid = b->CreateIsNull(offset);
-
-                        b->CreateAssert(valid, "%s.%s: thread local buffer 0x%" PRIx64 " "
-                                               "is not cache aligned (%" PRIu64 ")",
-                                        mCurrentKernelName, bindingName, intPtrVal, align);
-                    }
-
-                    const auto baseCapacity = bn.RequiredCapacity * b->getBitBlockWidth();
-                    assert (baseCapacity > 0);
-                    Value * const capacity = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(baseCapacity));
-                    buffer->setBaseAddress(b, b->CreatePointerCast(baseAddress, buffer->getPointerType()));
-                    buffer->setCapacity(b, capacity);
-                }
-                #endif
-
-
-#endif
+                buffer->setHandle(b->getScalarFieldPtr(handleName));
             }
         }
     }
@@ -172,19 +132,17 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     params.push_back(mKernelSharedHandle);
                 }
                 Value * func = nullptr;
+                FunctionType * funcTy;
                 if (nonLocal) {
-                    func = getKernelAllocateSharedInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateSharedInternalStreamSetsFunction(b);
                 } else {
-                    func = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
+                    std::tie(func, funcTy) = getKernelAllocateThreadLocalInternalStreamSetsFunction(b);
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                const auto scale = MaximumNumOfStrides[i] * Rational{mNumOfThreads};
-                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, scale));
+                params.push_back(b->CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
 
-                FunctionType * const funcType = cast<FunctionType>(func->getType()->getPointerElementType());
-
-                b->CreateCall(funcType, func, params);
+                b->CreateCall(funcTy, func, params);
             }
         }
     }
@@ -192,6 +150,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
             if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -202,8 +161,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     const auto producer = source(pe, mBufferGraph);
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto handleName = makeBufferName(producer, rd.Port);
-                    Value * const handle = b->getScalarFieldPtr(handleName);
-                    buffer->setHandle(handle);
+                    buffer->setHandle(b->getScalarFieldPtr(handleName));
                 } else {
                     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 }
@@ -233,7 +191,7 @@ void PipelineCompiler::releaseOwnedBuffers(BuilderRef b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isNonThreadLocal() && bn.isOwned() && !bn.isReturned() && !bn.isConstant()) {
+        if (LLVM_LIKELY(bn.isDeallocatable())) {
             StreamSetBuffer * const buffer = bn.Buffer;
             assert (isFromCurrentFunction(b, buffer->getHandle(), false));
             buffer->releaseBuffer(b);
@@ -248,7 +206,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isNonThreadLocal() && bn.isOwned()) {
+            if (LLVM_LIKELY(bn.isDeallocatable())) {
                 StreamSetBuffer * const buffer = bn.Buffer;
                 if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
                     const auto pe = in_edge(streamSet, mBufferGraph);
@@ -264,9 +222,9 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateExternalPipelineIO
+ * @brief updateExternalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateExternalPipelineIO(BuilderRef b) {
+void PipelineCompiler::updateExternalProducedItemCounts(BuilderRef b) {
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -396,14 +354,14 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
         const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
-        Value * const processedPtr = b->getScalarFieldPtr(prefix + suffix);
-        mProcessedItemCountPtr[inputPort] = processedPtr;
-        Value * itemCount = b->CreateLoad(processedPtr);
+        auto prodRef = b->getScalarFieldPtr(prefix + suffix);
+        mProcessedItemCountPtr[inputPort] = prodRef.first;
+        Value * itemCount = b->CreateLoad(prodRef.second, prodRef.first);
         mInitiallyProcessedItemCount[inputPort] = itemCount;
         if (br.isDeferred()) {
-            Value * const deferred = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProcessedDeferredItemCountPtr[inputPort] = deferred;
-            itemCount = b->CreateLoad(deferred);
+            auto defRef = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
+            itemCount = b->CreateLoad(defRef.second, defRef.first);
             mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
         }
     }
@@ -424,14 +382,14 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
         const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
-        Value * const produced = b->getScalarFieldPtr(prefix + suffix);
-        mProducedItemCountPtr[outputPort] = produced;
-        Value * const itemCount = b->CreateLoad(produced);
+        auto prodRef = b->getScalarFieldPtr(prefix + suffix);
+        mProducedItemCountPtr[outputPort] = prodRef.first;
+        Value * const itemCount = b->CreateLoad(prodRef.second, prodRef.first);
         mInitiallyProducedItemCount[streamSet] = itemCount;
         if (br.isDeferred()) {
-            Value * const deferred = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProducedDeferredItemCountPtr[outputPort] = deferred;
-            Value * const itemCount = b->CreateLoad(deferred);
+            auto defRef = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            mProducedDeferredItemCountPtr[outputPort] = defRef.first;
+            Value * const itemCount = b->CreateLoad(defRef.second, defRef.first);
             mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
         }
     }
@@ -455,13 +413,12 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = source(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
-            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
             ptr = mProcessedItemCountPtr[inputPort];
         }
@@ -492,13 +449,12 @@ void PipelineCompiler::writeUpdatedItemCounts(BuilderRef b) {
 //            continue;
 //        }
 
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
+//        const auto streamSet = target(e, mBufferGraph);
 
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
-            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
+            ptr = b->getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
             ptr = mProducedItemCountPtr[outputPort];
         }
@@ -570,9 +526,8 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(BuilderRef b) cons
             const BufferNode & bn = mBufferGraph[streamSet];
             assert (bn.isNonThreadLocal());
             Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
-            Value * vba = b->CreateLoad(ptr);
             StreamSetBuffer * const buffer = bn.Buffer;
-            vba = b->CreatePointerCast(vba, buffer->getPointerType());
+            Value * vba = b->CreateLoad(buffer->getPointerType(), ptr);
             buffer->setBaseAddress(b.get(), vba);
 //            if (CheckAssertions) {
 //                b->CreateAssert(vba, "%s.%s returned virtual base addresss cannot be null",
@@ -788,9 +743,9 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
     b->SetInsertPoint(copyStart);
     #ifdef ENABLE_PAPI
-    readPAPIMeasurement(b, mKernelId, PAPIReadBeforeMeasurementArray);
+    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_BUFFER_COPY);
     #endif
-    Value * const beforeCopy = startCycleCounter(b);
+    startCycleCounter(b, CycleCounter::BUFFER_COPY);
 
     Value * source = buffer->getOverflowAddress(b);
     Value * target = buffer->getMallocAddress(b);
@@ -803,10 +758,12 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 
     Value * const totalBytesPerStreamSetBlock = b->CreateMul(bytesPerStream, numOfStreams);
 
+    IntegerType * const int8Ty = b->getInt8Ty();
+
     if (mode == CopyMode::LookBehind || mode == CopyMode::Delay) {
         Value * const offset = b->CreateNeg(totalBytesPerStreamSetBlock);
-        source = b->CreateInBoundsGEP(source, offset);
-        target = b->CreateInBoundsGEP(target, offset);
+        source = b->CreateInBoundsGEP(int8Ty, source, offset);
+        target = b->CreateInBoundsGEP(int8Ty, target, offset);
     }
 
     if (mode == CopyMode::LookAhead || mode == CopyMode::Delay) {
@@ -820,7 +777,7 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
     if (copyLoop) {
 
         BasicBlock * recordCopyCycleCount = nullptr;
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             recordCopyCycleCount = b->CreateBasicBlock(prefix + "RecordCycleCount", copyExit);
         }
 
@@ -830,8 +787,8 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         PHINode * const idx = b->CreatePHI(b->getSizeTy(), 2);
         idx->addIncoming(b->getSize(0), copyStart);
         Value * const offset = b->CreateMul(idx, bytesPerStream);
-        Value * const sourcePtr = b->CreateGEP(source, offset);
-        Value * const targetPtr = b->CreateGEP(target, offset);
+        Value * const sourcePtr = b->CreateGEP(int8Ty, source, offset);
+        Value * const targetPtr = b->CreateGEP(int8Ty, target, offset);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_copying %" PRIu64 " bytes from %" PRIx64 " to %" PRIx64 " (align=%" PRIu64 ")", bytesToCopy, sourcePtr, targetPtr, b->getSize(align));
@@ -846,11 +803,11 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         BasicBlock * const loopExit = EnableCycleCounter ? recordCopyCycleCount : copyExit;
         b->CreateCondBr(done, loopExit, copyLoop);
 
-        if (EnableCycleCounter || EnablePAPICounters) {
+        if (EnableCycleCounter || NumOfPAPIEvents) {
             b->SetInsertPoint(recordCopyCycleCount);
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
-            accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
             b->CreateBr(copyExit);
         }
@@ -864,10 +821,11 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
         #endif
 
         b->CreateMemCpy(target, source, totalBytesPerStreamSetBlock, align);
-        if (EnableCycleCounter || EnablePAPICounters) {
-            updateCycleCounter(b, mKernelId, beforeCopy, CycleCounter::BUFFER_COPY);
+        assert (NumOfPAPIEvents > 0);
+        if (EnableCycleCounter || NumOfPAPIEvents) {
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_COPY);
             #ifdef ENABLE_PAPI
-            accumPAPIMeasurementWithoutReset(b, PAPIReadBeforeMeasurementArray, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_BUFFER_COPY);
             #endif
         }
         b->CreateBr(copyExit);
@@ -878,73 +836,9 @@ void PipelineCompiler::copy(BuilderRef b, const CopyMode mode, Value * cond,
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief prepareLinearBuffers
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::prepareLinearThreadLocalOutputBuffers(BuilderRef b) {
-#if 0
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
-            assert (mThreadLocalStreamSetBaseAddress);
-            assert (bn.IsLinear);
-            Value * const produced = mInitiallyProducedItemCount[streamSet];
-            // purely threadlocal buffers are guaranteed to consume every produced
-            // item each segment.
-            cast<StaticBuffer>(bn.Buffer)->linearCopyBack(b, produced, produced, nullptr);
-        }
-    }
-#endif
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief assignThreadLocalBufferMemoryForPartition
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
-    // Should I remap all of the buffers on realloc or map them at the point of entering a partition?
-
-    // The difficulty of remapping all of them is that we could end up increasing the segment length
-    // of a partition that requires substantially less memory than other partitions s.t. it does not
-    // trigger a realloc. We'd need a better check at the end for that case but could still better
-    // amortize the recalculations.
-
-    // Repeating streamsets are a big issue. To enable state free work, they're sized to be
-    // LCM(pattern length, block width) + max segment length. But if the max segment length changes
-    // then we either neet to expand them or treat them as circular buffers. The issue here is like
-    // above: testing only the total bytes required is not sufficient to determine when we need to
-    // expand them.
-
-    // Store a single bit to say some segment exceeds its largest prior one? That might not necessarily
-    // be its current older one. A repeating streamset may also be shared amongst multiple consumers and
-    // "resized" in multiple places if we do it at the kernel.
-
-    // We could add synchronization but do not want to needlessly add in another step here.
-
-    // We can make them thread local but then add to the potential cache contention.
-
-    // Ideally, we'd like to have the new max seg length to be shared instead of thread local but
-    // that opens the problem that we'd read the "current" value and write a new value in places
-    // that are guarded by different pre/post sync locks with stateless kernels. Will it matter?
-
-    // Another issue with sharing max seg length is we no longer know if the thread local data space
-    // is sufficient since all threads would be updating it. That alone may prohibit the use of
-    // shared max seg values unless we want to check at the start of each partition whether to
-    // resize the thread local buffers.
-
-    // Assuming we use a the doubling strategy, how often would we really see a resize if shared
-    // values are used? They would probably be front loaded but would that be bad for short files?
-
-    DataLayout DL(b->getModule());
-
-    IntegerType * const int8Ty = b->getInt8Ty();
-
-    auto getTypeSize = [&](Type * const type) -> uint64_t {
-        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-        return DL.getTypeAllocSize(type);
-        #else
-        return DL.getTypeAllocSize(type).getFixedSize();
-        #endif
-    };
 
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
@@ -952,30 +846,27 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal()) {
+            assert (!bn.isTruncated());
             assert (RequiredThreadLocalStreamSetMemory > 0);
             assert (mThreadLocalStreamSetBaseAddress);
-            assert (mThreadLocalStreamSetBaseAddress->getType()->getPointerElementType() == int8Ty);
+            assert (mThreadLocalStreamSetBaseAddress->getType() == b->getInt8PtrTy());
             auto start = bn.BufferStart;
             assert ((start % b->getCacheAlignment()) == 0);
             #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
             start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
             #endif
 
-            #ifdef USE_DYNAMIC_SEGMENT_LENGTH_SLIDING_WINDOW
             assert (mThreadLocalScalingFactor);
             Value * const startOffset = b->CreateMul(mThreadLocalScalingFactor, b->getSize(start));
-            #else
-            Value * const startOffset = b->CreateMul(mExpectedNumOfStridesMultiplier, b->getSize(start));
-            #endif
 
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
-            Constant * const bytesPerPack = ConstantExpr::getSizeOf(ptrTy->getElementType());
+            Constant * const bytesPerPack = b->getTypeSize(buffer->getType());
             Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
 
             Value * const offset = b->CreateSub(startOffset, producedBytes);
-            Value * ba = b->CreateGEP(mThreadLocalStreamSetBaseAddress, offset);
+            Value * ba = b->CreateGEP(b->getInt8Ty(), mThreadLocalStreamSetBaseAddress, offset);
             ba = b->CreatePointerCast(ba, ptrTy);
             buffer->setBaseAddress(b, ba);
 
@@ -995,28 +886,36 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
                                                 const bool prefetch,
                                                 const bool write) const {
 
-
     const StreamSetBuffer * const buffer = bufferNode.Buffer;
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
 
     Value * const baseAddress = buffer->getBaseAddress(b);
-
     if (bufferNode.isUnowned()) {
-        assert (bufferNode.Locality != BufferLocality::ThreadLocal);
+        assert (bufferNode.isNonThreadLocal());
         assert (!bufferNode.isConstant());
+        assert (!bufferNode.isTruncated());
         return baseAddress;
     }
 
-    Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
-    Constant * const ZERO = b->getSize(0);
-    PointerType * const bufferType = buffer->getPointerType();
-    Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
-
-    Value * const address = buffer->getStreamLogicalBasePtr(b, baseAddress, ZERO, blockIndex);
-    Value * const addr = b->CreatePointerCast(address, bufferType);
+    Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
+//    if (LLVM_UNLIKELY(CheckAssertions)) {
+//        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+//        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+//        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+//        Value * const V = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
+//        Value * const S = buffer->getMallocAddress(b);
+//        Value * const P = b->CreatePointerCast(V, S->getType());
+//        Value * const E = buffer->getOverflowAddress(b);
+//        Value * const valid = b->CreateAnd(b->CreateICmpULE(S, P), b->CreateICmpULE(P, E));
+//        b->CreateAssert(valid, "%s.%s virtual base address %" PRIx64 " is not within expected range [%" PRIx64 ",%" PRIx64 "]",
+//                        mCurrentKernelName, b->GetString(getBinding(rateData.Port).getName()), P, S, E);
+//    }
     if (prefetch) {
-        Value * const prefetchAddr = buffer->getStreamBlockPtr(b, addr, ZERO, blockIndex);
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+        Value * const prefetchAddr = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
         prefetchAtLeastThreeCacheLinesFrom(b, prefetchAddr, write);
     }
     return addr;
@@ -1049,7 +948,7 @@ void PipelineCompiler::prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * 
     const auto toFetch = round_up_to<unsigned>(cl * 3, typeSize);
     Value * const baseAddr = b->CreatePointerCast(addr, b->getInt8PtrTy());
     for (unsigned i = 0; i < toFetch; i += cl) {
-        args[0] = b->CreateGEP(baseAddr, b->getSize(i));
+        args[0] = b->CreateGEP0(baseAddr, b->getSize(i));
         b->CreateCall(prefetchFunc->getFunctionType(), prefetchFunc, args);
     }
 #endif
@@ -1069,8 +968,6 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         }
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-
-        assert ((bn.Locality != BufferLocality::ConstantShared) ^ isa<RepeatingBuffer>(bn.Buffer));
 
         if (LLVM_UNLIKELY(bn.isUnowned() && bn.isInternal())) {
             const auto output = in_edge(streamSet, mBufferGraph);

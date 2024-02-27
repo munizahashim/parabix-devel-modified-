@@ -19,6 +19,8 @@
 #include <pablo/bixnum/bixnum.h>
 
 using namespace llvm;
+using namespace pablo;
+using namespace kernel;
 
 namespace kernel {
 
@@ -37,6 +39,21 @@ void SpreadByMask(PipelineBuilder & P,
     P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
     P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
+
+
+void MergeByMask(PipelineBuilder & P,
+                 StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
+    unsigned elems = merged->getNumElements();
+    if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
+        llvm::report_fatal_error("MergeByMask called with incompatible element counts");
+    }
+    unsigned streamOffset = 0;
+    Scalar * base = P.CreateConstant(P.getDriver().getBuilder()->getSize(streamOffset));
+    int expansionFieldWidth=64;
+    P.CreateKernelCall<StreamMergeKernel>(mask,a,b,merged,base,expansionFieldWidth);
+
+}
+
 
 const unsigned StreamExpandStrideSize = 4;
 
@@ -213,6 +230,183 @@ void StreamExpandKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * con
     b->SetInsertPoint(expansionDone);
 }
 
+
+
+/*************************StreamMergeKernel*********************************/
+const unsigned StreamMergeStrideSize = 4;
+StreamMergeKernel::StreamMergeKernel(BuilderRef b,
+                                       StreamSet * mask,
+                                       StreamSet * source1,
+                                       StreamSet * source2,
+                                       StreamSet * merged,
+                                       Scalar * base,
+                                       const unsigned FieldWidth)
+: MultiBlockKernel(b, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "streamMerge"  << StreamMergeStrideSize << ':' << FieldWidth;
+                        nm << '_' << source1->getNumElements() << ':' << merged->getNumElements();
+                        nm.flush();
+                        return tmp;
+                    }(),
+{Binding("marker", mask, FixedRate(1), Principal()),Binding("source1", source1, PopcountOf("marker")), Binding("source2", source2, PopcountOfNot("marker"))},
+{Binding{"mergedStreamSet", merged}},
+// input scalar
+{Binding{"base", base}},
+{}, {})
+, mFieldWidth(FieldWidth)
+, mSelectedStreamCount(merged->getNumElements()){
+    setStride(StreamMergeStrideSize * b->getBitBlockWidth());
+}
+
+void StreamMergeKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) {
+    Type * fieldWidthTy = b->getIntNTy(mFieldWidth);
+    Type * sizeTy = b->getSizeTy();
+    const unsigned numFields = b->getBitBlockWidth() / mFieldWidth;
+
+    Constant * const ZERO = b->getSize(0);
+    Constant * BLOCK_WIDTH = ConstantInt::get(sizeTy, b->getBitBlockWidth());
+    Constant * FIELD_WIDTH = ConstantInt::get(sizeTy, mFieldWidth);
+    Constant * fwSplat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth));
+    Constant * fw_sub1Splat = b->getSplat(numFields, ConstantInt::get(fieldWidthTy, mFieldWidth - 1));
+
+    BasicBlock * entry = b->GetInsertBlock();
+    BasicBlock * mergeLoop = b->CreateBasicBlock("mergeLoop");
+    BasicBlock * mergenceDone = b->CreateBasicBlock("mergenceDone");
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b->getBitBlockWidth()) {
+        assert ((getStride() % b->getBitBlockWidth()) == 0);
+        ConstantInt * const mult = b->getSize(getStride() / b->getBitBlockWidth());
+        numOfBlocks = b->CreateMul(numOfStrides, mult);
+    }
+    Value * processedSourceItems1 = b->getProcessedItemCount("source1");
+    Value * processedSourceItems2 = b->getProcessedItemCount("source2");
+    Value * initialSourceOffset1 = b->CreateURem(processedSourceItems1, BLOCK_WIDTH);
+    Value * initialSourceOffset2 = b->CreateURem(processedSourceItems2, BLOCK_WIDTH);
+    Value * const streamBase = b->getScalarField("base");
+
+    SmallVector<Value *, 16> pendingData1(mSelectedStreamCount);
+    SmallVector<Value *, 16> pendingData2(mSelectedStreamCount);
+    for (unsigned i = 0; i < mSelectedStreamCount; i++) {
+        Constant * const streamIndex = ConstantInt::get(streamBase->getType(), i);
+        Value * const streamOffset = b->CreateAdd(streamBase, streamIndex);
+        pendingData1[i] = b->loadInputStreamBlock("source1", streamOffset, ZERO);
+        pendingData2[i] = b->loadInputStreamBlock("source2", streamOffset, ZERO);
+    }
+
+    b->CreateBr(mergeLoop);
+    // Main Loop
+    b->SetInsertPoint(mergeLoop);
+    const unsigned incomingCount = 2;
+    PHINode * blockNoPhi = b->CreatePHI(b->getSizeTy(), incomingCount);
+    PHINode * pendingOffsetPhi1 = b->CreatePHI(b->getSizeTy(), incomingCount);
+    PHINode * pendingOffsetPhi2 = b->CreatePHI(b->getSizeTy(), incomingCount);
+    SmallVector<PHINode *, 16> pendingDataPhi1(mSelectedStreamCount);
+    SmallVector<PHINode *, 16> pendingDataPhi2(mSelectedStreamCount);
+    blockNoPhi->addIncoming(ZERO, entry);
+    pendingOffsetPhi1->addIncoming(initialSourceOffset1, entry);
+    pendingOffsetPhi2->addIncoming(initialSourceOffset2, entry);
+
+    for (unsigned i = 0; i < mSelectedStreamCount; i++) {
+        pendingDataPhi1[i] = b->CreatePHI(b->getBitBlockType(), incomingCount);
+        pendingDataPhi1[i]->addIncoming(pendingData1[i], entry);
+        pendingDataPhi2[i] = b->CreatePHI(b->getBitBlockType(), incomingCount);
+        pendingDataPhi2[i]->addIncoming(pendingData2[i], entry);
+    }
+    Value * mask1 = b->loadInputStreamBlock("marker", ZERO, blockNoPhi);
+    Value * mask2 = b->CreateNot(mask1);
+    Value * nextBlk = b->CreateAdd(blockNoPhi, b->getSize(1));
+    Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
+
+    Value * pendingOffset1 = b->CreateURem(pendingOffsetPhi1, BLOCK_WIDTH);
+    Value * pendingOffset2 = b->CreateURem(pendingOffsetPhi2, BLOCK_WIDTH);
+
+    Value * pendingItems1 = b->CreateSub(BLOCK_WIDTH, pendingOffset1);
+    Value * pendingItems2 = b->CreateSub(BLOCK_WIDTH, pendingOffset2);
+
+    Value * field_offset_lo1 = b->CreateCeilUDiv(pendingItems1, FIELD_WIDTH);
+    Value * bit_offset1 = b->simd_fill(mFieldWidth, b->CreateURem(pendingOffset1, FIELD_WIDTH));
+
+    Value * field_offset_lo2 = b->CreateCeilUDiv(pendingItems2, FIELD_WIDTH);
+    Value * bit_offset2 = b->simd_fill(mFieldWidth, b->CreateURem(pendingOffset2, FIELD_WIDTH));
+
+    Value * field_offset_hi1 =  b->CreateUDiv(pendingItems1, FIELD_WIDTH);
+    Value * field_offset_hi2 =  b->CreateUDiv(pendingItems2, FIELD_WIDTH);
+
+    Value * shift_fwd1 = b->CreateURem(b->CreateSub(fwSplat, bit_offset1), fwSplat);
+    Value * shift_fwd2 = b->CreateURem(b->CreateSub(fwSplat, bit_offset2), fwSplat);
+
+    Value * fieldPopCounts1 = b->simd_popcount(mFieldWidth, mask1);
+    Value * fieldPopCounts2 = b->simd_popcount(mFieldWidth, mask2);
+
+
+    Value * partialSum1 = b->hsimd_partial_sum(mFieldWidth, fieldPopCounts1);
+    Value * partialSum2 = b->hsimd_partial_sum(mFieldWidth, fieldPopCounts2);
+    Value * const blockPopCount1 = b->CreateZExtOrTrunc(b->CreateExtractElement(partialSum1, numFields - 1), sizeTy);
+    Value * const blockPopCount2 = b->CreateZExtOrTrunc(b->CreateExtractElement(partialSum2, numFields - 1), sizeTy);
+    partialSum1 = b->mvmd_slli(mFieldWidth, partialSum1, 1);
+    partialSum2 = b->mvmd_slli(mFieldWidth, partialSum2, 1);
+
+    Value * const source_field_lo1 = b->CreateUDiv(partialSum1, fwSplat);
+    Value * const source_field_hi1 = b->CreateUDiv(b->CreateAdd(partialSum1, fw_sub1Splat), fwSplat);
+    Value * const source_shift_lo1 = b->CreateAnd(partialSum1, fw_sub1Splat);  // parallel URem
+    Value * const source_shift_hi1 = b->CreateAnd(b->CreateSub(fwSplat, source_shift_lo1), fw_sub1Splat);
+
+    Value * const source_field_lo2 = b->CreateUDiv(partialSum2, fwSplat);
+    Value * const source_field_hi2 = b->CreateUDiv(b->CreateAdd(partialSum2, fw_sub1Splat), fwSplat);
+    Value * const source_shift_lo2 = b->CreateAnd(partialSum2, fw_sub1Splat);
+    Value * const source_shift_hi2 = b->CreateAnd(b->CreateSub(fwSplat, source_shift_lo2), fw_sub1Splat);
+
+    Value * const newPendingOffset1 = b->CreateAdd(pendingOffsetPhi1, blockPopCount1);
+    Value * const srcBlockNo1 = b->CreateUDiv(newPendingOffset1, BLOCK_WIDTH);
+
+    Value * const newPendingOffset2 = b->CreateAdd(pendingOffsetPhi2, blockPopCount2);
+    Value * const srcBlockNo2 = b->CreateUDiv(newPendingOffset2, BLOCK_WIDTH);
+
+    // Now load and process source streams.
+    SmallVector<Value *, 16> sourceData1(mSelectedStreamCount);
+    SmallVector<Value *, 16> sourceData2(mSelectedStreamCount);
+    for (unsigned i = 0; i < mSelectedStreamCount; i++) {
+        Constant * const streamIndex = ConstantInt::get(streamBase->getType(), i);
+        Value * const streamOffset = b->CreateAdd(streamBase, streamIndex);
+        sourceData1[i] = b->loadInputStreamBlock("source1", streamOffset, srcBlockNo1);
+        sourceData2[i] = b->loadInputStreamBlock("source2", streamOffset, srcBlockNo2);
+        Value * A1 = b->simd_srlv(mFieldWidth, b->mvmd_dsll(mFieldWidth, sourceData1[i], pendingDataPhi1[i], field_offset_lo1), bit_offset1);
+        Value * B1 = b->simd_sllv(mFieldWidth, b->mvmd_dsll(mFieldWidth, sourceData1[i], pendingDataPhi1[i], field_offset_hi1), shift_fwd1);
+        Value * full_source_block1 = b->CreateOr(A1, B1, "toExpand1");
+        Value * C1 = b->simd_srlv(mFieldWidth, b->mvmd_shuffle(mFieldWidth, full_source_block1, source_field_lo1), source_shift_lo1);
+        Value * D1 = b->simd_sllv(mFieldWidth, b->mvmd_shuffle(mFieldWidth, full_source_block1, source_field_hi1), source_shift_hi1);
+        Value * expanded1 = b->bitCast(b->CreateOr(C1, D1, "expanded1"));
+
+        Value * A2 = b->simd_srlv(mFieldWidth, b->mvmd_dsll(mFieldWidth, sourceData2[i], pendingDataPhi2[i], field_offset_lo2), bit_offset2);
+        Value * B2 = b->simd_sllv(mFieldWidth, b->mvmd_dsll(mFieldWidth, sourceData2[i], pendingDataPhi2[i], field_offset_hi2), shift_fwd2);
+        Value * full_source_block2 = b->CreateOr(A2, B2, "toExpand1");
+        Value * C2 = b->simd_srlv(mFieldWidth, b->mvmd_shuffle(mFieldWidth, full_source_block2, source_field_lo2), source_shift_lo2);
+        Value * D2 = b->simd_sllv(mFieldWidth, b->mvmd_shuffle(mFieldWidth, full_source_block2, source_field_hi2), source_shift_hi2);
+        Value * expanded2 = b->bitCast(b->CreateOr(C2, D2, "expanded2"));
+
+        Value * toMerge1 = b->simd_pdep(mFieldWidth, expanded1, mask1);
+        Value * toMerge2 = b->simd_pdep(mFieldWidth, expanded2, mask2);
+        Value * merged=b->CreateOr(toMerge1,toMerge2);//combine 2 inputs using bitwise OR
+        b->storeOutputStreamBlock("mergedStreamSet", b->getInt32(i), blockNoPhi, merged);
+    }
+    //
+    // Update loop control Phis for the next iteration.
+    //
+    blockNoPhi->addIncoming(nextBlk, b->GetInsertBlock());
+    pendingOffsetPhi1->addIncoming(newPendingOffset1, b->GetInsertBlock());
+    pendingOffsetPhi2->addIncoming(newPendingOffset2, b->GetInsertBlock());
+    for (unsigned i = 0; i < mSelectedStreamCount; i++) {
+        pendingDataPhi1[i]->addIncoming(sourceData1[i], b->GetInsertBlock());
+        pendingDataPhi2[i]->addIncoming(sourceData2[i], b->GetInsertBlock());
+    }
+    // Now continue the loop if there are more blocks to process.
+    b->CreateCondBr(moreToDo, mergeLoop, mergenceDone);
+
+    b->SetInsertPoint(mergenceDone);
+}
+/*******************************************************************************************/
+
 FieldDepositKernel::FieldDepositKernel(BuilderRef b
                                        , StreamSet * mask, StreamSet * input, StreamSet * output
                                        , const unsigned fieldWidth)
@@ -296,7 +490,7 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
     Value * depositMaskPtr = kb->getInputStreamBlockPtr("depositMask", ZERO, blockOffsetPhi);
     depositMaskPtr = kb->CreatePointerCast(depositMaskPtr, fieldPtrTy);
     for (unsigned i = 0; i < fieldsPerBlock; i++) {
-        mask[i] = kb->CreateLoad(kb->CreateGEP(fieldTy, depositMaskPtr, kb->getInt32(i)));
+        mask[i] = kb->CreateLoad(fieldTy, kb->CreateGEP(fiedlTy, depositMaskPtr, kb->getInt32(i)));
     }
 #else
 
@@ -322,7 +516,7 @@ void PDEPFieldDepositLogic(BuilderRef kb, llvm::Value * const numOfStrides, unsi
 #endif
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
-            Value * field = kb->CreateLoad(kb->CreateGEP(fieldTy, inputPtr, kb->getInt32(i)));
+            Value * field = kb->CreateLoad(fieldTy, kb->CreateGEP(fiedlTy, inputPtr, kb->getInt32(i)));
 #else
             Value * field = kb->CreateExtractElement(inputStrm, kb->getInt32(i));
 #endif
@@ -403,8 +597,8 @@ void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
 
     // Extract the values we will use in the main processing loop
     Value * const markerStream = b->getInputStreamBlockPtr("marker", ZERO, strideIndex);
-    Value * const markerValue = b->CreateBlockAlignedLoad(markerStream);
-    Value * const selectors = b->fwCast(pdepWidth, markerValue);
+    Type * const vecType = b->fwVectorType(pdepWidth);
+    Value * const selectors = b->CreateBlockAlignedLoad(vecType, markerStream);
     Value * const numOfSelectors = b->simd_popcount(pdepWidth, selectors);
 
     // For each element of the marker block
@@ -432,7 +626,7 @@ void PDEPkernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         // Calculate the block and swizzle index of the current swizzle row
         Value * const blockOffset = b->CreateUDiv(updatedSourceOffset, BLOCK_WIDTH);
         Value * const swizzleIndex = b->CreateUDiv(b->CreateURem(updatedSourceOffset, BLOCK_WIDTH), PDEP_WIDTH);
-        Value * const swizzle = b->CreateBlockAlignedLoad(b->getInputStreamBlockPtr("source", swizzleIndex, blockOffset));
+        Value * const swizzle = b->CreateBlockAlignedLoad(b->getBitBlockType(), b->getInputStreamBlockPtr("source", swizzleIndex, blockOffset));
         Value * const swizzleOffset = b->CreateURem(updatedSourceOffset, PDEP_WIDTH);
 
         // Shift the swizzle to the right to clear off any used bits ...

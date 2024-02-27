@@ -15,6 +15,8 @@
 #include <re/adt/re_cc.h>
 #include <unicode/core/unicode_set.h>
 
+#include <pablo/pabloverifier.hpp>
+
 using namespace cc;
 using namespace re;
 using namespace pablo;
@@ -452,7 +454,7 @@ UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
     return ranges;
 }
 
-void UTF_Compiler::addTarget(Var * theVar, CC * theCC) {
+void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
     mTarget.emplace(theCC, theVar);
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
@@ -460,17 +462,20 @@ void UTF_Compiler::addTarget(Var * theVar, CC * theCC) {
 void UTF_Compiler::compile(IfHierarchy h) {
     if (h == IfHierarchy::None) generateRange(noIfHierachy, mPb);
     else generateRange(defaultIfHierachy, mPb);
+
+    PabloVerifier::verify(mPb.getPabloBlock()->getParent(), "after utf compiler");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned lookAhead, PabloAST * mask)
-: mPb(pb), mLookAhead(lookAhead), mMask(mask) {
+UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned /* lookAhead */, PabloAST * mask)
+: mPb(pb), mMask(mask) { // , mLookAhead(lookAhead)
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
     if (streamCount == 1) {
-        unsigned streamWidth = ty->getElementType()->getIntegerBitWidth();
+        VectorType * const vt = cast<VectorType>(ty->getArrayElementType());
+        const auto streamWidth = vt->getElementType()->getIntegerBitWidth();
         mEncoder.setCodeUnitBits(streamWidth);
         mCodeUnitCompiler =
         std::make_unique<cc::Direct_CC_Compiler>(pb.getPabloBlock(), pb.createExtract(basis_var, pb.getInteger(0)));

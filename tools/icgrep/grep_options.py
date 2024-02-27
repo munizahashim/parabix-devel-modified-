@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # 
 # A simple script to partially automate flag processing.
 

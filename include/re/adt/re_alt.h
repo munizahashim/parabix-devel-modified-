@@ -26,6 +26,7 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    template<typename iterator> static Alt * Create(const iterator begin, const iterator end) {return new Alt(begin, end);}
 protected:
     friend Alt * makeAlt();
     template<typename iterator> friend RE * makeAlt(iterator, iterator);
@@ -92,12 +93,9 @@ RE * makeAlt(const iterator begin, const iterator end) {
         } else if (const Rep * rep = llvm::dyn_cast<Rep>(*i)) {
             if (rep->getLB() == 0) {
                 if (nullableRE == nullptr) {
-                    // Already have a nullable case.
-                    newAlt.push_back(makeRep(rep->getRE(), 1, rep->getUB()));
-                } else {
-                    // This will be the nullable case.
-                    nullableRE = *i;
+                    nullableRE = makeSeq();
                 }
+                newAlt.push_back(makeRep(rep->getRE(), 1, rep->getUB()));
             } else {
                 newAlt.push_back(*i);
             }

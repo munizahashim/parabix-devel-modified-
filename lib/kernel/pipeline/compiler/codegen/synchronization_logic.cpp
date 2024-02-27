@@ -38,28 +38,23 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
-        assert (mSegNo == mExternalSegNo);
+        assert (mSegNo == mExternalSegNo && mSegNo);
+    } else if (mUseDynamicMultithreading) {
+        Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
+        // NOTE: this must be atomic or the pipeline will deadlock when some thread
+        // fetches a number before the prior one to fetch the same number updates it.
+        mSegNo = b->CreateAtomicFetchAndAdd(b->getSize(1), segNoPtr);
     } else {
-        #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-        ConstantInt * const sz_ONE = b->getSize(1);
-        if (LLVM_LIKELY(mNumOfThreads > 1)) {
-            Value * const segNoPtr = b->getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER);
-            // NOTE: this must be atomic or the pipeline will deadlock when some thread
-            // fetches a number before the prior one to fetch the same number updates it.
-            mSegNo = b->CreateAtomicFetchAndAdd(sz_ONE, segNoPtr);
-        } else {
-            Value * const initialSegNo = sz_ONE;
-        #else
-            Value * const initialSegNo = mSegNo; assert (mSegNo);
-        #endif
-            PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
-            segNo->addIncoming(initialSegNo, entryBlock);
-            mSegNo = segNo;
-        #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-        }
-        #endif
+        Value * initialSegNo = nullptr;
+//        if (mNumOfThreads == 1) {
+//            initialSegNo = b->getSize(0);
+//        } else {
+            initialSegNo = mSegNo; assert (mSegNo);
+//        }
+        PHINode * const segNo = b->CreatePHI(initialSegNo->getType(), 2, "segNo");
+        segNo->addIncoming(initialSegNo, entryBlock);
+        mSegNo = segNo;
     }
-    assert (mSegNo);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mBaseSegNo = mSegNo;
     mCurrentNestedSynchronizationVariable = 0;
@@ -70,21 +65,14 @@ void PipelineCompiler::obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * con
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock) {
-    #ifndef USE_FIXED_SEGMENT_NUMBER_INCREMENTS
-    if (LLVM_UNLIKELY(mNumOfThreads != 1)) {
-        return;
-    }
-    #endif
-    if (LLVM_LIKELY(mIsNestedPipeline)) {
-        return;
-    }
-    assert (mNumOfThreads > 0);
+    assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    Value * const segNo = mBaseSegNo;
+    Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
     #else
-    Value * const segNo = mSegNo;
+    Value * const segNo = mSegNo; assert (mSegNo);
     #endif
-    Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(mNumOfThreads));
+    assert (mNumOfFixedThreads);
+    Value * const nextSegNo = b->CreateAdd(segNo, mNumOfFixedThreads);
     cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
 }
 
@@ -127,15 +115,16 @@ void PipelineCompiler::acquireSynchronizationLock(BuilderRef b, const unsigned k
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, waitingOnIdx, type);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + ": waiting for %ssegment number %" PRIu64 ", initially %" PRIu64,
-                   __getSyncLockName(b, type), segNo, b->CreateAtomicLoadAcquire(waitingOnPtr));
+                   __getSyncLockName(b, type), segNo, b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr));
         #endif
-        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode(); assert (nextNode);
+        assert (b->GetInsertBlock());
+        BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
         BasicBlock * const acquire = b->CreateBasicBlock(prefix + "_LSN_acquire", nextNode);
         BasicBlock * const acquired = b->CreateBasicBlock(prefix + "_LSN_acquired", nextNode);
         b->CreateBr(acquire);
 
         b->SetInsertPoint(acquire);
-        Value * const currentSegNo = b->CreateAtomicLoadAcquire(waitingOnPtr);
+        Value * const currentSegNo = b->CreateAtomicLoadAcquire(b->getSizeTy(), waitingOnPtr);
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const minExpectedSegNo = b->getSize(0); // b->CreateSaturatingSub(segNo, b->getSize(mNumOfThreads - 1U));
             Value * const valid = b->CreateICmpUGE(currentSegNo, minExpectedSegNo);
@@ -168,8 +157,15 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         Value * const nextSegNo = b->CreateAdd(segNo, b->getSize(1));
         if (LLVM_UNLIKELY(CheckAssertions)) {
+            DataLayout DL(b->getModule());
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+            llvm::MaybeAlign align = Align(DL.getTypeStoreSize(nextSegNo->getType()));
+#endif
             Value * const updated = b->CreateAtomicCmpXchg(waitingOnPtr, segNo, nextSegNo,
-                                          AtomicOrdering::Release, AtomicOrdering::Acquire);
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+                                                           *align,
+#endif
+                                                           AtomicOrdering::Release, AtomicOrdering::Acquire);
             Value * const observed = b->CreateExtractValue(updated, { 0 });
             Value * const success = b->CreateExtractValue(updated, { 1 });
             SmallVector<char, 256> tmp;
@@ -187,38 +183,11 @@ void PipelineCompiler::releaseSynchronizationLock(BuilderRef b, const unsigned k
     }
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief verifyPostSynchronizationLock
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::verifyPostSynchronizationLock(BuilderRef b) {
-    if (isMultithreaded()) {
-        auto checkLockVal = [&](unsigned typeId) {
-            Value * const lockPtr = getSynchronizationLockPtrForKernel(b, mKernelId, typeId);
-            return b->CreateICmpUGE(b->CreateLoad(lockPtr), mSegNo);
-        };
-
-        Value * valid = nullptr;
-
-        if (isDataParallel(mKernelId)) {
-            Value * const A = checkLockVal(SYNC_LOCK_PRE_INVOCATION);
-            Value * const B = checkLockVal(SYNC_LOCK_POST_INVOCATION);
-            valid = b->CreateAnd(A, B);
-        } else {
-            Value * const F = checkLockVal(SYNC_LOCK_FULL);
-            valid = F;
-        }
-
-        b->CreateAssert(valid, "%s: invalid post-synchronization segment number detected!",
-                        mKernelName[mKernelId]);
-    }
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getSynchronizationLockPtrForKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned type) const {
-    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]);
+    Value * ptr = getScalarFieldPtr(b.get(), makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     ptr->setName(makeKernelName(kernelId) + __getSyncLockNameString(type));
     return ptr;
 }

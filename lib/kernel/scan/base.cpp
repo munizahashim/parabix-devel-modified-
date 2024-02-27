@@ -92,7 +92,7 @@ void SingleStreamScanKernelTemplate::generateMultiBlockLogic(BuilderRef b, Value
     Value * const processingBlockIndex = b->CreateAdd(strideOffset, blockNumOfWord);
     Value * const stridePtr = b->CreateBitCast(b->getInputStreamBlockPtr("scan", b->getInt32(0), processingBlockIndex), mSW.PointerTy);
     Value * const wordPtr = b->CreateGEP(mSW.Ty, stridePtr, blockOffset);
-    Value * const word = b->CreateLoad(wordPtr);
+    Value * const word = b->CreateLoad(mSW.Ty, wordPtr);
     willProcessWord(b, word);
     b->CreateBr(mProcessWord);
 
@@ -139,7 +139,7 @@ SingleStreamScanKernelTemplate::SingleStreamScanKernelTemplate(BuilderRef b, std
         report_fatal_error("scan-blocks must be a power of 2");
     }
     if ((codegen::ScanBlocks * b->getBitBlockWidth()) > MaxStrideWidth) {
-        report_fatal_error("scan-blocks exceeds maximum allowed size of " + std::to_string(MaxStrideWidth / b->getBitBlockWidth()));
+        report_fatal_error(StringRef("scan-blocks exceeds maximum allowed size of ") + std::to_string(MaxStrideWidth / b->getBitBlockWidth()));
     }
     setStride(strideWidth);
 }

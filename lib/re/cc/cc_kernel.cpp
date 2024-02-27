@@ -55,7 +55,7 @@ CharacterClassKernelBuilder::CharacterClassKernelBuilder(
 makeInputScalarBindings(signalNullObject),
 {}), mCharClasses(std::move(charClasses)), mAbortOnNull(signalNullObject != nullptr) {
     if (LLVM_UNLIKELY(ccStream->getNumElements() != mCharClasses.size())) {
-        report_fatal_error("cc streamset must have " + std::to_string(mCharClasses.size()) + " streams");
+        report_fatal_error(StringRef("cc streamset must have ") + std::to_string(mCharClasses.size()) + " streams");
     }
     if (mAbortOnNull) {
         addAttribute(CanTerminateEarly());

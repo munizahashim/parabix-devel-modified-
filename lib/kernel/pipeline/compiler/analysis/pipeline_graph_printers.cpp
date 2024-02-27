@@ -85,23 +85,31 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 assert (&rn.Callee);
                 out << "Callee:" << rn.Callee.get().Name;
                 break;
-            case RelationshipNode::IsRelationship:
+            case RelationshipNode::IsScalar:
+                if (LLVM_UNLIKELY(isa<ScalarConstant>(rn.Relationship))) {
+                    out << "Constant: ";
+                } else if (isa<CommandLineScalar>(rn.Relationship)) {
+                    out << "CommandLineScalar: ";
+                } else if (isa<Scalar>(rn.Relationship)) {
+                    out << "Scalar: ";
+                } else {
+                    out << "<Unknown Scalar>: ";
+                }
+                rn.Relationship->getType()->print(errs());
+                break;
+            case RelationshipNode::IsStreamSet:
                 assert (rn.Relationship);
                 if (isa<StreamSet>(rn.Relationship)) {
                     out << "StreamSet: ";
                 } else if (isa<RepeatingStreamSet>(rn.Relationship)) {
                     out << "RepeatingStreamSet: ";
-                } else if (isa<ScalarConstant>(rn.Relationship)) {
-                    out << "Constant: ";
-                } else if (isa<Scalar>(rn.Relationship)) {
-                    out << "Scalar: ";
+                } else if (isa<TruncatedStreamSet>(rn.Relationship)) {
+                    out << "TruncatedStreamSet: ";
                 } else {
-                    out << "<Unknown Relationship>: ";
+                    out << "<Unknown StreamSet>: ";
                 }
                 rn.Relationship->getType()->print(errs());
-
-//                out << " ";
-//                out.write_hex(reinterpret_cast<uintptr_t>(rn.Relationship));
+                break;
         }
         out << "\"];\n";
         out.flush();
@@ -131,6 +139,9 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 case ReasonType::ImplicitPopCount:
                     out << " (popcount)";
                     break;
+                case ReasonType::ImplicitTruncatedSource:
+                    out << " (truncated)";
+                    break;
                 case ReasonType::ImplicitRegionSelector:
                     out << " (region)";
                     break;
@@ -158,11 +169,14 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 out << joiner << "color=blue";
                 break;
             case ReasonType::Reference:
+            case ReasonType::ImplicitTruncatedSource:
                 out << joiner << "color=gray";
                 break;
             case ReasonType::OrderingConstraint:
                 out << joiner << "color=red";
                 break;
+            default:
+                llvm_unreachable("unexpected reason code");
         }
         out << "];\n";
         out.flush();
@@ -227,6 +241,12 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (bn.isExternal()) {
             out << 'X';
         }
+        if (bn.isThreadLocal()) {
+            out << 'T';
+        }
+        if (bn.isUnowned()) {
+            out << 'U';
+        }
         if (buffer == nullptr) {
             out << '?';
         } else {
@@ -236,20 +256,21 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
                 case BufferId::DynamicBuffer:
                     out << 'D'; break;
                 case BufferId::ExternalBuffer:
-                    out << 'E'; break;
+                    assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
+                    break;
                 case BufferId::RepeatingBuffer:
                     out << 'R'; break;
                 default: llvm_unreachable("unknown streamset type");
             }
-        }
-        if (bn.isUnowned()) {
-            out << 'U';
         }
         if (bn.IsLinear) {
             out << 'L';
         }
         if (bn.isReturned()) {
             out << 'R';
+        }
+        if (bn.isTruncated()) {
+            out << 'T';
         }
         if (bn.isShared()) {
             out << '*';
@@ -304,6 +325,27 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         #endif
 
         out << "}}\"];\n";
+
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+
+            const auto ts = cast<TruncatedStreamSet>(mStreamGraph[streamSet].Relationship);
+            const auto d = ts->getData();
+
+
+            for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+                const auto ss = static_cast<const StreamSet *>(mStreamGraph[i].Relationship);
+                if (LLVM_UNLIKELY(ss == d)) {
+                    out << "v" << i << " -> v" << streamSet <<
+                           " ["
+                              "style=\"dotted\""
+                           "];\n";
+
+                    break;
+                }
+            }
+
+
+        }
 
     };
 
@@ -379,6 +421,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
             }
             out << "\\n";
         }
+
+        assert (kernelObj);
+
         if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
             out << "<InternallySynchronized>\\n";
         }
@@ -388,7 +433,8 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (isKernelStateFree(kernel)) {
             out << "<StateFree>\\n";
         }
-        if (kernelObj->hasFamilyName()) {
+
+        if (isKernelFamilyCall(kernel)) {
             out << "<Family>\\n";
         }
 
@@ -425,8 +471,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
     }
 
     bool hidePipelineOutput = in_degree(PipelineOutput, mBufferGraph) == 0;
-
-    if (!PartitionJumpTargetId.empty()) {
+    if (LLVM_LIKELY(KernelPartitionId.size() > 0 && PartitionJumpTargetId.size() > 0)) {
         for (auto i = KernelPartitionId[FirstKernel]; i < KernelPartitionId[LastKernel]; ++i) {
             if (PartitionJumpTargetId[i] == KernelPartitionId[PipelineOutput]) {
                 hidePipelineOutput = false;
@@ -558,20 +603,22 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         out << "];\n";
     }
 
-    if (!PartitionJumpTargetId.empty()) {
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        const auto a = i;
-        const auto b = PartitionJumpTargetId[i];
-        if (b > (a + 1)) {
-            const auto s = firstKernelOfPartition[a];
-            const auto t = firstKernelOfPartition[b];
-            out << "v" << s << " -> v" << t <<
-                   " ["
-                      "style=\"dotted,bold\","
-                      "color=\"red\""
-                   "];\n";
+    if (LLVM_LIKELY(PartitionJumpTargetId.size() > 0)) {
+
+        for (unsigned i = 0; i < PartitionCount; ++i) {
+            const auto a = i;
+            const auto b = PartitionJumpTargetId[i];
+            if (b > (a + 1)) {
+                const auto s = firstKernelOfPartition[a];
+                const auto t = firstKernelOfPartition[b];
+                out << "v" << s << " -> v" << t <<
+                       " ["
+                          "style=\"dotted,bold\","
+                          "color=\"red\""
+                       "];\n";
+            }
         }
-    }
+
     }
 
     #ifndef USE_SIMPLE_BUFFER_GRAPH

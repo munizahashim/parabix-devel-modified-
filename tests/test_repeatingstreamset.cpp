@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  Copyright (c) 2018 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
@@ -7,6 +7,7 @@
 #include <kernel/core/idisa_target.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <llvm/Support/CommandLine.h>
@@ -23,11 +24,25 @@ using namespace llvm;
 using namespace testing;
 using namespace boost::integer;
 
-constexpr auto REPETITION_LENGTH = 5563ULL;
+static cl::opt<unsigned> optFieldWidth("field-width", cl::desc("Field width of pattern elements"), cl::init(0));
+
+static cl::opt<unsigned> optNumElements("num-elements", cl::desc("Number of elements in pattern streamset"), cl::init(0));
+
+static cl::opt<unsigned> optPatternLength("pattern-length", cl::desc("Length of each pattern"), cl::init(0));
+
+static cl::opt<unsigned> optRepetitionLength("repetition-length", cl::desc("Total length of repeating data"), cl::init(0));
+
+static cl::opt<bool> optAllowUnaligned("allow-unaligned", cl::desc("Allow unaligned access to single stream streamsets"), cl::init(true));
+
+static cl::opt<unsigned> optUseNestedPipeline("nested", cl::desc("Depth of nested pipeline before repeating streamset comparison (0, 1 or 2)"), cl::init(0));
+
+static cl::opt<bool> optUseFamilyCall("family", cl::desc("Execute nested pipeline using family kernel call"), cl::init(false));
+
+static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
-    RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, const unsigned fillSize = 1024);
+    RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
 protected:
     bool allocatesInternalStreamSets() const override { return true; }
     void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) override;
@@ -57,19 +72,19 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
         }
         out << '}';
     }
-    out << '}';
+    out << "}";
     out.flush();
     return tmp;
 }
 
-RepeatingSourceKernel::RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, const unsigned fillSize)
+RepeatingSourceKernel::RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
 : SegmentOrientedKernel(b, getStringHash(makeSignature(pattern, output, fillSize)),
 // input streams
 {},
 // output stream
 {Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer(), Linear() }}},
 // input scalar
-{},
+{Binding{b->getSizeTy(), "repLength", repLength}},
 {},
 // internal scalar
 {})
@@ -134,7 +149,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Value " << v << " exceeds a " << fieldWidth << "-bit value";
-                report_fatal_error(msg.str());
+                report_fatal_error(StringRef(msg.str()));
             }
         }
         maxPatternSize = std::max(maxPatternSize, vec.size());
@@ -148,18 +163,17 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         report_fatal_error("output rate should at least be as large as the pattern length");
     }
 
-
     if (fieldWidth > blockWidth) {
-        report_fatal_error("does not support field width sizes above " + std::to_string(blockWidth));
+        report_fatal_error(StringRef("does not support field width sizes above ") + std::to_string(blockWidth));
     }
     if ((maxFillSize % blockWidth) != 0) {
-        report_fatal_error("output rate should be a multiple of " + std::to_string(blockWidth)
+        report_fatal_error(StringRef("output rate should be a multiple of ") + std::to_string(blockWidth)
                            + " to ensure proper streamset construction");
     }
 
     StreamSetBuffer * const outputBuffer = b->getOutputStreamSetBuffer("output");
-    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();    
-    Type * const outputStreamSetTy = outputStreamSetPtrTy->getPointerElementType();
+    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
+    Type * const outputStreamSetTy = outputBuffer->getType();
 
 
     ConstantInt * const sz_ZERO = b->getSize(0);
@@ -170,9 +184,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     const auto numLanes = blockWidth / laneWidth;
     ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
 
+
     SmallVector<Constant *, 16> laneVal(numLanes);
     SmallVector<Constant *, 16> packVal(fieldWidth);
     SmallVector<GlobalVariable *, 16> streamVal(numElements);
+    SmallVector<Type *, 16> streamValTy(numElements);
 
     Module & mod = *b->getModule();
 
@@ -202,9 +218,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         }
 
         ArrayType * const streamTy = ArrayType::get(elementTy, runLength);
+        streamValTy[p] = streamTy;
         Constant * const patternVal = ConstantArray::get(streamTy, dataVectorArray);
         GlobalVariable * const gv = new GlobalVariable(mod, streamTy, true, GlobalValue::PrivateLinkage, patternVal);
         gv->setAlignment(MaybeAlign{blockWidth /8});
+        assert (streamTy->getPointerTo() == gv->getType());
 
         streamVal[p] = gv;
     }
@@ -311,9 +329,9 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     b->CreateBr(generateData);
 
     b->SetInsertPoint(generateData);
-    PHINode * const pos = b->CreatePHI(b->getSizeTy(), 3);
-    pos->addIncoming(produced, checkBufferExit);
-    pos->addIncoming(produced, prepareBufferExit);
+    PHINode * const producedPhi = b->CreatePHI(b->getSizeTy(), 3);
+    producedPhi->addIncoming(produced, checkBufferExit);
+    producedPhi->addIncoming(produced, prepareBufferExit);
     PHINode * const ba = b->CreatePHI(baseAddress->getType(), 3);
     ba->addIncoming(baseAddress, checkBufferExit);
     ba->addIncoming(newBaseAddress, prepareBufferExit);
@@ -321,36 +339,35 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     FixedArray<Value *,2> offset;
     offset[0] = sz_ZERO;
 
-    Value * const currentIndex = b->CreateExactUDiv(pos, sz_BlockWidth);
+    Value * const currentIndex = b->CreateExactUDiv(producedPhi, sz_BlockWidth);
     const auto length = (fieldWidth * blockWidth) / 8;
     ConstantInt * const elementSize = b->getSize(length);
     for (unsigned i = 0; i < numElements; ++i) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
-        Value * const src = b->CreateGEP(streamVal[i], offset);
+        Value * const src = b->CreateGEP(streamValTy[i], streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
-        b->CreateMemCpy(dst, src, elementSize, blockWidth / 8);
+        b->CreateMemCpy(dst, src, elementSize, 1U);
     }
 
-    Value * const nextProduced = b->CreateAdd(pos, sz_BlockWidth);
+    Value * const currentProduced = b->CreateAdd(producedPhi, sz_BlockWidth);
     BasicBlock * const generateDataExit = b->GetInsertBlock();
-    pos->addIncoming(nextProduced, generateDataExit);
+    producedPhi->addIncoming(currentProduced, generateDataExit);
     ba->addIncoming(ba, generateDataExit);
-    b->CreateCondBr(b->CreateICmpNE(nextProduced, total), generateData, finishedDataLoop);
+    b->CreateCondBr(b->CreateICmpULT(currentProduced, total), generateData, finishedDataLoop);
 
     b->SetInsertPoint(finishedDataLoop);
-    Value * const finalProduced = nextProduced;
-    b->setProducedItemCount("output", finalProduced);
-    Constant * const MAX = b->getSize(REPETITION_LENGTH);
-    Value * const finishedGenerating = b->CreateICmpUGE(finalProduced, MAX);
+    b->setProducedItemCount("output", currentProduced);
+    Value * const MAX = b->getScalarField("repLength");
+    Value * const finishedGenerating = b->CreateICmpUGE(currentProduced, MAX);
     b->CreateUnlikelyCondBr(finishedGenerating, zeroExtraneousBytes, exit);
 
     b->SetInsertPoint(zeroExtraneousBytes);
     b->setProducedItemCount("output", MAX);
     b->setTerminationSignal();
 
-    Constant * const startIndex = ConstantExpr::getUDiv(MAX, sz_BlockWidth);
+    Value * const startIndex = b->CreateUDiv(MAX, sz_BlockWidth);
 
     ConstantInt * const sz_BlockMask = b->getSize(blockWidth - 1U);
     ConstantInt * const sz_FieldWidth = b->getSize(fieldWidth);
@@ -371,7 +388,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         } else {
             ptr = outputBuffer->getStreamPackPtr(b.get(), ba, b->getInt32(i), startIndex, packIndex);
         }
-        Value * const val = b->CreateBlockAlignedLoad(ptr);
+        Value * const val = b->CreateBlockAlignedLoad(b->getBitBlockType(), ptr);
         Value * const maskedVal = b->CreateAnd(val, mask);
         b->CreateBlockAlignedStore(maskedVal, ptr);
     }
@@ -430,38 +447,66 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(BuilderRef b, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    StreamEq(BuilderRef b, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
     void generateInitializeMethod(BuilderRef b) override;
     void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(BuilderRef b) override;
-
+private:
+    inline Bindings makeInputBindings(StreamSet * lhs, const bool unalignedLHS, StreamSet * rhs, const bool unalignedRHS);
+private:
+    const bool UnalignedLHS;
+    const bool UnalignedRHS;
 };
+
+inline Bindings StreamEq::makeInputBindings(StreamSet * lhs, const bool unalignedLHS, StreamSet * rhs, const bool unalignedRHS) {
+    Bindings bindings;
+    if (unalignedLHS) {
+        bindings.emplace_back("lhs", lhs, FixedRate(), AllowsUnalignedAccess());
+    } else {
+        bindings.emplace_back("lhs", lhs);
+    }
+    if (unalignedRHS) {
+        bindings.emplace_back("rhs", rhs, FixedRate(), AllowsUnalignedAccess());
+    } else {
+        bindings.emplace_back("rhs", rhs);
+    }
+    return bindings;
+}
 
 StreamEq::StreamEq(
     BuilderRef b,
     StreamSet * lhs,
+    const bool unalignedLHS,
     StreamSet * rhs,
+    const bool unalignedRHS,
     Scalar * outPtr)
     : MultiBlockKernel(b, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
            << "<i" << lhs->getFieldWidth() << ">"
-           << "[" << lhs->getNumElements() << "],"
-           << "<i" << rhs->getFieldWidth() << ">"
+           << "[" << lhs->getNumElements() << "]";
+       if (unalignedLHS) {
+         str << 'U';
+       }
+       str << ",<i" << rhs->getFieldWidth() << ">"
            << "[" << rhs->getNumElements() << "]]";
-        str.flush();
-        return backing;
+       if (unalignedRHS) {
+         str << 'U';
+       }
+       str.flush();
+       return backing;
     }(),
-    {{"lhs", lhs}, {"rhs", rhs}},
+    {makeInputBindings(lhs, unalignedLHS, rhs, unalignedRHS)},
     {},
     {{"result_ptr", outPtr}},
     {},
     {InternalScalar(b->getInt1Ty(), "accum")})
+, UnalignedLHS(unalignedLHS)
+, UnalignedRHS(unalignedRHS)
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
-    setStride(b->getBitBlockWidth() / lhs->getFieldWidth());
     addAttribute(SideEffecting());
 }
 
@@ -473,6 +518,8 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
     auto istreamset = b->getInputStreamSet("lhs");
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
+
+    Type * const bbTy = b->getBitBlockType();
 
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
@@ -491,30 +538,46 @@ void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides)
     PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
-    for (uint32_t i = 0; i < COUNT; ++i) {
-        Value * lhs;
-        Value * rhs;
-        if (FW == 1) {
-            lhs = b->loadInputStreamBlock("lhs", b->getInt32(i), strideNo);
-            rhs = b->loadInputStreamBlock("rhs", b->getInt32(i), strideNo);
-        } else {
-            // TODO: using strideNo in this fashion is technically going to refer to the
-            // correct pack in memory but will exceed the number of elements in the pack
-            lhs = b->loadInputStreamPack("lhs", b->getInt32(i), strideNo);
-            rhs = b->loadInputStreamPack("rhs", b->getInt32(i), strideNo);
-        }
-    //    b->CallPrintRegister("lhs", lhs);
-    //    b->CallPrintRegister("rhs", rhs);
 
-        // Perform vector comparison lhs != rhs.
-        // Result will be a vector of all zeros if lhs == rhs
-        Value * const vComp = b->CreateICmpNE(lhs, rhs);
-        Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
-        // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-        Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-    //    b->CallPrintInt("comp", comp);
-        // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        nextAccum = b->CreateAnd(nextAccum, comp);
+    for (uint32_t i = 0; i < COUNT; ++i) {
+
+        Constant * const I = b->getInt32(i);
+
+        for (unsigned j = 0; j < FW; ++j) {
+
+            Value * lhs;
+            Value * rhs;
+            if (FW == 1) {
+                lhs = b->getInputStreamBlockPtr("lhs", I, strideNo);
+                rhs = b->getInputStreamBlockPtr("rhs", I, strideNo);
+            } else {
+                Constant * const J = b->getInt32(j);
+                lhs = b->getInputStreamPackPtr("lhs", I, J, strideNo);
+                rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
+            }
+            if (UnalignedLHS) {
+                lhs = b->CreateAlignedLoad(bbTy, lhs, 1);
+            } else {
+                lhs = b->CreateBlockAlignedLoad(bbTy, lhs);
+            }
+            if (UnalignedRHS) {
+                rhs = b->CreateAlignedLoad(bbTy, rhs, 1);
+            } else {
+                rhs = b->CreateBlockAlignedLoad(bbTy, rhs);
+            }
+
+            // Perform vector comparison lhs != rhs.
+            // Result will be a vector of all zeros if lhs == rhs
+            Value * const vComp = b->CreateICmpNE(lhs, rhs);
+            Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+        //    b->CallPrintInt("comp", comp);
+            // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
+            nextAccum = b->CreateAnd(nextAccum, comp);
+
+        }
+
     }
 
     Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
@@ -536,16 +599,158 @@ void StreamEq::generateFinalizeMethod(BuilderRef b) {
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * const ptrVal = b->CreateLoad(b->getScalarField("result_ptr"));
+    Value * resultPtr = b->getScalarField("result_ptr");
+    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
     Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
 
     Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, b->getScalarField("result_ptr"));
+    b->CreateStore(newVal, resultPtr);
 }
 
 typedef void (*TestFunctionType)(uint32_t * output);
 
-const static bool verbose = false;
+using PatternVec = std::vector<std::vector<uint64_t>>;
+
+using BuilderRef = Kernel::BuilderRef;
+
+class NestedRepeatingStreamSetTest : public PipelineKernel {
+public:
+    NestedRepeatingStreamSetTest(BuilderRef b,
+                                const PatternVec & pattern,
+                                const bool unaligned,
+                                StreamSet * const Output,
+                                Scalar * const invalid)
+        : PipelineKernel(b
+                         // signature
+                         , "NestedRepeatingStreamSetTest"
+                           + std::to_string(Output->getNumElements())
+                           + "x"
+                           + std::to_string(Output->getFieldWidth())
+                         // contains kernel family calls
+                         , 0
+                         // kernel list
+                         , {}
+                         // called functions
+                         , {}
+                         // stream inputs
+                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
+                         // stream outputs
+                         , {}
+                         // input scalars
+                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         // output scalars
+                         , {}
+                         // internally generated streamsets
+                         , {}
+                         // length assertions
+                         , {})
+    , mPattern(pattern)
+    , mAllowUnaligned(unaligned) {
+        addAttribute(InternallySynchronized());
+        addAttribute(SideEffecting());
+
+    }
+
+protected:
+
+    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+
+        StreamSet * Output = E->getInputStreamSet(0);
+
+        RepeatingStreamSet * RepeatingStream = nullptr;
+        if (mAllowUnaligned) {
+            RepeatingStream = E->CreateUnalignedRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+        } else {
+            RepeatingStream = E->CreateRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+        }
+
+        assert (mInternallyGeneratedStreamSets.size() == 1);
+
+        Scalar * invalid = E->getInputScalar(0);
+
+        E->CreateKernelCall<StreamEq>(RepeatingStream, mAllowUnaligned, Output, false, invalid);
+
+        E->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, mAllowUnaligned, invalid);
+
+    }
+
+const PatternVec & mPattern;
+const bool mAllowUnaligned;
+
+};
+
+
+class MultiLevelNestingTest : public PipelineKernel {
+public:
+    MultiLevelNestingTest(BuilderRef b,
+                          const PatternVec & pattern,
+                          const bool unaligned,
+                          const bool familyCall,
+                          StreamSet * const Output,
+                          Scalar * const invalid)
+        : PipelineKernel(b
+                         // signature
+                         , [&]() -> std::string {
+                            std::string tmp;
+                            raw_string_ostream out(tmp);
+                            out << "MultiLevelNestedRepeatingStreamSetTest"
+                                << Output->getNumElements()
+                                << "x"
+                                << Output->getFieldWidth();
+                            if (familyCall) {
+                                out << "F";
+                            }
+                            out.flush();
+                            return tmp;
+                         }()
+                         // contains kernel family calls
+                         , 0
+                         // kernel list
+                         , {}
+                         // called functions
+                         , {}
+                         // stream inputs
+                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
+                         // stream outputs
+                         , {}
+                         // input scalars
+                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         // output scalars
+                         , {}
+                         // internally generated streamsets
+                         , {}
+                         // length assertions
+                         , {})
+  , mPattern(pattern)
+  , mAllowUnaligned(unaligned)
+  , mFamilyCall(familyCall) {
+        addAttribute(InternallySynchronized());
+        addAttribute(SideEffecting());
+
+    }
+
+protected:
+
+    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+
+        StreamSet * Output = E->getInputStreamSet(0);
+
+        Scalar * invalid = E->getInputScalar(0);
+
+        if (mFamilyCall) {
+            E->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+        } else {
+            E->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+        }
+
+    }
+
+const PatternVec & mPattern;
+const bool mAllowUnaligned;
+const bool mFamilyCall;
+
+};
+
 
 bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
 
@@ -553,21 +758,53 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty()->getPointerTo(), "output"}},{});
 
-    std::uniform_int_distribution<uint64_t> fwDist(0, 5);
+    unsigned fieldWidth = optFieldWidth;
+    if (fieldWidth == 0) {
+        std::uniform_int_distribution<uint64_t> fwDist(0, 5);
+        fieldWidth = 1ULL << fwDist(rng);
+    }
 
-    const auto fieldWidth = 1ULL << fwDist(rng);
+    unsigned numElements = optNumElements;
+    if (numElements == 0) {
+        std::uniform_int_distribution<uint64_t> numElemDist(1, 8);
+        numElements = numElemDist(rng);
+    }
 
-    std::uniform_int_distribution<uint64_t> numElemDist(1, 8);
+    unsigned patternLength = optPatternLength;
+    if (patternLength == 0) {
+        std::uniform_int_distribution<uint64_t> patLength(1, 26);
+        patternLength = patLength(rng);
+    }
+
+    size_t repetitionLength = optRepetitionLength;
+    if (repetitionLength == 0) {
+        const auto bw = b->getBitBlockWidth();
+        const auto v = boost::lcm<unsigned>(patternLength, bw) * 3U;
+        repetitionLength = std::max(v, 4567U);
+    }
+
+    unsigned useNestedTest = optUseNestedPipeline;
+    if (optUseNestedPipeline.getNumOccurrences() == 0) {
+        std::uniform_int_distribution<unsigned> nestedPipeDist(0, 2);
+        useNestedTest = nestedPipeDist(rng);
+    }
+
+    std::array<bool, 2> useFamilyCall;
+
+    if (optUseFamilyCall.getNumOccurrences() == 0) {
+        for (unsigned i = 0; i < useNestedTest; ++i) {
+            std::uniform_int_distribution<unsigned> familyCallDist(0, 1);
+            useFamilyCall[i] = (familyCallDist(rng) != 0);
+        }
+    } else {
+        for (unsigned i = 0; i < useNestedTest; ++i) {
+            useFamilyCall[i] = optUseFamilyCall;
+        }
+    }
+
+    const bool allowUnaligned = optAllowUnaligned && numElements == 1;
 
     std::uniform_int_distribution<uint64_t> dist(0ULL, (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL);
-
-    std::uniform_int_distribution<uint64_t> patLength(1, 100);
-
-
-    const auto numElements = numElemDist(rng);
-
-    const auto patternLength = patLength(rng);
-
 
     std::vector<std::vector<uint64_t>> pattern(numElements);
     for (unsigned i = 0; i < numElements; ++i) {
@@ -578,20 +815,62 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         }
     }
 
-    RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
-
     StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
 
-    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output);
+    Scalar *  const repLength = P->CreateConstant(b->getSize(repetitionLength));
 
-    P->CreateKernelCall<StreamEq>(RepeatingStream, Output, P->getInputScalar("output"));
+    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
+
+    Scalar * invalid = P->getInputScalar("output");
+
+    if (useNestedTest == 2) {
+        if (useFamilyCall[0]) {
+            P->CreateNestedPipelineFamilyCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+        } else {
+            P->CreateNestedPipelineCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+        }
+    } else if (useNestedTest == 1) {
+        if (useFamilyCall[0]) {
+            P->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+        } else {
+            P->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+        }
+    } else {
+        RepeatingStreamSet * RepeatingStream = nullptr;
+        if (allowUnaligned) {
+            RepeatingStream = P->CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
+        } else {
+            RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+        }
+
+        P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
+
+        P->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
+    }
 
     const auto f = reinterpret_cast<TestFunctionType>(P->compile());
 
     uint32_t result = 0;
     f(&result);
 
-    if (result != 0 || verbose) {
+    if (result != 0 || optVerbose) {
+
+        if (useNestedTest) {
+
+            llvm::errs() << "NESTED ";
+            bool called = false;
+            if (useFamilyCall[0]) {
+                llvm::errs() << "OUTER ";
+                called = true;
+            }
+            if (useNestedTest > 1 && useFamilyCall[1]) {
+                llvm::errs() << "INNER ";
+                called = true;
+            }
+            if (called) {
+                llvm::errs() << "FAMILY CALL ";
+            }
+        }
 
         llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength << " : ";
 
@@ -629,8 +908,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    //for (unsigned rounds = 0; rounds < 10; ++rounds) {
+    for (unsigned rounds = 0; rounds < 10; ++rounds) {
         testResult |= runRepeatingStreamSetTest(pxDriver, rng);
-    //}
+    }
     return testResult ? -1 : 0;
 }

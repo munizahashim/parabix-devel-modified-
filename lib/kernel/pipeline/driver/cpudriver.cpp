@@ -46,9 +46,12 @@
 #else
 #include <llvm/IR/PassTimingInfo.h>
 #endif
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
 #include <llvm/Support/Host.h>
 #endif
+
 #ifndef NDEBUG
 #define IN_DEBUG_MODE true
 #else
@@ -210,6 +213,9 @@ inline void CPUDriver::preparePassManager() {
             report_fatal_error("LLVM error: could not add emit assembly pass");
         }
     }
+    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
+        mPassManager->add(createVerifierPass());
+    }
     #endif
 }
 
@@ -267,7 +273,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     for (const auto & kernel : mCachedKernel) {
         if (LLVM_UNLIKELY(kernel->getModule() == nullptr)) {
-            report_fatal_error(kernel->getName() + " was neither loaded from cache nor generated prior to finalizeObject");
+            report_fatal_error(llvm::StringRef(kernel->getName()) + " was neither loaded from cache nor generated prior to finalizeObject");
         }
         Module * const m = kernel->getModule();
         assert ("cached kernel has no module?" && m);
@@ -304,7 +310,12 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     mainModule->setDataLayout(mMainModule->getDataLayout());
     mBuilder->setModule(mainModule.get());
     pk->addKernelDeclarations(mBuilder);
-    const auto e = pk->externallyInitialized() || pk->generatesDynamicRepeatingStreamSets();
+
+    // TODO: to ensure that we can pass the correct num of threads, we cannot statically compile the
+    // main method until we add the thread count as a parameter. Investigate whether we can make a
+    // better "wrapper" method for that that allows easier access to the output scalars.
+
+    const auto e = true; // pk->containsKernelFamilyCalls() || pk->generatesDynamicRepeatingStreamSets();
     const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;
     Function * const main = pk->addOrDeclareMainFunction(mBuilder, method);
     mBuilder->setModule(mMainModule);
@@ -356,91 +367,6 @@ CPUDriver::~CPUDriver() {
     #endif
     delete mTarget;
 }
-
-#if 0
-
-class TracePass : public ModulePass {
-public:
-    static char ID;
-    TracePass(kernel::KernelBuilder * kb, StringRef to_trace) : ModulePass(ID), iBuilder(kb), mToTrace(to_trace) { }
-    virtual bool runOnModule(Module &M) override;
-private:
-    kernel::KernelBuilder * const iBuilder;
-    const StringRef mToTrace;
-};
-
-char TracePass::ID = 0;
-
-bool TracePass::runOnModule(Module & M) {
-    Module * const saveModule = iBuilder->getModule();
-    iBuilder->setModule(&M);
-    bool modified = false;
-    const auto includeEverything = M.getName().startswith(mToTrace);
-    const auto blockWidth = iBuilder->getBitBlockWidth();
-
-    for (Function & F : M) {
-        for (BasicBlock & B : F) {
-
-            auto match = [&](const Instruction & inst) {
-                return (includeEverything || inst.getName().startswith(mToTrace));
-            };
-
-            auto print = [&](Instruction & inst, const BasicBlock::iterator ip) {
-                if (isa<AllocaInst>(inst)) {
-                    return false;
-                }
-                if (match(inst)) {
-                    Type * const t = inst.getType();
-                    if (t->isVectorTy()) {
-                        if (cast<VectorType>(t)->getBitWidth() == blockWidth) {
-                            iBuilder->SetInsertPoint(&B, ip);
-                            iBuilder->CallPrintRegister(inst.getName(), &inst);
-                            return true;
-                        }
-                    }
-                    if (isa<IntegerType>(t) || isa<PointerType>(t)) {
-                        if (isa<PointerType>(t) || cast<IntegerType>(t)->getBitWidth() <= 64) {
-                            iBuilder->SetInsertPoint(&B, ip);
-                            iBuilder->CallPrintInt(inst.getName(), &inst);
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            };
-
-            auto i = B.begin();
-            auto ip = i;
-
-            for (; isa<PHINode>(*ip); ++ip);
-
-            for (; isa<PHINode>(*i); ++i) {
-                if (print(*i, ip)) {
-                    ip++;
-                    modified = true;
-                }
-            }
-
-            for (;;) {
-                assert (i != B.end());
-                Instruction & inst = *i;
-                if (LLVM_UNLIKELY(inst.isTerminator())) {
-                    break;
-                }
-                const auto ip = i;
-                ++i;
-                if (print(inst, ip)) {
-                    modified = true;
-                }
-            }
-
-        }
-    }
-    iBuilder->setModule(saveModule);
-    return modified;
-}
-
-#endif
 
 class TracePass : public ModulePass {
 public:

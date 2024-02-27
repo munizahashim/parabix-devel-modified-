@@ -25,16 +25,11 @@ using namespace re;
 using namespace llvm;
 using namespace UTF;
 
-static std::string sourceShape(StreamSet * s) {
-    return std::to_string(s->getNumElements()) + "x" + std::to_string(s->getFieldWidth());
-}
-
-inline std::string signature(const std::vector<re::CC *> & ccs) {
-    if (LLVM_UNLIKELY(ccs.empty())) {
-        return "[]";
-    } else {
-        std::string tmp;
-        raw_string_ostream out(tmp);
+std::string makeSignature(const StreamSet * const basis, const std::vector<re::CC *> & ccs) {
+    std::string tmp;
+    raw_string_ostream out(tmp);
+    out << basis->getNumElements() << 'x' << basis->getFieldWidth();
+    if (LLVM_LIKELY(!ccs.empty())) {
         char joiner = '[';
         for (const auto & set : ccs) {
             out << joiner;
@@ -42,20 +37,21 @@ inline std::string signature(const std::vector<re::CC *> & ccs) {
             joiner = ',';
         }
         out << ']';
-        return out.str();
     }
+    out.flush();
+    return tmp;
 }
-
-CharClassesSignature::CharClassesSignature(const std::vector<CC *> &ccs, StreamSet * BasisBits)
-: mUseDirectCC(BasisBits->getNumElements() == 1),
-  mSignature(signature(ccs)) {
-}
-
 
 CharClassesKernel::CharClassesKernel(BuilderRef b, std::vector<CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: CharClassesSignature(ccs, BasisBits)
-, PabloKernel(b, "cc" + sourceShape(BasisBits) + "_" + getStringHash(mSignature), {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
-, mCCs(ccs) {
+: CharClassesKernel(b, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
+
+}
+
+CharClassesKernel::CharClassesKernel(BuilderRef b, std::string signature, std::vector<CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+: PabloKernel(b, "cc_" + getStringHash(signature)
+, {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
+, mCCs(ccs)
+, mSignature(signature) {
 
 }
 
@@ -84,14 +80,23 @@ void CharClassesKernel::generatePabloMethod() {
     }
 }
 
-
 ByteClassesKernel::ByteClassesKernel(BuilderRef b,
                                      std::vector<re::CC *> ccs,
                                      StreamSet * inputStream,
-                                     StreamSet * CharClasses):
-CharClassesSignature(ccs, inputStream)
-, PabloKernel(b, "ByteClassesKernel_" + sourceShape(inputStream) + "_" + getStringHash(mSignature), {Binding{"basis", inputStream}}, {Binding{"charclasses", CharClasses}})
-, mCCs(ccs) {
+                                     StreamSet * CharClasses)
+: ByteClassesKernel(b, makeSignature(inputStream, ccs), std::move(ccs), inputStream, CharClasses) {
+
+}
+
+ByteClassesKernel::ByteClassesKernel(BuilderRef b,
+                                     std::string signature,
+                                     std::vector<re::CC *> && ccs,
+                                     StreamSet * inputStream,
+                                     StreamSet * CharClasses)
+: PabloKernel(b, "bcc_" + getStringHash(signature)
+, {Binding{"basis", inputStream}}, {Binding{"charclasses", CharClasses}})
+, mCCs(ccs)
+, mSignature(signature) {
 
 }
 
@@ -102,10 +107,12 @@ StringRef ByteClassesKernel::getSignature() const {
 void ByteClassesKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<cc::CC_Compiler> ccc;
-    if (mUseDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+
+    auto basisBits = getInputStreamSet("basis");
+    if (basisBits.size() == 1) {
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basisBits[0]);
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basisBits);
     }
     unsigned n = mCCs.size();
 

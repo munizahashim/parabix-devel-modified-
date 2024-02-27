@@ -39,6 +39,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
         auto makeBufferPort = [&](const RelationshipType port,
                                   const RelationshipNode & bindingNode,
+                                  const bool noThreadLocal,
                                   const unsigned streamSet) -> BufferPort {
             assert (bindingNode.Type == RelationshipNode::IsBinding);
             const Binding & binding = bindingNode.Binding;
@@ -79,7 +80,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
             BufferPort bp(port, binding, lb, ub);
 
-            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory;
+            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory || noThreadLocal;
 
             if (rate.isFixed()) {
                 bp.Flags |= BufferPortType::IsFixed;
@@ -112,6 +113,13 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         break;
                     case AttrId::Principal:
                         bp.Flags |= BufferPortType::IsPrincipal;
+                        if (LLVM_UNLIKELY(!rate.isFixed() || port.Type == PortType::Output)) {
+                            SmallVector<char, 0> tmp;
+                            raw_svector_ostream out(tmp);
+                            out << "Principal attribute may only be applied to a Fixed rate input port: "
+                                << kernelObj->getName() << "." << binding.getName();
+                            report_fatal_error(out.str());
+                        }
                         break;
                     case AttrId::Deferred:
                         bp.Flags |= BufferPortType::IsDeferred;
@@ -135,11 +143,18 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     default: break;
                 }
             }
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship))) {
+            const auto r = mStreamGraph[streamSet].Relationship;
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
                 bn.Locality = BufferLocality::ConstantShared;
                 bn.IsLinear = true;
-            } else if (cannotBePlacedIntoThreadLocalMemory) {
-                mNonThreadLocalStreamSets.insert(streamSet);
+            } else {
+                if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
+                    bn.Type |= BufferType::Truncated;
+                    cannotBePlacedIntoThreadLocalMemory = true;
+                }
+                if (cannotBePlacedIntoThreadLocalMemory) {
+                    mNonThreadLocalStreamSets.insert(streamSet);
+                }
             }
             return bp;
         };
@@ -164,6 +179,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
         size_t principalInputPort = 0;
         bool hasPrincipalInput = false;
+        bool nonGuaranteedInputRate = false;
 
         for (auto e : make_iterator_range(in_edges(kernel, mStreamGraph))) {
             const RelationshipType & port = mStreamGraph[e];
@@ -179,6 +195,27 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 principalInputPort = port.Number;
                 hasPrincipalInput = true;
             }
+            const Binding & bd = rn.Binding;
+            const ProcessingRate & rate = bd.getRate();
+
+            // The following targets a StreamCompress/StreamExpand edge case in icgrep. StreamExpand
+            // has a popcount input, fixed input and fixed output. StreamCompress produces data at a
+            // popcount rate (C) and StreamExpand consumes it with its popcount rate (E) but the
+            // reference stream of each is not always equal. If E >>> C, this can lead to StreamExpand
+            // suddenly producing an unpredictable amount of output (equal to its input fixed rate)
+            // during the final stride.
+
+            switch (rate.getKind()) {
+                case RateId::Fixed:
+                    break;
+                case RateId::Greedy:
+                    if (rate.getLowerBound() == Rational{0}) {
+                        break;
+                    }
+                default:
+                    nonGuaranteedInputRate = true;
+            }
+
             E[port.Number] = e;
             if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {
                 for (const auto f : make_iterator_range(in_edges(binding, mStreamGraph))) {
@@ -291,9 +328,8 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 const auto f = first_in_edge(binding, mStreamGraph);
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = source(f, mStreamGraph);
-                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(mStreamGraph[streamSet].Relationship) || isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
-                add_edge(streamSet, kernel, makeBufferPort(port, rn, streamSet), mBufferGraph);
+                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
+                add_edge(streamSet, kernel, makeBufferPort(port, rn, false, streamSet), mBufferGraph);
             } else {
                 const auto binding = target(e, mStreamGraph);
                 const RelationshipNode & rn = mStreamGraph[binding];
@@ -301,9 +337,8 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 const auto f = first_out_edge(binding, mStreamGraph);
                 assert (mStreamGraph[f].Reason != ReasonType::Reference);
                 const auto streamSet = target(f, mStreamGraph);
-                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
-                assert (isa<StreamSet>(mStreamGraph[streamSet].Relationship));
-                add_edge(kernel, streamSet, makeBufferPort(port, rn, streamSet), mBufferGraph);
+                assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
+                add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
             }
         }
 
@@ -342,7 +377,7 @@ void PipelineAnalysis::identifyOutputNodeIds() {
         StreamSetToNodeIdMap.reserve(n);
 
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsRelationship);
+            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
             const StreamSet * const ss = cast<StreamSet>(mStreamGraph[streamSet].Relationship);
             StreamSetToNodeIdMap.emplace(ss, streamSet - FirstStreamSet);
         }
@@ -416,9 +451,9 @@ void PipelineAnalysis::identifyOwnedBuffers() {
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const BufferPort & rate = mBufferGraph[e];
             if (LLVM_UNLIKELY(rate.isManaged())) {
+                // Every managed buffer is considered linear to the pipeline
                 const auto streamSet = target(e, mBufferGraph);
                 BufferNode & bn = mBufferGraph[streamSet];
-                // Every managed buffer is considered linear to the pipeline
                 bn.Type |= BufferType::Unowned;
                 if (rate.isShared()) {
                     bn.Type |= BufferType::Shared;
@@ -462,8 +497,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
     // requires that all of its inputs are linear.
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
-
-
 
         bool inputsMustBeLinear = false;
         if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::InternallySynchronized))) {
@@ -582,7 +615,6 @@ void PipelineAnalysis::identifyLinearBuffers() {
 
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyPortsThatModifySegmentLength
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -617,10 +649,11 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             BufferPort & outputRate = mBufferGraph[e];
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
-            if (!N.IsLinear) {
+            if (N.isUnowned()) {
                 outputRate.Flags |= BufferPortType::CanModifySegmentLength;
             }
         }
+
     }
 }
 
@@ -759,7 +792,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
-    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
+//    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
     const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
@@ -770,11 +803,14 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isConstant())) {
-            const auto consumerInput = first_out_edge(streamSet, mBufferGraph);
-            const BufferPort & consumerRate = mBufferGraph[consumerInput];
-            const Binding & input = consumerRate.Binding;
-            buffer = new RepeatingBuffer(streamSet, b, input.getType());
-        } else  {
+            const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
+//            const auto e = first_out_edge(streamSet, mBufferGraph);
+//            const BufferPort & consumerRate = mBufferGraph[e];
+//            const Binding & input = consumerRate.Binding;
+            buffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
+        } else if (LLVM_UNLIKELY(bn.isTruncated())) {
+            continue;
+        } else {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
@@ -787,12 +823,12 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
                 // analyze any consumption rates.
 
-                if (bn.Locality == BufferLocality::GloballyShared) {
+                //if (bn.Locality == BufferLocality::GloballyShared) {
                     // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
                     // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
                     // determine this.
-                    auto mult = mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U);
-                    auto bufferSize = bn.RequiredCapacity * mult;
+                    //auto mult = mNumOfThreads + 1U;
+                    auto bufferSize = bn.RequiredCapacity; // * mult;
                     assert (bufferSize > 0);
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                     bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
@@ -804,14 +840,14 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                     }
 
 
-                } else {
-                    auto bufferSize = bn.RequiredCapacity;
-                    bufferSize *= (mNumOfThreads + (disableThreadLocalMemory ? 1U : 0U));
-                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                    #endif
-                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                }
+//                } else {
+//                    auto bufferSize = bn.RequiredCapacity;
+//                    bufferSize *= (mNumOfThreads + 1U);
+//                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+//                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+//                    #endif
+//                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
+//                }
             }
         }
         assert ("missing buffer?" && buffer);
@@ -819,43 +855,22 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         bn.Buffer = buffer;
     }
 
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief numberDynamicRepeatingStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::numberDynamicRepeatingStreamSets() {
-
-    // The programmer's kernel ordering may differ from the pipeline's scheduled ordering.
-    // To avoid adding overhead to the pipeline "main" function creation, we determine the
-    // streamset ids of each input here for use later.
-
-    // NOTE: Since streamset 0 is impossible, we use that to signify a repeating streamset
-    // whose consumers were all removed.
-
-    flat_set<const StreamSet *> added;
-    for (const Kernel * kernel : mKernels) {
-        const auto m = kernel->getNumOfStreamInputs();
-        for (unsigned i = 0; i != m; ++i) {
-            const StreamSet * const input = kernel->getInputStreamSet(i);
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(input))) {
-                if (cast<RepeatingStreamSet>(input)->isDynamic() && added.emplace(input).second) {
-                    unsigned index = 0;
-                    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-                        RelationshipNode & rn = mStreamGraph[streamSet];
-                        assert (rn.Type == RelationshipNode::IsRelationship);
-                        Relationship * r = rn.Relationship;
-                        assert (isa<StreamSet>(r) || isa<RepeatingStreamSet>(r));
-                        if (LLVM_UNLIKELY(r == input)) {
-                            index = streamSet;
-                            break;
-                        }
-                    }
-                    mDynamicRepeatingStreamSetId.push_back(index);
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            StreamSetBuffer * buffer = nullptr;
+            for (const auto e : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                if (mStreamGraph[e].Reason == ReasonType::Reference) {
+                    const auto sourceStreamSet = source(e, mStreamGraph);
+                    buffer = mBufferGraph[sourceStreamSet].Buffer;
+                    break;
                 }
             }
+            assert ("missing source buffer for truncated streamset?" && buffer);
+            bn.Buffer = buffer;
         }
     }
+
 }
 
 }

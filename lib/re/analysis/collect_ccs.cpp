@@ -10,7 +10,44 @@
 using namespace llvm;
 
 namespace re {
-    
+
+struct CC_Collector final : public RE_Inspector {
+
+    CC_Collector(re::NameProcessingMode m)
+    : RE_Inspector(m, InspectionMode::IgnoreNonUnique)
+    , mUnionCC(makeCC()) {
+
+    }
+    void inspectAssertion(Assertion * a) final {
+        // assertions cannot add any characters to
+        // matched strings.
+    }
+
+    void inspectDiff(Diff * d) final {
+        inspectRE(d->getLH());
+    }
+
+    void inspectIntersect(Intersect * ix) final {
+        inspectRE(ix->getLH());
+    }
+
+    void inspectCC(CC * cc) final {
+        if (mUnionCC->empty()) {
+            mUnionCC = cc;
+        } else {
+            mUnionCC = makeCC(cc, mUnionCC);
+        }
+    }
+
+    CC * mUnionCC;
+};
+
+CC * unionCC(RE * re, re::NameProcessingMode m) {
+    CC_Collector collector(m);
+    collector.inspectRE(re);
+    return collector.mUnionCC;
+}
+
 struct SetCollector final : public RE_Inspector {
 
     SetCollector(const cc::Alphabet * alphabet, re::NameProcessingMode m, CC_Set & ccs)
@@ -41,8 +78,8 @@ CC_Set collectCCs(RE * const re, const cc::Alphabet & a, re::NameProcessingMode 
 
 struct AlphabetCollector final : public RE_Inspector {
 
-    AlphabetCollector(Alphabet_Set & alphabets)
-    : RE_Inspector()
+    AlphabetCollector(Alphabet_Set & alphabets, re::NameProcessingMode m)
+    : RE_Inspector(m)
     , mAlphabets(alphabets) {
 
     }
@@ -55,11 +92,10 @@ private:
     Alphabet_Set & mAlphabets;
 };
 
-Alphabet_Set collectAlphabets(RE * const re) {
-    Alphabet_Set alphabets;
-    AlphabetCollector collector(alphabets);
+void collectAlphabets(RE * const re, Alphabet_Set & alphabets,
+                      re::NameProcessingMode m) {
+    AlphabetCollector collector(alphabets, m);
     collector.inspectRE(re);
-    return alphabets;
 }
 
 

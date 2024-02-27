@@ -89,21 +89,21 @@ public:
 
         P.determineBufferSize(b);
 
-        P.identifyPortsThatModifySegmentLength();
-
         P.makeConsumerGraph();
 
         P.calculatePartialSumStepFactors(b);
 
        // P.makeTerminationPropagationGraph();
 
-        P.determineNumOfThreads();
+        P.identifyPortsThatModifySegmentLength();
 
-        P.numberDynamicRepeatingStreamSets();
+        P.mapInternallyGeneratedStreamSets();
 
         // Finish the buffer graph
         P.determineInitialThreadLocalBufferLayout(b, rng);
         P.addStreamSetsToBufferGraph(b);
+
+        P.scanFamilyKernelBindings();
 
         P.gatherInfo();
 
@@ -122,7 +122,7 @@ private:
     PipelineAnalysis(PipelineKernel * const pipelineKernel)
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
-    , mNumOfThreads(pipelineKernel->getNumOfThreads())
+//    , mNumOfThreads(pipelineKernel->getNumOfThreads())
     , mKernels(pipelineKernel->mKernels)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
@@ -135,27 +135,11 @@ private:
 
     void generateInitialPipelineGraph(BuilderRef b);
 
-    #ifdef ENABLE_GRAPH_TESTING_FUNCTIONS
-    void generateRandomPipelineGraph(BuilderRef b, const uint64_t seed,
-                                     const unsigned desiredKernels, const unsigned desiredStreamSets,
-                                     const unsigned desiredPartitions);
-    #endif
-
-    using KernelVertexVec = SmallVector<ProgramGraph::Vertex, 64>;
-
-    void addRegionSelectorKernels(BuilderRef b, Kernels & partition, KernelVertexVec & vertex, ProgramGraph & G);
-
-    void addPopCountKernels(BuilderRef b, Kernels & partition, KernelVertexVec & vertex, ProgramGraph & G);
-
-    void combineDuplicateKernels(BuilderRef b, ProgramGraph & G);
-
-    void removeUnusedKernels(const unsigned p_in, const unsigned p_out, ProgramGraph & G);
-
     void identifyPipelineInputs();
 
     void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
 
-    void gatherInfo() {        
+    void gatherInfo() {
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
         MaxNumOfOutputPorts = out_degree(PipelineInput, mBufferGraph);
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
@@ -239,10 +223,6 @@ private:
 
     void calculatePartialSumStepFactors(BuilderRef b);
 
-    void numberDynamicRepeatingStreamSets();
-
-    void determineNumOfThreads();
-
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
     // princpal rate analysis functions
@@ -266,6 +246,13 @@ private:
 
     void makeInputTruncationGraph();
 
+    // Family analysis functions
+
+    void scanFamilyKernelBindings();
+
+    // Internally generated streamsets
+
+    void mapInternallyGeneratedStreamSets();
 
 public:
 
@@ -273,15 +260,12 @@ public:
     void printBufferGraph(BuilderRef b, raw_ostream & out) const;
     static void printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name = "G");
 
-private:
+public:
 
     PipelineKernel * const          mPipelineKernel;
-    const unsigned					mNumOfThreads;
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
-
-public:
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
@@ -333,36 +317,16 @@ public:
 
     TerminationChecks               mTerminationCheck;
 
-    TerminationPropagationGraph     mTerminationPropagationGraph;
-    BitVector                       HasTerminationSignal;
+    TerminationPropagationGraph         mTerminationPropagationGraph;
+    InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
+    BitVector                           HasTerminationSignal;
 
-    std::vector<unsigned>           mDynamicRepeatingStreamSetId;
+    FamilyScalarGraph               mFamilyScalarGraph;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;
     OwningVector<StreamSetBuffer>   mInternalBuffers;
 };
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineNumOfThreads
- ** ------------------------------------------------------------------------------------------------------------- */
-inline void PipelineAnalysis::determineNumOfThreads() {
-    if (IsNestedPipeline) {
-        NumOfThreads = 1U;
-    } else {
-        const auto numKernels = LastKernel - FirstKernel + 1U;
-        NumOfThreads = mPipelineKernel->getNumOfThreads();
-        if (LLVM_UNLIKELY(numKernels < NumOfThreads)) {
-            for (auto k = FirstKernel; k <= LastKernel; ++k) {
-                if (LLVM_LIKELY(!isKernelStateFree(k))) {
-                    NumOfThreads = numKernels;
-                    break;
-                }
-            }
-        }
-    }
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printGraph

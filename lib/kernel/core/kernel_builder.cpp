@@ -32,7 +32,7 @@ Value * KernelBuilder::getThreadLocalHandle() const noexcept {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
+KernelBuilder::ScalarRef KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
     return COMPILER->getScalarFieldPtr(this, fieldName);
 }
 
@@ -40,27 +40,28 @@ Value * KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
  * @brief getScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelBuilder::getScalarField(const StringRef fieldName) {
-    return CreateLoad(getScalarFieldPtr(fieldName), fieldName);
+    auto sf = getScalarFieldPtr(fieldName);
+    return CreateLoad(sf.second, sf.first, fieldName);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::setScalarField(const StringRef fieldName, Value * const value) {
-    Value * const ptr = getScalarFieldPtr(fieldName);
-    assert (value->getType() == cast<PointerType>(ptr->getType())->getElementType());
-    CreateStore(value, ptr);
+    auto sf = getScalarFieldPtr(fieldName);
+    assert (value->getType() == sf.second);
+    CreateStore(value, sf.first);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateMonitoredScalarFieldLoad
  ** ------------------------------------------------------------------------------------------------------------- */
 LoadInst * KernelBuilder::CreateMonitoredScalarFieldLoad(const StringRef fieldName, Value * internalPtr) {
-    Type * internalTy = internalPtr->getType()->getScalarType()->getPointerElementType();
-    Value * scalarPtr = getScalarFieldPtr(fieldName);
-    Type * scalarTy = scalarPtr->getType()->getScalarType()->getPointerElementType();
+    Type * scalarTy;
+    Value * scalarPtr;
+    std::tie(scalarPtr, scalarTy) = getScalarFieldPtr(fieldName);
     Value * scalarEndPtr = CreateGEP(scalarTy, scalarPtr, getInt32(1));
-    Value * internalEndPtr = CreateGEP(internalTy, internalPtr, getInt32(1));
+    Value * internalEndPtr = CreateGEP(scalarTy, internalPtr, getInt32(1));
     Value * scalarAddr = CreatePtrToInt(scalarPtr, getSizeTy());
     Value * scalarEndAddr = CreatePtrToInt(scalarEndPtr, getSizeTy());
     Value * internalAddr = CreatePtrToInt(internalPtr, getSizeTy());
@@ -68,7 +69,7 @@ LoadInst * KernelBuilder::CreateMonitoredScalarFieldLoad(const StringRef fieldNa
     Value * inBounds = CreateAnd(CreateICmpULE(scalarAddr, internalAddr), CreateICmpUGE(scalarEndAddr, internalEndAddr));
     __CreateAssert(inBounds, "Access (%" PRIx64 ",%" PRIx64 ") to scalar " + fieldName + " out of bounds (%" PRIx64 ",%" PRIx64 ").",
                    {scalarAddr, scalarEndAddr, internalAddr, internalEndAddr});
-    return CreateLoad(internalPtr);
+    return CreateLoad(scalarTy, internalPtr);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -76,8 +77,9 @@ LoadInst * KernelBuilder::CreateMonitoredScalarFieldLoad(const StringRef fieldNa
  ** ------------------------------------------------------------------------------------------------------------- */
 StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef fieldName, Value * toStore, Value * internalPtr) {
     DataLayout DL(getModule());
-    Value * scalarPtr = getScalarFieldPtr(fieldName);
-    Type * scalarTy = scalarPtr->getType()->getScalarType()->getPointerElementType();
+    Type * scalarTy;
+    Value * scalarPtr;
+    std::tie(scalarPtr, scalarTy) = getScalarFieldPtr(fieldName);
     Value * scalarEndPtr = CreateGEP(scalarTy, scalarPtr, getInt32(1));
     Value * scalarAddr = CreatePtrToInt(scalarPtr, getSizeTy());
     Value * scalarEndAddr = CreatePtrToInt(scalarEndPtr, getSizeTy());
@@ -95,7 +97,7 @@ StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef field
 Value * KernelBuilder::getTerminationSignal() {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (ptr) {
-        return CreateIsNotNull(CreateLoad(ptr));
+        return CreateIsNotNull(CreateLoad(getSizeTy(), ptr));
     } else {
         return getFalse();
     }
@@ -107,39 +109,61 @@ Value * KernelBuilder::getTerminationSignal() {
 void KernelBuilder::setTerminationSignal(Value * const value) {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (LLVM_UNLIKELY(ptr == nullptr)) {
-        report_fatal_error(COMPILER->getName() + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
+        report_fatal_error(StringRef(COMPILER->getName()) + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
     }
     CreateStore(value, ptr);    
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const processed = getProcessedItemCount(name);
-    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const processed = getProcessedItemCount(name);
-    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
 }
 
 Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    return CreateBlockAlignedLoad(getInputStreamBlockPtr(name, streamIndex, blockOffset));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    const auto bw = getBitBlockWidth();
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(bw));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return buf->loadStreamBlock(this, buf->getBaseAddress(this), streamIndex, blockIndex, unaligned);
 }
 
 Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    return CreateBlockAlignedLoad(getInputStreamPackPtr(name, streamIndex, packIndex, blockOffset));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+    const auto bw = getBitBlockWidth();
+    Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(bw));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
+    }
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return buf->loadStreamPack(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex, unaligned);
 }
 
 Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
@@ -148,24 +172,26 @@ Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
 }
 
 Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * streamIndex, Value * const blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const produced = getProducedItemCount(name);
-    Value * blockIndex = CreateLShr(produced, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset) {
-    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const produced = getProducedItemCount(name);
-    Value * blockIndex = CreateLShr(produced, floor_log2(getBitBlockWidth()));
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
     return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
 }
 
@@ -177,22 +203,19 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
         out << "[" << c->getZExtValue() << "]";
     }
     toStore->setName(out.str());
-    Value * const ptr = getOutputStreamBlockPtr(name, streamIndex, blockOffset);
-    Type * const storeTy = toStore->getType();
-    Type * const ptrElemTy = ptr->getType()->getPointerElementType();
-    if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
-        if (LLVM_LIKELY(storeTy->canLosslesslyBitCastTo(ptrElemTy))) {
-            toStore = CreateBitCast(toStore, ptrElemTy);
-        } else {
-            std::string tmp;
-            raw_string_ostream out(tmp);
-            out << "invalid type conversion when calling storeOutputStreamBlock on " <<  name << ": ";
-            ptrElemTy->print(out);
-            out << " vs. ";
-            storeTy->print(out);
-        }
+
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
-    return CreateBlockAlignedStore(toStore, ptr);
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto bw = getBitBlockWidth();
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
 }
 
 StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset, Value * toStore) {
@@ -203,22 +226,19 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
         out << "[" << c->getZExtValue() << "]";
     }
     toStore->setName(out.str());
-    Value * const ptr = getOutputStreamPackPtr(name, streamIndex, packIndex, blockOffset);
-    Type * const storeTy = toStore->getType();
-    Type * const ptrElemTy = ptr->getType()->getPointerElementType();
-    if (LLVM_UNLIKELY(storeTy != ptrElemTy)) {
-        if (LLVM_LIKELY(storeTy->canLosslesslyBitCastTo(ptrElemTy))) {
-            toStore = CreateBitCast(toStore, ptrElemTy);
-        } else {
-            std::string tmp;
-            raw_string_ostream out(tmp);
-            out << "invalid type conversion when calling storeOutputStreamPack on " <<  name << ": ";
-            ptrElemTy->print(out);
-            out << " vs. ";
-            storeTy->print(out);
-        }
+
+    const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
+    Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
+    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    if (blockOffset) {
+        blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
-    return CreateBlockAlignedStore(toStore, ptr);
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
+    assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto bw = getBitBlockWidth();
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
 }
 
 Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {
@@ -280,15 +300,16 @@ Value * KernelBuilder::getAccessibleItemCount(const StringRef name) const noexce
 }
 
 Value * KernelBuilder::getProcessedItemCount(const StringRef name) {
-    return CreateLoad(COMPILER->getProcessedInputItemsPtr(name));
+    return CreateLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name));
 }
 
 void KernelBuilder::setProcessedItemCount(const StringRef name, Value * value) {
+    assert (value->getType() == getSizeTy());
     CreateStore(value, COMPILER->getProcessedInputItemsPtr(name));
 }
 
 Value * KernelBuilder::getProducedItemCount(const StringRef name) {
-    return CreateLoad(COMPILER->getProducedOutputItemsPtr(name));
+    return CreateLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name));
 }
 
 void KernelBuilder::setProducedItemCount(const StringRef name, Value * value) {

@@ -40,7 +40,7 @@ RE * RE_Transformer::transform(RE * const from) {
     using T = RE::ClassTypeId;
     RE * to = from;
     #define TRANSFORM(Type) \
-        case T::Type: to = transform##Type(llvm::cast<Type>(from)); break
+case T::Type: to = transform##Type(llvm::cast<Type>(from)); break
     switch (from->getClassTypeId()) {
         TRANSFORM(Alt);
         TRANSFORM(Any);
@@ -57,6 +57,7 @@ RE * RE_Transformer::transform(RE * const from) {
         TRANSFORM(Rep);
         TRANSFORM(Seq);
         TRANSFORM(Start);
+        TRANSFORM(Permute);
         TRANSFORM(PropertyExpression);
         default: llvm_unreachable("Unknown RE type");
     }
@@ -195,6 +196,19 @@ RE * RE_Transformer::transformAssertion(Assertion * a) {
     } else {
         return makeAssertion(x, a->getKind(), a->getSense());
     }
+}
+
+RE * RE_Transformer::transformPermute(Permute * p) {
+    SmallVector<RE *, 16> elems;
+    elems.reserve(p->size());
+    bool any_changed = false;
+    for (RE * e : *p) {
+        RE * e1 = transform(e);
+        if (e1 != e) any_changed = true;
+        elems.push_back(e1);
+    }
+    if (!any_changed) return p;
+    return makePermute(elems.begin(), elems.end());
 }
 
 RE * RE_Transformer::transformPropertyExpression(PropertyExpression * pe) {

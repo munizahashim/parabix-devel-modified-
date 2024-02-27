@@ -46,7 +46,7 @@ public:
 
     UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
 
-    void addTarget(pablo::Var * theVar, re::CC * theCC);
+    void addTarget(pablo::Var * theVar, const re::CC * theCC);
 
     void compile(IfHierarchy h = IfHierarchy::Default);
 
@@ -82,7 +82,7 @@ protected:
 private:
     UTF_Encoder             mEncoder;
     pablo::PabloBuilder &   mPb;
-    unsigned                mLookAhead;
+//    unsigned                mLookAhead;
     PabloAST *              mMask;
     std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
     TargetMap               mTarget;

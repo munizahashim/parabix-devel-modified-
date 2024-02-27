@@ -161,14 +161,14 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     breakWordBasePtr = b->CreatePointerCast(breakWordBasePtr, sw.pointerTy);
 
     Value * finalBreakIdx = b->CreateSub(sz_MAXBIT, b->CreateCountReverseZeroes(breakMask), "finalBreakIdx");
-    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
+    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
     Value * finalLineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(finalBreakWord));
     Value * finalLineStartPos = b->CreateAdd(stridePos, b->CreateMul(finalBreakIdx, sw.WIDTH));
     finalLineStartPos = b->CreateAdd(finalLineStartInWord, finalLineStartPos);
     Value * strideFinalLineNum = nullptr;
     if (mLineNumbering) {
         // compute the final line number.
-        Value * strideLineCount = b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
+        Value * strideLineCount = b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
         strideFinalLineNum = b->CreateAdd(pendingLineNum, b->CreateZExtOrTrunc(strideLineCount, sizeTy));
     }
     // Now check whether there are any matches at all in the stride.   If not, we
@@ -187,8 +187,8 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // If we have any bits in the current matchWordPhi, continue with those, otherwise load
     // the next match word.
     Value * matchWordIdx = b->CreateCountForwardZeroes(matchMaskPhi, "matchWordIdx");
-    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
-    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
+    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
+    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
     Value * theMatchWord = b->CreateSelect(b->CreateICmpEQ(matchWordPhi, sz_ZERO), nextMatchWord, matchWordPhi);
     Value * matchWordPos = b->CreateAdd(stridePos, b->CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchEndPosInWord = b->CreateCountForwardZeroes(theMatchWord);
@@ -208,7 +208,7 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // Create a safe index to load; the loaded value will be ignored for cases (a), (c).
     breakWordIdx = b->CreateSelect(inStrideCond, breakWordIdx, sz_ZERO);
     breakWordIdx = b->CreateSelect(inWordCond, matchWordIdx, breakWordIdx, "breakWordIdx");
-    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
+    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
     // For case (a), we use the previously masked value of the break word.
     breakWord = b->CreateSelect(inWordCond, priorBreaksThisWord, breakWord);   // cases (a) and (b)
     Value * lineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(breakWord));
@@ -218,7 +218,7 @@ void ScanMatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const matchStart = b->CreateSelect(b->CreateOr(inWordCond, inStrideCond), lineStartPos, pendingLineStart, "matchStart");
     Value * matchRecordNum = nullptr;
     if (mLineNumbering) {
-        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
+        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
         // Subtract the number of remaining breaks in the match word to get the relative line number.
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
@@ -350,9 +350,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
     Value * const avail = b->getAvailableItemCount("InputStream");
-    Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
-    //b->CallPrintInt("maxFileNum", maxFileNum);
-
+    Value * fileCount = b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator});
+    Value * maxFileNum = b->CreateSub(fileCount, b->getInt32(1));
     Value * const initialLineStart = b->getProcessedItemCount("InputStream");
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
@@ -377,10 +376,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     if (mLineNumbering) {
         pendingLineNum = b->CreatePHI(sizeTy, 2);
         pendingLineNum->addIncoming(initialLineNum, entryBlock);
-        ////b->CallPrintInt("stride pendingLineNum", pendingLineNum);
     }
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
-    //b->CallPrintInt("stridePos", stridePos);
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * matchWordBasePtr = b->getInputStreamBlockPtr("matchResult", sz_ZERO, strideBlockOffset);
     matchWordBasePtr = b->CreatePointerCast(matchWordBasePtr, sw.pointerTy);
@@ -393,6 +390,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
     Value * fileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b->CreateSelect(inFinalFile, availableLimit, fileLimit);
+
     b->setScalarField("pendingFileLimit", pendingLimit);
     b->CreateBr(stridePrecomputation);
 
@@ -446,14 +444,14 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // and line number, if needed.
 
     Value * finalBreakIdx = b->CreateSub(sz_MAXBIT, b->CreateCountReverseZeroes(breakMask), "finalBreakIdx");
-    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
+    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
     Value * finalLineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(finalBreakWord));
     Value * finalLineStartPos = b->CreateAdd(stridePos, b->CreateMul(finalBreakIdx, sw.WIDTH));
     finalLineStartPos = b->CreateAdd(finalLineStartInWord, finalLineStartPos);
     Value * strideFinalLineNum = nullptr;
     if (mLineNumbering) {
         // compute the final line number.
-        Value * strideLineCount = b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
+        Value * strideLineCount = b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
         strideFinalLineNum = b->CreateAdd(pendingLineNum, b->CreateZExtOrTrunc(strideLineCount, sizeTy));
     }
     // Now check whether there are any matches at all in the stride.   If not, we
@@ -472,8 +470,8 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // If we have any bits in the current matchWordPhi, continue with those, otherwise load
     // the next match word.
     Value * matchWordIdx = b->CreateCountForwardZeroes(matchMaskPhi, "matchWordIdx");
-    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
-    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
+    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
+    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
     Value * theMatchWord = b->CreateSelect(b->CreateICmpEQ(matchWordPhi, sz_ZERO), nextMatchWord, matchWordPhi);
     Value * matchWordPos = b->CreateAdd(stridePos, b->CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchEndPosInWord = b->CreateCountForwardZeroes(theMatchWord);
@@ -493,7 +491,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     // Create a safe index to load; the loaded value will be ignored for cases (a), (c).
     breakWordIdx = b->CreateSelect(inStrideCond, breakWordIdx, sz_ZERO);
     breakWordIdx = b->CreateSelect(inWordCond, matchWordIdx, breakWordIdx, "breakWordIdx");
-    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
+    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
     // For case (a), we use the previously masked value of the break word.
     breakWord = b->CreateSelect(inWordCond, priorBreaksThisWord, breakWord);   // cases (a) and (b)
     Value * lineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(breakWord));
@@ -503,7 +501,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     Value * const matchStart = b->CreateSelect(b->CreateOr(inWordCond, inStrideCond), lineStartPos, pendingLineStart, "matchStart");
     Value * matchRecordNum = nullptr;
     if (mLineNumbering) {
-        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
+        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
         // Subtract the number of remaining breaks in the match word to get the relative line number.
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
@@ -517,26 +515,22 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     pendingLimit = b->getScalarField("pendingFileLimit");
     Value * beyondFileEnd = b->CreateICmpUGE(matchStart, pendingLimit);
+
     b->CreateUnlikelyCondBr(beyondFileEnd, nextInBatch, dispatch);
 
     b->SetInsertPoint(nextInBatch);
     batchFileNum = b->getScalarField("batchFileNum");
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch matchStart", matchStart);
-    //b->CallPrintInt("nextInBatch pendingLimit", pendingLimit);
-
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
+        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
+        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         //b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, batchFileNum, priorLineCount});
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
@@ -547,7 +541,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
-    //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGE(matchStart, limit);
@@ -601,7 +594,6 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     //  We've processed available stride data looking for matches, now check
     //  for any files that are terminated within the stride and finalize them.
     Value * strideLimit = b->CreateUMin(b->CreateAdd(stridePos, sz_STRIDE), availableLimit);
-    //b->CallPrintInt("strideLimit", strideLimit);
     pendingLimit = b->getScalarField("pendingFileLimit");
     //  We use a strictly greater than test here; if the pendingLimit is the availableLimit,
     //  this means that we are at the end of the available data, not necessarily a file end.
@@ -610,31 +602,22 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 
     b->SetInsertPoint(nextInBatch2);
     batchFileNum = b->getScalarField("batchFileNum");
-    //b->CallPrintInt("nextInBatch2 batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch2 maxFileNum", maxFileNum);
-    pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch2 pendingLimit", pendingLimit);
+    // pendingLimit = b->getScalarField("pendingFileLimit");
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
-        //b->CallPrintInt("nextInBatch2 strideOffsetPos", strideOffsetPos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
-        //b->CallPrintInt("nextInBatch2 offsetIdx", offsetIdx);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        //b->CallPrintInt("nextInBatch2 offsetPosInWord", offsetPosInWord);
-        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
+        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        //b->CallPrintInt("nextInBatch2 offsetLineCount", offsetLineCount);
-        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
+        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
@@ -662,9 +645,7 @@ void ScanBatchKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     b->SetInsertPoint(callFinalizeScan);
     Value * const bufferEnd = b->getRawInputPointer("InputStream", avail);
     b->CreateCall(finalizer->getFunctionType(), finalizer, {accumulator, bufferEnd});
-    //b->CallPrintInt("finalizeScan maxFileNum", maxFileNum);
     /*if (mLineNumbering) {
-        //b->CallPrintInt("strideFinalLineNumPhi", strideFinalLineNumPhi);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, strideFinalLineNumPhi});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, maxFileNum, sz_ZERO});
@@ -826,14 +807,14 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     breakWordBasePtr = b->CreateBitCast(breakWordBasePtr, sw.pointerTy);
 
     Value * finalBreakIdx = b->CreateSub(sz_MAXBIT, b->CreateCountReverseZeroes(breakMask), "finalBreakIdx");
-    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
+    Value * finalBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, finalBreakIdx)), sizeTy);
     Value * finalLineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(finalBreakWord));
     Value * finalLineStartPos = b->CreateAdd(stridePos, b->CreateMul(finalBreakIdx, sw.WIDTH));
     finalLineStartPos = b->CreateAdd(finalLineStartInWord, finalLineStartPos);
     Value * strideFinalLineNum = nullptr;
     if (mLineNumbering) {
         // compute the final line number.
-        Value * strideLineCount = b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
+        Value * strideLineCount = b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
         strideFinalLineNum = b->CreateAdd(pendingLineNum, b->CreateZExtOrTrunc(strideLineCount, sizeTy));
    }
     // Now check whether there are any matches at all in the stride.   If not, we
@@ -854,8 +835,8 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     // If we have any bits in the current matchWordPhi, continue with those, otherwise load
     // the next match word.
     Value * matchWordIdx = b->CreateCountForwardZeroes(matchMaskPhi, "matchWordIdx");
-    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
-    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
+    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
+    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
     Value * theMatchWord = b->CreateSelect(b->CreateIsNull(matchWordPhi), nextMatchWord, matchWordPhi);
     Value * matchWordPos = b->CreateAdd(stridePos, b->CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchEndPosInWord = b->CreateCountForwardZeroes(theMatchWord);
@@ -874,7 +855,7 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * breakWordIdx = b->CreateSub(sz_MAXBIT, b->CreateCountReverseZeroes(priorBreaksInStride), "breakWordIdx_");
     // Create a safe index to load; the loaded value will be ignored for cases (a), (c).
     breakWordIdx = b->CreateSelect(inWordCond, matchWordIdx, b->CreateSelect(inStrideCond, breakWordIdx, sz_ZERO), "breakWordIdx");
-    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
+    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
     // For case (a), we use the previously masked value of the break word.
     breakWord = b->CreateSelect(inWordCond, priorBreaksThisWord, breakWord);   // cases (a) and (b)
     Value * lineStartInWord = b->CreateSub(sz_BITS, b->CreateCountReverseZeroes(breakWord));
@@ -888,7 +869,7 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * const lineEndsPtr = b->getRawOutputPointer("Coordinates", b->getInt32(LINE_ENDS), matchNumPhi);
     b->CreateStore(matchEndPos, lineEndsPtr);
     if (mLineNumbering) {
-        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
+        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
         // Subtract the number of remaining breaks in the match word to get the relative line number.
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
@@ -976,8 +957,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * const initialPos = b->getProcessedItemCount("matchResult");
     Value * const accumulator = b->getScalarField("accumulator_address");
     Value * maxFileNum = b->CreateSub(b->CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b->getInt32(1));
-    //b->CallPrintInt("maxFileNum", maxFileNum);
-
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
     Value * lineCountArrayWordPtr = nullptr;
@@ -1002,10 +981,8 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     if (mLineNumbering) {
         pendingLineNum = b->CreatePHI(sizeTy, 2);
         pendingLineNum->addIncoming(initialLineNum, entryBlock);
-        ////b->CallPrintInt("stride pendingLineNum", pendingLineNum);
     }
     Value * stridePos = b->CreateAdd(initialPos, b->CreateMul(strideNo, sz_STRIDE));
-    //b->CallPrintInt("stridePos", stridePos);
     Value * strideBlockOffset = b->CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * matchWordBasePtr = b->getInputStreamBlockPtr("matchResult", sz_ZERO, strideBlockOffset);
     matchWordBasePtr = b->CreatePointerCast(matchWordBasePtr, sw.pointerTy);
@@ -1071,7 +1048,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     Value * strideFinalLineNum = nullptr;
     if (mLineNumbering) {
         // compute the final line number.
-        Value * strideLineCount = b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
+        Value * strideLineCount = b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, sw.ix_MAXBIT));
         strideFinalLineNum = b->CreateAdd(pendingLineNum, b->CreateZExtOrTrunc(strideLineCount, sizeTy));
     }
     // Now check whether there are any matches at all in the stride.   If not, we
@@ -1092,8 +1069,8 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     // If we have any bits in the current matchWordPhi, continue with those, otherwise load
     // the next match word.
     Value * matchWordIdx = b->CreateCountForwardZeroes(matchMaskPhi, "matchWordIdx");
-    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
-    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
+    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
+    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
     Value * theMatchWord = b->CreateSelect(b->CreateICmpEQ(matchWordPhi, sz_ZERO), nextMatchWord, matchWordPhi);
     Value * matchWordPos = b->CreateAdd(stridePos, b->CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchEndPosInWord = b->CreateCountForwardZeroes(theMatchWord);
@@ -1113,12 +1090,12 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     // Create a safe index to load; the loaded value will be ignored for cases (a), (c).
     breakWordIdx = b->CreateSelect(inStrideCond, breakWordIdx, sz_ZERO);
     breakWordIdx = b->CreateSelect(inWordCond, matchWordIdx, breakWordIdx, "breakWordIdx");
-    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
+    Value * breakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
     // For case (a), we use the previously masked value of the break word.
     breakWord = b->CreateSelect(inWordCond, priorBreaksThisWord, breakWord);   // cases (a) and (b)
     //Value * matchRecordNum = nullptr;
     if (mLineNumbering) {
-        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
+        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
         // Subtract the number of remaining breaks in the match word to get the relative line number.
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
@@ -1132,20 +1109,16 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     b->SetInsertPoint(nextInBatch);
     batchFileNum = b->getScalarField("batchFileNum");
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch pendingLimit", pendingLimit);
-
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
+        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
+        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
@@ -1155,7 +1128,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     Value * nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
-    //b->CallPrintInt("nextInBatch nextFileLimit", nextFileLimit);
     Value * limit = b->CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b->setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b->CreateICmpUGT(matchEndPos, limit);
@@ -1169,12 +1141,11 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     b->CreateStore(b->CreateZExt(b->getScalarField("batchFileNum"), sizeTy), fileNumPtr);
 #endif
     if (mLineNumbering) {
-        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
+        Value * lineCountInStride = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
         // Subtract the number of remaining breaks in the match word to get the relative line number.
         Value * extraBreaks = b->CreateXor(matchBreakWord, priorBreaksThisWord);
         lineCountInStride = b->CreateSub(lineCountInStride, b->CreatePopcount(extraBreaks));
         Value * lineNum = b->CreateAdd(pendingLineNum, lineCountInStride);
-        //b->CallPrintInt("storing lineNum", lineNum);
         b->CreateStore(lineNum, b->getRawOutputPointer("Coordinates", b->getInt32(BATCH_LINE_NUMBERS), matchNumPhi));
     }
 
@@ -1207,7 +1178,6 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
     //  We've processed available stride data looking for matches, now check
     //  for any files that are terminated within the stride and finalize them.
     Value * strideLimit = b->CreateUMin(b->CreateAdd(stridePos, sz_STRIDE), availableLimit);
-    //b->CallPrintInt("strideLimit", strideLimit);
     pendingLimit = b->getScalarField("pendingFileLimit");
     //  We use a strictly greater than test here; if the pendingLimit is the availableLimit,
     //  this means that we are at the end of the available data, not necessarily a file end.
@@ -1216,31 +1186,22 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(BuilderRef b, Value * const
 
     b->SetInsertPoint(nextInBatch2);
     batchFileNum = b->getScalarField("batchFileNum");
-    //b->CallPrintInt("nextInBatch2 batchFileNum", batchFileNum);
-    //b->CallPrintInt("nextInBatch2 maxFileNum", maxFileNum);
     pendingLimit = b->getScalarField("pendingFileLimit");
-    //b->CallPrintInt("nextInBatch2 pendingLimit", pendingLimit);
     if (mLineNumbering) {
         Value * strideOffsetPos = b->CreateSub(pendingLimit, stridePos);
-        //b->CallPrintInt("nextInBatch2 strideOffsetPos", strideOffsetPos);
         Value * offsetIdx = b->CreateUDiv(strideOffsetPos, sw.WIDTH);
-        //b->CallPrintInt("nextInBatch2 offsetIdx", offsetIdx);
         Value * offsetPosInWord = b->CreateURem(strideOffsetPos, sw.WIDTH);
         // Get the count of all line breaks including the offset word.
-        //b->CallPrintInt("nextInBatch2 offsetPosInWord", offsetPosInWord);
-        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
+        Value * offsetLineCount = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, lineCountArrayWordPtr, offsetIdx)), sizeTy);
         // Subtract the breaaks that are past the start position.
-        //b->CallPrintInt("nextInBatch2 offsetLineCount", offsetLineCount);
-        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
+        Value * fileBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, offsetIdx)), sizeTy);
         Value * excess = b->CreatePopcount(b->CreateLShr(fileBreakWord, offsetPosInWord));
         Value * priorLineCount = b->CreateAdd(b->CreateSub(offsetLineCount, excess), pendingLineNum);
-        //b->CallPrintInt("priorLineCount", priorLineCount);
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, priorLineCount});
     } else {
         b->CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     nextFileNum = b->CreateAdd(batchFileNum, b->getInt32(1));
-    //b->CallPrintInt("nextInBatch2 nextFileNum", nextFileNum);
     b->setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b->CreateICmpEQ(nextFileNum, maxFileNum);
     nextFileLimit = b->CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b->CreateSelect(inFinalFile, maxFileNum, b->CreateAdd(nextFileNum, b->getInt32(1)))});
@@ -1325,6 +1286,7 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
     Value * matchesAvail = b->getAvailableItemCount("Coordinates");
 
     Constant * const sz_ONE = b->getSize(1);
+    Type * const sizeTy = b->getSizeTy();
 
     b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, coordinatesDone);
 
@@ -1334,9 +1296,9 @@ void MatchReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Value * nextMatchNum = b->CreateAdd(phiMatchNum, sz_ONE);
 
-    Value * matchRecordStart = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
-    Value * matchRecordEnd = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
-    Value * matchRecordNum = b->CreateLoad(b->getRawInputPointer("Coordinates", b->getInt32(LINE_NUMBERS), phiMatchNum), "matchNumLoad");
+    Value * matchRecordStart = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
+    Value * matchRecordEnd = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
+    Value * matchRecordNum = b->CreateLoad(sizeTy, b->getRawInputPointer("Coordinates", b->getInt32(LINE_NUMBERS), phiMatchNum), "matchNumLoad");
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
     // to access past EOF.
@@ -1486,13 +1448,13 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     // If we have any bits in the current matchWordPhi, continue with those, otherwise load
     // the next match word.
     Value * matchWordIdx = b->CreateCountForwardZeroes(matchMaskPhi, "matchWordIdx");
-    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
+    Value * nextMatchWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, matchWordBasePtr, matchWordIdx)), sizeTy);
     Value * theMatchWord = b->CreateSelect(b->CreateICmpEQ(matchWordPhi, sz_ZERO), nextMatchWord, matchWordPhi);
     Value * matchWordPos = b->CreateAdd(stridePos, b->CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchPosInWord = b->CreateCountForwardZeroes(theMatchWord);
     Value * matchPos = b->CreateAdd(matchWordPos, matchPosInWord, "matchPos");
     // We have the match start position, now find the match end position.
-    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
+    Value * matchBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, matchWordIdx)), sizeTy);
     Value * notBeforeMatch = b->CreateNot(b->CreateMaskToLowestBitExclusive(theMatchWord));
     Value * followingMatchIdx = b->CreateNot(b->CreateMaskToLowestBitInclusive(matchMaskPhi));
     Value * breaksInWord = b->CreateAnd(matchBreakWord, notBeforeMatch);
@@ -1505,7 +1467,7 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
     Value * breakWordIdx = b->CreateCountForwardZeroes(breaksAfterWord, "breakWordIdx");
     breakWordIdx = b->CreateSelect(b->CreateIsNotNull(breaksInWord), matchWordIdx, breakWordIdx);
     Value * breakWordPos = b->CreateAdd(stridePos, b->CreateMul(breakWordIdx, sw.WIDTH));
-    Value * nextBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
+    Value * nextBreakWord = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx)), sizeTy);
     Value * breakWord = b->CreateSelect(b->CreateIsNull(breaksInWord), nextBreakWord, breaksInWord);
     Value * breakPosInWord = b->CreateCountForwardZeroes(breakWord);
     Value * matchEndPos = b->CreateAdd(breakWordPos, breakPosInWord, "breakPos");
@@ -1535,7 +1497,7 @@ void MatchFilterKernel::generateMultiBlockLogic(BuilderRef b, Value * const numO
 
     b->SetInsertPoint(strideInitialMatch);
     Value * breakWordIdx1 = b->CreateCountForwardZeroes(breakMask);
-    Value * breakWord1 = b->CreateZExtOrTrunc(b->CreateLoad(b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx1)), sizeTy);
+    Value * breakWord1 = b->CreateZExtOrTrunc(b->CreateLoad(sw.Ty, b->CreateGEP(sw.Ty, breakWordBasePtr, breakWordIdx1)), sizeTy);
     Value * breakWord1Pos = b->CreateAdd(stridePos, b->CreateMul(breakWordIdx1, sw.WIDTH));
     Value * break1Pos = b->CreateAdd(breakWord1Pos, b->CreateCountForwardZeroes(breakWord1));
     Value * initialLineLgth = b->CreateAdd(b->CreateSub(break1Pos, stridePos), sz_ONE);
@@ -1607,7 +1569,7 @@ ColorizedReporter::ColorizedReporter(BuilderRef b, StreamSet * ByteStream, Strea
                         // output scalars
 {},
                         // kernel state
-{}), mColorizedLineNumberIndex(SourceCoords->getNumElements() == 3 ? LINE_NUMBERS : BATCH_LINE_NUMBERS) {
+{}), mColorizedLineNumberIndex(SourceCoords->getNumElements() == 3 ? (unsigned)LINE_NUMBERS : (unsigned)BATCH_LINE_NUMBERS) {
     setStride(1);
     addAttribute(SideEffecting());
 }
@@ -1630,6 +1592,7 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
     Value * matchesAvail = b->getAvailableItemCount("SourceCoords");
 
     Constant * const sz_ONE = b->getSize(1);
+    Type * const sizeTy = b->getSizeTy();
 
     b->CreateCondBr(b->CreateICmpNE(matchesProcessed, matchesAvail), processMatchCoordinates, checkFinal);
 
@@ -1639,12 +1602,12 @@ void ColorizedReporter::generateDoSegmentMethod(BuilderRef b) {
 
     Value * nextMatchNum = b->CreateAdd(phiMatchNum, sz_ONE);
 
-    Value * matchRecordStart = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
-    Value * matchRecordEnd = b->CreateLoad(b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
+    Value * matchRecordStart = b->CreateLoad(sizeTy, b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_STARTS), phiMatchNum), "matchStartLoad");
+    Value * matchRecordEnd = b->CreateLoad(sizeTy, b->getRawInputPointer("ColorizedCoords", b->getInt32(LINE_ENDS), phiMatchNum), "matchEndLoad");
     #ifdef WRITE_FILE_NUMBERS
-    Value * matchFileNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(BATCH_FILE_NUMBERS), phiMatchNum), "matchFileNumLoad");
+    Value * matchFileNum = b->CreateLoad(sizeTy, b->getRawInputPointer("SourceCoords", b->getInt32(BATCH_FILE_NUMBERS), phiMatchNum), "matchFileNumLoad");
     #endif
-    Value * matchRecordNum = b->CreateLoad(b->getRawInputPointer("SourceCoords", b->getInt32(mColorizedLineNumberIndex), phiMatchNum), "matchNumLoad");
+    Value * matchRecordNum = b->CreateLoad(sizeTy, b->getRawInputPointer("SourceCoords", b->getInt32(mColorizedLineNumberIndex), phiMatchNum), "matchNumLoad");
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
     // to access past EOF.

@@ -9,6 +9,7 @@
 
 namespace llvm {
     class Type;
+    class StructType;
 }
 
 namespace pablo {
@@ -55,11 +56,20 @@ public:
     void setSummarySizeTy(llvm::Type * summarySize) {
         mSummarySize = summarySize;
     }
+
+    void setNestedCarryStateType(llvm::StructType * stateType) {
+        mNestedCarryStateType = stateType;
+    }
+
+    llvm::StructType * getNestedCarryStateType() const {
+        return mNestedCarryStateType;
+    }
     
 private:
 
-    SummaryType     mSummaryType = NoSummary;
-    llvm::Type *    mSummarySize = nullptr;
+    SummaryType         mSummaryType = NoSummary;
+    llvm::Type *        mSummarySize = nullptr;
+    llvm::StructType *  mNestedCarryStateType = nullptr;
 };
 
 

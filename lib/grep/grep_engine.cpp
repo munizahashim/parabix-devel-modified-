@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 #include <toolchain/toolchain.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Casting.h>
@@ -58,13 +59,17 @@
 #include <re/transforms/re_contextual_simplification.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
+#include <re/transforms/remove_nullable.h>
 #include <re/transforms/replaceCC.h>
 #include <re/transforms/re_multiplex.h>
+#include <re/transforms/expand_permutes.h>
 #include <re/transforms/name_intro.h>
 #include <re/transforms/reference_transform.h>
+#include <re/transforms/variable_alt_promotion.h>
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <sys/stat.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_toolchain.h>
@@ -78,6 +83,18 @@ using namespace cc;
 using namespace kernel;
 
 namespace grep {
+
+using UntilNMode = UntilNkernel::Mode;
+
+static cl::opt<UntilNMode>
+MaxLimitTerminationMode("maxlimit-termination-mode",
+                  cl::init(UntilNMode::TerminateAtN),
+                  cl::desc("method of pipeline termination when -m=maxlimit is reached."),
+                  cl::values(clEnumValN(UntilNMode::ReportAcceptedLengthAtAndBeforeN, "report", "halt pipeline after maxlimit using truncated streamset"),
+                             clEnumValN(UntilNMode::TerminateAtN, "terminate", "halt pipeline after maxlimit using streamset copy"),
+                             clEnumValN(UntilNMode::ZeroAfterN, "zero", "fully process the file")
+                  CL_ENUM_VAL_SENTINEL));
+
 
 const auto ENCODING_BITS = 8;
 
@@ -255,7 +272,8 @@ void GrepEngine::initRE(re::RE * re) {
     if ((mEngineKind != EngineKind::EmitMatches) || mInvertMatches) {
         mColoring = false;
     }
-    mRE = resolveModesAndExternalSymbols(re, mCaseInsensitive);
+    mRE = expandPermutes(re);
+    mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     // Determine the unit of length for the RE.  If the RE involves
     // fixed length UTF-8 sequences only, then UTF-8 can be used
     // for most efficient processing.   Otherwise we must use full
@@ -268,15 +286,6 @@ void GrepEngine::initRE(re::RE * re) {
     StreamIndexCode u8 = mExternalTable.declareStreamIndex("u8");
     StreamIndexCode Unicode = mExternalTable.declareStreamIndex("U", u8, "u8index");
 
-    if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        mBreakCC = re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029)));
-        setComponent(mExternalComponents, Component::UTF8index);
-    } else if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-        mBreakCC = re::makeCC(0, &cc::Unicode);  // Null
-    } else {
-        mBreakCC = re::makeCC(0x0A, &cc::Unicode); // LF
-    }
-
     mRefInfo = re::buildReferenceInfo(mRE);
     if (!mRefInfo.twixtREs.empty()) {
         UnicodeIndexing = true;
@@ -287,37 +296,52 @@ void GrepEngine::initRE(re::RE * re) {
         for (auto m : FRT.mNameMap) {
             re::Reference * ref = cast<re::Reference>(m.second);
             UCD::property_t p = ref->getReferencedProperty();
-            if (p == UCD::identity) {
-                auto u8_u21 = new U21_External();
-                mExternalTable.declareExternal(u8, "u21", u8_u21);
-                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
-            } else {
-                std::string extName = UCD::getPropertyFullName(p) + "_basis";
-                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
-            }
+            std::string instanceName = ref->getInstanceName();
             auto captureLen = getLengthRange(ref->getCapture(), &cc::Unicode).first;
             if (captureLen != 1) {
                 llvm::report_fatal_error("Capture length > 1 is a future extension");
             }
-            std::string instanceName = ref->getInstanceName();
             auto mapping = mRefInfo.twixtREs.find(instanceName);
             auto twixtLen = getLengthRange(mapping->second, &cc::Unicode).first;
             auto dist = captureLen + twixtLen;
             mExternalTable.declareExternal(indexCode, m.first, new PropertyDistanceExternal(p, dist));
+            UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+            if (isa<UCD::EnumeratedPropertyObject>(propObj)) {
+                std::string extName = UCD::getPropertyFullName(p) + "_basis";
+                mExternalTable.declareExternal(indexCode, extName, new PropertyBasisExternal(p));
+            } else if (isa<UCD::CodePointPropertyObject>(propObj)) {
+                // Identity or other codepoint properties
+                auto u8_u21 = new U21_External();
+                mExternalTable.declareExternal(u8, "u21", u8_u21);
+                mExternalTable.declareExternal(Unicode, "basis", new FilterByMaskExternal(u8, {"u8index", "u21"}, u8_u21));
+            }
         }
     }
-    //
-    // As grep should match within lines, but not across lines, we process
-    // the RE to remove any line break characters.
-    mRE = re::exclude_CC(mRE, mBreakCC);
-    if (!mColoring) mRE = remove_nullable_ends(mRE);
-
+    if (mColoring) {
+        mRE = zeroBoundElimination(mRE);
+        mRE = variableAltPromotion(mRE, mLengthAlphabet);
+    } else {
+        mRE = remove_nullable_ends(mRE);
+    }
     mRE = regular_expression_passes(mRE);
+    UCD::PropertyExternalizer PE;
+    mRE = PE.transformRE(mRE);
+    for (auto m : PE.mNameMap) {
+        if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
+            if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
+                re::RE * propRE = pe->getResolvedRE();
+                if (getLengthRange(propRE, &cc::UTF8).second > 1) {
+                    mLengthAlphabet = &cc::Unicode;
+                    break;
+                }
+            }
+        }
+    }
     auto lgth_range = getLengthRange(mRE, mLengthAlphabet);
     // For length 0 regular expressions (e.g. a zero-width assertion like $)
     // there will be no match spans to color.
     if (lgth_range.second == 0) mColoring = false;
-    if ((mLengthAlphabet = &cc::Unicode) && mColoring) {
+    if ((mLengthAlphabet == &cc::Unicode) && mColoring) {
         mExternalTable.declareExternal(u8, "LineStarts", new LineStartsExternal());
         UnicodeIndexing = true;
     }
@@ -334,18 +358,6 @@ void GrepEngine::initRE(re::RE * re) {
             }
         }
     }
-    if (anyStartAnchor(mRE)) {
-        if (UnicodeIndexing) {
-            auto U_Starts = new LineStartsExternal({"$"});
-            mExternalTable.declareExternal(Unicode, "^", U_Starts);
-        }
-        std::vector<std::string> lineStartParms = {"$"};
-        if (mLengthAlphabet == &cc::Unicode) {
-            lineStartParms.push_back("u8index");
-        }
-        auto u8_Starts = new LineStartsExternal(lineStartParms);
-        mExternalTable.declareExternal(u8, "^", u8_Starts);
-    }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (hasGraphemeClusterBoundary(mRE)) {
         auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
@@ -359,8 +371,6 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
         }
     }
-    UCD::PropertyExternalizer PE;
-    mRE = PE.transformRE(mRE);
     for (auto m : PE.mNameMap) {
         if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
             if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
@@ -377,6 +387,10 @@ void GrepEngine::initRE(re::RE * re) {
         } else {
             llvm::report_fatal_error("Expected property expression");
         }
+    }
+    if (mIndexAlphabet == &cc::UTF8) {
+        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
+        mRE = toUTF8(mRE, useInternalNaming);
     }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);
@@ -401,9 +415,8 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     if (hasComponent(mInternalComponents, Component::MoveMatchesToEOL)) {
-        re::RE * notBreak = re::makeDiff(re::makeByte(0x00, 0xFF), toUTF8(mBreakCC));
         if (!hasEndAnchor(mRE)) {
-            mRE = re::makeSeq({mRE, re::makeRep(notBreak, 0, re::Rep::UNBOUNDED_REP), makeNegativeLookAheadAssertion(notBreak)});
+            mRE = re::makeSeq({mRE, re::makeRep(re::makeAny(mLengthAlphabet), 0, re::Rep::UNBOUNDED_REP), re::makeEnd()});
         }
     }
     if (mColoring) {
@@ -438,6 +451,26 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexing, spanName, new MarkedSpanExternal(prefixStr, prefixLgth, nameStr, offset));
             mSpanNames.push_back(spanName);
         }
+        re::Repeated_CC_Seq_Namer RCCSnamer;
+        mRE = RCCSnamer.transformRE(mRE);
+        for (auto m : RCCSnamer.mNameMap) {
+            std::string nameStr = m.first;
+            re::RE * namedRE = m.second;
+            auto r = new RE_External(this, namedRE, mIndexAlphabet);
+            mExternalTable.declareExternal(indexing, nameStr, r);
+            auto f = RCCSnamer.mInfoMap.find(nameStr);
+            if (f != RCCSnamer.mInfoMap.end()) {
+                const re::CC * varCC = f->second.first;
+                unsigned fixed= f->second.second;
+                auto maskName = nameStr + "mask";
+                auto e1 = new CCmask(mIndexAlphabet, varCC);
+                mExternalTable.declareExternal(indexing, maskName, e1);
+                auto spanName = nameStr + "Span";
+                auto e2 = new MaskedFixedSpanExternal(maskName, nameStr, fixed, grepOffset(namedRE));
+                mExternalTable.declareExternal(indexing, spanName, e2);
+                mSpanNames.push_back(spanName);
+            }
+        }
     }
     if (mLengthAlphabet == &cc::Unicode) {
         setComponent(mExternalComponents, Component::S2P);
@@ -445,9 +478,6 @@ void GrepEngine::initRE(re::RE * re) {
     } else if (!byteTestsWithinLimit(mRE, ByteCClimit)) {
         setComponent(mExternalComponents, Component::S2P);
     }
-    //if (mExternalTable.hasReferenceTo(u8, "u8index")) {
-    //    mExternalTable.declareExternal(u8, "u8index", new U8Index_External());
-    //}
 }
 
 StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
@@ -517,16 +547,9 @@ void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStre
 }
 
 void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
-    auto alphabets = re::collectAlphabets(regexp);
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
-    for (auto & a : alphabets) {
-        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            std::string basisName = a->getName() + "_basis";
-            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
-            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
-            options->addAlphabet(mpx, alphabetBasis);
-        }
-    }
+    re::Alphabet_Set alphas;
+    re::collectAlphabets(regexp, alphas);
     std::set<re::Name *> externals;
     re::gatherNames(regexp, externals);
     // We may end up with multiple instances of a Name, but we should
@@ -541,15 +564,23 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
             const auto offset = ext->getOffset();
             std::pair<int, int> lengthRange = ext->getLengthRange();
             options->addExternal(name, extStream, offset, lengthRange);
+        } else {
+            // We have a name that has not been set up as an external.
+            // Its definition will need to be processed.
+            re::RE * defn = e->getDefinition();
+            if (defn) re::collectAlphabets(defn, alphas);
         }
     }
-    if (anyStartAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "^");
-        options->addExternal("^", extStream, 1, std::make_pair(0,0));
-    }
-    if (anyEndAnchor(regexp)) {
-        StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, "$");
-        options->addExternal("$", extStream, 1, std::make_pair(0,0));
+    for (auto & a : alphas) {
+        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
+            std::string basisName = a->getName() + "_basis";
+            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
+            if (mIllustrator) mIllustrator->captureBixNum(P, basisName, alphabetBasis);
+            options->addAlphabet(mpx, alphabetBasis);
+        } else {
+            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, "basis");
+            options->addAlphabet(a, alphabetBasis);
+        }
     }
 }
 
@@ -560,6 +591,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         for (unsigned i = 0; i < mSpanNames.size(); i++) {
             allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
         }
+        if (allSpans.size() == 1) return allSpans[0];
         StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
@@ -581,30 +613,27 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
         StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
+        P->CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
         return spans;
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Source, StreamSet * Results) {
+unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
-    options->setSource(Source);
-    //llvm::errs() << "mIndexAlphabet: " << mIndexAlphabet->getCode() << "\n";
-    //llvm::errs() << "mLengthAlphabet: " << mLengthAlphabet->getCode() << "\n";
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
         if (mLengthAlphabet == &cc::Unicode) {
             indexStream = mU8index;
             options->setIndexing(indexStream);
         }
-        bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
-        re = toUTF8(re, useInternalNaming);
     }
     options->setRE(re);
+    auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
+    options->setBarrier(mExternalTable.getStreamSet(P, indexing, "$"));
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
-    Kernel * k = P->CreateKernelCall<ICGrepKernel>(std::move(options));
-    if (mIllustrator) mIllustrator->captureBitstream(P, "rungrep", Results);
+    Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    if (mIllustrator) mIllustrator->captureBitstream(P, "RunGrep", Results);
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
@@ -614,7 +643,7 @@ StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
     StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(P, mIndexAlphabet, mRE, SourceStream, Matches);
+    RunGrep(P, mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
@@ -643,13 +672,19 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
-        StreamSet * const TruncatedMatches = P->CreateStreamSet();
+        StreamSet * MaxCountLines = nullptr;
         Scalar * const maxCount = P->getInputScalar("maxCount");
-        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, TruncatedMatches);
-        if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedMatches", TruncatedMatches);
-        MatchedLineEnds = TruncatedMatches;
+        const UntilNMode m = MaxLimitTerminationMode;
+        if (m == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
+            MaxCountLines = P->CreateTruncatedStreamSet(MatchedLineEnds);
+        } else {
+            MaxCountLines = P->CreateStreamSet();
+        }
+        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
+        if (mIllustrator) mIllustrator->captureBitstream(P, "MaxCountLines", MaxCountLines);
+        MatchedLineEnds = MaxCountLines;
         StreamSet * TruncatedLines =
-            streamutils::Merge(P, {{TruncatedMatches, {0}}, {mLineBreakStream, {0}}});
+            streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
         if (mIllustrator) mIllustrator->captureBitstream(P, "TruncatedLines", TruncatedLines);
         mLineBreakStream = TruncatedLines;
     }
@@ -789,9 +824,7 @@ public:
                          , [&]() -> std::string {
                              return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
                          }()
-                         // num of threads
-                         , 1
-                         // has repeating streamset
+                         // contains kernel family calls
                          , false
                          // kernel list
                          , {}
@@ -799,13 +832,15 @@ public:
                          , {}
                          // stream inputs
                          , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, FixedRate(), Principal()),
-                            Bind("Basis", Basis)}
+                            Bind("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
+                            Bind("Basis", Basis, GreedyRate(), Deferred())}
                          // stream outputs
                          , {}
                          // input scalars
                          , {Binding{b->getIntAddrTy(), "callbackObject", callbackObject}}
                          // output scalars
+                         , {}
+                         // internally generated streamsets
                          , {}
                          // length assertions
                          , {}) {
@@ -818,6 +853,7 @@ public:
         // the pipeline compiler doesn't really understand how to treat the greedy input rate
         // as a "production" rate. The simulator inside needs more information to understand it
         // as a dataflow rate but current modelling system isn't very good for that.
+
     }
 
 protected:
@@ -896,28 +932,33 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
         std::vector<unsigned> insertAmts;
         for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
+        StreamSet * const SpanMarks = E->CreateStreamSet(2, 1);
+        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "SpanMarks", SpanMarks);
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "SpreadMask", SpreadMask);
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
         StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
         E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         // Basis bit streams expanded with 0 bits for each string to be inserted.
+        if (mIllustrator) mIllustrator->captureBixNum(E, "InsertIndex", InsertIndex);
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(E, SpreadMask, InsertMarks, ExpandedMarks);
+        SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ExpandedMarks", ExpandedMarks);
 
         StreamSet * ColorizedBasis = E->CreateStreamSet(8);
         E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "ColorizedBasis", ColorizedBasis);
 
         StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
@@ -927,6 +968,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
         E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "ColorizedBreaks", ColorizedBreaks);
 
         // TODO: source coords >= colorized coords until the final stride?
         // E->AssertEqualLength(SourceCoords, ColorizedCoords);
@@ -975,6 +1017,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+        if (mIllustrator) mIllustrator->captureBixNum(E, "Filtered", Filtered);
 
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
@@ -997,6 +1040,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
+        if (mIllustrator) mIllustrator->captureBitstream(E, "FilteredMatchSpans", FilteredMatchSpans);
 
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
@@ -1097,6 +1141,7 @@ std::string GrepEngine::linePrefix(std::string fileName) {
 
 // Default: do not show anything
 void GrepEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {
+
 }
 
 void CountOnlyEngine::showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) {
@@ -1147,7 +1192,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
 
         accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
         if (accum.mBatchBuffer == nullptr) {
-            llvm::report_fatal_error("Unable to allocate batch buffer of size: " + std::to_string(aligned_size));
+            llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
         }
         char * current_base = accum.mBatchBuffer;
 
@@ -1242,12 +1287,13 @@ void * DoGrepThreadFunction(void *args) {
 }
 
 bool GrepEngine::searchAllFiles() {
+
     std::vector<pthread_t> threads(codegen::TaskThreads);
 
     for(unsigned long i = 1; i < codegen::TaskThreads; ++i) {
         const int rc = pthread_create(&threads[i], nullptr, DoGrepThreadFunction, (void *)this);
         if (rc) {
-            llvm::report_fatal_error("Failed to create thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to create thread: code ") + std::to_string(rc));
         }
     }
     // Main thread also does the work;
@@ -1256,7 +1302,7 @@ bool GrepEngine::searchAllFiles() {
         void * status = nullptr;
         const int rc = pthread_join(threads[i], &status);
         if (rc) {
-            llvm::report_fatal_error("Failed to join thread: code " + std::to_string(rc));
+            llvm::report_fatal_error(llvm::StringRef("Failed to join thread: code ") + std::to_string(rc));
         }
     }
     return grepMatchFound;
@@ -1267,6 +1313,7 @@ void * GrepEngine::DoGrepThreadMethod() {
 
     unsigned fileIdx = mNextFileToGrep++;
     while (fileIdx < mFileGroups.size()) {
+
         const auto grepResult = doGrep(mFileGroups[fileIdx], mResultStrs[fileIdx]);
         mFileStatus[fileIdx] = FileStatus::GrepComplete;
         if (grepResult > 0) {
@@ -1316,11 +1363,12 @@ void * GrepEngine::DoGrepThreadMethod() {
 }
 
 InternalSearchEngine::InternalSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto & idb = mGrepDriver.getBuilder();
@@ -1341,7 +1389,6 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
                                        Binding{idb->getSizeTy(), "length"},
                                        Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
@@ -1359,11 +1406,12 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
 
     StreamSet * MatchResults = E->CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
+    options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
-    options->setSource(BasisBits);
+    options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
     options->addExternal("UTF8_index", u8index);
-    E->CreateKernelCall<ICGrepKernel>(std::move(options));
+    E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
     StreamSet * MatchingRecords = E->CreateStreamSet();
     E->CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
 
@@ -1395,11 +1443,12 @@ void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLengt
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(BaseDriver &driver) :
-    mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mCaseInsensitive(false),
-    mGrepDriver(driver),
-    mMainMethod(nullptr),
-    mNumOfThreads(1) {}
+mGrepRecordBreak(GrepRecordBreakKind::LF),
+mCaseInsensitive(false),
+mGrepDriver(driver),
+mMainMethod(nullptr) {
+
+}
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine) :
     InternalMultiSearchEngine(engine->mGrepDriver) {}
@@ -1417,7 +1466,6 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
         Binding{idb->getSizeTy(), "length"},
         Binding{idb->getIntAddrTy(), "accumulator"}});
-    E->setNumOfThreads(mNumOfThreads);
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
@@ -1443,20 +1491,21 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         auto options = std::make_unique<GrepKernelOptions>();
 
         auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
-        r = re::exclude_CC(r, breakCC);
-        r = resolveAnchors(r, breakCC);
+        //r = re::exclude_CC(r, breakCC);
+        //r = resolveAnchors(r, breakCC);
         r = regular_expression_passes(r);
         r = toUTF8(r);
 
+        options->setBarrier(RecordBreakStream);
         options->setRE(r);
-        options->setSource(BasisBits);
+        options->addAlphabet(&cc::UTF8, BasisBits);
         options->setResults(MatchResults);
         const auto isExclude = patterns[i].first == re::PatternKind::Exclude;
         if (i != 0 || !isExclude) {
             options->setCombiningStream(isExclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultsSoFar);
         }
         options->addExternal("UTF8_index", u8index);
-        E->CreateKernelCall<ICGrepKernel>(std::move(options));
+        E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
         resultsSoFar = MatchResults;
     }
 

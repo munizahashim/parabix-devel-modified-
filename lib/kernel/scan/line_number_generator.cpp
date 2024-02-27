@@ -40,14 +40,14 @@ void LineNumberGenerator::generateProcessingLogic(BuilderRef b, Value * const ab
     b->setProducedItemCount("output", b->CreateAdd(producedItemCount, b->getSize(1)));
     Value * const blockNo = b->CreateUDiv(mWordOffset, mSW.WORDS_PER_BLOCK);
     Value * const wordIndex = b->CreateURem(mWordOffset, mSW.WORDS_PER_BLOCK);
-    Value * lineCount = b->CreateLoad(b->CreateGEP(b->getBitBlockType(), mLineCountArrayBlockPtr, blockNo));
+    Value * lineCount = b->CreateLoad(b->getBitBlockType(), b->CreateGEP(b->getBitBlockType(), mLineCountArrayBlockPtr, blockNo));
     lineCount = b->CreateExtractElement(b->fwCast(mSW.width, lineCount), wordIndex);
     // It is possible that there are break positions in this current scan word
     // which come after the scan-bit position but are included in the value
     // of lineCount. We need to subtract the number of such break positions to
     // get the correct line number.
     Value * const breaksBlockPtr = b->CreateBitCast(b->getInputStreamBlockPtr("lines", b->getInt32(0), blockIndex), mSW.PointerTy);
-    Value * const breaksWord = b->CreateLoad(b->CreateGEP(mSW.Ty, breaksBlockPtr, wordIndex));
+    Value * const breaksWord = b->CreateLoad(mSW.Ty, b->CreateGEP(mSW.Ty, breaksBlockPtr, wordIndex));
     Value * const highMask = b->CreateNot(b->CreateMaskToLowestBitExclusive(mProcessingWord));
     Value * const maskedBreaksWord = b->CreateAnd(breaksWord, highMask);
     lineCount = b->CreateSub(lineCount, b->CreatePopcount(maskedBreaksWord));

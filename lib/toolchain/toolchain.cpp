@@ -7,9 +7,16 @@
 #include <toolchain/toolchain.h>
 #include <unicode/core/UCD_Config.h>
 #include <llvm/Support/CommandLine.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/raw_ostream.h>
 #include <boost/interprocess/mapped_region.hpp>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#include <thread>
+#endif
 
 using namespace llvm;
 
@@ -36,6 +43,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(SerializeThreads, "Force segment threads to run sequentially."),
                         clEnumVal(TraceCounts, "Trace kernel processed, consumed and produced item counts."),
                         clEnumVal(TraceDynamicBuffers, "Trace dynamic buffer allocations and deallocations."),
+                        clEnumVal(TraceDynamicMultithreading, "Trace dynamic multithreading thread count state."),
                         clEnumVal(TraceBlockedIO, "Trace kernels prevented from processing any strides "
                                                   "due to insufficient input items / output space."),
                         clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
@@ -46,14 +54,6 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(GenerateDeferredItemCountHistogram, "Generate a histogram CSV of each deferred port detailing "
                                                                       "the difference between the deferred and total item count "
                                                                       "per executed stride."),
-                        #ifdef ENABLE_CERN_ROOT
-                        clEnumVal(AnalyzeTransferredItemCounts, "Generate a histogram CSV of each non-Fixed port detailing "
-                                                                "the transfered item count per executed stride."),
-                        clEnumVal(AnalyzeDeferredItemCounts, "Generate a histogram CSV of each deferred port detailing "
-                                                             "the difference between the deferred and total item count "
-                                                             "per executed stride."),
-                        #endif
-
                         clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
                         clEnumVal(EnablePipelineAsserts, "Enable built-in Parabix framework asserts in generated pipeline IR."),
                         clEnumVal(EnableMProtect, "Use mprotect to cause a write fault when erroneously "
@@ -140,6 +140,23 @@ static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
 
+bool EnableDynamicMultithreading;
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+float DynamicMultithreadingAddThreshold;
+static cl::opt<float, true> DynamicMultithreadingAddThresholdOption("dynamic-multithreading-add-threshold", cl::location(DynamicMultithreadingAddThreshold), cl::init(10.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+float DynamicMultithreadingRemoveThreshold;
+static cl::opt<float, true> DynamicMultithreadingRemoveThresholdOption("dynamic-multithreading-remove-threshold", cl::location(DynamicMultithreadingRemoveThreshold), cl::init(15.0),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+size_t DynamicMultithreadingPeriod;
+static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithreading-period", cl::location(DynamicMultithreadingPeriod), cl::init(100),
+                                                   cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),
                                                     cl::desc("The number of free calls to allow in bisecting"), cl::cat(CodeGenOptions));
 
@@ -170,7 +187,9 @@ static cl::opt<bool, true> OptSplitTransposition("enable-split-s2p", cl::locatio
 
 static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+                     cl::init(std::thread::hardware_concurrency()),
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
                      cl::init(llvm::sys::getHostNumPhysicalCores()),
 #else
                      cl::init(2),
@@ -180,8 +199,12 @@ MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
 
 static cl::opt<unsigned, true>
 ThreadNumOption("thread-num", cl::location(SegmentThreads),
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
-                cl::init(llvm::sys::getHostNumPhysicalCores()),
+                #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+                cl::init(std::thread::hardware_concurrency() - 1),
+                #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+                // If we have more than 2 cores, leave one for other processes,
+                // and use the rest for multithreading of the pipeline.
+                cl::init(std::max(llvm::sys::getHostNumPhysicalCores() - 1, 2)),
 #else
                 cl::init(2),
 #endif
@@ -255,7 +278,14 @@ bool LLVM_READONLY AnyDebugOptionIsSet() {
     return DebugOptions.getBits() != 0;
 }
 
-std::string ProgramName;
+bool LLVM_READONLY AnyAssertionOptionIsSet() {
+    #ifdef FORCE_ASSERTIONS
+    return true;
+    #endif
+    return DebugOptions.isSet(DebugFlags::EnableAsserts) || DebugOptions.isSet(DebugFlags::EnablePipelineAsserts);
+}
+
+const char * ProgramName;
 
 inline bool disableObjectCacheDueToCommandLineOptions() {
     if (!TraceOption.empty()) return true;
@@ -320,7 +350,9 @@ void AddParabixVersionPrinter() {
 
 void setTaskThreads(unsigned taskThreads) {
     TaskThreads = std::max(taskThreads, 1u);
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+    unsigned coresPerTask = std::thread::hardware_concurrency()/TaskThreads;
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
     unsigned coresPerTask = llvm::sys::getHostNumPhysicalCores()/TaskThreads;
 #else
     unsigned coresPerTask = 2;  // assumption

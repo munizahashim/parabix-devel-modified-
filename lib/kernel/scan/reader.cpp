@@ -17,6 +17,13 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     Value * const sz_ZERO = b->getSize(0);
     Value * const sz_ONE = b->getSize(1);
 
+
+    Function * const fCallback = module->getFunction(mCallbackName);
+    if (fCallback == nullptr) {
+        llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mCallbackName);
+    }
+    FunctionType * const fCallbackTy = fCallback->getFunctionType();
+
     BasicBlock * const entryBlock = b->GetInsertBlock();
     BasicBlock * const readItem = b->CreateBasicBlock("readItem");
     BasicBlock * const exitBlock = b->CreateBasicBlock("exitBlock");
@@ -30,11 +37,11 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     strideNo->addIncoming(sz_ZERO, entryBlock);
     Value * const nextStrideNo = b->CreateAdd(strideNo, sz_ONE);
     strideNo->addIncoming(nextStrideNo, readItem);
-    std::vector<Value *> callbackParams{};
+    std::vector<Value *> callbackParams;
     Value * maxScanIndex = nullptr;
     Value * const index = b->CreateAdd(strideNo, initialStride);
     for (uint32_t i = 0; i < mNumScanStreams; ++i) {
-        Value * const scanItem = b->CreateLoad(b->getRawInputPointer("scan", b->getInt32(i), index));
+        Value * const scanItem = b->CreateLoad(sizeTy, b->getRawInputPointer("scan", b->getInt32(i), index));
         if (maxScanIndex != nullptr) {
             maxScanIndex = b->CreateUMax(maxScanIndex, scanItem);
         } else {
@@ -47,27 +54,27 @@ void ScanReader::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     b->setProcessedItemCount("source", maxScanIndex);
     Value * const nextIndex = b->CreateAdd(nextStrideNo, initialStride);
     b->setProcessedItemCount("scan", nextIndex);
-    for (auto const & name : mAdditionalStreamNames) {
-        Value * const item = b->CreateLoad(b->getRawInputPointer(name, b->getInt32(0), index));
+    for (unsigned i = 2; i < getNumOfStreamInputs(); ++i) {
+        const StreamSet * const ss = getInputStreamSet(i);
+        const auto & name = getInputStreamSetBinding(i).getName();
+        Value * const ptr = b->getRawInputPointer(name, b->getInt32(0), index);
+        Value * const item = b->CreateLoad(b->getIntNTy(ss->getFieldWidth()), ptr);
         callbackParams.push_back(item);
         b->setProcessedItemCount(name, nextIndex);
     }
-    Function * const callback = module->getFunction(mCallbackName);
-    FunctionType * fTy = callback->getFunctionType();
-    if (callback == nullptr) {
-        llvm::report_fatal_error(mKernelName + ": failed to get function: " + mCallbackName);
-    }
-    b->CreateCall(fTy, callback, ArrayRef<Value *>(callbackParams));
+
+    assert (fCallbackTy->getNumParams() == callbackParams.size());
+    b->CreateCall(fCallbackTy, fCallback, callbackParams);
     b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), readItem, exitBlock);
 
     if (doneBlock != exitBlock) {
-        b->SetInsertPoint(doneBlock);
-        Function * const callback = module->getFunction(mDoneCallbackName);
-        FunctionType * fTy = callback->getFunctionType();
-        if (callback == nullptr) {
-            llvm::report_fatal_error(mKernelName + ": failed to get function: " + mDoneCallbackName);
+        Function * const fDone = module->getFunction(mDoneCallbackName);
+        FunctionType * fDoneTy = fDone->getFunctionType();
+        if (fDone == nullptr) {
+            llvm::report_fatal_error(llvm::StringRef(mKernelName) + ": failed to get function: " + mDoneCallbackName);
         }
-        b->CreateCall(fTy, callback, ArrayRef<Value *>({}));
+        b->SetInsertPoint(doneBlock);
+        b->CreateCall(fDoneTy, fDone, ArrayRef<Value *>({}));
         b->CreateBr(exitBlock);
     }
 
@@ -92,7 +99,6 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
 , mCallbackName(callbackName)
-, mAdditionalStreamNames()
 , mNumScanStreams(scanIndices->getNumElements())
 {
     assert (scanIndices->getFieldWidth() == 64);
@@ -113,7 +119,6 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
 , mCallbackName(callbackName)
-, mAdditionalStreamNames()
 , mNumScanStreams(scanIndices->getNumElements())
 {
     assert (scanIndices->getFieldWidth() == 64);
@@ -121,10 +126,11 @@ ScanReader::ScanReader(BuilderRef b, StreamSet * source, StreamSet * scanIndices
     addAttribute(SideEffecting());
     setStride(1);
     size_t i = 0;
+    assert (mInputStreamSets.size() == 2);
     for (auto const & stream : additionalStreams) {
         std::string name = "__additional_" + std::to_string(i++);
         mInputStreamSets.push_back({name, stream, BoundedRate(0, 1)});
-        mAdditionalStreamNames.push_back(name);
+//        mAdditionalStreamNames.push_back(name);
     }
 }
 

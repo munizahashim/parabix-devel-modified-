@@ -84,6 +84,8 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
     Type * i8Ty = b->getInt8Ty();
+    DataLayout DL(b->getModule());
+    Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
 
     Value * const numOfStrides = b->getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -107,7 +109,9 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     Value * const consumedPageOffset = b->CreateAnd(consumedBytes, ConstantExpr::getNeg(MMAP_PAGE_SIZE));
     Value * const consumedBuffer = b->getRawOutputPointer("sourceBuffer", consumedPageOffset);
     Value * const readableBuffer = b->getScalarField("buffer");
-    Value * const unnecessaryBytes = b->CreatePtrDiff(consumedBuffer, readableBuffer);
+    Value * const unnecessaryBytes =
+      b->CreateSub(b->CreatePtrToInt(consumedBuffer, intPtrTy),
+                   b->CreatePtrToInt(readableBuffer, intPtrTy));
 
     // avoid calling madvise unless an actual page table change could occur
     b->CreateLikelyCondBr(b->CreateIsNotNull(unnecessaryBytes), dropPages, checkRemaining);

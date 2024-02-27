@@ -11,9 +11,10 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
-        Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId));
-        if (LLVM_UNLIKELY(mKernel->externallyInitialized())) {
-            handle = b->CreateLoad(b->CreatePointerCast(handle, mKernel->getSharedStateType()->getPointerTo()->getPointerTo()));
+        Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId)).first;
+        if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
+            PointerType * pty = mKernel->getSharedStateType()->getPointerTo();
+            handle = b->CreateLoad(pty, handle);
         }
         mKernelSharedHandle = handle;
     }
@@ -142,10 +143,13 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
     const Kernel * const kernel = getKernel(kernelIndex);
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-    if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
-        handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            b->CreateAssert(handle, "null handle load");
+        }
+        handle = b->CreateLoad(localStateTy->getPointerTo(), handle);
     }
     assert (handle->getType()->isPointerTy());
     return handle;
@@ -158,10 +162,13 @@ Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsi
     const Kernel * const kernel = getKernel(kernelIndex);
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX);
-    if (LLVM_UNLIKELY(kernel->externallyInitialized())) {
+    Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
-        handle = b->CreatePointerCast(b->CreateLoad(handle), localStateTy->getPointerTo());
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            b->CreateAssert(handle, "null handle load");
+        }
+        handle = b->CreateLoad(localStateTy->getPointerTo(), handle);
     }
     assert (handle->getType()->isPointerTy());
     return handle;
@@ -246,6 +253,10 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
     if (LLVM_LIKELY(out_degree(PipelineInput, mBufferGraph) > 0)) {
         for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
+            if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
+                assert ("non-constant streamset without a producer?" && mBufferGraph[streamSet].isConstant());
+                continue;
+            }
             const auto producer = parent(streamSet, mBufferGraph);
             if (LLVM_UNLIKELY(producer == PipelineInput)) {
                 const BufferPort & br = mBufferGraph[e];
@@ -253,21 +264,6 @@ void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
             }
         }
     }
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasExternalIO
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::hasExternalIO(const size_t kernel) const {
-    for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-        const auto streamSet = source(input, mBufferGraph);
-        const BufferNode & node = mBufferGraph[streamSet];
-        if (node.isExternal()) {
-            return true;
-        }
-    }
-    return false;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -427,12 +423,16 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mExecuteStridesIndividually = false;
     mCurrentKernelIsStateFree = false;
     mAllowDataParallelExecution = false;
+    mHasPrincipalInput = false;
 
     mHasMoreInput = nullptr;
     mHasZeroExtendedInput = nullptr;
-
+    mStrideStepSize = nullptr;
     mAnyClosed = nullptr;
+
     mPrincipalFixedRateFactor = nullptr;
+    mHasExhaustedClosedInput = nullptr;
+    mStrideStepSizeAtLoopEntryPhi = nullptr;
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;
     mKernelInitiallyTerminated = nullptr;
@@ -451,7 +451,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     assert (mKernelId <= LastKernel);
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
-    reset(mAccessibleInputItems, numOfInputs);
+    reset(mInternalAccessibleInputItems, numOfInputs);
     mInitiallyProcessedItemCount.reset(numOfInputs);
     mInitiallyProcessedDeferredItemCount.reset(numOfInputs);
     mAlreadyProcessedPhi.reset(numOfInputs);
@@ -465,6 +465,8 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mProcessedItemCount.reset(numOfInputs);
     mProcessedDeferredItemCountPtr.reset(numOfInputs);
     mProcessedDeferredItemCount.reset(numOfInputs);
+    mExhaustedInputPort.reset(numOfInputs);
+    mExhaustedInputPortPhi.reset(numOfInputs);
     mCurrentProcessedItemCountPhi.reset(numOfInputs);
     mCurrentProcessedDeferredItemCountPhi.reset(numOfInputs);
     mCurrentLinearInputItems.reset(numOfInputs);
@@ -474,7 +476,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mFullyProcessedItemCount.reset(numOfInputs);
 
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
-    reset(mWritableOutputItems, numOfOutputs);
+    reset(mInternalWritableOutputItems, numOfOutputs);
     mAlreadyProducedPhi.reset(numOfOutputs);
     mAlreadyProducedDelayedPhi.reset(numOfOutputs);
     mAlreadyProducedDeferredPhi.reset(numOfOutputs);

@@ -84,8 +84,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         const auto m = K.size();
         for (unsigned i = 0; i < m; ++i) {
             const auto producer = K[i];
-            const auto stridesPerSegmentVar = VarList[producer];
-            assert (stridesPerSegmentVar);
+            assert (VarList[producer]);
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
 
             for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
@@ -94,9 +93,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                     const auto f = first_out_edge(binding, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
-                    assert (Relationships[streamSet].Type == RelationshipNode::IsRelationship);
-                    assert (isa<StreamSet>(Relationships[streamSet].Relationship));
-
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
                     const RelationshipNode & output = Relationships[binding];
                     assert (output.Type == RelationshipNode::IsBinding);
                     const Binding & outputBinding = output.Binding;
@@ -108,52 +105,53 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                     for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
                         const auto binding = target(e, Relationships);
                         const RelationshipNode & input = Relationships[binding];
-                        assert (input.Type == RelationshipNode::IsBinding);
-                        const Binding & inputBinding = input.Binding;
-                        const ProcessingRate & iRate = inputBinding.getRate();
+                        if (input.Type == RelationshipNode::IsBinding) {
+                            const Binding & inputBinding = input.Binding;
+                            const ProcessingRate & iRate = inputBinding.getRate();
 
-                        const auto f = first_out_edge(binding, Relationships);
-                        assert (Relationships[f].Reason != ReasonType::Reference);
-                        const unsigned consumer = target(f, Relationships);
+                            const auto f = first_out_edge(binding, Relationships);
+                            assert (Relationships[f].Reason != ReasonType::Reference);
+                            const unsigned consumer = target(f, Relationships);
 
-                        const auto c = PartitionIds.find(consumer);
-                        assert (c != PartitionIds.end());
-                        const auto consumerPartitionId = c->second;
-                        assert (prodId <= consumerPartitionId);
+                            const auto c = PartitionIds.find(consumer);
+                            assert (c != PartitionIds.end());
+                            const auto consumerPartitionId = c->second;
+                            assert (prodId <= consumerPartitionId);
 
-                        if (prodId != consumerPartitionId) {
+                            if (prodId != consumerPartitionId) {
 
-                            // mark that there is non-fixed dataflow between these
-                            const auto e = add_edge(prodId, consumerPartitionId, false, T).first;
-                            if (!oRate.isFixed() || !iRate.isFixed()) {
-                                T[e] = true;
+                                // mark that there is non-fixed dataflow between these
+                                const auto e = add_edge(prodId, consumerPartitionId, false, T).first;
+                                if (!oRate.isFixed() || !iRate.isFixed()) {
+                                    T[e] = true;
+                                }
+
+                                if (LLVM_UNLIKELY(oRate.isUnknown())) {
+                                    continue;
+                                }
+
+                                if (expOutRate == nullptr) {
+                                    const RelationshipNode & producerNode = Relationships[producer];
+                                    assert (producerNode.Type == RelationshipNode::IsKernel);
+                                    const auto s = producerNode.Kernel->getStride();
+                                    const auto expectedOutput = (oRate.getLowerBound() + oRate.getUpperBound()) * Rational{s, 2};
+                                    expOutRate = multiply(VarList[producer], expectedOutput);
+                                }
+
+                                Z3_ast expInRate = nullptr;
+
+                                if (LLVM_UNLIKELY(iRate.isGreedy())) {
+                                    expInRate = expOutRate;
+                                } else {
+                                    const RelationshipNode & consumerNode = Relationships[consumer];
+                                    assert (consumerNode.Type == RelationshipNode::IsKernel);
+                                    const auto s = consumerNode.Kernel->getStride();
+                                    const auto expectedInput = (iRate.getLowerBound() + iRate.getUpperBound()) * Rational{s, 2};
+                                    expInRate = multiply(VarList[consumer], expectedInput);
+                                }
+
+                                soft_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                             }
-
-                            if (LLVM_UNLIKELY(oRate.isUnknown())) {
-                                continue;
-                            }
-
-                            if (expOutRate == nullptr) {
-                                const RelationshipNode & producerNode = Relationships[producer];
-                                assert (producerNode.Type == RelationshipNode::IsKernel);
-                                const auto s = producerNode.Kernel->getStride();
-                                const auto expectedOutput = (oRate.getLowerBound() + oRate.getUpperBound()) * Rational{s, 2};
-                                expOutRate = multiply(VarList[producer], expectedOutput);
-                            }
-
-                            Z3_ast expInRate = nullptr;
-
-                            if (LLVM_UNLIKELY(iRate.isGreedy())) {
-                                expInRate = expOutRate;
-                            } else {
-                                const RelationshipNode & consumerNode = Relationships[consumer];
-                                assert (consumerNode.Type == RelationshipNode::IsKernel);
-                                const auto s = consumerNode.Kernel->getStride();
-                                const auto expectedInput = (iRate.getLowerBound() + iRate.getUpperBound()) * Rational{s, 2};
-                                expInRate = multiply(VarList[consumer], expectedInput);
-                            }
-
-                            soft_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
                         }
                     }
 

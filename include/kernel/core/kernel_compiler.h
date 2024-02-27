@@ -21,7 +21,9 @@ public:
 
     using Rational = ProcessingRate::Rational;
 
-    using ScalarValueMap = llvm::StringMap<llvm::Value *>;
+    using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
+
+    using ScalarValueMap = llvm::StringMap<ScalarRef>;
 
     using ScalarAliasMap = std::vector<std::pair<std::string, std::string>>;
 
@@ -324,7 +326,7 @@ public:
 
     bool hasScalarField(const llvm::StringRef name) const;
 
-    llvm::Value * getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
+    ScalarRef getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
 
     LLVM_READNONE const BindingMapEntry & getBinding(const BindingType type, const llvm::StringRef name) const;
 
@@ -346,25 +348,13 @@ protected:
 
     void addAlias(llvm::StringRef alias, llvm::StringRef scalarName);
 
-    llvm::Value * getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
-
-protected:
-
-    // In threaded mode, the PipelineCompiler generates a DoSegment block that instantiates
-    // a set of thread functions. When compiling the DoSegmentThread functions, the I/O
-    // arguments must refer to the argments of the DoSegmentThread function but we want to
-    // be able to revert them back to the original DoSegment arguments afterwards to maintain
-    // a consistent interface.
-
-    std::vector<llvm::Value *> storeDoSegmentState() const;
-
-    void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
+    ScalarRef getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
 
 public:
 
     void callGenerateInitializeMethod(BuilderRef b);
 
-    virtual void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    virtual void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end);
 
     void callGenerateInitializeThreadLocalMethod(BuilderRef b);
 

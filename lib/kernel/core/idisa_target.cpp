@@ -22,7 +22,10 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <kernel/core/kernel_builder.h>
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
+
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
 #include <llvm/Support/Host.h>
 #endif
 

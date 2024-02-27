@@ -206,7 +206,6 @@ void FileSelectAccumulator::accumulate_match(const size_t fileIdx, char * name_s
     assert(name_end > name_start);
     assert((name_end - name_start) <= 4096);
     fs::path p(std::string(name_start, name_end - name_start));
-
     if (fileIdx < mFullPathEntries) {
         selectPath(mCollectedPaths, std::move(p));
    } else {
@@ -386,7 +385,6 @@ std::vector<fs::path> getFullFileList(CPUDriver & driver, cl::list<std::string> 
     // them to the global list of selected files.
 
     grep::NestedInternalSearchEngine pathSelectEngine(driver);
-    pathSelectEngine.setNumOfThreads(1);
     pathSelectEngine.setRecordBreak(grep::GrepRecordBreakKind::Null);
     pathSelectEngine.init();
     pathSelectEngine.push(coalesceREs(getIncludeExcludePatterns(), GitREcoalescing));
@@ -413,7 +411,6 @@ std::vector<fs::path> getFullFileList(CPUDriver & driver, cl::list<std::string> 
         // Each of these candidates is a full path return from command line argument processing.
         directoryAccum.setFullPathEntries(commandLineDirCandidates);
         pathSelectEngine.doGrep(dirCandidates.data(), dirCandidates.size(), directoryAccum);
-
         // Select files from subdirectories using the recursive process.
         for (const auto & dirpath : selectedDirectories) {
             recursiveFileSelect(driver, dirpath, pathSelectEngine, collectedPaths);

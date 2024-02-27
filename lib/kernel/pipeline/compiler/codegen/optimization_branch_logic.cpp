@@ -41,7 +41,7 @@ inline bool isConstantOne(const Value * const value) {
  * @brief checkOptimizationBranchSpanLength
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value * const numOfLinearStrides) {
-
+#if 0
     const OptimizationBranch * const optBr = cast<OptimizationBranch>(mKernel);
     Relationship * const cond = optBr->getCondition();
     if (LLVM_UNLIKELY(!isa<StreamSet>(cond))) {
@@ -56,7 +56,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
         assert (mStreamGraph[f].Reason != ReasonType::Reference);
         const auto streamSet = source(f, mStreamGraph);
         const auto & rn = mStreamGraph[streamSet];
-        assert (rn.Type == RelationshipNode::IsRelationship);
+        assert (rn.Type == RelationshipNode::IsStreamSet);
         if (cast<StreamSet>(rn.Relationship) == cond) {
             condInput = mStreamGraph[e];
             assert (condInput.Type == PortType::Input);
@@ -111,7 +111,6 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     BasicBlock * const scanLengthCheck = b->CreateBasicBlock(prefix + "_scanLengthCheck", mKernelLoopCall);
     BasicBlock * const scanLengthExit = b->CreateBasicBlock(prefix + "_scanLengthExit", mKernelLoopCall);
 
-    assert (mMayLoopToEntry);
     Value * const totalExecutedNumOfStrides =
         b->CreateExactUDiv(mCurrentProcessedItemCountPhi[condInput], BIT_BLOCK_WIDTH);
     Value * const limit = b->CreateAdd(totalExecutedNumOfStrides, numOfLinearStrides);
@@ -129,9 +128,9 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     Value * const optIdx = b->CreateMul(optNumOfStridesPhi, BLOCKS_PER_STRIDE);
     Value * optAddr = buffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, optIdx);
     optAddr = b->CreatePointerCast(optAddr, bitBlockTy->getPointerTo());
-    Value * optCondVal = b->CreateLoad(optAddr);
+    Value * optCondVal = b->CreateLoad(bitBlockTy, optAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(b->CreateGEP(optAddr, b->getInt32(i)));
+        Value * const val = b->CreateLoad(bitBlockTy, b->CreateGEP(bitBlockTy, optAddr, b->getInt32(i)));
         optCondVal = b->CreateOr(optCondVal, val);
     }
     Value * const foundNonOpt = b->bitblock_any(optCondVal);
@@ -152,9 +151,9 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     Value * const regIdx = b->CreateMul(regNumOfStridesPhi, BLOCKS_PER_STRIDE);
     Value * regAddr = buffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, regIdx);
     regAddr = b->CreatePointerCast(regAddr, bitBlockTy->getPointerTo());
-    Value * regCondVal = b->CreateLoad(regAddr);
+    Value * regCondVal = b->CreateLoad(bitBlockTy, regAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(b->CreateGEP(regAddr, b->getInt32(i)));
+        Value * const val = b->CreateLoad(bitBlockTy, b->CreateGEP(bitBlockTy, regAddr, b->getInt32(i)));
         regCondVal = b->CreateOr(regCondVal, val);
     }
     regCondVal = b->bitblock_any(regCondVal);
@@ -206,6 +205,8 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
     }
 
     return selectedNumOfStrides;
+#endif
+    return nullptr;
 }
 
 }

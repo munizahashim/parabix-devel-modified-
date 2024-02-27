@@ -14,7 +14,9 @@ SRC
     re_name_resolve.cpp
     resolve_properties.cpp
 DEPS
-    re.compile
+    re.adt
+    re.analysis
+    re.transforms
     re.parse
     re.printer
     unicode.data

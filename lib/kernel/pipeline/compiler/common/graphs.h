@@ -51,19 +51,25 @@ using BuilderRef = KernelCompiler::BuilderRef;
 using ArgIterator = KernelCompiler::ArgIterator;
 using InitArgTypes = KernelCompiler::InitArgTypes;
 
-using Vertex = unsigned;
-
 using StreamSetId = unsigned;
+
+enum RelationshipNodeFlag {
+    IndirectFamily = 1
+    , ImplicitlyAdded = 2
+};
 
 struct RelationshipNode {
 
     enum RelationshipNodeType : unsigned {
         IsNil
         , IsKernel
-        , IsRelationship
+        , IsStreamSet
+        , IsScalar
         , IsCallee
         , IsBinding
     } Type;
+
+    unsigned Flags;
 
     union {
 
@@ -92,17 +98,25 @@ struct RelationshipNode {
     static_assert(sizeof(Kernel) == sizeof(Callee), "pointer size inequality?");
     static_assert(sizeof(Kernel) == sizeof(Binding), "pointer size inequality?");
 
-    explicit RelationshipNode() noexcept : Type(IsNil), Kernel(nullptr) { }
-    explicit RelationshipNode(std::nullptr_t) noexcept : Type(IsNil), Kernel(nullptr) { }
-    explicit RelationshipNode(not_null<const kernel::Kernel *> kernel) noexcept : Type(IsKernel), Kernel(kernel) { }
-    explicit RelationshipNode(not_null<kernel::Relationship *> relationship) noexcept : Type(IsRelationship), Relationship(relationship) { }
-    explicit RelationshipNode(not_null<const CallBinding *> callee) noexcept : Type(IsCallee), Callee(callee) { }
-    explicit RelationshipNode(not_null<const kernel::Binding *> ref) noexcept : Type(IsBinding), Binding(ref) { }
-    explicit RelationshipNode(const RelationshipNode & rn) noexcept : Type(rn.Type), Kernel(rn.Kernel) { }
+    explicit RelationshipNode() noexcept
+        : Type(IsNil), Flags(0U), Kernel(nullptr) { }
+    explicit RelationshipNode(std::nullptr_t) noexcept
+        : Type(IsNil), Flags(0U), Kernel(nullptr)  { }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const kernel::Kernel *> kernel, const unsigned flags = 0U) noexcept
+        : Type(IsKernel), Flags(flags), Kernel(kernel) { assert (typeId == IsKernel); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<kernel::Relationship *> relationship, const unsigned flags = 0U) noexcept
+        : Type(typeId), Flags(flags), Relationship(relationship) { assert (typeId == IsStreamSet || typeId == IsScalar); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const CallBinding *> callee, const unsigned flags = 0U) noexcept
+        : Type(IsCallee), Flags(flags), Callee(callee) { assert (typeId == IsCallee); }
+    explicit RelationshipNode(RelationshipNodeType typeId, not_null<const kernel::Binding *> ref, const unsigned flags = 0U) noexcept
+        : Type(IsBinding), Flags(flags), Binding(ref) { assert (typeId == IsBinding); }
+    explicit RelationshipNode(const RelationshipNode & rn) noexcept
+        : Type(rn.Type), Flags(rn.Flags), Kernel(rn.Kernel) { }
 
     RelationshipNode & operator = (const RelationshipNode & other) {
         Type = other.Type;
         Kernel = other.Kernel;
+        Flags = other.Flags;
         return *this;
     }
 
@@ -115,6 +129,7 @@ enum class ReasonType : unsigned {
     // -----------------------------
     , ImplicitRegionSelector
     , ImplicitPopCount
+    , ImplicitTruncatedSource
     // -----------------------------
     , Reference
     // -----------------------------
@@ -157,23 +172,23 @@ struct ProgramGraph : public RelationshipGraph {
     using Vertex = RelationshipGraph::vertex_descriptor;
 
     template <typename T>
-    inline Vertex add(T key) {
-        return __add(RelationshipNode{key});
+    inline Vertex add(RelationshipNode::RelationshipNodeType typeId, T key, const unsigned flags = 0) {
+        return __add(RelationshipNode{typeId, key, flags});
     }
 
     template <typename T>
-    inline Vertex set(T key, Vertex v) {
-        return __set(RelationshipNode{key}, v);
+    inline Vertex set(RelationshipNode::RelationshipNodeType typeId, T key, Vertex v) {
+        return __set(RelationshipNode{typeId, key}, v);
     }
 
     template <typename T>
-    inline Vertex find(T key) {
-        return __find(RelationshipNode{key});
+    inline Vertex find(RelationshipNode::RelationshipNodeType typeId, T key) {
+        return __find(RelationshipNode{typeId, key});
     }
 
     template <typename T>
-    inline Vertex addOrFind(T key, const bool permitAdd = true) {
-        return __addOrFind(RelationshipNode{key}, permitAdd);
+    inline Vertex addOrFind(RelationshipNode::RelationshipNodeType typeId, T key, const bool permitAdd = true) {
+        return __addOrFind(RelationshipNode{typeId, key}, permitAdd);
     }
 
     RelationshipGraph & Graph() {
@@ -250,6 +265,7 @@ enum BufferType : unsigned {
     , Unowned = 2
     , Shared = 4
     , Returned = 8
+    , Truncated = 16
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -307,6 +323,10 @@ struct BufferNode {
         return (Type & BufferType::Returned) != 0;
     }
 
+    bool isTruncated() const {
+        return (Type & BufferType::Truncated) != 0;
+    }
+
     bool isThreadLocal() const {
         return (Locality == BufferLocality::ThreadLocal);
     }
@@ -319,6 +339,9 @@ struct BufferNode {
         return (Locality == BufferLocality::ConstantShared);
     }
 
+    bool isDeallocatable() const {
+        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isReturned());
+    }
 };
 
 enum BufferPortType : unsigned {
@@ -388,6 +411,14 @@ struct BufferPort {
         return static_cast<unsigned>(Port.Type) < static_cast<unsigned>(rn.Port.Type);
     }
 
+    const ProcessingRate & getRate() const {
+        return Binding.get().getRate();
+    }
+
+    const kernel::AttributeSet & getAttributes() const {
+        return Binding.get().getAttributes();
+    }
+
     BufferPort() = default;
 
     BufferPort(RelationshipType port, const struct Binding & binding,
@@ -413,7 +444,6 @@ struct ConsumerEdge {
         , UpdateConsumedCount = 1
         , WriteConsumedCount = 2
         , UpdateExternalCount = 4
-        , MayHaveJumpedConsumer = 8
     };
 
     unsigned Port = 0;
@@ -530,6 +560,48 @@ struct SchedulingNode {
 };
 
 using SchedulingGraph = adjacency_list<vecS, vecS, bidirectionalS, SchedulingNode, Rational>;
+
+struct InternallyGeneratedStreamSetGraphNode {
+    mutable Value * StreamSet = nullptr;
+    mutable Value * RunLength = nullptr;
+};
+
+using InternallyGeneratedStreamSetGraph = adjacency_list<vecS, vecS, bidirectionalS, InternallyGeneratedStreamSetGraphNode, unsigned>;
+
+struct FamilyScalarData {
+    mutable Value * SharedStateObject = nullptr;
+    mutable Value * allocateSharedInternalStreamSetsFuncPointer = nullptr;
+    mutable Value * initializeThreadLocalFuncPointer = nullptr;
+    mutable Value * allocateThreadLocalFuncPointer = nullptr;
+    mutable Value * doSegmentFuncPointer = nullptr;
+    mutable Value * finalizeThreadLocalFuncPointer = nullptr;
+    mutable Value * finalizeFuncPointer = nullptr;
+
+    unsigned CaptureFlags = 0;
+    unsigned InputNum = 0;
+    unsigned PassedParamNum = 0;
+
+
+    enum {
+        CaptureSharedStateObject = 1
+        , CaptureThreadLocal = 2
+        , CaptureAllocateInternal = 4
+        , CaptureStoreInKernelState = 8
+    };
+
+    FamilyScalarData(unsigned inputNum, unsigned passedParam, unsigned flags)
+    : CaptureFlags(flags)
+    , InputNum(inputNum)
+    , PassedParamNum(passedParam)
+    {
+
+    }
+
+    FamilyScalarData() = default;
+};
+
+using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, FamilyScalarData>;
+
 
 }
 

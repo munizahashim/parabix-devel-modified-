@@ -78,7 +78,7 @@ void PopCountKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const n
     if (LLVM_LIKELY(mType == PopCountType::POSITIVE || mType == PopCountType::NEGATIVE)) {
         Value * const array = b->getRawOutputPointer(OUTPUT_STREAM, position);
         #ifdef USE_LOOKBEHIND_FOR_LAST_VALUE
-        Value * const count = b->CreateLoad(b->CreateInBoundsGEP(array, NEG_ONE));
+        Value * const count = b->CreateLoad(b->CreateInBoundsGEP(sizeTy, array, NEG_ONE));
         #else
         Value * const count = b->getScalarField("count");
         #endif
@@ -99,8 +99,8 @@ void PopCountKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const n
         positiveArray = b->getRawOutputPointer(POSITIVE_STREAM, position);
         negativeArray = b->getRawOutputPointer(NEGATIVE_STREAM, position);
         #ifdef USE_LOOKBEHIND_FOR_LAST_VALUE
-        initialPositiveCount = b->CreateLoad(b->CreateInBoundsGEP(positiveArray, NEG_ONE));
-        initialNegativeCount = b->CreateLoad(b->CreateInBoundsGEP(negativeArray, NEG_ONE));
+        initialPositiveCount = b->CreateLoad(b->CreateInBoundsGEP(sizeTy, positiveArray, NEG_ONE));
+        initialNegativeCount = b->CreateLoad(b->CreateInBoundsGEP(sizeTy, negativeArray, NEG_ONE));
         #else
         initialPositiveCount = b->getScalarField("posCount");
         initialNegativeCount = b->getScalarField("negCount");
@@ -209,7 +209,7 @@ void PopCountKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const n
     if (positiveArray) {
         positivePartialSum = b->CreateAdd(positiveSum, sum);
         positiveSum->addIncoming(positivePartialSum, popCountLoop);
-        Value * const ptr = b->CreateInBoundsGEP(positiveArray, index);
+        Value * const ptr = b->CreateInBoundsGEP(sizeTy, positiveArray, index);
         b->CreateStore(positivePartialSum, ptr);
         #ifdef PRINT_POP_COUNTS_TO_STDERR
         b->CreateDprintfCall(STDERR,
@@ -227,7 +227,7 @@ void PopCountKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const n
         }
         negativePartialSum = b->CreateAdd(negativeSum, negSum);
         negativeSum->addIncoming(negativePartialSum, popCountLoop);
-        Value * const ptr = b->CreateInBoundsGEP(negativeArray, index);
+        Value * const ptr = b->CreateInBoundsGEP(sizeTy, negativeArray, index);
         b->CreateStore(negativePartialSum, ptr);       
         #ifdef PRINT_POP_COUNTS_TO_STDERR
         b->CreateDprintfCall(STDERR,

@@ -39,14 +39,6 @@ struct ExternalCollector final : public RE_Inspector {
         ExternalSet.insert(n->getFullName());
     }
 
-    void inspectStart(Start *) final {
-        ExternalSet.insert("^");
-    }
-
-    void inspectEnd(End *) final {
-        ExternalSet.insert("$");
-    }
-
     void inspectCC(CC * cc) final {
         auto alpha = cc->getAlphabet();
         if ((alpha == &cc::Unicode) || (alpha == &cc::UTF8)) {

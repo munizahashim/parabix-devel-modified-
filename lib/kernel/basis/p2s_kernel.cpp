@@ -355,7 +355,10 @@ void P2S16KernelWithCompressedOutputOld::generateDoBlockMethod(BuilderRef b) {
     p2s(b, lo_input, lo_bytes);
 
     Value * delCountBlock_ptr = b->getInputStreamBlockPtr("deletionCounts", b->getInt32(0));
-    Value * unit_counts = b->fwCast(b->getBitBlockWidth() / 16, b->CreateBlockAlignedLoad(delCountBlock_ptr));
+
+    Type * vecTy = b->fwVectorType(b->getBitBlockWidth() / 16);
+
+    Value * unit_counts = b->CreateBlockAlignedLoad(vecTy, delCountBlock_ptr);
 
     Value * u16_output_ptr = b->getOutputStreamBlockPtr("i16Stream", b->getInt32(0));
     u16_output_ptr = b->CreatePointerCast(u16_output_ptr, int16PtrTy);

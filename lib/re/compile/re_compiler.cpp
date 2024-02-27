@@ -139,7 +139,7 @@ Marker RE_Block_Compiler::process(RE * const re, Marker marker) {
         // CCs may be passed through the toolchain directly to the compiler.
         return compileAny(marker);
     } else {
-        RE_Compiler::UnsupportedRE("RE Compiler failed to process " + Printer_RE::PrintRE(re));
+        UnsupportedRE("RE Compiler failed to process " + Printer_RE::PrintRE(re));
     }
 }
 
@@ -148,7 +148,7 @@ Marker RE_Block_Compiler::compileAny(Marker marker) {
     if (marker.offset() == 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
     }
-    return Marker(nextPos);
+    return Marker(mPB.createAnd(nextPos, mMain.mMatchable));
 }
 
 Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
@@ -172,17 +172,17 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     while (i < mMain.mAlphabets.size() && (a != mMain.mAlphabets[i])) i++;
     if (i < mMain.mAlphabets.size()) {
         //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
-        PabloAST * ccStrm = mMain.mAlphabetCompilers[i]->compileCC(cc);
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
     if (a == &cc::Byte) {
         //llvm::errs() << "Using alphabet 0: for Byte\n";
-        PabloAST * ccStrm = mMain.mAlphabetCompilers[0]->compileCC(cc);
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
-    llvm::report_fatal_error("Alphabet " + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
+    llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
 }
 
 inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
@@ -194,7 +194,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         // sequences (e.g., sequences of UTF-8 CCs).
         RE * defn = name->getDefinition();
         if (!defn) {
-            llvm::report_fatal_error("RE compiler cannot find name as external or definition: " + nameString);
+            llvm::report_fatal_error(llvm::StringRef("RE compiler cannot find name as external or definition: ") + nameString);
         }
         if (mMain.mIndexingAlphabet) {
             // If we have an indexing alphabet, then the marker may be aligned
@@ -217,11 +217,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     }
     auto externalLength = f->second.minLength();
     if (externalLength != f->second.maxLength()) {
-        llvm::report_fatal_error("Variable length external not in initial position:  "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
     auto external_adv = externalLength + externalMarker.offset();
     if (external_adv < marker.offset()) {
-        llvm::report_fatal_error("Negative advance amount in processing "  + nameString);
+        llvm::report_fatal_error(llvm::StringRef("Negative advance amount in processing ")  + nameString);
     }
     auto adv = external_adv - marker.offset();
     PabloAST * nextPos = marker.stream();
@@ -308,7 +308,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
             Marker fbyte = AdvanceMarker(marker, 1);
             return Marker(mPB.createAnd(fbyte.stream(), boundaryCond, "boundary"), 1);
         }
-        else RE_Compiler::UnsupportedRE("Unsupported boundary assertion");
+        else UnsupportedRE("Unsupported boundary assertion");
     }
     // Lookahead assertions.
     auto lengths = lengthRange(asserted);
@@ -335,7 +335,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         return Marker(mPB.createAnd(following.stream(), la, "lookahead"), 1);
     }
     llvm::errs() << "lengths.second = " << lengths.second << "\n";
-    RE_Compiler::UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
+    UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
 }
 
 inline bool alignedUnicodeLength(const RE * const lh, const RE * const rh) {
@@ -355,7 +355,7 @@ Marker RE_Block_Compiler::compileDiff(Diff * diff, Marker marker) {
         AlignMarkers(t1, t2);
         return Marker(mPB.createAnd(t1.stream(), mPB.createNot(t2.stream()), "diff"), t1.offset());
     }
-    RE_Compiler::UnsupportedRE("Unsupported Diff operands: " + Printer_RE::PrintRE(diff));
+    UnsupportedRE("Unsupported Diff operands: " + Printer_RE::PrintRE(diff));
 }
 
 Marker RE_Block_Compiler::compileIntersect(Intersect * const x, Marker marker) {
@@ -367,7 +367,7 @@ Marker RE_Block_Compiler::compileIntersect(Intersect * const x, Marker marker) {
         AlignMarkers(t1, t2);
         return Marker(mPB.createAnd(t1.stream(), t2.stream(), "intersect"), t1.offset());
     }
-    RE_Compiler::UnsupportedRE("Unsupported Intersect operands: " + Printer_RE::PrintRE(x));
+    UnsupportedRE("Unsupported Intersect operands: " + Printer_RE::PrintRE(x));
 }
 
 bool CharacteristicSubexpressionAnalysis(RE * repeated, RE * &E1, RE * &C, RE * &E2) {
@@ -691,32 +691,17 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 }
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
-    auto f = mMain.mExternalNameMap.find("^");
-    if (f == mMain.mExternalNameMap.end()) {
-        PabloAST * const SOT = mPB.createNot(mPB.createAdvance(mPB.createOnes(), 1), "SOT");
-        return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
-    }
-    return f->second.marker();
+    PabloAST * SOT = mPB.createNot(mPB.createAdvance(mMain.mMatchable, 1), "SOT");
+    return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), 1);
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
-    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {marker.stream()});
-
-    auto f = mMain.mExternalNameMap.find("$");
-    if (f == mMain.mExternalNameMap.end()) {
-        PabloAST * nextPos = marker.stream();
-        if (marker.offset() == 0) {
-            nextPos = mPB.createAdvance(nextPos, 1);
-        }
-        PabloAST * endOfText = mPB.createAtEOF(mPB.createAdvance(mPB.createOnes(), 1), "EOT");
-        PabloAST * const EOT_match = mPB.createAnd(endOfText, nextPos, "EOT_match");
-        return Marker(EOT_match, 1);
+    PabloAST * nextPos = marker.stream();
+    if (marker.offset() == 0) {
+        nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
     }
-    auto EOLmarker = f->second.marker();
-    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {EOLmarker.stream()});
-
-    AlignMarkers(EOLmarker, marker);
-    return Marker(mPB.createAnd(EOLmarker.stream(), marker.stream()), marker.offset());
+    PabloAST * const EOT_match = mPB.createAnd(mPB.createNot(mMain.mMatchable), nextPos, "EOT_match");
+    return Marker(EOT_match, 1);
 }
 
 inline Marker RE_Block_Compiler::AdvanceMarker(Marker marker, const unsigned offset) {
@@ -778,18 +763,27 @@ void RE_Compiler::addAlphabet(const cc::Alphabet * a, std::vector<pablo::PabloAS
 }
 
 void RE_Compiler::setIndexing(const cc::Alphabet * indexingAlphabet, PabloAST * indexStream) {
+    PabloBuilder pb(mEntryScope);
     mIndexingAlphabet = indexingAlphabet;
     mIndexStream = indexStream;
+    //mMatchable = pb.createAnd(indexStream, mMatchable);
 }
     
 void RE_Compiler::addPrecompiled(std::string precompiledName, ExternalStream precompiled) {
     PabloBuilder pb(mEntryScope);
-    mExternalNameMap.emplace(precompiledName, precompiled);
+    auto rg = precompiled.lengthRange();
+    auto strm = precompiled.marker().stream();
+    auto offs = precompiled.marker().offset();
+    if (offs > 0) {
+        mExternalNameMap.emplace(precompiledName, precompiled);
+    } else {
+        Marker a = Marker(pb.createAnd(strm, mMatchable), offs);
+        mExternalNameMap.emplace(precompiledName, ExternalStream(a, rg));
+    }
 }
 
 Marker RE_Compiler::compileRE(RE * const re) {
     pablo::PabloBuilder mPB(mEntryScope);
-    //return process(re, Marker(mIndexStream, 1), mPB);
     RE_Block_Compiler blockCompiler(*this, mPB);
     return blockCompiler.process(re, Marker(mIndexStream, 1));
 }
@@ -811,20 +805,23 @@ Marker RE_Compiler::compileRE(RE * const re, Marker initialMarkers) {
     return Marker(m, m1.offset());
 }
 
-LLVM_ATTRIBUTE_NORETURN void RE_Compiler::UnsupportedRE(std::string errmsg) {
-    llvm::report_fatal_error(errmsg);
-}
-
 RE_Compiler::RE_Compiler(PabloBlock * scope,
+                         PabloAST * barrierStream,
                          const cc::Alphabet * codeUnitAlphabet)
 : mEntryScope(scope)
 , mCodeUnitAlphabet(codeUnitAlphabet)
 , mIndexingAlphabet(nullptr)
 , mIndexStream(nullptr)
+, mMatchable(nullptr)
 , mWhileTest(nullptr)
 , mStarDepth(0) {
     PabloBuilder pb(mEntryScope);
     mIndexStream = pb.createOnes();
+    if (barrierStream != nullptr) {
+        mMatchable = pb.createNot(barrierStream);
+    } else {
+        mMatchable = pb.createOnes();
+    }
 }
 
 } // end of namespace re

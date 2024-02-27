@@ -127,8 +127,8 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
                                   UTF8_Encoder.encoded_length(hi_codepoint(cc->back())));
         }
         return std::make_pair(1, INT_MAX);
-    } else if (isa<Any>(re)) {
-        if (indexAlphabet == &cc::Unicode) return std::make_pair(1, 1);
+    } else if (const Any * a = dyn_cast<Any>(re)) {
+        if (indexAlphabet == a->getAlphabet()) return std::make_pair(1, 1);
         if (indexAlphabet == &cc::UTF8) {
             return std::make_pair(1, 4);
         }
@@ -338,7 +338,7 @@ struct FixedUTF8Validator : public RE_Validator {
     }
 
     bool validateAny(const Any * a) override {
-        return false;
+        return a->getAlphabet() == &cc::UTF8;
     }
 
     bool validateName(const Name * name) override {
@@ -596,7 +596,12 @@ unsigned grepOffset(const RE * re) {
         return altOffset;
     } else if (const Seq * seq = dyn_cast<Seq>(re)) {
         if (seq->empty()) return 1;
-        return grepOffset(seq->back());
+        for (auto i = seq->rbegin(); i != seq->rend(); ++i) {
+            unsigned o = grepOffset(*i);
+            if (!isa<Assertion>(*i)) return o;
+            if (o == 1) return o;
+        }
+        return 1;
     } else if (const Rep * rep = dyn_cast<Rep>(re)) {
         if (rep->getUB() == Rep::UNBOUNDED_REP) return 1;
         return grepOffset(rep->getRE());
@@ -604,7 +609,10 @@ unsigned grepOffset(const RE * re) {
         return 1;
     } else if (isa<End>(re)) {
         return 1;
-    } else if (isa<Assertion>(re)) {
+    } else if (const Assertion * a = dyn_cast<Assertion>(re)) {
+        if (a->getKind() == Assertion::Kind::LookBehind) {
+            return grepOffset(a->getAsserted());
+        }
         return 1;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return grepOffset(diff->getLH());

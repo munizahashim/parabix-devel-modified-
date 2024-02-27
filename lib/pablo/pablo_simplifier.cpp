@@ -75,40 +75,29 @@ struct VariableTable {
         }
     }
 
-    KeySet keySet() const {
-        KeySet keySet;
-        const Map & M = mMap;
-        unsigned i = 0;
-        for (const auto & e : M) {
-            keySet[i++] = e.first;
-        }
-        if (mOuter) {
-            KeySet tmp1;
-            KeySet tmp2;
-            const VariableTable * current = mOuter;
-            for (;;) {
-                const Map & M = current->mMap;
-                tmp1.resize(M.size());
-                unsigned i = 0;
-                for (const auto & e : M) {
-                    tmp1[i++] = e.first;
-                }
-                tmp2.reserve(tmp1.size() + keySet.size());
-                std::set_union(keySet.begin(), keySet.end(), tmp1.begin(), tmp1.end(), std::back_inserter(tmp2));
-                keySet.swap(tmp2);
-                current = current->mOuter;
-                if (current == nullptr) {
-                    break;
-                }
-                tmp1.clear();
-                tmp2.clear();
-            }
-        }
-        return keySet;
+    size_t depth(const Var * const a) const {
+        const Var * v = a;
+//        if (LLVM_UNLIKELY(isa<Extract>(a))) {
+//            v = cast<Extract>(a)->getArray();
+//            assert (!isa<Extract>(v));
+//        }
+        return __depth(v);
     }
 
     void clear() {
         mMap.clear();
+    }
+
+private:
+
+    size_t __depth(const Var * a) const {
+        if (mMap.find(a) != mMap.end()) {
+            return 0;
+        } else if (LLVM_UNLIKELY(mOuter == nullptr)) {
+            return 1;
+        } else {
+            return mOuter->__depth(a) + 1UL;
+        }
     }
 
 private:
@@ -230,7 +219,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
 
         if (LLVM_UNLIKELY(isa<Assign>(stmt))) {
 
-            if (isRedundantAssign(cast<Assign>(stmt), variables)) {
+            if (evaluateAssign(cast<Assign>(stmt), variables)) {
                 stmt = stmt->eraseFromParent();
                 continue;
             }
@@ -323,7 +312,23 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
     // Construct the nested variable table
     VariableTable nestedVariables(variables);
     EscapedVars escaped = br->getEscaped();
-    std::sort(escaped.begin(), escaped.end());
+
+    const auto n = escaped.size();
+
+    using RankedVar = std::pair<size_t, Var *>;
+
+    SmallVector<RankedVar, 16> depth(n);
+    for (size_t i = 0; i < n; ++i) {
+        depth[i] = std::make_pair(variables.depth(escaped[i]), escaped[i]);
+    }
+
+    std::sort(depth.begin(), depth.begin() + n, [&](const RankedVar & a, const RankedVar & b) {
+        return (a.first > b.first);
+    });
+
+    for (size_t i = 0; i < n; ++i) {
+        escaped[i] = depth[i].second;
+    }
 
     if (LLVM_UNLIKELY(isa<While>(br))) {
         for (Var * const var : escaped) {
@@ -405,14 +410,6 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
     SmallVector<PabloAST *, 16> final(n);
     bool modified = false;
 
-    for (unsigned i = 0; i < n; ++i) {
-        Var * const var = escaped[i];
-        incoming[i] = outer.get(var);
-        outgoing[i] = inner.get(var);
-        initial[i] = var;
-        final[i] = var;
-    }
-
     // CASE 1:
 
     // Detect when Var a is assigned the same value within the branch as its original value
@@ -424,10 +421,16 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
     //             y = a op z                y = *x* op z
 
     for (unsigned i = 0; i < n; ++i) {
+        Var * const var = escaped[i];
+        incoming[i] = outer.get(var);
+        outgoing[i] = inner.get(var);
         if (LLVM_UNLIKELY(incoming[i] == outgoing[i])) {
             initial[i] = incoming[i];
             final[i] = incoming[i];
             modified = true;
+        } else {
+            initial[i] = var;
+            final[i] = var;
         }
     }
 
@@ -444,12 +447,16 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
     //                b = y                     ...
 
     for (unsigned i = 0; i < n; ++i) {
-        for (unsigned j = 0; j < i; ++j) {
-            if (LLVM_UNLIKELY((outgoing[i] == outgoing[j]) && (incoming[i] == incoming[j]))) {
-                initial[i] = escaped[j];
-                final[i] = outgoing[j];
-                modified = true;
-                break;
+        if (LLVM_LIKELY(incoming[i] != outgoing[i])) {
+            for (unsigned j = 0; j < i; ++j) {
+                if (LLVM_UNLIKELY((outgoing[i] == outgoing[j]) && (incoming[i] == incoming[j]))) {
+                    if (escaped[i] != escaped[j]) {
+                        modified = true;
+                        initial[i] = escaped[j];
+                        final[i] = escaped[j];
+                        break;
+                    }
+                }
             }
         }
     }
@@ -628,23 +635,38 @@ static Assign * getSafePostDominatingAssignment(const Var * const var, Statement
 #endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isRedundantAssign
+ * @brief evaluateAssign
  ** ------------------------------------------------------------------------------------------------------------- */
-static bool isRedundantAssign(Assign * const assign, VariableTable & variables) {
+static bool evaluateAssign(Assign * const assign, VariableTable & variables) {
     Var * const var = assign->getVariable();
     PabloAST * const prior = variables.get(var);
-    PabloAST * value = assign->getValue();
-    while (LLVM_UNLIKELY(isa<Var>(value))) {
-        if (LLVM_UNLIKELY(var == value || prior == value)) {
-            return true;
-        }
-        PabloAST * const next = variables.get(cast<Var>(value));
-        if (LLVM_LIKELY(next == nullptr || next == value)) {
-            break;
-        }
-        value = next;
-        assign->setValue(value);
+    PabloAST * const value = assign->getValue();
+
+    if (LLVM_UNLIKELY(var == value || prior == value)) {
+        return true;
     }
+
+    PabloBlock * scope = assign->getParent();
+    PabloKernel * kernel = scope->getParent();
+    SmallVector<Var *, 4> toCopy;
+    const auto n = kernel->getNumOfVariables();
+    for (size_t i = 0; i != n; ++i) {
+        Var * other = kernel->getVariable(i); assert (other);
+        PabloAST * otherVal = variables.get(other);
+        if (otherVal == var) {
+            toCopy.push_back(other);
+        }
+    }
+    if (toCopy.size() > 0) {
+        scope->setInsertPoint(assign->getPrevNode());
+        Var * newVar = scope->createVar(var->getName().str() + "'");
+        scope->createAssign(newVar, var);
+        variables.put(newVar, newVar);
+        for (Var * other : toCopy) {
+            variables.put(other, newVar);
+        }
+    }
+
     variables.put(var, value);
     return false;
 }

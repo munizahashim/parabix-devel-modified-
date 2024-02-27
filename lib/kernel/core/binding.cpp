@@ -140,24 +140,23 @@ void Binding::setRelationship(Relationship * const value) {
 }
 
 unsigned Binding::getNumElements() const {
-    StreamSet * const ss = llvm::dyn_cast_or_null<StreamSet>(mRelationship);
-    if (LLVM_UNLIKELY(ss == nullptr)) {
+    if (LLVM_UNLIKELY(mRelationship->isScalar())) {
         llvm::report_fatal_error(NOT_STREAM_SET);
     }
-    return ss->getNumElements();
+    return static_cast<const StreamSet *>(mRelationship)->getNumElements();
 }
 
 unsigned Binding::getFieldWidth() const {
-    StreamSet * const ss = llvm::dyn_cast_or_null<StreamSet>(mRelationship);
-    if (LLVM_UNLIKELY(ss == nullptr)) {
+    if (LLVM_UNLIKELY(mRelationship->isScalar())) {
         llvm::report_fatal_error(NOT_STREAM_SET);
     }
-    return ss->getFieldWidth();
+    return static_cast<const StreamSet *>(mRelationship)->getFieldWidth();
 }
 
 void Binding::print(const Kernel * kernel, llvm::raw_ostream & out) const noexcept {
     mRate.print(kernel, out);
     AttributeSet::print(out);
+    assert ("binding missing type?" && getType());
     getType()->print(out);
 }
 

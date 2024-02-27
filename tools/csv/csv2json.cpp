@@ -23,6 +23,7 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/util/debug_display.h>
@@ -60,6 +61,7 @@ static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parame
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 
 static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(CSV_Options));
+static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
@@ -102,18 +104,19 @@ void BasisCombine::generatePabloMethod() {
     }
 }
 
-StreamSet * CreateRepeatingBixNum(const std::unique_ptr<ProgramBuilder> & P, unsigned bixNumBits, std::vector<uint64_t> nums) {
-    std::vector<std::vector<uint64_t>> templatePattern;
-    templatePattern.resize(bixNumBits);
-    for (unsigned i = 0; i < bixNumBits; i++) {
-        templatePattern[i].resize(nums.size());
+void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
+                 StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
+    unsigned elems = merged->getNumElements();
+    if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
+        llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
-    for (unsigned j = 0; j < nums.size(); j++) {
-        for (unsigned i = 0; i < bixNumBits; i++) {
-            templatePattern[i][j] = static_cast<uint64_t>((nums[j] >> i) & 1U);
-        }
-    }
-    return P->CreateRepeatingStreamSet(1, templatePattern, TestDynamicRepeatingFile);
+    StreamSet * expandedA = P->CreateStreamSet(elems);
+    SpreadByMask(P, mask, a, expandedA);
+    StreamSet * inverted = P->CreateStreamSet(1);
+    P->CreateKernelCall<Invert>(mask, inverted);
+    StreamSet * expandedB = P->CreateStreamSet(elems);
+    SpreadByMask(P, inverted, b, expandedB);
+    P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {
@@ -146,11 +149,11 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * recordSeparators = P->CreateStreamSet(1);
     StreamSet * fieldSeparators = P->CreateStreamSet(1);
     StreamSet * quoteEscape = P->CreateStreamSet(1);
+
+    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     SHOW_STREAM(recordSeparators);
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
-
-    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     StreamSet * toKeep = P->CreateStreamSet(1);
     P->CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
     SHOW_STREAM(toKeep);
@@ -171,97 +174,73 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
     StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
+
     FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
     SHOW_STREAM(filteredFieldSeparators);
-    
-    StreamSet * fieldStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
-    SHOW_STREAM(fieldStarts);
 
     std::vector<uint64_t> insertionAmts;
-    unsigned insertionTotal = 0;
     unsigned maxInsertAmt = 0;
     for (auto & s : templateStrs) {
         unsigned insertAmt = s.size();
         insertionAmts.push_back(insertAmt);
-        insertionTotal += insertAmt;
         if (insertAmt > maxInsertAmt) maxInsertAmt = insertAmt;
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
-    StreamSet * RepeatingLgths = CreateRepeatingBixNum(P, insertLengthBits, insertionAmts);
+    StreamSet * PrefixLgths = P->CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
+
+    StreamSet * fieldStarts = P->CreateStreamSet(1);
+    P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
+    SHOW_STREAM(fieldStarts);
 
     StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
-    SpreadByMask(P, fieldStarts, RepeatingLgths, PrefixInsertBixNum);
+    SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
     SHOW_BIXNUM(PrefixInsertBixNum);
-
-    // TODO: these aren't very tight bounds but works for now
-    StreamSet * const PrefixSpreadMask = InsertionSpreadMask(P, PrefixInsertBixNum, InsertPosition::Before);
-    SHOW_STREAM(PrefixSpreadMask);
-
-    StreamSet * expandedFieldSeparators = P->CreateStreamSet(1);
-    SpreadByMask(P, PrefixSpreadMask, filteredFieldSeparators, expandedFieldSeparators);
-    SHOW_STREAM(expandedFieldSeparators);
 
     std::vector<uint64_t> fieldSuffixLgths;
     for (unsigned i = 0; i < templateStrs.size() - 1; i++) {
         // Insertion of a single quote to terminate each field.
         fieldSuffixLgths.push_back(1);
     }
-    // Insertion of either "}, or "}]" to terminate each record
+    // Insertion of |"},| to terminate each record
     fieldSuffixLgths.push_back(3);
 
     const unsigned suffixLgthBits = 2;  // insert 1-3 characters.
-    StreamSet * RepeatingSuffixLgths = CreateRepeatingBixNum(P, suffixLgthBits, fieldSuffixLgths);
+    StreamSet * RepeatingSuffixLgths = P->CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
     StreamSet * SuffixInsertBixNum = P->CreateStreamSet(suffixLgthBits);
-    SpreadByMask(P, expandedFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
+    SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * FieldPrefixMask = P->CreateStreamSet(1);
-    P->CreateKernelCall<Invert>(PrefixSpreadMask, FieldPrefixMask);
-    SHOW_STREAM(FieldPrefixMask);
+    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
+    P->CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
+    SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * const SuffixSpreadMask = InsertionSpreadMask(P, SuffixInsertBixNum, InsertPosition::Before);
-
-    StreamSet * FieldPrefixMask2 = P->CreateStreamSet(1);
-    SpreadByMask(P, SuffixSpreadMask, FieldPrefixMask, FieldPrefixMask2);
-    SHOW_STREAM(FieldPrefixMask2);
-
-    StreamSet * BasisSpreadMask = P->CreateStreamSet(1);
-    SpreadByMask(P, SuffixSpreadMask, PrefixSpreadMask, BasisSpreadMask);
+    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
     SHOW_STREAM(BasisSpreadMask);
-
-    // Baais bit streams expanded with 0 bits for each string to be inserted.
-    StreamSet * ExpandedBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, BasisSpreadMask, filteredBasis, ExpandedBasis);
-    SHOW_BIXNUM(ExpandedBasis);
-
-    std::vector<uint64_t> fieldPrefixBytes;
-    for (auto & tmpStr : templateStrs) {
-        for (auto ch : tmpStr) {
-            fieldPrefixBytes.push_back(static_cast<uint64_t>(ch));
+    
+    std::vector<uint64_t> templateBytes;
+    for (unsigned i = 0; i < templateStrs.size(); i++) {
+        for (auto ch : templateStrs[i]) {
+            templateBytes.push_back(static_cast<uint64_t>(ch));
+        }
+        templateBytes.push_back(static_cast<uint64_t>('"'));
+        if (i == templateStrs.size() - 1) {
+            templateBytes.push_back(static_cast<uint64_t>('}'));
+            templateBytes.push_back(static_cast<uint64_t>(','));
         }
     }
-
-    StreamSet * RepeatingBasis = CreateRepeatingBixNum(P, 8, fieldPrefixBytes);
-
-    StreamSet * TemplateBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, FieldPrefixMask2, RepeatingBasis, TemplateBasis);
-    SHOW_BIXNUM(TemplateBasis);
-
-    StreamSet * InstantiatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<BasisCombine>(ExpandedBasis, TemplateBasis, InstantiatedBasis);
-    SHOW_BIXNUM(InstantiatedBasis);
+    StreamSet * TemplateBasis = P->CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
     StreamSet * FinalBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<AddFieldSuffix>(SuffixSpreadMask, InstantiatedBasis, FinalBasis);
+    if (UseMergeByMaskKernel) {
+        MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+    } else {
+        MergeByMask01(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+    }
     SHOW_BIXNUM(FinalBasis);
-
     StreamSet * Instantiated = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
-
-    //  The StdOut kernel writes a byte stream to standard output.
     P->CreateKernelCall<StdOutKernel>(Instantiated);
     return reinterpret_cast<CSVFunctionType>(P->compile());
 }

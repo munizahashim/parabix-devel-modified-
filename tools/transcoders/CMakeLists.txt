@@ -16,6 +16,7 @@ DEPS
     kernel.streamutils
     kernel.unicode
     kernel.util
+    re.adt
 )
 
 parabix_add_executable(
@@ -45,6 +46,7 @@ DEPS
     kernel.pipeline
     kernel.streamutils
     kernel.unicode
+    re.adt
     re.cc
     toolchain
 )
@@ -60,6 +62,7 @@ DEPS
     kernel.pipeline
     kernel.streamutils
     kernel.unicode
+    re.adt
     re.cc
     toolchain
 )
@@ -77,3 +80,38 @@ DEPS
     re.cc
     toolchain
 )
+
+parabix_add_executable(
+NAME
+    xch
+SRC
+    xch.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
+parabix_add_executable(
+NAME
+    nfd
+SRC
+    nfd.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
