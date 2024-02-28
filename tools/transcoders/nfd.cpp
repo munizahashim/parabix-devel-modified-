@@ -113,10 +113,11 @@ std::vector<re::CC *> NFD_BixData::NFD_Insertion_BixNumCCs() {
     for (auto p : mNFD_length) {
         BixNumCCs.push_back(UCD::UnicodeSet());
         BixNumCCs.push_back(UCD::UnicodeSet());
-        if ((p.second & 1) == 1) {
+        auto insert_amt = p.second - 1;
+        if ((insert_amt & 1) == 1) {
             BixNumCCs[0].insert(p.first);
         }
-        if ((p.second & 2) == 2) {
+        if ((insert_amt & 2) == 2) {
             BixNumCCs[1].insert(p.first);
         }
     }
