@@ -24,10 +24,14 @@ public:
     void generateFinalizeMethod(BuilderRef b) override {
         freeBuffer(b, mCodeUnitWidth);
     }
+    llvm::Value * generateExpectedOutputSizeMethod(BuilderRef b) override {
+        return generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
+    }
 protected:
     static void generatLinkExternalFunctions(BuilderRef b);
     static void generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
     static void generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
+    static llvm::Value * generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, BuilderRef b);
     static void freeBuffer(BuilderRef b, const unsigned codeUnitWidth);
 protected:
     const unsigned mCodeUnitWidth;
@@ -46,9 +50,13 @@ public:
     void generateFinalizeMethod(BuilderRef b) override {
         freeBuffer(b);
     }
+    llvm::Value * generateExpectedOutputSizeMethod(BuilderRef b) override {
+        return generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
+    }
 protected:
     static void generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
     static void generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
+    static llvm::Value * generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, BuilderRef b);
     static void freeBuffer(BuilderRef b);
     static void createInternalBuffer(BuilderRef b);
 private:
@@ -62,6 +70,7 @@ public:
     void generateInitializeMethod(BuilderRef b) override;
     void generateDoSegmentMethod(BuilderRef b) override;
     void generateFinalizeMethod(BuilderRef b) override;
+    llvm::Value * generateExpectedOutputSizeMethod(BuilderRef) override;
 protected:
     const unsigned mCodeUnitWidth;
 };
@@ -73,6 +82,7 @@ protected:
     void generateInitializeMethod(BuilderRef b) override;
     void generateDoSegmentMethod(BuilderRef b) override;
     void generateFinalizeMethod(BuilderRef b) override;
+    llvm::Value * generateExpectedOutputSizeMethod(BuilderRef) override;
 };
 
 }

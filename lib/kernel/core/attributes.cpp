@@ -10,10 +10,11 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
     #define NAME(DEF) \
         case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF); break
     #define NAME_AMOUNT(DEF) \
-        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount; break
+        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount.numerator(); break
     #define NAME_STRING(DEF) \
-        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount; break
-
+        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount.numerator(); break
+    #define NAME_RATIO(DEF) \
+        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount.numerator() << '/' << mAmount.denominator(); break
 
     switch (getKind()) {
         NAME_AMOUNT(LookAhead);
@@ -30,7 +31,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME_AMOUNT(Delayed);
         NAME(ManagedBuffer);
         NAME(SharedManagedBuffer);
-        NAME(ReturnedBuffer);
+        NAME_RATIO(ReturnedBuffer);
         NAME(AllowsUnalignedAccess);
         NAME_AMOUNT(BlockSize);
         NAME(ReverseAdapter);

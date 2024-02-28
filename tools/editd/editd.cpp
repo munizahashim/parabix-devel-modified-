@@ -204,7 +204,7 @@ preprocessFunctionType preprocessPipeline(CPUDriver & pxDriver) {
     StreamSet * const CCResults = pxDriver.CreateStreamSet(4);
     auto & b = pxDriver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer())}, {{int32Ty, "fileDescriptor"}});
+    auto P = pxDriver.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer(1))}, {{int32Ty, "fileDescriptor"}});
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
