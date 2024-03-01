@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setActiveKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal) {
+void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal, const bool getCommonThreadLocal) {
     assert (kernelId >= FirstKernel && kernelId <= LastKernel);
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
@@ -21,7 +21,12 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernelThreadLocalHandle = nullptr;
     if (mKernel->hasThreadLocal() && allowThreadLocal) {
         mKernelThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId);
+        if (getCommonThreadLocal) {
+            mKernelCommonThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId, true);
+        }
     }
+
+
     mCurrentKernelName = mKernelName[mKernelId];
 }
 
@@ -139,30 +144,18 @@ Value * PipelineCompiler::subtractLookahead(BuilderRef b, const BufferPort & inp
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadLocalHandlePtr
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
+Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal) const {
     const Kernel * const kernel = getKernel(kernelIndex);
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
-    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
-        StructType * const localStateTy = kernel->getThreadLocalStateType();
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            b->CreateAssert(handle, "null handle load");
-        }
-        handle = b->CreateLoad(localStateTy->getPointerTo(), handle);
+    Value * handle = nullptr;
+    if (LLVM_UNLIKELY(commonThreadLocal)) {
+        assert (mCommonThreadLocalHandle);
+        handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        assert (handle);
+    } else {
+        handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     }
-    assert (handle->getType()->isPointerTy());
-    return handle;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getCommonThreadLocalHandlePtr
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
-    const Kernel * const kernel = getKernel(kernelIndex);
-    assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
-    const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
         if (LLVM_UNLIKELY(CheckAssertions)) {

@@ -417,7 +417,6 @@ void PipelineCompiler::generateKernelMethod(BuilderRef b) {
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
-
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         // get the last segment # used by any kernel in case any reports require it.
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
@@ -474,15 +473,16 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
+        assert (kernel->hasThreadLocal() || !isa<PipelineKernel>(kernel));
         if (kernel->hasThreadLocal()) {
-            setActiveKernel(b, i, true);
+            setActiveKernel(b, i, true, true);
             assert (mKernel == kernel);
             SmallVector<Value *, 2> args;
             if (LLVM_LIKELY(mKernelSharedHandle != nullptr)) {
                 args.push_back(mKernelSharedHandle);
             }
-            args.push_back(getCommonThreadLocalHandlePtr(b, i));
-            args.push_back(mKernelThreadLocalHandle);
+            args.push_back(mKernelCommonThreadLocalHandle); assert (mKernelCommonThreadLocalHandle);
+            args.push_back(mKernelThreadLocalHandle); assert (mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
             if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
               //  b->CreateFree(mKernelThreadLocalHandle);

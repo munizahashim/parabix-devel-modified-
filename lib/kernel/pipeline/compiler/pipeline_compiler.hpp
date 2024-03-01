@@ -203,7 +203,7 @@ public:
 // main doSegment functions
 
     void start(BuilderRef b);
-    void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal);
+    void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal, const bool getCommonThreadLocal = false);
     void executeKernel(BuilderRef b);
     void end(BuilderRef b);
 
@@ -504,8 +504,7 @@ public:
 
 // thread local functions
 
-    Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
-    Value * getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
+    Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal = false) const;
 
 // optimization branch functions
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
@@ -679,6 +678,7 @@ protected:
     const Kernel *                              mKernel = nullptr;
     Value *                                     mKernelSharedHandle = nullptr;
     Value *                                     mKernelThreadLocalHandle = nullptr;
+    Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS

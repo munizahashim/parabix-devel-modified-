@@ -336,6 +336,8 @@ protected:
 
     virtual void addBaseInternalProperties(BuilderRef b);
 
+    ScalarRef getThreadLocalScalarFieldPtr(BuilderRef b, llvm::Value * handle, const llvm::StringRef name) const;
+
 private:
 
     void initializeScalarMap(BuilderRef b, const InitializeOptions options);
@@ -347,8 +349,6 @@ private:
 protected:
 
     void addAlias(llvm::StringRef alias, llvm::StringRef scalarName);
-
-    ScalarRef getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const;
 
 public:
 

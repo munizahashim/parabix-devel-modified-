@@ -13,6 +13,7 @@
 #include <llvm/ADT/Twine.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/container/flat_set.hpp>
+#include <boost/container/flat_map.hpp>
 #include <kernel/core/streamsetptr.h>
 #include <codegen/TypeBuilder.h>
 
@@ -20,6 +21,7 @@ using namespace llvm;
 using namespace boost;
 using boost::intrusive::detail::floor_log2;
 using boost::container::flat_set;
+using boost::container::flat_map;
 
 namespace kernel {
 
@@ -31,7 +33,6 @@ using PortType = Kernel::PortType;
 
 const static std::string BUFFER_HANDLE_SUFFIX = "_buffer";
 const static std::string TERMINATION_SIGNAL = "__termination_signal";
-const static std::string INTERNAL_COMMON_THREAD_LOCAL_PREFIX = "!__ctl__";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
@@ -1070,9 +1071,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
 
                 if (LLVM_UNLIKELY(options == InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars)) {
-                    Value * const mainScalar = b->CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
 
-                    addToScalarFieldMap(INTERNAL_COMMON_THREAD_LOCAL_PREFIX + binding.getName(), scalar, binding.getValueType(), scalarType);
+                    Value * const mainScalar = b->CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
 
                     using AccumRule = Kernel::ThreadLocalScalarAccumulationRule;
 
@@ -1205,13 +1205,6 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
         b->CreateBr(exit);
         b->SetInsertPoint(exit);
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getCommonThreadLocalScalarFieldPtr
- ** ------------------------------------------------------------------------------------------------------------- */
-KernelCompiler::ScalarRef KernelCompiler::getCommonThreadLocalScalarFieldPtr(KernelBuilder * b, const llvm::StringRef name) const {
-    return getScalarFieldPtr(b, INTERNAL_COMMON_THREAD_LOCAL_PREFIX + name.str());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1385,6 +1378,61 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder * cons
         assert (isFromCurrentFunction(b, result.first, false));
         return result;
     }
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getThreadLocalScalarFieldPtr
+ ** ------------------------------------------------------------------------------------------------------------- */
+KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(BuilderRef b, Value * handle, const StringRef name) const {
+
+    const auto count = mInternalScalars.size();
+
+    flat_map<size_t, size_t> threadLocalGroups;
+
+    size_t i = 0;
+    size_t groupIndex = 0;
+    size_t scalarIndex = 0;
+    for (; i < count; ++i) {
+        const InternalScalar & scalar = mInternalScalars[i];
+        if (scalar.getScalarType() == ScalarType::ThreadLocal) {
+            const auto g = scalar.getGroup();
+            auto f = threadLocalGroups.find(g);
+            if (LLVM_UNLIKELY(f == threadLocalGroups.end())) {
+                f = threadLocalGroups.emplace(g, 0).first;
+            }
+            if (scalar.getName() == name) {
+                groupIndex = g;
+                scalarIndex = f->second;
+                break;
+            }
+            f->second++;
+        }
+    }
+
+    for (; i < count; ++i) {
+        const InternalScalar & scalar = mInternalScalars[i];
+        if (scalar.getScalarType() == ScalarType::ThreadLocal) {
+            const auto g = scalar.getGroup();
+            auto f = threadLocalGroups.find(g);
+            threadLocalGroups.emplace(g, 0);
+        }
+    }
+
+    StructType * const threadLocalTy = mTarget->getThreadLocalStateType(); assert (threadLocalTy);
+
+    const auto f = threadLocalGroups.find(groupIndex);
+    const auto groupPos = std::distance(threadLocalGroups.begin(), f);
+
+    FixedArray<Value *, 3> indices;
+    indices[0] = b->getInt32(0);
+    indices[1] = b->getInt32(groupPos * 2);
+    indices[2] = b->getInt32(scalarIndex);
+
+    Value * ptr = b->CreateGEP(threadLocalTy, handle, indices); assert (ptr);
+    Type * ty = threadLocalTy->getStructElementType(groupPos * 2)->getStructElementType(scalarIndex);
+    return ScalarRef{ptr, ty};
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
