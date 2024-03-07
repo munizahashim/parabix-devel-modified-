@@ -31,12 +31,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-//#include <sys/memfd.h>
-
-size_t get_lcm(const size_t A, const size_t B) {
-    return boost::lcm<size_t>(A, B);
-}
-
+// #include <sys/memfd.h>
 
 inline static int create_memfd() {
 #if defined(__FreeBSD__)
@@ -1015,7 +1010,7 @@ void DynamicBuffer::destroyBuffer(BuilderPtr b, Value * baseAddress, Value * cap
         b->CreateFree(baseAddress);
     } else {
         FixedArray<Value *, 4> destroyArgs;
-        destroyArgs[0] = baseAddress;
+        destroyArgs[0] = b->CreatePointerCast(baseAddress, b->getInt8PtrTy());
         destroyArgs[1] = b->getSize(mUnderflow);
         destroyArgs[2] = b->CreateMul(b->getTypeSize(mType), capacity);
         destroyArgs[3] = b->getSize(mUnderflow);
@@ -1492,8 +1487,10 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             makeArgs[0] = b->getSize(mUnderflow);
             makeArgs[1] = b->CreateMul(newInternalCapacity, typeSize);
             makeArgs[2] = b->getSize(mUnderflow);
-            Value * const newBuffer = b->CreateCall(m->getFunction(__MAKE_CIRCULAR_BUFFER), makeArgs);
-
+            Value * newBuffer = b->CreateCall(m->getFunction(__MAKE_CIRCULAR_BUFFER), makeArgs);
+            #ifndef NDEBUG
+            newBuffer = b->CreatePointerCast(newBuffer, mType->getPointerTo());
+            #endif
             Value * newBufferOffset = b->CreateURem(consumedChunks, newInternalCapacity);
             Value * const toWriteDataPtr = b->CreateInBoundsGEP(mType, newBuffer, newBufferOffset);
             b->CreateAlignedStore(newBuffer, virtualBaseField, sizeTyWidth);
