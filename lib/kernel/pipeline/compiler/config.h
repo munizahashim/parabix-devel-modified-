@@ -59,4 +59,6 @@
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
 
+#define TEST_MMAPPED_CIRCULAR_BUFFERS
+
 #endif // PIPELINE_KERNEL_COMPILER_CONFIG_H

@@ -85,6 +85,7 @@ public:
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyZeroExtendedStreamSets();
+
         P.identifyLinearBuffers();
 
         P.determineBufferSize(b);

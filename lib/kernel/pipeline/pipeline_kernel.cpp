@@ -3,6 +3,7 @@
 #include "compiler/pipeline_compiler.hpp"
 #include <llvm/IR/Function.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/core/streamset.h>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
 #include <llvm/Analysis/ConstantFolding.h>
 #endif
@@ -217,6 +218,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
+    StreamSetBuffer::linkFunctions(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);

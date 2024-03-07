@@ -110,6 +110,8 @@ public:
 
     virtual void releaseBuffer(BuilderPtr b) const = 0;
 
+    virtual void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
+
     // The number of items that cam be linearly accessed from a given logical stream position.
     virtual llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * overflowItems = nullptr) const = 0;
 
@@ -159,6 +161,8 @@ public:
 
     static llvm::Type * resolveType(BuilderPtr b, llvm::Type * const streamSetType);
 
+    static void linkFunctions(BuilderPtr b); // temporary function
+
 protected:
 
     llvm::Value * addOverflow(BuilderPtr b, llvm::Value * const bufferCapacity, llvm::Value * const overflowItems, llvm::Value * const consumedOffset) const;
@@ -198,6 +202,8 @@ public:
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
     void releaseBuffer(BuilderPtr b) const override;
+
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
@@ -250,7 +256,7 @@ public:
 
 //    llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const final;
 
-    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const final;
+    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const override;
 
     llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * overflowItems = nullptr) const override;
 
@@ -278,6 +284,8 @@ public:
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
     void releaseBuffer(BuilderPtr b) const override;
+
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::StructType * getHandleType(BuilderPtr b) const override;
 
@@ -331,6 +339,8 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     llvm::Value * getCapacity(BuilderPtr b) const override;
@@ -346,6 +356,8 @@ public:
     void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+
+    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const override;
 
     llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * const fromPosition, llvm::Value * const consumedItems, llvm::Value * overflowItems = nullptr) const override;
 
@@ -384,6 +396,8 @@ public:
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
     void releaseBuffer(BuilderPtr b) const override;
+
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
@@ -436,6 +450,8 @@ public:
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
     void releaseBuffer(BuilderPtr b) const override;
+
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::StructType * getHandleType(BuilderPtr b) const override;
 

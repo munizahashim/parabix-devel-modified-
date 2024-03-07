@@ -48,6 +48,9 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         if (bn.isOwned() && isa<DynamicBuffer>(buffer) && isMultithreaded()) {
             assert (bn.isNonThreadLocal());
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
+            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
+            mTarget->addThreadLocalScalar(b->getSizeTy(), prefix + PENDING_FREEABLE_BUFFER_CAPACITY, groupId);
+            #endif
         }
     }
 
@@ -256,7 +259,9 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(BuilderRef b) {
                     const BufferPort & rd = mBufferGraph[pe];
                     assert (rd.Port.Type == PortType::Output);
                     const auto prefix = makeBufferName(p, rd.Port);
-                    b->CreateFree(b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS));
+                    Value * const addr = b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
+                    Value * const capacity = b->getScalarField(prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
+                    buffer->destroyBuffer(b, addr, capacity);
                 }
             }
         }
@@ -623,6 +628,9 @@ void PipelineCompiler::writeLookBehindLogic(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.LookBehind) {
+            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
+            if (isa<DynamicBuffer>(buffer)) continue;
+            #endif
             const BufferPort & br = mBufferGraph[e];
             Constant * const underflow = b->getSize(bn.LookBehind);
             Value * const produced = mCurrentProducedItemCountPhi[br.Port];
@@ -648,6 +656,9 @@ void PipelineCompiler::writeDelayReflectionLogic(BuilderRef b) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             const StreamSetBuffer * const buffer = bn.Buffer;
+            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
+            if (isa<DynamicBuffer>(buffer)) continue;
+            #endif
             Value * const capacity = buffer->getCapacity(b);
             Value * const produced = mCurrentProducedItemCountPhi[br.Port];
             const auto size = round_up_to(br.Delay, b->getBitBlockWidth());
@@ -668,6 +679,9 @@ void PipelineCompiler::writeCopyBackLogic(BuilderRef b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.CopyBack) {
             const StreamSetBuffer * const buffer = bn.Buffer;
+            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
+            if (isa<DynamicBuffer>(buffer)) continue;
+            #endif
             const BufferPort & br = mBufferGraph[e];
             Value * const capacity = buffer->getCapacity(b);
             Value * const alreadyProduced = mCurrentProducedItemCountPhi[br.Port];
@@ -698,6 +712,9 @@ void PipelineCompiler::writeLookAheadLogic(BuilderRef b) {
         if (bn.CopyForwards) {
 
             const StreamSetBuffer * const buffer = bn.Buffer;
+            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
+            if (isa<DynamicBuffer>(buffer)) continue;
+            #endif
             const BufferPort & br = mBufferGraph[e];
             Value * const capacity = buffer->getCapacity(b);
             Value * const initial = mInitiallyProducedItemCount[streamSet];

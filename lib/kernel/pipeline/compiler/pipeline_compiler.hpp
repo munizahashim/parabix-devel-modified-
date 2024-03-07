@@ -134,6 +134,7 @@ const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDM
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
+const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
 
 using ArgVec = Vec<Value *, 64>;
 

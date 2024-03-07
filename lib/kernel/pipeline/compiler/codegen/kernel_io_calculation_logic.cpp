@@ -863,12 +863,17 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     #endif
     startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
     Value * priorBufferPtr = nullptr;
+    Value * priorCapacityPtr = nullptr;
     if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
         // delete any old buffer if one exists
         Type * bufTy;
         std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
         Value * const priorBuffer = b->CreateLoad(bufTy, priorBufferPtr); // <- threadlocal
-        b->CreateFree(priorBuffer);
+        Type * intTy;
+        std::tie(priorCapacityPtr, intTy) = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
+        Value * const priorCapacity = b->CreateLoad(intTy, priorCapacityPtr);
+        buffer->destroyBuffer(b, priorBuffer, priorCapacity);
+        // b->CreateFree(priorBuffer);
         b->CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
     }
 
@@ -922,14 +927,19 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // which could result in free'ing the "old" buffer twice.
 
     if (isa<DynamicBuffer>(buffer)) {
-        Value * const priorBuffer = buffer->expandBuffer(b, produced, consumed, required);
+        Value * expandedStruct = buffer->expandBuffer(b, produced, consumed, required);
+        Value * priorBuffer = b->CreateExtractValue(expandedStruct, 0);
+        assert (priorBuffer->getType()->isPointerTy());
+        Value * priorCapacity = b->CreateExtractValue(expandedStruct, 1);
+        assert (priorCapacity->getType()->isIntegerTy());
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             recordBufferExpansionHistory(b, streamSet, bn, port, buffer);
         }
         if (isMultithreaded()) {
             b->CreateStore(priorBuffer, priorBufferPtr);
+            b->CreateStore(priorCapacity, priorCapacityPtr);
         } else {
-            b->CreateFree(priorBuffer);
+            buffer->destroyBuffer(b, priorBuffer, priorCapacity);
         }
     }
     b->CreateBr(afterCopyBackOrExpand);
