@@ -501,63 +501,8 @@ void PipelineAnalysis::identifyLinearBuffers() {
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         BufferNode & N = mBufferGraph[streamSet];
-        N.IsLinear = true;
-    }
-
-    // Any kernel that is internally synchronized or has a greedy rate input
-    // requires that all of its inputs are linear.
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        const Kernel * const kernelObj = getKernel(i);
-
-        bool inputsMustBeLinear = false;
-        if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::InternallySynchronized))) {
-            // An internally synchronized kernel requires that all I/O is linear
-            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                const auto streamSet = target(e, mBufferGraph);
-                BufferNode & N = mBufferGraph[streamSet];
-                N.IsLinear = true;
-            }
-            inputsMustBeLinear = true;
-        } else {
-            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                const BufferPort & rateData = mBufferGraph[e];
-                const Binding & binding = rateData.Binding;
-                const ProcessingRate & rate = binding.getRate();
-                if (LLVM_UNLIKELY(rate.isGreedy())) {
-                    inputsMustBeLinear = true;
-                    break;
-                }
-            }
-        }
-        if (LLVM_UNLIKELY(inputsMustBeLinear)) {
-            for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                const auto streamSet = source(e, mBufferGraph);
-                BufferNode & N = mBufferGraph[streamSet];
-                N.IsLinear = true;
-            }
-        }
-    }
-
-    // If the binding attributes of the producer/consumer(s) of a streamSet indicate
-    // that the kernel requires linear input, mark it accordingly.
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & N = mBufferGraph[streamSet];
-        if (N.Locality != BufferLocality::ThreadLocal) {
-            assert (N.Locality == BufferLocality::ConstantShared || in_degree(streamSet, mBufferGraph) == 1);
-            for (const auto output : make_iterator_range(in_edges(streamSet, mBufferGraph))) {
-                if (!mBufferGraph[output].isFixed()) {
-                    N.IsLinear = true;
-                    goto must_be_linear;
-                }
-            }
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                if (!mBufferGraph[input].isFixed()) {
-                    N.IsLinear = true;
-                    goto must_be_linear;
-                }
-            }
-must_be_linear:
-            continue;
+        if (N.isReturned()) {
+            N.IsLinear = true;
         }
     }
 

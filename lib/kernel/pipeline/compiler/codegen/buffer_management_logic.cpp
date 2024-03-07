@@ -958,18 +958,18 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     }
 
     Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
-//        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
-//        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
-//        Value * const V = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
-//        Value * const S = buffer->getMallocAddress(b);
-//        Value * const P = b->CreatePointerCast(V, S->getType());
-//        Value * const E = buffer->getOverflowAddress(b);
-//        Value * const valid = b->CreateAnd(b->CreateICmpULE(S, P), b->CreateICmpULE(P, E));
-//        b->CreateAssert(valid, "%s.%s virtual base address %" PRIx64 " is not within expected range [%" PRIx64 ",%" PRIx64 "]",
-//                        mCurrentKernelName, b->GetString(getBinding(rateData.Port).getName()), P, S, E);
-//    }
+    if (LLVM_UNLIKELY(CheckAssertions && isa<DynamicBuffer>(buffer))) {
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));
+        Value * const blockIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+        Value * const V = tmp.getStreamBlockPtr(b, addr, b->getSize(0), blockIndex);
+        Value * const S = buffer->getMallocAddress(b);
+        Value * const P = b->CreatePointerCast(V, S->getType());
+        Value * const E = buffer->getOverflowAddress(b);
+        Value * const valid = b->CreateAnd(b->CreateICmpULE(S, P), b->CreateICmpULE(P, E));
+        b->CreateAssert(valid, "%s.%s virtual base address %" PRIx64 " is not within expected range [%" PRIx64 ",%" PRIx64 "]",
+                        mCurrentKernelName, b->GetString(getBinding(rateData.Port).getName()), P, S, E);
+    }
     if (prefetch) {
         ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
         Constant * const LOG_2_BLOCK_WIDTH = b->getSize(floor_log2(b->getBitBlockWidth()));

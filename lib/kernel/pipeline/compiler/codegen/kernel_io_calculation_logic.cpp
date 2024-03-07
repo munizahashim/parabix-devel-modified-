@@ -539,10 +539,6 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
         hasEnough = b->CreateOr(hasEnough, closed);
     }
 
-
-
-
-
     BasicBlock * const target = b->CreateBasicBlock(prefix + "_hasOutputSpace", mKernelLoopCall);
     assert (mKernelInsufficientInput);
     b->CreateCondBr(hasEnough, target, mKernelInsufficientInput);
@@ -873,7 +869,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         std::tie(priorCapacityPtr, intTy) = getScalarFieldPtr(b.get(), prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
         Value * const priorCapacity = b->CreateLoad(intTy, priorCapacityPtr);
         buffer->destroyBuffer(b, priorBuffer, priorCapacity);
-        // b->CreateFree(priorBuffer);
         b->CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
     }
 
