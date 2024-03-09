@@ -88,11 +88,11 @@ public:
 
         P.identifyLinearBuffers();
 
+        P.calculatePartialSumStepFactors(b);
+
         P.determineBufferSize(b);
 
         P.makeConsumerGraph();
-
-        P.calculatePartialSumStepFactors(b);
 
        // P.makeTerminationPropagationGraph();
 

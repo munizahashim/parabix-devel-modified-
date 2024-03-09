@@ -365,7 +365,7 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(BuilderRef b) {
             const ProcessingRate & rate = output.getRate();
             const auto ub = rate.getUpperBound() * mTarget->getStride();
             const auto bufferSize = ceiling(ub);
-            buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(), bufferSize, 0, 0, true, 0);
+            buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(), bufferSize,  0, true, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
         }

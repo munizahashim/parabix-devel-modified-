@@ -259,14 +259,10 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     assert (rate.isFixed());
                     const auto j = mapping[streamSet - FirstStreamSet];
                     assert (j != -1U);
-                    const auto base = rate.getUpperBound() * rateFactor;
-                    const auto withOverflow = base + bn.OverflowCapacity;
-                    const auto size = typeSize * withOverflow;
+                    const auto size = typeSize * bn.RequiredCapacity;
 
-                    assert (size.denominator() == 1);
-                    weight[j] = round_up_to(size.numerator(), pageSize);
+                    weight[j] = round_up_to(size, pageSize); // .numerator()
                     assert ((weight[j] % pageSize) == 0);
-                    assert (bn.UnderflowCapacity == 0);
 
                     // record how many consumers exist before the streamset memory can be reused
                     // (NOTE: the +1 is to indicate this kernel requires each output streamset

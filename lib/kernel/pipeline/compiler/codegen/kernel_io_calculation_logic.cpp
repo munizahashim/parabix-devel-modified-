@@ -743,21 +743,9 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     Value * overflow = nullptr;
 
     if (LLVM_LIKELY(useOverflow)) {
-        if (bn.CopyForwards > 0 || port.Add > 0) {
-            const auto A = port.Add;
-            const auto L = bn.CopyForwards;
-            if (A == L) {
-                overflow = b->getSize(A);
-            } else {
-                Value * const closed = isClosed(b, streamSet);
-                overflow = b->CreateSelect(closed, b->getSize(A), b->getSize(L));
-            }
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_overflow (add:%" PRIu64 ",la:%" PRIu64 ") = %" PRIu64,
-                                    b->getSize(A),
-                                    b->getSize(L),
-                                    overflow);
-            #endif
+        if (port.Add > 0) {
+            Value * const closed = isClosed(b, streamSet);
+            overflow = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
         }
     }
 
@@ -1099,12 +1087,8 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
                             consumed, produced);
         }
 
-        if (useOverflow && (bn.CopyBack || port.Add)) {
-            const auto k = std::max<unsigned>(bn.CopyBack, port.Add);
-            overflow = b->getSize(k);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_overflow = %" PRIu64, overflow);
-            #endif
+        if (useOverflow && port.Add) {
+            overflow = b->getSize(port.Add);
         }
 
         writable = buffer->getLinearlyWritableItems(b, produced, consumed, overflow);
@@ -1514,9 +1498,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     Value * initialItemCount = nullptr;
     Value * sourceItemCount = nullptr;
     Value * currentItemCount = nullptr;
-    Value * peekableItemCount = nullptr;
     Value * minimumItemCount = MAX_INT;
-    Value * nonOverflowItems = nullptr;
 
     const auto port = partialSumPort.Port;
 
@@ -1524,30 +1506,14 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
         initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
         currentItemCount = accessible;
-        const auto streamSet = getInputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyForwards) {
-            nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = subtractLookahead(b, partialSumPort, b->CreateAdd(initialItemCount, accessible));
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, accessible);
-        }
+        sourceItemCount = b->CreateAdd(initialItemCount, accessible);
         minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
         Value * const writable = getWritableOutputItems(b, partialSumPort, true);
         currentItemCount = writable;
-        const auto streamSet = getOutputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyBack) {
-            nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = b->CreateAdd(initialItemCount, writable);
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, writable);
-        }
+        sourceItemCount = b->CreateAdd(initialItemCount, writable);
         minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
@@ -1641,18 +1607,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
 
     Value * finalNumOfStrides = numOfStridesPhi;
-    if (peekableItemCount) {
-        // Since we want to allow the stream to peek into the overflow but not start
-        // in it, check to see if we can support one more stride by using it.
-//        Value * const internalCapacity = sourceBuffer->getInternalCapacity(b);
-//        Value * const pos = b->CreateURem(nextRequiredItemsPhi, internalCapacity);
-//        ConstantInt * const overflowLimit = b->getSize(numOfPeekableItems);
-//        Value * const hasOverwrittenData = b->CreateICmpUGE(nextRequiredItemsPhi, overflowLimit);
-//        Value * const canPeekIntoOverflow = b->CreateAnd(hasOverwrittenData, b->CreateICmpULE(nextRequiredItemsPhi, overflowLimit));
-
-        Value * const canPeekIntoOverflow = b->CreateICmpULE(nextRequiredItemsPhi, peekableItemCount);
-        finalNumOfStrides = b->CreateAdd(finalNumOfStrides, b->CreateZExt(canPeekIntoOverflow, sizeTy));
-    }
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & binding = getInputBinding(ref);
         b->CreateAssert(b->CreateICmpNE(finalNumOfStrides, MAX_INT),
@@ -1696,8 +1650,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(BuilderRef b) {
         const auto fw = b->getSizeTy()->getIntegerBitWidth();
         assert ((bw % fw) == 0 && bw > fw);
         const auto stepsPerBlock = bw / fw;
-        const auto spanLength = bn.OverflowCapacity;
-        assert (spanLength > 0);
+        const auto spanLength = bn.PartialSumSpanLength;
 
         ConstantInt * const sz_stepsPerBlock = b->getSize(stepsPerBlock);
         ConstantInt * const sz_ONE = b->getSize(1);

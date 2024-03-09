@@ -162,10 +162,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     b->SetInsertPoint(mKernelLoopCall);
-    writeLookBehindLogic(b);
     writeKernelCall(b);
-    writeCopyBackLogic(b);
-    writeDelayReflectionLogic(b);
 
     /// -------------------------------------------------------------------------------------
     /// KERNEL EXPLICIT TERMINATION CHECK
@@ -252,7 +249,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     Value * const terminated = b->CreateICmpNE(mTerminatedAtLoopExitPhi, unterminated);
     computeFullyProcessedItemCounts(b, terminated);
     computeMinimumConsumedItemCounts(b);
-    writeLookAheadLogic(b);
     computeFullyProducedItemCounts(b, terminated);
     if (mIsPartitionRoot) {
         updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);

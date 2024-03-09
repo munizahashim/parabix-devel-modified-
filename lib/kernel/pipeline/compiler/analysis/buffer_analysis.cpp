@@ -1,8 +1,6 @@
 #include "pipeline_analysis.hpp"
 #include "lexographic_ordering.hpp"
-#ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
 #include <unistd.h>
-#endif
 
 // TODO: any buffers that exist only to satisfy the output dependencies are unnecessary.
 // We could prune away kernels if none of their outputs are needed but we'd want some
@@ -141,7 +139,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyWriteOverflow:
-                        bn.OverflowCapacity = std::max(bn.OverflowCapacity, 1U);
+                        bn.RequiredCapacity = std::max(bn.RequiredCapacity, 1U);
                         break;
                     default: break;
                 }
@@ -562,36 +560,23 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
         BufferNode & bn = mBufferGraph[streamSet];
 
-        if (bn.isThreadLocal() || bn.isUnowned() || bn.hasZeroElementsOrWidth()) {
+        if (bn.isUnowned() || bn.hasZeroElementsOrWidth() || bn.isConstant()) {
             continue;
         }
 
-        auto calculateCopyLength = [&](const BufferPort & rate, const unsigned kernel) {
-            const auto r = rate.Maximum - rate.Minimum;
-            return ceiling(r);
-        };
-
-        unsigned maxDelay = 0;
-        unsigned maxLookAhead = 0;
         unsigned maxLookBehind = 0;
-        unsigned copyBack = 0;
 
         Rational bMin{0};
         Rational bMax{0};
-        size_t producer = 0;
-        if (bn.isConstant()) {
-            bMin = std::numeric_limits<size_t>::max();
-        } else {
+        if (LLVM_LIKELY(!bn.isConstant())) {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
-            maxDelay = producerRate.Delay;
-            maxLookAhead = producerRate.LookAhead;
             maxLookBehind = producerRate.LookBehind;
-            producer = source(producerOutput, mBufferGraph);
-            copyBack = calculateCopyLength(producerRate, producer);
+            const auto producer = source(producerOutput, mBufferGraph);
             bMin = producerRate.Minimum * MinimumNumOfStrides[producer];
             const auto max = std::max(MaximumNumOfStrides[producer], 1U);
-            bMax = producerRate.Maximum * max;
+            const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
+            bMax = (producerRate.Maximum * max) + extra;
         }
 
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
@@ -600,81 +585,39 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 
             const auto consumer = target(e, mBufferGraph);
 
-            const auto min = std::max(MinimumNumOfStrides[consumer], 1U);
+            const auto min = MinimumNumOfStrides[consumer];
             const auto cMin = consumerRate.Minimum * min;
             const auto max = std::max(MaximumNumOfStrides[consumer], 1U);
-            const auto cMax = consumerRate.Maximum * max;
+            const auto extra = std::max(consumerRate.LookAhead, consumerRate.Add);
+            const auto cMax = (consumerRate.Maximum * max) + extra;
 
             assert (cMax >= cMin);
 
             bMin = std::min(bMin, cMin);
             bMax = std::max(bMax, cMax);
 
-            maxDelay = std::max(maxDelay, consumerRate.Delay);
-            maxLookAhead = std::max(maxLookAhead, consumerRate.LookAhead);
             maxLookBehind = std::max(maxLookBehind, consumerRate.LookBehind);
         }
 
         bn.LookBehind = maxLookBehind;
 
-        // calculate overflow (lookahead) and underflow (lookbehind) space
-        const auto overflow0 = std::max(maxLookAhead, bn.MaxAdd);
-        const auto underflow0 = std::max(maxLookBehind, maxDelay);
-
         // A buffer can only be Linear or Circular. Linear buffers only require a set amount
         // of space and automatically handle under/overflow issues.
-        // Circular buffers, on the other hand, may require explicit under / overflow regions.
-        // Specifically, if a streamset is produced at a variable rate, it requires an overflow
-        // space that is copied back to first block of the buffer after invocation. If a
-        // streamset is consumed at a variable rate, it also requires an overflow but the
-        // first block of the buffer must be
 
         const auto rs = 2 * ceiling(bMax) - floor(bMin);
+        auto reqSize = round_up_to(rs, blockWidth) / blockWidth;
 
-        if (bn.IsLinear || bn.isConstant()) {
-            bn.CopyBack = 0;
-            bn.CopyForwards = 0;
-            bn.RequiredCapacity = round_up_to(rs, blockWidth) / blockWidth;
-        } else {
-            unsigned copyForwards = 0;
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const BufferPort & consumerRate = mBufferGraph[e];
-                const auto kernel = target(e, mBufferGraph);
-                const auto cpl = calculateCopyLength(consumerRate, kernel);
-                const auto cf = (cpl * StrideRepetitionVector[kernel]) + consumerRate.LookAhead;
-                copyForwards = std::max(copyForwards, cf);
-            }
-            if (copyForwards > blockWidth || copyBack > blockWidth) {
-                bn.IsLinear = true;
-                bn.CopyBack = 0;
-                bn.CopyForwards = 0;
-            } else {
-                bn.CopyBack = copyBack;
-                bn.CopyForwards = copyForwards;
-            }
-
-            const auto overflow1 = std::max(bn.CopyBack, bn.CopyForwards);
-            const auto overflow2 = std::max(overflow0, overflow1);
-            const auto overflowSize = round_up_to(overflow2, blockWidth) / blockWidth;
-            const auto underflowSize = round_up_to(underflow0, blockWidth) / blockWidth;
-            const auto reqSize1 = round_up_to(rs, blockWidth) / blockWidth;
-            const auto reqSize2 = 2 * (overflowSize + underflowSize);
-            auto reqSize3 = std::max(reqSize1, reqSize2);
-            bn.OverflowCapacity = std::max(bn.OverflowCapacity, overflowSize);
-            bn.UnderflowCapacity = std::max(bn.UnderflowCapacity, underflowSize);
-            bn.RequiredCapacity = reqSize3;
+        if (bn.PartialSumSpanLength) {
+            reqSize = std::max(reqSize, bn.PartialSumSpanLength);
         }
-
-
-  \
-
-
-
-
+        if (maxLookBehind) {
+            bn.RequiresUnderflow = !bn.IsLinear;
+            const auto underflowSize = round_up_to(maxLookBehind, blockWidth) / blockWidth;
+            reqSize = std::max(reqSize, underflowSize);
+        }
+        bn.RequiredCapacity = reqSize;
 
     }
-
-
 
 }
 
@@ -686,7 +629,6 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
-//    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
     const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
@@ -698,9 +640,6 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(bn.isConstant())) {
             const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
-//            const auto e = first_out_edge(streamSet, mBufferGraph);
-//            const BufferPort & consumerRate = mBufferGraph[e];
-//            const Binding & input = consumerRate.Binding;
             buffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
         } else if (LLVM_UNLIKELY(bn.isTruncated())) {
             continue;
@@ -731,11 +670,11 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                     #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                     bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
                     #endif
-                    if (useMMap) {
-                        buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                    } else {
-                        buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-                    }
+//                    if (useMMap) {
+//                        buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, 0, bn.RequiresUnderflow, bn.IsLinear, 0U);
+//                    } else {
+                        buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
+//                    }
 
 
 //                } else {

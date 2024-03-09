@@ -285,18 +285,16 @@ struct BufferNode {
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
-    unsigned CopyBack = 0;
-    unsigned CopyForwards = 0;
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
     unsigned BufferStart = 0;
     unsigned BufferEnd = 0;
 
-    unsigned RequiredCapacity = 0;
-    unsigned OverflowCapacity = 0;
-    unsigned UnderflowCapacity = 0;
+    bool RequiresUnderflow = false;
 
+    unsigned RequiredCapacity = 0;
+    unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
 

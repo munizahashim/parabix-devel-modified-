@@ -310,12 +310,6 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         }
 
         #ifndef USE_SIMPLE_BUFFER_GRAPH
-        if (bn.CopyBack) {
-            out << "|CB:" << bn.CopyBack;
-        }
-        if (bn.CopyForwards) {
-            out << "|CF:" << bn.CopyForwards;
-        }
         if (bn.LookBehind) {
             out << "|LB:" << bn.LookBehind;
         }

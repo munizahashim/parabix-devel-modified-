@@ -55,21 +55,21 @@ public:
         return getType()->getPointerTo(getAddressSpace());
     }
 
-    bool hasOverflow() const {
-        return mOverflow != 0;
-    }
+//    bool hasOverflow() const {
+//        return mOverflow != 0;
+//    }
 
-    unsigned getOverflow() const {
-        return mOverflow;
-    }
+//    unsigned getOverflow() const {
+//        return mOverflow;
+//    }
 
-    bool hasUnderflow() const {
-        return mUnderflow != 0;
-    }
+//    bool hasUnderflow() const {
+//        return mUnderflow != 0;
+//    }
 
-    unsigned getUnderflow() const {
-        return mUnderflow;
-    }
+//    unsigned getUnderflow() const {
+//        return mUnderflow;
+//    }
 
     bool isLinear() const {
         return mLinear;
@@ -81,9 +81,9 @@ public:
 
     unsigned getFieldWidth() const;
 
-    size_t getUnderflowCapacity(BuilderPtr b) const;
+//    size_t getUnderflowCapacity(BuilderPtr b) const;
 
-    size_t getOverflowCapacity(BuilderPtr b) const;
+//    size_t getOverflowCapacity(BuilderPtr b) const;
 
     bool isEmptySet() const;
 
@@ -139,8 +139,6 @@ public:
 
     virtual void setBaseAddress(BuilderPtr b, llvm::Value * addr) const = 0;
 
-    virtual llvm::Value * getOverflowAddress(BuilderPtr b) const = 0;
-
     virtual void setCapacity(BuilderPtr b, llvm::Value * size) const = 0;
 
     virtual llvm::Value * getCapacity(BuilderPtr b) const = 0;
@@ -165,9 +163,7 @@ public:
 
 protected:
 
-    llvm::Value * addOverflow(BuilderPtr b, llvm::Value * const bufferCapacity, llvm::Value * const overflowItems, llvm::Value * const consumedOffset) const;
-
-    StreamSetBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType, const size_t overflowBlocks, const size_t underflowSize, const bool linear, const unsigned AddressSpace);
+    StreamSetBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType, const bool linear, const unsigned AddressSpace);
 
 private:
 
@@ -183,8 +179,6 @@ protected:
     llvm::Type * const              mType;
     llvm::Type * const              mBaseType;
     mutable llvm::StructType *      mHandleType;
-    const unsigned                  mOverflow;
-    const unsigned                  mUnderflow;
     const unsigned                  mAddressSpace;
     const bool                      mLinear;
 };
@@ -233,8 +227,6 @@ public:
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
-
 private:
 
     void assertValidBlockIndex(BuilderPtr b, llvm::Value * blockIndex) const;
@@ -263,7 +255,6 @@ public:
 protected:
 
     InternalBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType,
-                   const size_t overflowBlocks, const size_t underflowSize,
                    const bool linear, const unsigned AddressSpace);
 
 
@@ -276,7 +267,7 @@ public:
     }
 
     StaticBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type,
-                 const size_t capacity, const size_t overflowBlocks, const size_t underflowSize,
+                 const size_t capacity,
                  const bool linear, const unsigned AddressSpace);
 
     enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, PriorAddress };
@@ -294,8 +285,6 @@ public:
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
-
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
 
     void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
 
@@ -332,7 +321,7 @@ public:
     }
 
     DynamicBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
-                  const size_t overflowSize, const size_t underflowSize,
+                  const bool hasUnderflow,
                   const bool linear, const unsigned AddressSpace);
 
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
@@ -371,12 +360,10 @@ public:
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
-
 private:
 
     const size_t    mInitialCapacity;
-
+    const bool      mHasUnderflow;
 };
 
 class MMapedBuffer final : public InternalBuffer {
@@ -425,8 +412,6 @@ public:
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
-
 private:
 
     const size_t    mInitialCapacity;
@@ -460,8 +445,6 @@ public:
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
-
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
 
     void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
 
