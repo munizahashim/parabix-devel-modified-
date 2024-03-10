@@ -330,13 +330,11 @@ Value * ExternalBuffer::modByCapacity(BuilderPtr /* b */, Value * const offset) 
     return offset;
 }
 
-Value * ExternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const fromPosition, Value * const totalItems, Value * /* overflowItems */) const {
-    assert (totalItems);
-    assert (fromPosition);
+Value * ExternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const fromPosition, Value * const totalItems) const {
     return b->CreateSub(totalItems, fromPosition);
 }
 
-Value * ExternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const fromPosition, Value * const /* consumed */, Value * /* overflowItems */) const {
+Value * ExternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const fromPosition, Value * const /* consumed */) const {
     assert (fromPosition);
     Value * const capacity = getCapacity(b);
     assert (fromPosition->getType() == capacity->getType());
@@ -411,22 +409,13 @@ Value * InternalBuffer::getVirtualBasePtr(BuilderPtr b, Value * const baseAddres
     return b->CreatePointerCast(addr, getPointerType());
 }
 
-Value * InternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const processedItems, Value * const totalItems, Value * const overflowItems) const {
-    if (mLinear) {
-        return b->CreateSub(totalItems, processedItems);
-    } else {
-        Value * const capacity = getCapacity(b);
-        Value * const fromOffset = b->CreateURem(processedItems, capacity);
-        Value * const linearSpace = b->CreateSub(capacity, fromOffset);
-        Value * const availableItems = b->CreateSub(totalItems, processedItems);
-        return b->CreateUMin(availableItems, linearSpace);
-    }
+Value * InternalBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const processedItems, Value * const totalItems) const {
+    return b->CreateSub(totalItems, processedItems);
 }
 
-Value * InternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const producedItems, Value * const consumedItems, Value * const overflowItems) const {
+Value * InternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const producedItems, Value * const consumedItems) const {
     Value * const capacity = getCapacity(b);
-    ConstantInt * const ZERO = b->getSize(0);
-    if (mLinear) {
+    if (LLVM_UNLIKELY(mLinear)) {
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
             Value * const valid = b->CreateICmpULE(producedItems, capacity);
             b->CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
@@ -434,17 +423,16 @@ Value * InternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const pro
         }
         return b->CreateSub(capacity, producedItems);
      } else {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+            Value * const total = b->CreateAdd(capacity, consumedItems);
+            Value * const valid = b->CreateICmpULE(producedItems, total);
+            b->CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds total (%" PRIu64 ").",
+                            producedItems, total);
+        }
         Value * const unconsumedItems = b->CreateSub(producedItems, consumedItems);
-        Value * const full = b->CreateICmpUGE(unconsumedItems, capacity);
-        Value * const fromOffset = b->CreateURem(producedItems, capacity);
-        Value * const consumedOffset = b->CreateURem(consumedItems, capacity);
-        Value * const toEnd = b->CreateICmpULE(consumedOffset, fromOffset);
-        Value * const limit = b->CreateSelect(toEnd, capacity, consumedOffset);
-        Value * const remaining = b->CreateSub(limit, fromOffset);
-        return b->CreateSelect(full, ZERO, remaining);
+        return b->CreateSaturatingSub(capacity, unconsumedItems);
     }
 }
-
 
 // Static Buffer
 
@@ -918,16 +906,6 @@ Value * DynamicBuffer::getInternalCapacity(BuilderPtr b) const {
 
 void DynamicBuffer::setCapacity(BuilderPtr /* b */, Value * /* capacity */) const {
     unsupported("setCapacity", "Dynamic");
-}
-
-Value * DynamicBuffer::getLinearlyAccessibleItems(BuilderPtr b, Value * const processedItems, Value * const totalItems, Value * const overflowItems) const {
-    return b->CreateSub(totalItems, processedItems);
-}
-
-Value * DynamicBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const producedItems, Value * const consumedItems, Value * const overflowItems) const {
-    Value * const capacity = getCapacity(b);
-    Value * const unconsumedItems = b->CreateSub(producedItems, consumedItems);
-    return b->CreateSaturatingSub(capacity, unconsumedItems);
 }
 
 Value * DynamicBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * consumed, Value * required) const {

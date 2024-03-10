@@ -444,7 +444,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     assert (mKernelId <= LastKernel);
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
-    reset(mInternalAccessibleInputItems, numOfInputs);
+    mInternalAccessibleInputItems.reset(numOfInputs);
     mInitiallyProcessedItemCount.reset(numOfInputs);
     mInitiallyProcessedDeferredItemCount.reset(numOfInputs);
     mAlreadyProcessedPhi.reset(numOfInputs);
@@ -469,7 +469,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mFullyProcessedItemCount.reset(numOfInputs);
 
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
-    reset(mInternalWritableOutputItems, numOfOutputs);
+    mInternalWritableOutputItems.reset(numOfOutputs);
     mAlreadyProducedPhi.reset(numOfOutputs);
     mAlreadyProducedDelayedPhi.reset(numOfOutputs);
     mAlreadyProducedDeferredPhi.reset(numOfOutputs);

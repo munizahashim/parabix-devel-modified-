@@ -346,7 +346,7 @@ public:
     Value * calculateNumOfLinearItems(BuilderRef b, const BufferPort &port, Value * const adjustment, StringRef location);
     Value * getAccessibleInputItems(BuilderRef b, const BufferPort & inputPort, const bool useOverflow = true);
     Value * getNumOfAccessibleStrides(BuilderRef b, const BufferPort & inputPort, Value * const numOfLinearStrides);
-    Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool useOverflow = true);
+    Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool force = false);
     Value * getNumOfWritableStrides(BuilderRef b, const BufferPort & port, Value * const numOfLinearStrides);
     Value * addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const;
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
@@ -822,7 +822,7 @@ protected:
     InputPortVector<PHINode *>                  mInputVirtualBaseAddressPhi;
     InputPortVector<Value *>                    mFirstInputStrideLength;
 
-    OverflowItemCounts                          mInternalAccessibleInputItems;
+    InputPortVector<Value *>                    mInternalAccessibleInputItems;
     InputPortVector<PHINode *>                  mLinearInputItemsPhi;
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
     InputPortVector<Value *>                    mProcessedItemCountPtr; // exiting the segment loop
@@ -850,7 +850,7 @@ protected:
     OutputPortVector<PHINode *>                 mAlreadyProducedDeferredPhi;
     OutputPortVector<Value *>                   mFirstOutputStrideLength;
 
-    OverflowItemCounts                          mInternalWritableOutputItems;
+    OutputPortVector<Value *>                   mInternalWritableOutputItems;
     OutputPortVector<PHINode *>                 mLinearOutputItemsPhi;
     OutputPortVector<Value *>                   mReturnedOutputVirtualBaseAddressPtr; // written by the kernel
     OutputPortVector<Value *>                   mReturnedProducedItemCountPtr; // written by the kernel
@@ -1018,6 +1018,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mInputVirtualBaseAddressPhi(P.MaxNumOfInputPorts, mAllocator)
 , mFirstInputStrideLength(P.MaxNumOfInputPorts, mAllocator)
 , mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
+, mInternalAccessibleInputItems(P.MaxNumOfInputPorts, mAllocator)
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
@@ -1041,6 +1042,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mAlreadyProducedDelayedPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mAlreadyProducedDeferredPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mFirstOutputStrideLength(P.MaxNumOfOutputPorts, mAllocator)
+, mInternalWritableOutputItems(P.MaxNumOfOutputPorts, mAllocator)
 , mLinearOutputItemsPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedOutputVirtualBaseAddressPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)

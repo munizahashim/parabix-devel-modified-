@@ -379,8 +379,6 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
 
-    // Value * strideLength = getInputStrideLength(b, port, stepLength);
-
     const auto prefix = makeBufferName(mKernelId, inputPort);
     Value * const required = addLookahead(b, port, strideLength); assert (required);
     Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
@@ -504,8 +502,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
         return;
     }
 
-    Value * const writable = getWritableOutputItems(b, outputPort, true);
-  //  Value * const required = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], mStrideStepSize);
+    Value * const writable = getWritableOutputItems(b, outputPort);
     Value * const required = getOutputStrideLength(b, outputPort, "getSufficient");
     const auto prefix = makeBufferName(mKernelId, outputPort.Port);
     #ifdef PRINT_DEBUG_MESSAGES
@@ -691,9 +688,6 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 
         b->SetInsertPoint(lastTestExit);
         Value * hasEnough = enoughInputPhi; assert (enoughInputPhi);
-//        if (mHasExhaustedClosedInput) {
-//            hasEnough = b->CreateOr(mHasExhaustedClosedInput, enoughInputPhi);
-//        }
         return b->CreateAnd(hasEnough, nonFinal);
 
     } else {
@@ -706,14 +700,12 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort & port, const bool useOverflow) {
+Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort & port, const bool useOverflow1) {
 
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
-    auto & A = mInternalAccessibleInputItems[inputPort.Number];
-
-    Value * const alreadyComputed = A[useOverflow ? WITH_OVERFLOW : WITHOUT_OVERFLOW];
+    Value * const alreadyComputed = mInternalAccessibleInputItems[inputPort];
     if (alreadyComputed) {
         return alreadyComputed;
     }
@@ -740,16 +732,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     debugPrint(b, prefix + "_processed (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), processed);
     #endif
 
-    Value * overflow = nullptr;
-
-    if (LLVM_LIKELY(useOverflow)) {
-        if (port.Add > 0) {
-            Value * const closed = isClosed(b, streamSet);
-            overflow = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
-        }
-    }
-
-    Value * accessible = buffer->getLinearlyAccessibleItems(b, processed, available, overflow);
+    Value * accessible = buffer->getLinearlyAccessibleItems(b, processed, available);
     #ifndef DISABLE_ZERO_EXTEND
     if (LLVM_UNLIKELY(port.isZeroExtended())) {
         // To zero-extend an input stream, we must first exhaust all input for this stream before
@@ -780,11 +763,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & inputBinding = port.Binding;
-        Value * avail = available;
-        if (overflow) {
-            avail = b->CreateAdd(avail, overflow);
-        }
-        Value * valid = b->CreateICmpULE(processed, avail);
+        Value * valid = b->CreateICmpULE(processed, available);
         Value * const zeroExtended = mIsInputZeroExtended[inputPort];
         if (zeroExtended) {
             valid = b->CreateOr(valid, zeroExtended);
@@ -797,12 +776,7 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
                         b->GetString("getAccessibleInputItems"));
     }
     // cache the values for later use
-    if (useOverflow) {
-        A[WITH_OVERFLOW] = accessible;
-    }
-    if (overflow == nullptr) {
-        A[WITHOUT_OVERFLOW] = accessible;
-    }
+    mInternalAccessibleInputItems[inputPort] = accessible;
     return accessible;
 }
 
@@ -823,15 +797,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     const auto prefix = makeBufferName(mKernelId, outputPort);
     const StreamSetBuffer * const buffer = bn.Buffer;
 
-    getWritableOutputItems(b, port, true);
-
     Value * const required = mLinearOutputItemsPhi[outputPort];
 
     BasicBlock * const expandBuffer = b->CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b->CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
-    const auto beforeExpansion = mInternalWritableOutputItems[outputPort.Number];
+    Value * const beforeExpansion = getWritableOutputItems(b, port);
 
-    Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion[WITH_OVERFLOW]);
+    Value * const hasEnoughSpace = b->CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
@@ -940,15 +912,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         #endif
     }
 
-    auto & afterExpansion = mInternalWritableOutputItems[outputPort.Number];
-    afterExpansion[WITH_OVERFLOW] = nullptr;
-    afterExpansion[WITHOUT_OVERFLOW] = nullptr;
-
-    getWritableOutputItems(b, port, true);
-    if (LLVM_UNLIKELY(beforeExpansion[WITHOUT_OVERFLOW] && (beforeExpansion[WITH_OVERFLOW] != beforeExpansion[WITHOUT_OVERFLOW]))) {
-        getWritableOutputItems(b, port, false);
-    }
-
+    Value * const afterExpansion = getWritableOutputItems(b, port, true);
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & output = getOutputBinding(outputPort);
@@ -957,20 +921,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
                         "%s.%s: required items (%" PRIu64 ") exceeds post-expansion writable items (%" PRIu64 ")",
                         mCurrentKernelName,
                         b->GetString(output.getName()),
-                        required, afterExpansion[WITH_OVERFLOW]);
+                        required, afterExpansion);
     }
-
-
-    assert (beforeExpansion[WITH_OVERFLOW] == nullptr || (beforeExpansion[WITH_OVERFLOW] != afterExpansion[WITH_OVERFLOW]));
-    assert ((beforeExpansion[WITH_OVERFLOW] != nullptr) && (afterExpansion[WITH_OVERFLOW] != nullptr));
-    assert (beforeExpansion[WITHOUT_OVERFLOW] == nullptr || (beforeExpansion[WITHOUT_OVERFLOW] != afterExpansion[WITHOUT_OVERFLOW]));
-    assert ((beforeExpansion[WITHOUT_OVERFLOW] == nullptr) ^ (afterExpansion[WITHOUT_OVERFLOW] != nullptr));
-    assert ((beforeExpansion[WITH_OVERFLOW] != beforeExpansion[WITHOUT_OVERFLOW]) ^ (afterExpansion[WITH_OVERFLOW] == afterExpansion[WITHOUT_OVERFLOW]));
-
-//    #ifdef PRINT_DEBUG_MESSAGES
-//    debugPrint(b, prefix + "_addr' [%" PRIx64 ",%" PRIx64 ")",
-//               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
-//    #endif
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion[WITH_OVERFLOW]);
@@ -981,25 +933,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     b->CreateBr(expanded);
 
     b->SetInsertPoint(expanded);
-
-    IntegerType * const sizeTy = b->getSizeTy();
-    if (afterExpansion[WITH_OVERFLOW]) {
-        PHINode * const phi = b->CreatePHI(sizeTy, 2);
-        phi->addIncoming(beforeExpansion[WITH_OVERFLOW], noExpansionExit);
-        phi->addIncoming(afterExpansion[WITH_OVERFLOW], expandBufferExit);
-        afterExpansion[WITH_OVERFLOW] = phi;
-    }
-
-    if (afterExpansion[WITHOUT_OVERFLOW]) {
-        if (LLVM_LIKELY(beforeExpansion[WITH_OVERFLOW] == beforeExpansion[WITHOUT_OVERFLOW])) {
-            afterExpansion[WITHOUT_OVERFLOW] = afterExpansion[WITH_OVERFLOW];
-        } else {
-            PHINode * const phi = b->CreatePHI(sizeTy, 2);
-            phi->addIncoming(beforeExpansion[WITHOUT_OVERFLOW], noExpansionExit);
-            phi->addIncoming(afterExpansion[WITHOUT_OVERFLOW], expandBufferExit);
-            afterExpansion[WITHOUT_OVERFLOW] = phi;
-        }
-    }
+    PHINode * const phi = b->CreatePHI(b->getSizeTy(), 2);
+    phi->addIncoming(beforeExpansion, noExpansionExit);
+    phi->addIncoming(afterExpansion, expandBufferExit);
+    mInternalWritableOutputItems[outputPort] = phi;
 
 }
 
@@ -1037,14 +974,15 @@ Value * PipelineCompiler::getNumOfWritableStrides(BuilderRef b,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getWritableOutputItems
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort & port, const bool useOverflow) {
+Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort & port, const bool force) {
 
     const auto outputPort = port.Port;
     assert (outputPort.Type == PortType::Output);
 
-    auto & W = mInternalWritableOutputItems[outputPort.Number];
-    Value * const alreadyComputed = W[useOverflow ? WITH_OVERFLOW : WITHOUT_OVERFLOW];
-    if (alreadyComputed) {
+    const auto useOverflow = false;
+
+    Value * const alreadyComputed = mInternalWritableOutputItems[outputPort];
+    if (alreadyComputed && !force) {
         return alreadyComputed;
     }
 
@@ -1086,12 +1024,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
                             b->GetString(output.getName()),
                             consumed, produced);
         }
-
-        if (useOverflow && port.Add) {
-            overflow = b->getSize(port.Add);
-        }
-
-        writable = buffer->getLinearlyWritableItems(b, produced, consumed, overflow);
+        writable = buffer->getLinearlyWritableItems(b, produced, consumed);
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -1099,12 +1032,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     #endif
 
     // cache the values for later use
-    if (useOverflow) {
-        W[WITH_OVERFLOW] = writable;
-    }
-    if (overflow == nullptr) {
-        W[WITHOUT_OVERFLOW] = writable;
-    }
+    mInternalWritableOutputItems[outputPort] = writable;
     return writable;
 }
 
@@ -1504,14 +1432,14 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     if (port.Type == PortType::Input) {
         initialItemCount = mCurrentProcessedItemCountPhi[port];
-        Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
+        Value * const accessible = getAccessibleInputItems(b, partialSumPort);
         currentItemCount = accessible;
         sourceItemCount = b->CreateAdd(initialItemCount, accessible);
         minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
-        Value * const writable = getWritableOutputItems(b, partialSumPort, true);
+        Value * const writable = getWritableOutputItems(b, partialSumPort);
         currentItemCount = writable;
         sourceItemCount = b->CreateAdd(initialItemCount, writable);
         minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
