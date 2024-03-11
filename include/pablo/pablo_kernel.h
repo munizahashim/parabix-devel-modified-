@@ -125,6 +125,8 @@ public:
         std::free(ptr);
     }
 
+    bool isCachable() const override;
+
     String * makeName(const llvm::StringRef prefix) const;
 
     Integer * getInteger(const int64_t value, unsigned intWidth = 64) const;

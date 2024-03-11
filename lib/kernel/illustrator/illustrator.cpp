@@ -484,8 +484,8 @@ inline void displayCapturedData(const size_t blockWidth) const {
                                 add_edge(priorIndex, u, D);
                                 B.emplace(key, u);
                             } else {
-                                assert (edge(priorIndex, u, D).second);
                                 u = f->second;
+                                assert (edge(priorIndex, u, D).second);
                             }
                             priorIndex = u;
                         }

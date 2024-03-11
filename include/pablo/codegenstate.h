@@ -373,12 +373,6 @@ public:
 
     void print(llvm::raw_ostream & O, const bool expandNested = true) const;
 
-    void captureByteData(llvm::StringRef streamName, PabloAST * byteData, const char nonASCIIsubstitute = '.');
-
-    void captureBitstream(llvm::StringRef streamName, PabloAST * bitstream, const char zeroCh = '.', const char oneCh = '1');
-
-    void captureBixNum(llvm::StringRef streamName, PabloAST * bixnum, const char hexBase = 'A');
-
     virtual ~PabloBlock() {}
 
 protected:

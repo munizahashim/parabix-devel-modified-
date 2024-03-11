@@ -16,17 +16,18 @@ SRC
     compressed_carry_manager.cpp
     distributivepass.cpp
     flattenif.cpp
+    pabloAST.cpp
     # pablo_automultiplexing.cpp # TODO: use source variable
-    passes.cpp
     pablo_compiler.cpp
+    pablo_illustratorpass.cpp
     pablo_kernel.cpp
     pablo_simplifier.cpp
-    pabloAST.cpp
+    pablo_toolchain.cpp
     pabloverifier.cpp
+    passes.cpp
     printer_pablos.cpp
     schedulingprepass.cpp
     symbol_generator.cpp
-    pablo_toolchain.cpp
 DEPS
     kernel.core
     toolchain

@@ -25,7 +25,6 @@ const cl::OptionCategory * pablo_toolchain_flags() {
     return &PabloOptions;
 }
     
-    
 static cl::bits<PabloDebugFlags> 
 DebugOptions(cl::desc("Pablo Debug Flags"),
              cl::values(clEnumVal(VerifyPablo, "Run the Pablo verifier"),
@@ -72,6 +71,12 @@ std::string BitMovementMode_string(BitMovementMode m) {
     if (m == BitMovementMode::Advance) return "Advance";
     else return "LookAhead";
 }
+
+
+std::string PabloIllustrateBitstreamRegEx = "";
+static cl::opt<std::string, true> PabloIllustrateBitstreamOption("pablo-illustrate-bitstream", cl::location(PabloIllustrateBitstreamRegEx), cl::ValueOptional,
+                                                         cl::desc("RegEx describing Pablo statement names to illustrate"), cl::value_desc("regex"), cl::cat(PabloOptions));
+
 
 bool DebugOptionIsSet(const PabloDebugFlags flag) {return DebugOptions.isSet(flag);}
     

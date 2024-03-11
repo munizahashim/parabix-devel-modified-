@@ -179,6 +179,10 @@ void PabloKernel::addInternalProperties(BuilderRef b) {
     mStreamTy = nullptr;
 }
 
+bool PabloKernel::isCachable() const {
+    return !codegen::EnableIllustrator;
+}
+
 void PabloKernel::linkExternalMethods(BuilderRef b) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         assert (mSharedStateType);

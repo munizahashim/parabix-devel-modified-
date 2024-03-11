@@ -1487,9 +1487,6 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        buffer << "_Illustrator";
-    }
     buffer.flush();
     return name;
 }

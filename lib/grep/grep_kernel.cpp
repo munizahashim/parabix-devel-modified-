@@ -518,7 +518,6 @@ void UTF8_index::generatePabloMethod() {
     it.createAssign(nonFinal, it.createAnd(nonFinal, u8valid));
 
     Var * const u8index = getOutputStreamVar("u8index");
-    pb.createIllustrateBitstream(u8index, "u8");
     PabloAST * u8final = pb.createInFile(pb.createNot(nonFinal));
     if (getNumOfStreamInputs() > 1) {
         u8final = pb.createOr(u8final, getInputStreamSet("u8_LB")[0]);

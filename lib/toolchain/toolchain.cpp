@@ -139,7 +139,6 @@ static cl::opt<bool, true> TraceObjectCacheOption("trace-object-cache", cl::loca
 static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""),
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
-
 bool EnableDynamicMultithreading;
 static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
@@ -325,6 +324,9 @@ void ParseCommandLineOptions(int argc, const char * const *argv, std::initialize
     }
 #endif
     cl::ParseCommandLineOptions(argc, argv);
+//    if (LLVM_UNLIKELY(!PabloIllustrateBitstreamRegEx.empty() || IllustratorDisplay != 0)) {
+//        EnableIllustrator = true;
+//    }
     if (disableObjectCacheDueToCommandLineOptions()) {
         EnableObjectCache = false;
     } else if (disablePipelineObjectCacheDueToCommandLineOptions()) {

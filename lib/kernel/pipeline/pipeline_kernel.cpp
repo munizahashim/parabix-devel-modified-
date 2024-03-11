@@ -479,7 +479,7 @@ std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(Builde
  * @brief isCachable
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineKernel::isCachable() const {
-    return codegen::EnablePipelineObjectCache;
+    return codegen::EnablePipelineObjectCache && !codegen::EnableIllustrator;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
