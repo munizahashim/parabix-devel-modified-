@@ -380,7 +380,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
-    Value * const required = addLookahead(b, port, strideLength); assert (required);
+
     Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -390,7 +390,7 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     #endif
 
 
-    Value * minimum = required;
+    Value * minimum = strideLength;
     if (mPrincipalFixedRateFactor && port.isFixed()) {
         assert (!port.isPrincipal());
         const Binding & input = port.Binding;
@@ -398,8 +398,9 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
         const auto factor = rate.getRate() / mFixedRateLCM;
         minimum = b->CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
     }
+    Value * const required = addLookahead(b, port, minimum); assert (required);
 
-    Value * hasEnough = b->CreateICmpUGE(accessible, minimum);
+    Value * hasEnough = b->CreateICmpUGE(accessible, required);
 \
     if (LLVM_LIKELY(mIsPartitionRoot)) { // && !port.isZeroExtended()
         if (mAnyClosed) {
@@ -511,8 +512,6 @@ void PipelineCompiler::checkForSufficientOutputSpace(BuilderRef b, const BufferP
     #endif
     Value * hasEnough = b->CreateICmpULE(required, writable, prefix + "_hasEnough");
 
-
-
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * closed = isClosed(b, id);
@@ -567,23 +566,10 @@ Value * PipelineCompiler::checkIfInputIsExhausted(BuilderRef b, InputExhaustionR
                 continue;
             }
             Value * const closed = isClosed(b, streamSet); assert (closed);
-            Value * fullyConsumed = closed;
-            if (!bn.IsLinear) {
-                Value * const processed = mCurrentProcessedItemCountPhi[br.Port];
-                Value * const accessible = getAccessibleInputItems(b, br);
-                Value * const total = b->CreateAdd(processed, accessible);
-                Value * const avail = mLocallyAvailableItems[streamSet];
-                Value * const fullyReadable = b->CreateICmpEQ(total, avail);
-                fullyConsumed = b->CreateAnd(closed, fullyReadable);
-            }
             if (resultVal) {
-                if (returnValType == InputExhaustionReturnType::Conjunction) {
-                    resultVal = b->CreateAnd(resultVal, closed);
-                } else {
-                    resultVal = b->CreateOr(resultVal, closed);
-                }
+                resultVal = b->CreateAnd(resultVal, closed);
             } else {
-                resultVal = fullyConsumed;
+                resultVal = closed;
             }
         }
         assert (resultVal && "non-zero-extended stream is required");
@@ -606,6 +592,29 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
     if (mIsPartitionRoot) {
 
         ConstantInt * const i1_FALSE = b->getFalse();
+
+        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
+        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
+
+        bool anyNonCountable = false;
+
+        for (auto ei = ei_begin; ei != ei_end; ++ei) {
+            const BufferPort & port =  mBufferGraph[*ei];
+            if (port.canModifySegmentLength()) {
+                const auto streamSet = source(*ei, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(bn.isConstant())) {
+                    continue;
+                }
+                const Binding & binding = port.Binding;
+                if (isCountable(binding)) {
+                    continue;
+                }
+                anyNonCountable = true;
+                break;
+            }
+        }
+
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
 
         BasicBlock * const nextNode = b->GetInsertBlock()->getNextNode();
@@ -613,73 +622,79 @@ Value * PipelineCompiler::hasMoreInput(BuilderRef b) {
         BasicBlock * const lastTestExit = b->CreateBasicBlock("", nextNode);
         PHINode * const enoughInputPhi = PHINode::Create(b->getInt1Ty(), 4, "", lastTestExit);
 
-        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
-        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
-
         Value * enoughInput = b->CreateAnd(notAtSegmentLimit, nonFinal);
-
-        // Value * const nextStrideIndex = b->CreateAdd(mUpdatedNumOfStrides, mStrideStepSize);
 
         Value * const nextStrideIndex = b->CreateAdd(mNumOfLinearStrides, mStrideStepSize);
 
         bool isFirstCheck = true;
 
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
-
-            const auto streamSet = source(*ei, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.isConstant())) continue;
             const BufferPort & port =  mBufferGraph[*ei];
-            const Binding & binding = port.Binding;
-            const ProcessingRate & rate = binding.getRate();
+            if (port.canModifySegmentLength()) {
+                const auto streamSet = source(*ei, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(bn.isConstant())) {
+                    continue;
+                }
 
-            // If the next rate we check is a PartialSum, always check it; otherwise we expect that
-            // if this test passes the first check, it will pass the remaining ones so don't bother
-            // creating a branch for the remaining checks.
+                const Binding & binding = port.Binding;
+                const ProcessingRate & rate = binding.getRate();
 
-            Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
-            Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
+                // If the next rate we check is a PartialSum, always check it; otherwise we expect that
+                // if this test passes the first check, it will pass the remaining ones so don't bother
+                // creating a branch for the remaining checks.
 
-            if (rate.isPartialSum() || isFirstCheck) {
-                BasicBlock * const nextTest = b->CreateBasicBlock("", lastTestExit);
-                enoughInputPhi->addIncoming(i1_FALSE, b->GetInsertBlock());
-                b->CreateLikelyCondBr(enoughInput, nextTest, lastTestExit);
-                b->SetInsertPoint(nextTest);
-                enoughInput = nullptr;
-                isFirstCheck = false;
-            }
+                Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
+                Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
 
-            Value * const closed = isClosed(b, streamSet);
+                if (rate.isPartialSum() || isFirstCheck) {
+                    BasicBlock * const nextTest = b->CreateBasicBlock("", lastTestExit);
+                    enoughInputPhi->addIncoming(i1_FALSE, b->GetInsertBlock());
+                    b->CreateUnlikelyCondBr(enoughInput, nextTest, lastTestExit);
 
-            if (LLVM_UNLIKELY(port.isZeroExtended())) {
-                avail = b->CreateSelect(closed, MAX_INT, avail);
-            } else if (port.Add) {
-                ConstantInt * const ADD = b->getSize(port.Add);
-                ConstantInt * const ZERO = b->getSize(0);
-                Value * const added = b->CreateSelect(closed, ADD, ZERO);
-                avail = b->CreateAdd(avail, added);
-            }
+                    b->SetInsertPoint(nextTest);
+                    enoughInput = nullptr;
+                    isFirstCheck = false;
+                }
 
-            if (LLVM_UNLIKELY(CheckAssertions)) {
-                const Binding & inputBinding = port.Binding;
-                Value * valid = b->CreateICmpULE(processed, avail);
-                b->CreateAssert(valid,
-                                "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
-                                mCurrentKernelName,
-                                b->GetString(inputBinding.getName()),
-                                processed, avail,
-                                b->GetString("hasMoreInput"));
-            }
+                Value * const closed = isClosed(b, streamSet);
 
-            Value * const remaining = b->CreateSub(avail, processed, "remaining");
-            Value * nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
-            Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-            Value * const hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
+                Value * hasEnough = closed;
 
-            if (enoughInput) {
-                enoughInput = b->CreateAnd(enoughInput, hasEnough);
-            } else {
-                enoughInput = hasEnough;
+                if (anyNonCountable) {
+
+                    if (LLVM_UNLIKELY(port.isZeroExtended())) {
+                        avail = b->CreateSelect(closed, MAX_INT, avail);
+                    } else if (port.Add) {
+                        ConstantInt * const ADD = b->getSize(port.Add);
+                        ConstantInt * const ZERO = b->getSize(0);
+                        Value * const added = b->CreateSelect(closed, ADD, ZERO);
+                        avail = b->CreateAdd(avail, added);
+                    }
+
+                    if (LLVM_UNLIKELY(CheckAssertions)) {
+                        const Binding & inputBinding = port.Binding;
+                        Value * valid = b->CreateICmpULE(processed, avail);
+                        b->CreateAssert(valid,
+                                        "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
+                                        mCurrentKernelName,
+                                        b->GetString(inputBinding.getName()),
+                                        processed, avail,
+                                        b->GetString("hasMoreInput"));
+                    }
+
+                    Value * const remaining = b->CreateSub(avail, processed, "remaining");
+                    Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
+                    Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+                    hasEnough = b->CreateOr(closed, b->CreateICmpUGE(remaining, required));
+                }
+
+                if (enoughInput) {
+                    enoughInput = b->CreateAnd(enoughInput, hasEnough);
+                } else {
+                    enoughInput = hasEnough;
+                }
+
             }
 
         }

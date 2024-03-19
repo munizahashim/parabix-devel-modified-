@@ -1249,7 +1249,13 @@ int32_t GrepEngine::openFile(const std::string & fileName, std::ostringstream & 
     }
     else {
         struct stat sb;
-        int32_t fileDescriptor = open(fileName.c_str(), O_RDONLY);
+        int flags = O_RDONLY;
+        #ifdef __linux__
+        if (NoOSFileCaching) {
+            flags |= O_DIRECT;
+        }
+        #endif
+        int32_t fileDescriptor = open(fileName.c_str(), flags);
         if (LLVM_UNLIKELY(fileDescriptor == -1)) {
             if (!mSuppressFileMessages) {
                 if (errno == EACCES) {
@@ -1271,6 +1277,12 @@ int32_t GrepEngine::openFile(const std::string & fileName, std::ostringstream & 
             close(fileDescriptor);
             return -1;
         }
+        #ifdef __APPLE__
+        if (NoOSFileCaching) {
+            fcntl(fileDescriptor, F_NOCACHE, 1);
+            fcntl(fileDescriptor, F_RDAHEAD, 0);
+        }
+        #endif
         if (TraceFiles) {
             llvm::errs() << "Opened " << fileName << ".\n";
         }

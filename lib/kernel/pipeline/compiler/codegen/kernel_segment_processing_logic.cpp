@@ -32,10 +32,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     mAllowDataParallelExecution = mCurrentKernelIsStateFree;
     #endif
     #endif
-    identifyPipelineInputs(mKernelId);
 
-    mIsBounded = isBounded();
-    mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];

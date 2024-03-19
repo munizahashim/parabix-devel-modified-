@@ -549,16 +549,15 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         b->CreateCondBr(notDone, maskLoop, maskExit);
 
         b->SetInsertPoint(maskExit);
+
         // Zero out any blocks we could potentially touch
-        Rational strideLength{0};
+        const BufferPort & rd = mBufferGraph[e];
+        auto strideLength = rd.Maximum + rd.Add;
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];
-            const Binding & input = rd.Binding;
-            Rational R{rd.Maximum};
-            if (LLVM_UNLIKELY(input.hasLookahead())) {
-                R += input.getLookahead();
-            }
-            strideLength = std::max(strideLength, R);
+            const auto d = std::max(rd.LookAhead, rd.Add);
+            const auto r = rd.Maximum + d;
+            strideLength = std::max(strideLength, r);
         }
 
         const auto blocksToZero = ceiling(Rational{strideLength.numerator(), blockWidth * strideLength.denominator()});

@@ -13,6 +13,13 @@
 #include <toolchain/toolchain.h>
 #include <boost/interprocess/mapped_region.hpp>
 #include <llvm/Support/raw_ostream.h>
+#include <unistd.h>
+
+#ifdef __APPLE__
+#define PREAD pread
+#else
+#define PREAD pread64
+#endif
 
 using namespace llvm;
 
@@ -179,6 +186,10 @@ void MMapSourceKernel::linkExternalMethods(BuilderRef b) {
 
 /// READ SOURCE KERNEL
 
+void ReadSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
+    b->LinkFunction("read", read);
+}
+
 void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
     ConstantInt * const bufferItems = b->getSize(stride * 4);
     const auto codeUnitSize = codeUnitWidth / 8;
@@ -311,7 +322,15 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     producedSoFar->addIncoming(produced, entryBB);
     producedSoFar->addIncoming(produced, prepareBuffer);
     Value * const sourceBuffer = b->getRawOutputPointer("sourceBuffer", producedSoFar);
-    Value * const bytesRead = b->CreateReadCall(fd, sourceBuffer, bytesToRead);
+
+    FixedArray<Value *, 3> args;
+    args[0] = fd;
+    args[1] = sourceBuffer;
+    args[2] = bytesToRead;
+//    args[3] = producedSoFar;
+    Function *  const preadFunc = b->getModule()->getFunction("read");
+    Value * const bytesRead = b->CreateCall(preadFunc, args);
+
     // There are 4 possibile results from read:
     // bytesRead == -1: an error occurred
     // bytesRead == 0: EOF, no bytes read
@@ -351,6 +370,10 @@ Value * ReadSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUn
     Function * const fileSizeFn = b->getModule()->getFunction("file_size"); assert (fileSizeFn);
     FunctionType * fTy = fileSizeFn->getFunctionType();
     return b->CreateZExtOrTrunc(b->CreateCall(fTy, fileSizeFn, fd), b->getSizeTy());
+}
+
+void ReadSourceKernel::linkExternalMethods(BuilderRef b) {
+    ReadSourceKernel::generatLinkExternalFunctions(b);
 }
 
 /// Hybrid MMap/Read source kernel
@@ -446,6 +469,7 @@ Value * FDSourceKernel::generateExpectedOutputSizeMethod(BuilderRef b) {
 
 void FDSourceKernel::linkExternalMethods(BuilderRef b) {
     MMapSourceKernel::generatLinkExternalFunctions(b);
+    ReadSourceKernel::generatLinkExternalFunctions(b);
 }
 
 /// MEMORY SOURCE KERNEL

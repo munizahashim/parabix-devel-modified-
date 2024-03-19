@@ -608,6 +608,14 @@ Value * CBuilder::CreateAnonymousMMap(Value * size, const unsigned flags) {
     return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, intflags, fd, offset);
 }
 
+#if __linux__
+#include <linux/version.h>
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,22)
+#undef MAP_POPULATE_FLAGS
+#define HAS_MAP_POPULATE
+#endif
+#endif
+
 Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
     PointerType * const voidPtrTy = getVoidPtrTy();
     IntegerType * const intTy = getInt32Ty();
@@ -615,7 +623,12 @@ Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
     IntegerType * const sizeTy = getSizeTy();
     size = CreateZExtOrTrunc(size, sizeTy);
     ConstantInt * const prot =  ConstantInt::get(intTy, PROT_READ);
-    ConstantInt * const flags =  ConstantInt::get(intTy, MAP_PRIVATE);
+    #ifdef HAS_MAP_POPULATE
+    #define MMAP_FLAGS MAP_POPULATE|MAP_NONBLOCK|MAP_PRIVATE
+    #else
+    #define MMAP_FLAGS MAP_PRIVATE
+    #endif
+    ConstantInt * const flags =  ConstantInt::get(intTy, MMAP_FLAGS);
     Constant * const offset = ConstantInt::get(sizeTy, 0);
     return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, flags, fd, offset);
 }

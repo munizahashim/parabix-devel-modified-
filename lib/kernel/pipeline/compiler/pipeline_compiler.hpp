@@ -237,8 +237,6 @@ public:
 
     void determinePartitionStrideRateScalingFactor();
 
-    bool hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const;
-
     void writePartitionEntryIOGuard(BuilderRef b);
     Value * calculatePartitionSegmentLength(BuilderRef b);
 
@@ -291,7 +289,6 @@ public:
     };
 
     Value * checkIfInputIsExhausted(BuilderRef b, InputExhaustionReturnType returnValType);
-    void determineIsFinal(BuilderRef b, Value * const numOfLinearStrides);
     Value * hasMoreInput(BuilderRef b);
 
     struct FinalItemCount {
@@ -469,13 +466,6 @@ public:
 
     void simplifyPhiNodes(Module * const m) const;
     void replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock *& toReplace, BasicBlock * const phiContainer);
-
-// kernel config functions
-
-    bool isBounded() const;
-    bool requiresExplicitFinalStride() const ;
-    void identifyPipelineInputs(const unsigned kernelId);
-    void identifyLocalPortIds(const unsigned kernelId);
 
 // synchronization functions
 
@@ -684,12 +674,6 @@ protected:
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
 
-    Value *                                     mMinimumNumOfThreads = nullptr;
-    Value *                                     mMaximumNumOfThreads = nullptr;
-    Value *                                     mBufferSegments = nullptr;
-    Value *                                     mDynamicMultithreadingSegmentsPerCheck = nullptr;
-    Value *                                     mDynamicMultithreadingAdditionalThreadSynchronizationThreshold = nullptr;
-
     BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
@@ -791,16 +775,12 @@ protected:
     Value *                                     mAnyClosed = nullptr;
     Value *                                     mPrincipalFixedRateFactor = nullptr;
     Value *                                     mHasExhaustedClosedInput = nullptr;
-    BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
     Value *                                     mBranchToLoopExit = nullptr;
 
-
-    bool                                        mIsBounded = false;
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
-    bool                                        mHasExplicitFinalPartialStride = false;
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
@@ -876,7 +856,7 @@ protected:
     FixedArray<Value *, TOTAL_NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
 
     // dynamic multithreading cycle counter state
-    Value *                                     mFullSegmentStartTime = nullptr;
+//    Value *                                     mFullSegmentStartTime = nullptr;
     Value *                                     mAccumulatedSynchronizationTimePtr = nullptr;
 
     // papi counter state
@@ -1017,8 +997,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mIsInputZeroExtended(P.MaxNumOfInputPorts, mAllocator)
 , mInputVirtualBaseAddressPhi(P.MaxNumOfInputPorts, mAllocator)
 , mFirstInputStrideLength(P.MaxNumOfInputPorts, mAllocator)
-, mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
 , mInternalAccessibleInputItems(P.MaxNumOfInputPorts, mAllocator)
+, mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)

@@ -218,8 +218,9 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     const auto producer = source(pe, mBufferGraph);
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto prefix = makeBufferName(producer, rd.Port);
-                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ")",
-                               buffer->getMallocAddress(b), buffer->getOverflowAddress(b));
+                    Value * start = buffer->getMallocAddress(b);
+                    Value * end = b->CreateGEP(addr, buffer->getCapacity(b));
+                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ")", start, end);
                     #endif
 
                 }
@@ -626,6 +627,8 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
 
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
 
+    DataLayout DL(b->getModule());
+
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -646,6 +649,10 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
+
+//            Rational scale{b->getTypeSize(DL, buffer->getType()), b->getBitBlockWidth()};
+//            Value * const producedBytes = b->CreateMulRational(produced, scale);
+
             Constant * const bytesPerPack = b->getTypeSize(buffer->getType());
             Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
 

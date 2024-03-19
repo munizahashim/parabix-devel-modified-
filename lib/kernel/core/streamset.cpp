@@ -14,6 +14,7 @@
 #include <llvm/Support/Format.h>
 #include <llvm/ADT/Twine.h>
 #include <boost/intrusive/detail/math.hpp>
+#include <boost/interprocess/mapped_region.hpp>
 #include <llvm/Analysis/ConstantFolding.h>
 
 #include <array>
@@ -28,6 +29,10 @@
 #include <fcntl.h>
 
 // #include <sys/memfd.h>
+
+inline unsigned getPageSize() {
+    return boost::interprocess::mapped_region::get_page_size();
+}
 
 inline static int create_memfd() {
 #if defined(__FreeBSD__)
@@ -55,7 +60,7 @@ return fd;
 
 uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
 
-    assert ((size % getpagesize()) == 0);
+    assert ((size % getPageSize()) == 0);
 
     const auto memfd = create_memfd();
     if (memfd == -1) {
@@ -799,7 +804,7 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         ConstantInt * typeSize = b->getTypeSize(mType);
 
         Module * m = b->getModule();
-        Rational stepSize{getpagesize(), typeSize->getLimitedValue()};
+        Rational stepSize{getPageSize(), typeSize->getLimitedValue()};
         capacity = b->CreateRoundUp(capacity, b->getSize(stepSize.numerator()));
         Value * capacityBytes = b->CreateMul(typeSize, capacity);
 
@@ -1424,7 +1429,7 @@ Value * MMapedBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value * 
     Value * const virtualBaseInt = b->CreatePtrToInt(virtualBase, intPtrTy);
     Value * startOfUsedBuffer = b->CreatePtrToInt(b->CreateInBoundsGEP(mType, virtualBase, consumedChunks), intPtrTy);
     Value * unnecessaryBytes = b->CreateSub(startOfUsedBuffer, virtualBaseInt);
-    unnecessaryBytes = b->CreateRoundDown(unnecessaryBytes, b->getSize(b->getPageSize()));
+    unnecessaryBytes = b->CreateRoundDown(unnecessaryBytes, b->getSize(getPageSize()));
     // assume that we can always discard memory
     b->CreateMAdvise(virtualBase, unnecessaryBytes, MADV_DONTNEED);
 
