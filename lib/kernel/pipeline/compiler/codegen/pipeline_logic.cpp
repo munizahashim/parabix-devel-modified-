@@ -323,14 +323,12 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
+
     Value * bufferSize = expectedNumOfStrides;
     if (!mIsNestedPipeline) {
         Value * const threadCount = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
         bufferSize = b->CreateMul(bufferSize, threadCount);
     }
-
-
-
 
     bool hasAnyReturnedBuffer = false;
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {

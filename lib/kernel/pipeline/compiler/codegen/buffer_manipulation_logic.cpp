@@ -498,10 +498,6 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, sz_ZERO, sz_ZERO, sz_ZERO);
-        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
-        #endif
         BasicBlock * const entry = b->GetInsertBlock();
         b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
 

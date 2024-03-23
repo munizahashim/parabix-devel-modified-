@@ -504,6 +504,32 @@ void PipelineAnalysis::identifyLinearBuffers() {
         }
     }
 
+    #if defined(FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR) || defined(FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR)
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & N = mBufferGraph[streamSet];
+        if (N.isConstant()) continue;
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto partId = KernelPartitionId[producer];
+        bool isIntraPartition = true;
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            if (KernelPartitionId[consumer] != partId) {
+                isIntraPartition = false;
+                break;
+            }
+        }
+        if (isIntraPartition) {
+        #ifdef FORCE_ALL_INTRA_PARTITION_STREAMSETS_TO_BE_LINEAR
+            N.IsLinear = true;
+        #endif
+        } else {
+        #ifdef FORCE_ALL_INTER_PARTITION_STREAMSETS_TO_BE_LINEAR
+            N.IsLinear = true;
+        #endif
+        }
+    }
+    #endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -629,7 +655,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
-    const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
+//    const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
@@ -656,35 +682,12 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
                 // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
                 // analyze any consumption rates.
 
-
-
-
-
-                //if (bn.Locality == BufferLocality::GloballyShared) {
-                    // TODO: we can make some buffers static despite crossing a partition but only if we can guarantee
-                    // an upper bound to the buffer size for all potential inputs. Build a dataflow analysis to
-                    // determine this.
-                    //auto mult = mNumOfThreads + 1U;
-                    auto bufferSize = bn.RequiredCapacity;
-                    assert (bufferSize > 0);
-                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                    #endif
-//                    if (useMMap) {
-//                        buffer = new MMapedBuffer(streamSet, b, output.getType(), bufferSize, 0, bn.RequiresUnderflow, bn.IsLinear, 0U);
-//                    } else {
-                        buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
-//                    }
-
-
-//                } else {
-//                    auto bufferSize = bn.RequiredCapacity;
-//                    bufferSize *= (mNumOfThreads + 1U);
-//                    #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-//                    bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-//                    #endif
-//                    buffer = new StaticBuffer(streamSet, b, output.getType(), bufferSize, bn.OverflowCapacity, bn.UnderflowCapacity, bn.IsLinear, 0U);
-//                }
+                auto bufferSize = bn.RequiredCapacity;
+                assert (bufferSize > 0);
+                #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+                bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+                #endif
+                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
             }
         }
         assert ("missing buffer?" && buffer);

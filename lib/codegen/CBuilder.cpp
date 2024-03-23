@@ -1557,7 +1557,7 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(Val->getType()), "CreateStore");
     }
-    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     Val = IRBuilder<>::CreateBitCast(Val, Ptr->getType()->getPointerElementType());
     #endif
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);

@@ -15,6 +15,7 @@
 #include <llvm/ADT/Twine.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <boost/interprocess/mapped_region.hpp>
+#include <boost/integer/common_factor_rt.hpp>
 #include <llvm/Analysis/ConstantFolding.h>
 
 #include <array>
@@ -272,10 +273,12 @@ Type * StreamSetBuffer::resolveType(BuilderPtr b, Type * const streamSetType) {
  ** ------------------------------------------------------------------------------------------------------------- */
 constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
 constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
+// constexpr char __GET_LCM[] = "__get_lcm";
 
 void StreamSetBuffer::linkFunctions(BuilderPtr b) {
 b->LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
 b->LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
+// b->LinkFunction(__GET_LCM, boost::lcm<size_t>);
 }
 
 // External Buffer
@@ -429,13 +432,12 @@ Value * InternalBuffer::getLinearlyWritableItems(BuilderPtr b, Value * const pro
         return b->CreateSub(capacity, producedItems);
      } else {
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-            Value * const total = b->CreateAdd(capacity, consumedItems);
-            Value * const valid = b->CreateICmpULE(producedItems, total);
-            b->CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds total (%" PRIu64 ").",
-                            producedItems, total);
+            Value * const valid = b->CreateICmpULE(consumedItems, producedItems);
+            b->CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
+                            consumedItems, producedItems);
         }
         Value * const unconsumedItems = b->CreateSub(producedItems, consumedItems);
-        return b->CreateSaturatingSub(capacity, unconsumedItems);
+        return b->CreateSub(capacity, unconsumedItems);
     }
 }
 
@@ -739,7 +741,7 @@ StructType * DynamicBuffer::getHandleType(BuilderPtr b) const {
         auto & C = b->getContext();
         PointerType * const typePtr = getPointerType();
         IntegerType * const sizeTy = b->getSizeTy();
-        FixedArray<Type *, 5> types;
+        FixedArray<Type *, 4> types;
 
         types[BaseAddress] = typePtr;
         types[InternalCapacity] = sizeTy;
@@ -747,12 +749,10 @@ StructType * DynamicBuffer::getHandleType(BuilderPtr b) const {
         if (mLinear) {
             types[MallocedAddress] = typePtr;
             types[EffectiveCapacity] = sizeTy;
-            types[InitialConsumedCount] = sizeTy;
         } else {
             Type * const emptyTy = StructType::get(C);
             types[MallocedAddress] = emptyTy;
             types[EffectiveCapacity] = emptyTy;
-            types[InitialConsumedCount] = emptyTy;
         }
 
         mHandleType = StructType::get(C, types);
@@ -782,7 +782,6 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
     Value * const capacityField = b->CreateInBoundsGEP(mHandleType, handle, indices);
 
     if (mLinear) {
-
         Value * baseAddress = b->CreatePageAlignedMalloc(mType, capacity, mAddressSpace);
         b->CreateStore(baseAddress, baseAddressField);
         b->CreateStore(capacity, capacityField);
@@ -795,18 +794,15 @@ void DynamicBuffer::allocateBuffer(BuilderPtr b, Value * const capacityMultiplie
         Value * const effCapacityField = b->CreateInBoundsGEP(mHandleType, handle, indices);
         b->CreateStore(capacity, effCapacityField);
 
-        indices[1] = b->getInt32(InitialConsumedCount);
-        Value * const reqSegNoField = b->CreateInBoundsGEP(mHandleType, handle, indices);
-        b->CreateStore(b->getSize(0), reqSegNoField);
-
     } else {
 
-        ConstantInt * typeSize = b->getTypeSize(mType);
-
         Module * m = b->getModule();
-        Rational stepSize{getPageSize(), typeSize->getLimitedValue()};
-        capacity = b->CreateRoundUp(capacity, b->getSize(stepSize.numerator()));
-        Value * capacityBytes = b->CreateMul(typeSize, capacity);
+        DataLayout DL(m);
+
+        const auto typeSize = b->getTypeSize(DL, mType);
+        Rational stridesPerPage{getPageSize(), typeSize};
+        capacity = b->CreateRoundUpRational(capacity, stridesPerPage.numerator());
+        Value * capacityBytes = b->CreateMul(b->getSize(typeSize), capacity);
 
         FixedArray<Value *, 2> makeArgs;
         makeArgs[0] = capacityBytes;
@@ -881,7 +877,6 @@ Value * DynamicBuffer::modByCapacity(BuilderPtr b, Value * const offset) const {
         indices[1] = b->getInt32(InternalCapacity);
         Value * const capacityPtr = b->CreateInBoundsGEP(mHandleType, getHandle(), indices);
         Value * const capacity = b->CreateLoad(b->getSizeTy(), capacityPtr);
-        assert (capacity->getType()->isIntegerTy());
         return b->CreateURem(offset, capacity);
     }
 }
@@ -894,7 +889,6 @@ Value * DynamicBuffer::getCapacity(BuilderPtr b) const {
     Value * ptr = b->CreateInBoundsGEP(mHandleType, getHandle(), indices);
     ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
     Value * const capacity = b->CreateLoad(b->getSizeTy(), ptr);
-    assert (capacity->getType()->isIntegerTy());
     return b->CreateMul(capacity, BLOCK_WIDTH, "capacity");
 }
 
@@ -947,7 +941,7 @@ Value * DynamicBuffer::requiresExpansion(BuilderPtr b, Value * produced, Value *
         return b->CreateICmpUGT(requiresUpToPosition, startOfUsedBuffer);
 
     } else { // Circular
-        return b->getTrue();
+        return nullptr;
     }
 
 }
@@ -1014,8 +1008,6 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             produced->setName("produced");
             Value * const consumed = nextArg();
             consumed->setName("consumed");
-//            Value * const requiredSegNoBeforeAnotherCopyBack = nextArg();
-//            requiredSegNoBeforeAnotherCopyBack->setName("requiredSegNoBeforeAnotherCopyBack");
             assert (arg == func->arg_end());
 
             setHandle(handle);
@@ -1056,9 +1048,7 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(mHandleType, handle, indices);
             b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
-            indices[1] = b->getInt32(InitialConsumedCount);
-            Value * const initialConsumedField = b->CreateInBoundsGEP(mHandleType, handle, indices);
-            b->CreateAlignedStore(consumedChunks, initialConsumedField, sizeTyWidth);
+
             b->CreateRetVoid();
 
             b->restoreIP(ip);
@@ -1215,39 +1205,36 @@ Value * DynamicBuffer::expandBuffer(BuilderPtr b, Value * const produced, Value 
             Value * const effectiveCapacity = b->CreateAdd(consumedChunks, newInternalCapacity);
             indices[1] = b->getInt32(EffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(handleTy, handle, indices);
-            b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
-            Value * const newVirtualAddress = b->CreateGEP(mType, expandedBuffer, b->CreateNeg(consumedChunks));
-            b->CreateAlignedStore(newVirtualAddress, virtualBaseField, sizeTyWidth);
 
-            indices[1] = b->getInt32(InitialConsumedCount);
-            Value * const initConsumedField = b->CreateInBoundsGEP(handleTy, handle, indices);
-            b->CreateAlignedStore(consumedChunks, initConsumedField, sizeTyWidth);
+            Value * const newVirtualAddress = b->CreateGEP(mType, expandedBuffer, b->CreateNeg(consumedChunks));
+
+            b->CreateAlignedStore(effectiveCapacity, effCapacityField, sizeTyWidth);
+            b->CreateAlignedStore(newVirtualAddress, virtualBaseField, sizeTyWidth);
 
             retVal = mallocedAddress;
 
         } else { // Circular
-
-            indices[1] = b->getInt32(InternalCapacity);
-
-            b->CreateAlignedStore(newInternalCapacity, intCapacityField, sizeTyWidth);
 
             Module * const m = b->getModule();
 
             FixedArray<Value *, 2> makeArgs;
             makeArgs[0] = b->CreateMul(newInternalCapacity, typeSize);
             makeArgs[1] = b->getSize(mHasUnderflow);
+
             Value * newBuffer = b->CreateCall(m->getFunction(__MAKE_CIRCULAR_BUFFER), makeArgs);
-            #ifndef NDEBUG
             newBuffer = b->CreatePointerCast(newBuffer, mType->getPointerTo());
-            #endif
+
             Value * newBufferOffset = b->CreateURem(consumedChunks, newInternalCapacity);
             Value * const toWriteDataPtr = b->CreateInBoundsGEP(mType, newBuffer, newBufferOffset);
-            b->CreateAlignedStore(newBuffer, virtualBaseField, sizeTyWidth);
+
 
             Value * const oldBufferOffset = b->CreateURem(consumedChunks, internalCapacity);
             Value * const unreadDataPtr = b->CreateInBoundsGEP(mType, virtualBase, oldBufferOffset);
 
             b->CreateMemCpy(toWriteDataPtr, unreadDataPtr, bytesToCopy, blockSize);
+
+            b->CreateAlignedStore(newBuffer, virtualBaseField, sizeTyWidth);
+            b->CreateAlignedStore(newInternalCapacity, intCapacityField, sizeTyWidth);
 
             retVal = virtualBase;
 

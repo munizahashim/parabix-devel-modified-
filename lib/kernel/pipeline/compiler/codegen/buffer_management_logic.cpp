@@ -32,9 +32,12 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
             } else if (bn.isThreadLocal()) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addNonPersistentScalar(handleType, prefix);
-            } else if (LLVM_LIKELY(bn.isOwned())) {
+            } else if (LLVM_LIKELY(bn.isOwned() || bn.hasZeroElementsOrWidth())) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
+                if (LLVM_LIKELY(!bn.hasZeroElementsOrWidth())) {
+                    mTarget->addNonPersistentScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
+                }
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
                 mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
@@ -48,9 +51,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
         if (bn.isOwned() && isa<DynamicBuffer>(buffer) && isMultithreaded()) {
             assert (bn.isNonThreadLocal());
             mTarget->addThreadLocalScalar(b->getVoidPtrTy(), prefix + PENDING_FREEABLE_BUFFER_ADDRESS, groupId);
-            #ifdef TEST_MMAPPED_CIRCULAR_BUFFERS
             mTarget->addThreadLocalScalar(b->getSizeTy(), prefix + PENDING_FREEABLE_BUFFER_CAPACITY, groupId);
-            #endif
         }
     }
 
@@ -219,7 +220,7 @@ void PipelineCompiler::allocateOwnedBuffers(BuilderRef b, Value * const expected
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto prefix = makeBufferName(producer, rd.Port);
                     Value * start = buffer->getMallocAddress(b);
-                    Value * end = b->CreateGEP(addr, buffer->getCapacity(b));
+                    Value * end = b->CreateGEP(buffer->getType(), start, buffer->getCapacity(b));
                     debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ")", start, end);
                     #endif
 
@@ -604,7 +605,7 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderR
         if (LLVM_LIKELY(bn.isOwned() || bn.isExternal() || bn.hasZeroElementsOrWidth())) {
             continue;
         }
-        assert (bn.Locality != BufferLocality::ThreadLocal);
+        assert (bn.isNonThreadLocal());
         const BufferPort & rd = mBufferGraph[e];
         const auto handleName = makeBufferName(kernelId, rd.Port);
         Value * const vba = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
@@ -617,6 +618,24 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderR
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "%s_loadPriorVirtualBaseAddress = 0x%" PRIx64, b->GetString(handleName), buffer->getBaseAddress(b));
         #endif
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief acquireVirtualBaseAddressesOfProducedStreamSetBuffers
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::acquireVirtualBaseAddressesOfProducedStreamSetBuffers(BuilderRef b) const {
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_LIKELY(bn.isThreadLocal() || bn.isUnowned() || bn.isExternal() || bn.isConstant() || bn.isTruncated() || bn.hasZeroElementsOrWidth())) {
+            continue;
+        }
+        const BufferPort & rd = mBufferGraph[e];
+        Value * consumed = mInitialConsumedItemCount[streamSet];
+        Value * vba = getVirtualBaseAddress(b, rd, bn, consumed, false, false);
+        const auto handleName = makeBufferName(mKernelId, rd.Port);
+        b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
     }
 }
 
@@ -650,9 +669,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(BuilderRef b) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
 
-//            Rational scale{b->getTypeSize(DL, buffer->getType()), b->getBitBlockWidth()};
-//            Value * const producedBytes = b->CreateMulRational(produced, scale);
-
             Constant * const bytesPerPack = b->getTypeSize(buffer->getType());
             Value * const producedBytes = b->CreateMul(b->CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
 
@@ -680,6 +696,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(BuilderRef b,
     const StreamSetBuffer * const buffer = bufferNode.Buffer;
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle()));
+    assert (position);
 
     Value * const baseAddress = buffer->getBaseAddress(b);
     if (bufferNode.isUnowned() || bufferNode.hasZeroElementsOrWidth()) {
@@ -748,17 +765,19 @@ void PipelineCompiler::getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> &
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        if (LLVM_UNLIKELY(bn.isUnowned() && bn.isInternal())) {
+        Value * addr = nullptr;
+
+        if (LLVM_LIKELY(bn.isThreadLocal() || bn.isUnowned() || bn.isExternal() || bn.isConstant() || bn.isTruncated() || bn.hasZeroElementsOrWidth())) {
+            addr = getVirtualBaseAddress(b, inputPort, bn, processed, bn.isNonThreadLocal(), false);
+        } else {
             const auto output = in_edge(streamSet, mBufferGraph);
             const auto producer = source(output, mBufferGraph);
             assert (producer < mKernelId);
             const BufferPort & outputPort = mBufferGraph[output];
             const auto handleName = makeBufferName(producer, outputPort.Port);
-            Value * const vba = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
-            bn.Buffer->setBaseAddress(b.get(), vba);
+            addr = b->getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
         }
 
-        Value * addr = getVirtualBaseAddress(b, inputPort, bn, processed, bn.isNonThreadLocal(), false);
         baseAddresses[inputPort.Port.Number] = addr;
     }
 }

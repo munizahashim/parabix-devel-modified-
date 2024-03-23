@@ -396,6 +396,8 @@ public:
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
+    void acquireVirtualBaseAddressesOfProducedStreamSetBuffers(BuilderRef b) const;
+
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;

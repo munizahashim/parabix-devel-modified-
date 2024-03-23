@@ -55,22 +55,6 @@ public:
         return getType()->getPointerTo(getAddressSpace());
     }
 
-//    bool hasOverflow() const {
-//        return mOverflow != 0;
-//    }
-
-//    unsigned getOverflow() const {
-//        return mOverflow;
-//    }
-
-//    bool hasUnderflow() const {
-//        return mUnderflow != 0;
-//    }
-
-//    unsigned getUnderflow() const {
-//        return mUnderflow;
-//    }
-
     bool isLinear() const {
         return mLinear;
     }
@@ -80,10 +64,6 @@ public:
     }
 
     unsigned getFieldWidth() const;
-
-//    size_t getUnderflowCapacity(BuilderPtr b) const;
-
-//    size_t getOverflowCapacity(BuilderPtr b) const;
 
     bool isEmptySet() const;
 
@@ -246,8 +226,6 @@ public:
 
     llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-//    llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const final;
-
     llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems) const override;
 
     llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
@@ -312,7 +290,7 @@ private:
 
 class DynamicBuffer final : public InternalBuffer {
 
-    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, InitialConsumedCount };
+    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity };
 
 public:
 

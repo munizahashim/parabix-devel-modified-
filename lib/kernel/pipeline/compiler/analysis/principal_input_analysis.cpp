@@ -5,7 +5,7 @@ namespace kernel {
 
 void PipelineAnalysis::analyzePrincipalRateIO() {
 
-    using Graph = adjacency_list<vecS, vecS, bidirectionalS, Rational, Rational>;
+//    using Graph = adjacency_list<vecS, vecS, bidirectionalS, Rational, Rational>;
 
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
 

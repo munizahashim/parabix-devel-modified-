@@ -67,7 +67,7 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mConsumerGraph))) {
         const auto streamSet = target(e, mConsumerGraph);
         Value * consumed = readConsumedItemCount(b, streamSet);
-//        mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
+        mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
         #ifdef PRINT_DEBUG_MESSAGES
         const ConsumerEdge & c = mConsumerGraph[e];
         const StreamSetPort port{PortType::Output, c.Port};
@@ -164,6 +164,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         }
         itemCount = b->CreateLoad(b->getSizeTy(), ptr, true);
     }
+    assert (itemCount);
     return itemCount;
 #endif
 }

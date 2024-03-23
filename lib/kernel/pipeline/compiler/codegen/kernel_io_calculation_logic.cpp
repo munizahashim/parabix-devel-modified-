@@ -383,22 +383,21 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
 
     Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
 
+    Value * minimum = strideLength;
+//    if (mPrincipalFixedRateFactor && port.isFixed()) {
+//        assert (!port.isPrincipal());
+//        const Binding & input = port.Binding;
+//        const ProcessingRate & rate = input.getRate();
+//        const auto factor = rate.getRate() / mFixedRateLCM;
+//        minimum = b->CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
+//    }
+    Value * const required = addLookahead(b, port, minimum); assert (required);
+
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_requiredInput (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), required);
     debugPrint(b, prefix + "_accessible (%" PRIu64 ") = %" PRIu64, b->getSize(streamSet), accessible);
     debugPrint(b, prefix + "_closed = %" PRIu8, closed);
     #endif
-
-
-    Value * minimum = strideLength;
-    if (mPrincipalFixedRateFactor && port.isFixed()) {
-        assert (!port.isPrincipal());
-        const Binding & input = port.Binding;
-        const ProcessingRate & rate = input.getRate();
-        const auto factor = rate.getRate() / mFixedRateLCM;
-        minimum = b->CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
-    }
-    Value * const required = addLookahead(b, port, minimum); assert (required);
 
     Value * hasEnough = b->CreateICmpUGE(accessible, required);
 \
@@ -476,15 +475,15 @@ void PipelineCompiler::checkForSufficientInputData(BuilderRef b, const BufferPor
     }
 
     b->SetInsertPoint(hasInputData);
-    if (mHasPrincipalInputRate && port.isPrincipal()) {
-        const Binding & binding = port.Binding;
-        const ProcessingRate & rate = binding.getRate();
-        const auto factor = mFixedRateLCM / rate.getRate();
-        assert (mFixedRateLCM.denominator() == 1);
-        Value * principalFixedRateFactor = b->CreateMulRational(accessible, factor);
-        ConstantInt * const maxFactor = b->getSize(mFixedRateLCM.numerator());
-        mPrincipalFixedRateFactor = b->CreateSelect(hasEnough, maxFactor, principalFixedRateFactor);
-    }
+//    if (mHasPrincipalInputRate && port.isPrincipal()) {
+//        const Binding & binding = port.Binding;
+//        const ProcessingRate & rate = binding.getRate();
+//        const auto factor = mFixedRateLCM / rate.getRate();
+//        assert (mFixedRateLCM.denominator() == 1);
+//        Value * principalFixedRateFactor = b->CreateMulRational(accessible, factor);
+//        ConstantInt * const maxFactor = b->getSize(mFixedRateLCM.numerator());
+//        mPrincipalFixedRateFactor = b->CreateSelect(hasEnough, maxFactor, principalFixedRateFactor);
+//    }
 
 }
 
@@ -748,6 +747,12 @@ Value * PipelineCompiler::getAccessibleInputItems(BuilderRef b, const BufferPort
     #endif
 
     Value * accessible = buffer->getLinearlyAccessibleItems(b, processed, available);
+    if (LLVM_UNLIKELY(port.Add > 0)) {
+        Value * const closed = isClosed(b, streamSet);
+        Value * const addedItems = b->CreateSelect(closed, b->getSize(port.Add), b->getSize(0));
+        accessible = b->CreateAdd(accessible, addedItems);
+    }
+
     #ifndef DISABLE_ZERO_EXTEND
     if (LLVM_UNLIKELY(port.isZeroExtended())) {
         // To zero-extend an input stream, we must first exhaust all input for this stream before
@@ -870,7 +875,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
         BasicBlock * expand = nullptr;
 
         if (isa<DynamicBuffer>(buffer)) {
-            mustExpand = buffer->requiresExpansion(b, produced, consumed, required);
+            mustExpand = buffer->requiresExpansion(b, produced, consumed, required); assert (mustExpand);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
             #endif
@@ -940,7 +945,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion[WITH_OVERFLOW]);
+    debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion);
     debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
 
@@ -994,8 +999,6 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     const auto outputPort = port.Port;
     assert (outputPort.Type == PortType::Output);
 
-    const auto useOverflow = false;
-
     Value * const alreadyComputed = mInternalWritableOutputItems[outputPort];
     if (alreadyComputed && !force) {
         return alreadyComputed;
@@ -1013,10 +1016,7 @@ Value * PipelineCompiler::getWritableOutputItems(BuilderRef b, const BufferPort 
     debugPrint(b, prefix + "_produced = %" PRIu64, produced);
     #endif
 
-
     Value * writable = nullptr;
-
-    ConstantInt * overflow = nullptr;
 
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
