@@ -314,7 +314,7 @@ void Hangul_VT_Indices::generatePabloMethod() {
     // The offset will have up to 14 significant bits.
     //
     BixNum rel_offset = bnc.ZeroExtend(L_index, 14);
-    rel_offset = bnc.MulModular(L_index, Hangul_NCount);
+    rel_offset = bnc.MulModular(rel_offset, Hangul_NCount);
     //
     // Compute the VT index as the index within the block of
     // Hangul_NCount entries.
