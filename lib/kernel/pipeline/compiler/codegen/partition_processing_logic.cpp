@@ -357,35 +357,35 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Builde
 
     phiOutPartitionItemCounts(b, mKernelId, targetPartitionId, fromKernelEntryBlock);
 
-    flat_set<size_t> consumed;
-    for (auto kernel = targetKernelId; kernel <= PipelineOutput; ++kernel) {
-        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            const auto streamSet = getTruncatedStreamSetSourceId(source(input, mBufferGraph));
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isNonThreadLocal() && bn.isOwned() && bn.isInternal() && !bn.hasZeroElementsOrWidth()) {
-                assert (!bn.isTruncated());
-                consumed.insert(streamSet);
-            }
-        }
-    }
+//    flat_set<size_t> consumed;
+//    for (auto kernel = targetKernelId; kernel <= PipelineOutput; ++kernel) {
+//        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+//            const auto streamSet = getTruncatedStreamSetSourceId(source(input, mBufferGraph));
+//            const BufferNode & bn = mBufferGraph[streamSet];
+//            if (bn.isNonThreadLocal() && bn.isOwned() && bn.isInternal() && !bn.hasZeroElementsOrWidth()) {
+//                assert (!bn.isTruncated());
+//                consumed.insert(streamSet);
+//            }
+//        }
+//    }
 
-    for (auto kernel = mKernelId; kernel < targetKernelId; ++kernel) {
-        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            const auto streamSet = getTruncatedStreamSetSourceId(target(output, mBufferGraph));
-            if (consumed.count(streamSet)) {
-                Value * consumed = readConsumedItemCount(b, streamSet);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                const StreamSetBuffer * const buffer = bn.Buffer;
-                assert ("buffer cannot be null!" && buffer);
-                assert (isFromCurrentFunction(b, buffer->getHandle()));
-                Value * const baseAddress = buffer->getBaseAddress(b);
-                Value * const vba = buffer->getVirtualBasePtr(b, baseAddress, consumed);
-                const BufferPort & rt = mBufferGraph[output];
-                const auto handleName = makeBufferName(kernel, rt.Port);
-                b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
-            }
-        }
-    }
+//    for (auto kernel = mKernelId; kernel < targetKernelId; ++kernel) {
+//        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//            const auto streamSet = getTruncatedStreamSetSourceId(target(output, mBufferGraph));
+//            if (consumed.count(streamSet)) {
+//                Value * consumed = readConsumedItemCount(b, streamSet);
+//                const BufferNode & bn = mBufferGraph[streamSet];
+//                const StreamSetBuffer * const buffer = bn.Buffer;
+//                assert ("buffer cannot be null!" && buffer);
+//                assert (isFromCurrentFunction(b, buffer->getHandle()));
+//                Value * const baseAddress = buffer->getBaseAddress(b);
+//                Value * const vba = buffer->getVirtualBasePtr(b, baseAddress, consumed);
+//                const BufferPort & rt = mBufferGraph[output];
+//                const auto handleName = makeBufferName(kernel, rt.Port);
+//                b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
+//            }
+//        }
+//    }
 
 
     releaseAllSynchronizationLocksFor(b, mKernelId);
