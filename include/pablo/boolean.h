@@ -6,6 +6,12 @@
 
 namespace pablo {
 
+#ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+#define BOOLEAN_CANONICALIZE(x, y) {(x->getNodeId() < y->getNodeId()) ? x : y, (x->getNodeId() < y->getNodeId()) ? y : x}
+#else
+#define BOOLEAN_CANONICALIZE(x, y) {x, y}
+#endif
+
 class And final : public Statement {
     friend class PabloBlock;
 public:
@@ -18,7 +24,7 @@ public:
     virtual ~And() { }
 protected:
     And(llvm::Type * const type, PabloAST * expr1, PabloAST * expr2, const String * name, Allocator & allocator)
-    : Statement(ClassTypeId::And, type, {expr1, expr2}, name, allocator)
+    : Statement(ClassTypeId::And, type, BOOLEAN_CANONICALIZE(expr1, expr2), name, allocator)
     {
 
     }
@@ -36,7 +42,7 @@ public:
     virtual ~Or() { }
 protected:
     Or(llvm::Type * const type, PabloAST * expr1, PabloAST * expr2, const String * name, Allocator & allocator)
-    : Statement(ClassTypeId::Or, type, {expr1, expr2}, name, allocator)
+    : Statement(ClassTypeId::Or, type, BOOLEAN_CANONICALIZE(expr1, expr2), name, allocator)
     {
 
     }
@@ -53,7 +59,7 @@ public:
     }
 protected:
     Xor(llvm::Type * const type, PabloAST * expr1, PabloAST * expr2, const String * name, Allocator & allocator)
-    : Statement(ClassTypeId::Xor, type, {expr1, expr2}, name, allocator)
+    : Statement(ClassTypeId::Xor, type, BOOLEAN_CANONICALIZE(expr1, expr2), name, allocator)
     {
 
     }
@@ -107,6 +113,10 @@ protected:
 
     }
 };
+
+#ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+#undef BOOLEAN_CANONICALIZE
+#endif
 
 class Ternary final : public Statement {
     friend class PabloBlock;
