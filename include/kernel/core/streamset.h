@@ -290,7 +290,18 @@ private:
 
 class DynamicBuffer final : public InternalBuffer {
 
-    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity };
+    enum { LinearMallocedAddress = 0,
+           LinearInternalCapacity = 1,
+           LinearBaseAddress = 2,
+           LinearEffectiveCapacity = 3,
+           LinearFields = 4,
+           // -------------------------------
+           CircularAddressSelector = 0,
+           CircularBaseAddress = 1,
+           CircularSecondaryBaseAddress = 2,
+           CircularInternalCapacity = 3,
+           CircularSecondaryInternalCapacity = 4,
+           CircularFields = 5 };
 
 public:
 
