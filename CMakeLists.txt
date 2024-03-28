@@ -471,6 +471,11 @@ add_test(
   COMMAND ./test_u32u8 "${BIN_DIR}/u32u8")
 
 add_test(
+  NAME nfd_test
+  WORKING_DIRECTORY ${QA_DIR}/nfd
+  COMMAND ./test_nfd "${BIN_DIR}/nfd")
+
+add_test(
     NAME editd_test
     WORKING_DIRECTORY ${QA_DIR}/editd
     COMMAND python3 run_all.py -e ${BIN_DIR})
@@ -528,6 +533,10 @@ add_custom_target (base64_test
 add_custom_target(gb18030_test
   WORKING_DIRECTORY ${QA_DIR}/gb18030
   COMMAND ./run_all "${BIN_DIR}/gb18030")
+
+add_custom_target(nfd_test
+  WORKING_DIRECTORY ${QA_DIR}/nfd
+  COMMAND ./test_nfd "${BIN_DIR}/nfd")
 
 add_custom_target (abc_gen
     WORKING_DIRECTORY ${QA_DIR}
