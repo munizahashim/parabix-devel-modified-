@@ -126,7 +126,10 @@ void KernelCompiler::addBaseInternalProperties(BuilderRef b) {
         const Binding & output = mOutputStreamSets[i];
         Type * const handleTy = mStreamSetOutputBuffers[i]->getHandleType(b);
         assert (handleTy && !handleTy->isPointerTy());
-        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, false))) {
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
         } else {
             mTarget->addNonPersistentScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -558,8 +561,10 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         StreamSetBuffer * const buffer = mStreamSetOutputBuffers[i].get();
 
         const Binding & output = mOutputStreamSets[i];
-        const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
-        const auto isLocal =  Kernel::isLocalBuffer(output, false);
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        const auto isLocal =  Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
 
         if (LLVM_UNLIKELY(isShared)) {
             Value * const handle = nextArg();
@@ -731,8 +736,10 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         const auto & buffer = mStreamSetOutputBuffers[i];
         const Binding & output = mOutputStreamSets[i];
 
-        const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
-        const auto isLocal = Kernel::isLocalBuffer(output, false);
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
 
         Value * handle = nullptr;
         if (LLVM_UNLIKELY(isShared)) {            
@@ -1241,7 +1248,10 @@ void KernelCompiler::initializeOwnedBufferHandles(BuilderRef b, const Initialize
     const auto numOfOutputs = getNumOfStreamOutputs();
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const Binding & output = mOutputStreamSets[i];
-        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, false))) {
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
             auto handle = getScalarFieldPtr(b.get(), output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);

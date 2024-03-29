@@ -75,6 +75,7 @@ const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
 
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
+const static std::string BUFFER_SEGMENT_LENGTH = "BSL";
 const static std::string DYNAMIC_MULTITHREADING_SEGMENT_PERIOD = "SEG.C";
 const static std::string DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTA";
 const static std::string DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTR";
@@ -396,7 +397,6 @@ public:
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
-    void acquireVirtualBaseAddressesOfProducedStreamSetBuffers(BuilderRef b) const;
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 

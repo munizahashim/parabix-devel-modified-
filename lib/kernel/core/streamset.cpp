@@ -1157,6 +1157,8 @@ void DynamicBuffer::linearCopyBack(BuilderPtr b, Value * produced, Value * consu
             indices[1] = b->getInt32(LinearInternalCapacity);
             Value * const intCapacityField = b->CreateInBoundsGEP(mHandleType, handle, indices);
             Value * const internalCapacity = b->CreateAlignedLoad(b->getSizeTy(), intCapacityField, sizeTyWidth);
+
+
             Value * const effectiveCapacity = b->CreateSub(b->CreateAdd(consumedChunks, internalCapacity), unconsumedChunks);
             indices[1] = b->getInt32(LinearEffectiveCapacity);
             Value * const effCapacityField = b->CreateInBoundsGEP(mHandleType, handle, indices);

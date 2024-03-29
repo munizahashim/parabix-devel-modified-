@@ -397,10 +397,7 @@ void PipelineCompiler::readProcessedItemCounts(BuilderRef b) {
         const BufferPort & br = mBufferGraph[e];
         const auto inputPort = br.Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
-
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         auto prodRef = b->getScalarFieldPtr(prefix + suffix);
@@ -425,15 +422,13 @@ void PipelineCompiler::readProducedItemCounts(BuilderRef b) {
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
         const auto prefix = makeBufferName(mKernelId, outputPort);
-
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        const auto & suffix = (mCurrentKernelIsStateFree &&  bn.isInternal()) ?
+        const auto & suffix = (mCurrentKernelIsStateFree) ?
             STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
         auto prodRef = b->getScalarFieldPtr(prefix + suffix);
         mProducedItemCountPtr[outputPort] = prodRef.first;
         Value * const itemCount = b->CreateLoad(prodRef.second, prodRef.first);
+        const auto streamSet = target(e, mBufferGraph);
         mInitiallyProducedItemCount[streamSet] = itemCount;
         if (br.isDeferred()) {
             auto defRef = b->getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
@@ -619,24 +614,6 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderR
         debugPrint(b, "%s_loadPriorVirtualBaseAddress = 0x%" PRIx64, b->GetString(handleName), buffer->getBaseAddress(b));
         #endif
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief acquireVirtualBaseAddressesOfProducedStreamSetBuffers
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::acquireVirtualBaseAddressesOfProducedStreamSetBuffers(BuilderRef b) const {
-//    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-//        const auto streamSet = target(e, mBufferGraph);
-//        const BufferNode & bn = mBufferGraph[streamSet];
-//        if (LLVM_LIKELY(bn.isThreadLocal() || bn.isUnowned() || bn.isExternal() || bn.isConstant() || bn.isTruncated() || bn.hasZeroElementsOrWidth())) {
-//            continue;
-//        }
-//        const BufferPort & rd = mBufferGraph[e];
-//        Value * consumed = mInitialConsumedItemCount[streamSet];
-//        Value * vba = getVirtualBaseAddress(b, rd, bn, consumed, false, false);
-//        const auto handleName = makeBufferName(mKernelId, rd.Port);
-//        b->setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
-//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

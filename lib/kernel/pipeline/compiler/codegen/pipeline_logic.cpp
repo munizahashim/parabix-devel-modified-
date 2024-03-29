@@ -322,12 +322,16 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
+
+
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
 
-    Value * bufferSize = expectedNumOfStrides;
-    if (!mIsNestedPipeline) {
+    Value * allocScale = expectedNumOfStrides;
+    if (LLVM_LIKELY(!mIsNestedPipeline)) {
+        Value * bsl = b->getScalarField(BUFFER_SEGMENT_LENGTH);
+        allocScale = b->CreateMul(allocScale, bsl);
         Value * const threadCount = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
-        bufferSize = b->CreateMul(bufferSize, threadCount);
+        allocScale = b->CreateMul(allocScale, threadCount);
     }
 
     bool hasAnyReturnedBuffer = false;
@@ -356,7 +360,7 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef
         }
         expectedSourceOutputSize = b->CreateCeilUDiv(expectedSourceOutputSize, b->getSize(b->getBitBlockWidth()));
     }
-    allocateOwnedBuffers(b, bufferSize, expectedSourceOutputSize, true);
+    allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
 }
@@ -381,13 +385,18 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
     assert (mTarget->hasThreadLocal());
+    Value * allocScale = expectedNumOfStrides;
+    if (LLVM_LIKELY(!mIsNestedPipeline)) {
+        Value * bsl = b->getScalarField(BUFFER_SEGMENT_LENGTH);
+        allocScale = b->CreateMul(allocScale, bsl);
+    }
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         auto size = RequiredThreadLocalStreamSetMemory;
         #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
         size *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
         #endif
         ConstantInt * const reqMemory = b->getSize(size);
-        Value * const memorySize = b->CreateMul(reqMemory, expectedNumOfStrides);
+        Value * const memorySize = b->CreateMul(reqMemory, allocScale);
         Value * const base = b->CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b->getInt8PtrTy();
         b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));

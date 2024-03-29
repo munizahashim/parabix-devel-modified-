@@ -276,7 +276,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     b->SetInsertPoint(mKernelExit);
     recordFinalProducedItemCounts(b);
     writeConsumedItemCounts(b);
-    acquireVirtualBaseAddressesOfProducedStreamSetBuffers(b);
     mKernelTerminationSignal[mKernelId] = mTerminatedAtExitPhi;
     if (mIsPartitionRoot) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
