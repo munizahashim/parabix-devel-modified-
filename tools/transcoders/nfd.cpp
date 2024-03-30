@@ -30,6 +30,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/UCD_property_kernel.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
@@ -497,6 +498,11 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
     StreamSet * NFD_Basis = P->CreateStreamSet(21, 1);
     P->CreateKernelCall<NFD_Translation>(NFD_Data, Hangul_NFD_Basis, NFD_Basis);
     SHOW_BIXNUM(NFD_Basis);
+    
+    UCD::EnumeratedPropertyObject * enumObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(UCD::ccc));
+    StreamSet * CCC_Basis = P->CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    P->CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
+    SHOW_BIXNUM(CCC_Basis);
 
     StreamSet * const OutputBasis = P->CreateStreamSet(8);
     U21_to_UTF8(P, NFD_Basis, OutputBasis);
