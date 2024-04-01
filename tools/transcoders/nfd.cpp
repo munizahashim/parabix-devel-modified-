@@ -420,6 +420,37 @@ void Hangul_NFD::generatePabloMethod() {
     }
 }
 
+class CCC_Check : public pablo::PabloKernel {
+public:
+    CCC_Check(BuilderRef b, StreamSet * CCC_Basis, StreamSet * CCC_Violation);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mCCC_basis_size;
+};
+
+CCC_Check::CCC_Check (BuilderRef b, StreamSet * CCC_Basis, StreamSet * CCC_Violation)
+: PabloKernel(b, "CCC_Check",
+// inputs
+{Binding{"CCC_Basis", CCC_Basis, FixedRate(1), LookAhead(1)}},
+// output
+{Binding{"CCC_Violation", CCC_Violation}}), mCCC_basis_size(CCC_Basis->getNumElements()) {
+}
+
+void CCC_Check::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNum CCC = getInputStreamSet("CCC_Basis");
+    BixNum CCC_ahead(mCCC_basis_size);
+    for (unsigned i = 0; i < mCCC_basis_size; i++) {
+        CCC_ahead[i] = pb.createLookahead(CCC[i], 1);
+    }
+    BixNumCompiler bnc(pb);
+    PabloAST * violation = pb.createAnd(bnc.NEQ(CCC_ahead, 0), bnc.UGT(CCC, CCC_ahead));
+    //PabloAST * violation = bnc.NEQ(CCC_ahead, 0);
+    //PabloAST * violation = bnc.UGT(CCC, CCC_ahead);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_Violation"), pb.getInteger(0)), violation);
+}
+
 typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
 
 XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
@@ -503,6 +534,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
     StreamSet * CCC_Basis = P->CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
     P->CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
     SHOW_BIXNUM(CCC_Basis);
+
+    StreamSet * CCC_Violation = P->CreateStreamSet(1, 1);
+    P->CreateKernelCall<CCC_Check>(CCC_Basis, CCC_Violation);
+    SHOW_STREAM(CCC_Violation);
 
     StreamSet * const OutputBasis = P->CreateStreamSet(8);
     U21_to_UTF8(P, NFD_Basis, OutputBasis);
