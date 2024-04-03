@@ -2,6 +2,7 @@
 #define ILLUSTRATOR_H
 
 #include <stdlib.h>
+#include <stdint.h>
 
 namespace kernel {
 

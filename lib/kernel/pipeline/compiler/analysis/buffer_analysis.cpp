@@ -880,12 +880,12 @@ void PipelineAnalysis::identifyIllustratedStreamSets() {
     mIllustratedStreamSetBindings.reserve(n);
 
     for (auto & p : illustratorBindings) {
-        StreamSet * ss = p.StreamSet;
+        StreamSet * ss = p.StreamSetObj;
 check_for_additional_remapping:
         auto f = RedundantStreamSets.find(ss);
         if (LLVM_UNLIKELY(f != RedundantStreamSets.end())) {
             ss = f->second;
-            assert (ss != p.StreamSet);
+            assert (ss != p.StreamSetObj);
             goto check_for_additional_remapping;
         }
 

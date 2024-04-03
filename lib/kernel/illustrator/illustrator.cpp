@@ -16,8 +16,6 @@
 #include <mutex>
 #include <stack>
 
-
-
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
@@ -407,7 +405,7 @@ inline void displayCapturedData(const size_t blockWidth) const {
     }
     assert (M.size() == numOfStateObjects);
 
-    constexpr auto TREE_NODE = std::numeric_limits<size_t>::max();
+    #define TREE_NODE std::numeric_limits<size_t>::max()
 
     struct DisplayNode {
         size_t Index;

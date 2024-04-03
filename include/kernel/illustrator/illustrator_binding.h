@@ -17,11 +17,11 @@ enum class IllustratorTypeId : uint8_t {
 struct IllustratorBinding {
     const IllustratorTypeId IllustratorType;
     std::string Name;
-    StreamSet * StreamSet;
+    kernel::StreamSet * StreamSetObj;
     const std::array<char, 2> ReplacementCharacter;
 
     IllustratorBinding(IllustratorTypeId type, std::string name, kernel::StreamSet * streamSet, char rep0 = '\0', char rep1 = '\0')
-    : IllustratorType(type), Name(std::move(name)), StreamSet(streamSet), ReplacementCharacter({rep0, rep1}) {
+    : IllustratorType(type), Name(std::move(name)), StreamSetObj(streamSet), ReplacementCharacter({rep0, rep1}) {
 
     }
 
