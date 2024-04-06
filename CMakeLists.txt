@@ -186,7 +186,16 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
 # Parabix Object Cache default
+if (NOT EXISTS "$ENV{HOME}/.cache/")
+    message("Created $ENV{HOME}/.cache/")
+    MAKE_DIRECTORY("$ENV{HOME}/.cache/")
+endif()
 set(PARABIX_OBJECT_CACHE "$ENV{HOME}/.cache/parabix/")
+if (NOT EXISTS "${PARABIX_OBJECT_CACHE}")
+    MAKE_DIRECTORY("${PARABIX_OBJECT_CACHE}")
+    message("Created: ${PARABIX_OBJECT_CACHE}")
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_OBJECT_CACHE='\"${PARABIX_OBJECT_CACHE}\"'")
 
 # Use @rpath for dylibs on macOS
