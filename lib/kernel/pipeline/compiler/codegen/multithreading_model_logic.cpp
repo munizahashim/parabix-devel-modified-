@@ -846,8 +846,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mKernelId = 0;
     mAddressableItemCountPtr.clear();
     mVirtualBaseAddressPtr.clear();
-    mNumOfTruncatedInputBuffers = 0;
-    mTruncatedInputBuffer.clear();
     mPipelineProgress = b->getFalse();
 
 }

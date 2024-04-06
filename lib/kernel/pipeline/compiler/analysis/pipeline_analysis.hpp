@@ -94,7 +94,7 @@ public:
 
         P.makeConsumerGraph();
 
-       // P.makeTerminationPropagationGraph();
+        P.buildZeroInputGraph();
 
         P.identifyPortsThatModifySegmentLength();
 
@@ -203,6 +203,8 @@ private:
     void identifyOutputNodeIds();
 
     void identifyPortsThatModifySegmentLength();
+
+    void buildZeroInputGraph();
 
     // thread local analysis
 
@@ -323,6 +325,7 @@ public:
     BitVector                           HasTerminationSignal;
 
     FamilyScalarGraph               mFamilyScalarGraph;
+    ZeroInputGraph                  mZeroInputGraph;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;

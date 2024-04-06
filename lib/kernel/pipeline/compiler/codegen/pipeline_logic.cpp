@@ -92,6 +92,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
             addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
         }
     }
+    addZeroInputStructProperties(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -507,6 +508,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
         b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
     }
     freePendingFreeableDynamicBuffers(b);
+    freeZeroedInputBuffers(b);
 }
 
 }

@@ -229,7 +229,6 @@ void PipelineCompiler::updateTotalCycleCounterTime(BuilderRef b) const {
         // multiple threads updating it.
         Value * const ptr = getScalarFieldPtr(b.get(), STATISTICS_CYCLE_COUNT_TOTAL).first;
         Value * const updated = b->CreateAdd(b->CreateLoad(b->getSizeTy(), ptr), duration);
-       // b->CallPrintInt("updated", updated);
         b->CreateStore(updated, ptr);
     }
 }

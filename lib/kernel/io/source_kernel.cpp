@@ -138,30 +138,6 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     // If this is the last page, create a temporary buffer of up to two pages size, copy the unconsumed data
     // and zero any bytes that are not used.
     b->SetInsertPoint(setTermination);
-    if (!codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-        Value * const consumedOffset = b->CreateAnd(consumedItems, ConstantExpr::getNeg(BLOCK_WIDTH));
-        Value * const readStart = b->getRawOutputPointer("sourceBuffer", consumedOffset);
-        Value * const readEnd = b->getRawOutputPointer("sourceBuffer", fileItems);
-
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(readEnd->getType());
-        Value * const readEndInt = b->CreatePtrToInt(readEnd, intPtrTy);
-        Value * const readStartInt = b->CreatePtrToInt(readStart, intPtrTy);
-        Value * unconsumedBytes = b->CreateSub(readEndInt, readStartInt);
-        unconsumedBytes = b->CreateTrunc(unconsumedBytes, b->getSizeTy());
-        Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, PADDING_SIZE), STRIDE_BYTES);
-        Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
-        b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-        b->CreateMemZero(b->CreateGEP(i8Ty, buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
-        // get the difference between our base and from position then compute an offsetted temporary buffer address
-        Value * const base = b->getBaseAddress("sourceBuffer");
-        Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
-        Value * const diff = b->CreateSub(baseInt, readStartInt);
-        Value * const offsettedBuffer = b->CreateGEP(i8Ty, buffer, diff);
-        PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
-        b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
-        b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
-    }
     b->setTerminationSignal();
     b->setProducedItemCount("sourceBuffer", fileItems);
     b->CreateBr(exit);
@@ -512,54 +488,6 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     b->CreateUnlikelyCondBr(lastPage, createTemporary, exit);
 
     b->SetInsertPoint(createTemporary);
-    // (!codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-    Value * const consumedItems = b->getConsumedItemCount("sourceBuffer");
-    Value * readStart = nullptr;
-    Value * readEnd = nullptr;
-
-    // compute the range of our unconsumed buffer slice
-
-    const auto streamSetCount = source->getNumElements();
-    if (LLVM_UNLIKELY(streamSetCount > 1)) {
-        Constant * const ZERO = b->getSize(0);
-        const StreamSetBuffer * const sourceBuffer = b->getOutputStreamSetBuffer("sourceBuffer");
-        Value * const fromIndex = b->CreateUDiv(consumedItems, BLOCK_WIDTH);
-        Value * const sourceBufferBaseAddress = sourceBuffer->getBaseAddress(b);
-        readStart = sourceBuffer->getStreamBlockPtr(b, sourceBufferBaseAddress, ZERO, fromIndex);
-        Value * const toIndex = b->CreateCeilUDiv(fileItems, BLOCK_WIDTH);
-        // since we know this is an ExternalBuffer, we don't need to consider any potential modulus calculations.
-        readEnd = sourceBuffer->getStreamBlockPtr(b, sourceBufferBaseAddress, ZERO, toIndex);
-    } else {
-        // make sure our copy is block-aligned
-        Value * const consumedOffset = b->CreateAnd(consumedItems, ConstantExpr::getNeg(BLOCK_WIDTH));
-        readStart = b->getRawOutputPointer("sourceBuffer", consumedOffset);
-        Value * lastFileByte = fileItems;
-        if (codeUnitWidth < 8) {
-            // If trying to load a bitstream and the number of items is not byte-aligned, load an extra byte.
-            lastFileByte = b->CreateRoundUpRational(fileItems, Rational{8, codeUnitWidth});
-        }
-        readEnd = b->getRawOutputPointer("sourceBuffer", lastFileByte);
-    }
-
-    DataLayout DL(b->getModule());
-    Type * const intPtrTy = DL.getIntPtrType(readEnd->getType());
-    Value * const readEndInt = b->CreatePtrToInt(readEnd, intPtrTy);
-    Value * const readStartInt = b->CreatePtrToInt(readStart, intPtrTy);
-    Value * const unconsumedBytes = b->CreateTrunc(b->CreateSub(readEndInt, readStartInt), b->getSizeTy());
-    Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, BLOCK_WIDTH), segmentSize);
-    Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
-    PointerType * const codeUnitPtrTy = codeUnitTy->getPointerTo();
-    b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
-    b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-    b->CreateMemZero(b->CreateGEP(b->getInt8Ty(), buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
-
-    // get the difference between our base and from position then compute an offsetted temporary buffer address
-    Value * const base = b->getBaseAddress("sourceBuffer");
-    Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
-    Value * const diff = b->CreateSub(baseInt, readStartInt);
-    Value * const offsettedBuffer = b->CreateGEP(b->getInt8Ty(), buffer, diff);
-    // set the temporary buffer as the new source buffer
-    b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
     b->setTerminationSignal();
     b->setProducedItemCount("sourceBuffer", fileItems);
     b->CreateBr(exit);
@@ -582,9 +510,6 @@ std::string makeSourceName(StringRef prefix, const unsigned fieldWidth, const un
     out << prefix << codegen::SegmentSize << '@' << fieldWidth;
     if (numOfStreams != 1) {
         out << ':' << numOfStreams;
-    }
-    if (codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-        out << 'U';
     }
     out.flush();
     return tmp;

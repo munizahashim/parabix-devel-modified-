@@ -605,6 +605,8 @@ struct FamilyScalarData {
 
 using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, FamilyScalarData>;
 
+using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsigned>;
+
 
 }
 

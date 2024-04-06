@@ -137,6 +137,8 @@ const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
 const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
 
+const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
+
 using ArgVec = Vec<Value *, 64>;
 
 using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;
@@ -404,6 +406,8 @@ public:
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
     void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
 
+    void addZeroInputStructProperties(BuilderRef b) const;
+
 // repeating streamset functions
 
     using InternallyGeneratedStreamSetMap = flat_map<Value *, std::pair<Value *, Value>>;
@@ -656,7 +660,7 @@ protected:
     const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
     const FamilyScalarGraph                     mFamilyScalarGraph;
-
+    const ZeroInputGraph                        mZeroInputGraph;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
@@ -699,7 +703,6 @@ protected:
 
     Vec<AllocaInst *, 16>                       mAddressableItemCountPtr;
     Vec<AllocaInst *, 16>                       mVirtualBaseAddressPtr;
-    Vec<AllocaInst *, 4>                        mTruncatedInputBuffer;
     FixedVector<PHINode *>                      mInitiallyAvailableItemsPhi;
     FixedVector<Value *>                        mLocallyAvailableItems;
 
@@ -792,8 +795,6 @@ protected:
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
     bool                                        mHasPrincipalInputRate = false;
-
-    unsigned                                    mNumOfTruncatedInputBuffers = 0;
 
     InputPortVector<Value *>                    mInitiallyProcessedItemCount; // *before* entering the kernel
     InputPortVector<Value *>                    mInitiallyProcessedDeferredItemCount;
@@ -974,6 +975,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
 
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
+, mZeroInputGraph(std::move(P.mZeroInputGraph))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)

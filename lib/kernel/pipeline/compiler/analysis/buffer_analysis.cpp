@@ -713,4 +713,86 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief scanZeroInputAfterFinalItemCount
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::buildZeroInputGraph() {
+
+    SmallVector<std::pair<size_t, unsigned>, 8> entries;
+
+    const auto n = LastKernel - FirstKernel + 1;
+
+    ZeroInputGraph G(n);
+
+    for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+
+        assert (entries.empty());
+
+        for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+
+            const auto streamSet = source(e, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const BufferNode & bn = mBufferGraph[streamSet];
+
+            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
+                continue;
+            }
+
+            if (LLVM_UNLIKELY(!(bn.isTruncated() || bn.isConstant()))) {
+                const auto producer = parent(streamSet, mBufferGraph);
+                if (KernelPartitionId[producer] == KernelPartitionId[kernel]) {
+                    continue;
+                }
+            }
+
+
+            const BufferPort & port = mBufferGraph[e];
+            assert (port.Port.Type == PortType::Input);
+            const Binding & input = port.Binding;
+            const ProcessingRate & rate = input.getRate();
+
+            // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
+            // nested pipelines but could replace the source output.
+
+            if (LLVM_UNLIKELY(rate.isGreedy() && !(bn.isUnowned() || bn.isTruncated() || bn.isConstant()))) {
+                continue;
+            }
+
+            size_t w = 0;
+            if (port.isDeferred()) {
+                // we won't know how big a deferred entry; we still allocate based on need at run-time
+                // but this will at least minimize the potential reallocs.
+                w = std::numeric_limits<size_t>::max();
+            } else {
+                assert (port.Maximum.denominator() == 1);
+                w = port.Maximum.denominator();
+            }
+
+            entries.emplace_back(w, port.Port.Number);
+        }
+
+        if (entries.empty()) {
+            continue;
+        }
+
+        // sort primarily by size so we can merge any larger ones as needed.
+        std::sort(entries.begin(), entries.end());
+
+        const auto l = entries.size();
+
+        for (auto m = num_vertices(G) - n; m < l; ++m) {
+            add_vertex(G);
+        }
+
+        for (auto k = 0; k < l; ++k) {
+            const auto portNum = entries[k].second;
+            add_edge(kernel - FirstKernel, n + k, portNum, G);
+        }
+
+        entries.clear();
+    }
+
+    mZeroInputGraph = G;
+}
+
 }

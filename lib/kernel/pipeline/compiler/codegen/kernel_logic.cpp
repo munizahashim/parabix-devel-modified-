@@ -319,8 +319,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
 
     // TODO: make it so these are only needed in debug mode for assertion checks?
 
-    mNumOfTruncatedInputBuffers = 0;
-
     mExecuteStridesIndividually = false;
     mCurrentKernelIsStateFree = false;
     mAllowDataParallelExecution = false;

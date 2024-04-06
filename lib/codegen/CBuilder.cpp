@@ -1798,7 +1798,11 @@ BasicBlock * CBuilder::WriteDefaultRethrowBlock() {
     Function * const f = current->getParent();
 
     f->setPersonalityFn(getDefaultPersonalityFunction());
-    f->addFnAttr(Attribute::UWTable);
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    f->setHasUWTable();
+    #else
+    f->setUWTableKind(UWTableKind::Default);
+    #endif
 
     LLVMContext & C = getContext();
 

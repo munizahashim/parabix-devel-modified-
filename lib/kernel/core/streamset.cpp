@@ -273,12 +273,10 @@ Type * StreamSetBuffer::resolveType(BuilderPtr b, Type * const streamSetType) {
  ** ------------------------------------------------------------------------------------------------------------- */
 constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
 constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
-// constexpr char __GET_LCM[] = "__get_lcm";
 
 void StreamSetBuffer::linkFunctions(BuilderPtr b) {
 b->LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
 b->LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
-// b->LinkFunction(__GET_LCM, boost::lcm<size_t>);
 }
 
 // External Buffer

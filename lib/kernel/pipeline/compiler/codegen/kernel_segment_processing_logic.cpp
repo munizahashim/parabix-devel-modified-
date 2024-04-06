@@ -220,7 +220,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
-    freeZeroedInputBuffers(b);
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);
 
