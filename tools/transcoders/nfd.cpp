@@ -40,6 +40,8 @@
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <unicode/algo/decomposition.h>
+#include <unicode/core/unicode_set.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/data/PropertyObjects.h>
 #include <unicode/data/PropertyObjectTable.h>
@@ -71,17 +73,155 @@ const unsigned Hangul_TCount = 28;
 const unsigned Hangul_NCount = 588;
 const unsigned Hangul_SCount = 11172;
 
+class NFD_BixData : public UCD::NFD_Engine {
+public:
+    NFD_BixData();
+    std::vector<re::CC *> NFD_Insertion_BixNumCCs();
+    std::vector<re::CC *> NFD_Hangul_LV_LVT_CCs();
+    unicode::BitTranslationSets NFD_1st_BitXorCCs();
+    unicode::BitTranslationSets NFD_2nd_BitCCs();
+    unicode::BitTranslationSets NFD_3rd_BitCCs();
+    unicode::BitTranslationSets NFD_4th_BitCCs();
+private:
+    bool mInitialized;
+    std::unordered_map<codepoint_t, unsigned> mNFD_length;
+    unicode::TranslationMap mNFD_CharMap[4];
+    UCD::UnicodeSet mHangul_Precomposed_LV;
+    UCD::UnicodeSet mHangul_Precomposed_LVT;
+};
 
-std::vector<re::CC *> HangulInsertionBixNumCCs() {
-    UCD::codepoint_t Max_Hangul_Precomposed = Hangul_SBase + Hangul_SCount - 1;
-    UCD::UnicodeSet Hangul_Precomposed_LV;
-    for (UCD::codepoint_t cp = Hangul_SBase; cp <= Max_Hangul_Precomposed; cp += Hangul_TCount) {
-        Hangul_Precomposed_LV.insert(cp);
+NFD_BixData::NFD_BixData() : UCD::NFD_Engine(UCD::DecompositionOptions::NFD) {
+    auto cps = decompMappingObj->GetExplicitCps();
+    for (auto cp : cps) {
+        std::u32string decomp;
+        NFD_append1(decomp, cp);
+        mNFD_length.emplace(cp, decomp.length());
+        for (unsigned i = 0; i < decomp.length(); i++) {
+            mNFD_CharMap[i].emplace(cp, decomp[i]);
+        }
     }
-    UCD::UnicodeSet Hangul_Precomposed(Hangul_SBase, Max_Hangul_Precomposed) ;
-    UCD::UnicodeSet Hangul_Precomposed_LVT = Hangul_Precomposed - Hangul_Precomposed_LV;
-    return {re::makeCC(Hangul_Precomposed_LV, &cc::Unicode),
-            re::makeCC(Hangul_Precomposed_LVT, &cc::Unicode)};
+    UCD::codepoint_t Max_Hangul_Precomposed = Hangul_SBase + Hangul_SCount - 1;
+    for (UCD::codepoint_t cp = Hangul_SBase; cp <= Max_Hangul_Precomposed; cp += Hangul_TCount) {
+        mHangul_Precomposed_LV.insert(cp);
+    }
+    UCD::UnicodeSet Hangul_Precomposed(Hangul_SBase, Max_Hangul_Precomposed);
+    mHangul_Precomposed_LVT = Hangul_Precomposed - mHangul_Precomposed_LV;
+}
+
+std::vector<re::CC *> NFD_BixData::NFD_Insertion_BixNumCCs() {
+    unicode::BitTranslationSets BixNumCCs;
+    for (auto p : mNFD_length) {
+        BixNumCCs.push_back(UCD::UnicodeSet());
+        BixNumCCs.push_back(UCD::UnicodeSet());
+        auto insert_amt = p.second - 1;
+        if ((insert_amt & 1) == 1) {
+            BixNumCCs[0].insert(p.first);
+        }
+        if ((insert_amt & 2) == 2) {
+            BixNumCCs[1].insert(p.first);
+        }
+    }
+    BixNumCCs[0] = BixNumCCs[0] + mHangul_Precomposed_LV;
+    BixNumCCs[1] = BixNumCCs[1] + mHangul_Precomposed_LVT;
+    return {re::makeCC(BixNumCCs[0], &cc::Unicode),
+            re::makeCC(BixNumCCs[1], &cc::Unicode)};
+}
+
+std::vector<re::CC *> NFD_BixData::NFD_Hangul_LV_LVT_CCs() {
+    return {re::makeCC(mHangul_Precomposed_LV, &cc::Unicode),
+            re::makeCC(mHangul_Precomposed_LVT, &cc::Unicode)};
+}
+
+unicode::BitTranslationSets NFD_BixData::NFD_1st_BitXorCCs() {
+    return unicode::ComputeBitTranslationSets(mNFD_CharMap[0]);
+}
+
+unicode::BitTranslationSets NFD_BixData::NFD_2nd_BitCCs() {
+    return unicode::ComputeBitTranslationSets(mNFD_CharMap[1], unicode::XlateMode::LiteralBit);
+}
+
+unicode::BitTranslationSets NFD_BixData::NFD_3rd_BitCCs() {
+    return unicode::ComputeBitTranslationSets(mNFD_CharMap[2], unicode::XlateMode::LiteralBit);
+}
+
+unicode::BitTranslationSets NFD_BixData::NFD_4th_BitCCs() {
+    return unicode::ComputeBitTranslationSets(mNFD_CharMap[3], unicode::XlateMode::LiteralBit);
+}
+
+class NFD_Translation : public pablo::PabloKernel {
+public:
+    NFD_Translation(BuilderRef b, NFD_BixData & BixData,
+                    StreamSet * Basis, StreamSet * Output);
+protected:
+    void generatePabloMethod() override;
+    NFD_BixData & mBixData;
+};
+
+NFD_Translation::NFD_Translation (BuilderRef b, NFD_BixData & BixData,
+                                  StreamSet * Basis, StreamSet * Output)
+: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1",
+// inputs
+{Binding{"basis", Basis}},
+// output
+{Binding{"Output", Output}}), mBixData(BixData) {
+}
+
+void NFD_Translation::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    unicode::BitTranslationSets NFD1 = mBixData.NFD_1st_BitXorCCs();
+    unicode::BitTranslationSets NFD2 = mBixData.NFD_2nd_BitCCs();
+    unicode::BitTranslationSets NFD3 = mBixData.NFD_3rd_BitCCs();
+    unicode::BitTranslationSets NFD4 = mBixData.NFD_4th_BitCCs();
+    std::vector<Var *> NFD1_Vars;
+    std::vector<Var *> NFD2_Vars;
+    std::vector<Var *> NFD3_Vars;
+    std::vector<Var *> NFD4_Vars;
+    for (unsigned i = 0; i < NFD1.size(); i++) {
+        Var * v = pb.createVar("NFD1_bit" + std::to_string(i), pb.createZeroes());
+        NFD1_Vars.push_back(v);
+        unicodeCompiler.addTarget(v, re::makeCC(NFD1[i], &cc::Unicode));
+    }
+    for (unsigned i = 0; i < NFD2.size(); i++) {
+        Var * v = pb.createVar("NFD2_bit" + std::to_string(i), pb.createZeroes());
+        NFD2_Vars.push_back(v);
+        unicodeCompiler.addTarget(v, re::makeCC(NFD2[i], &cc::Unicode));
+    }
+    for (unsigned i = 0; i < NFD3.size(); i++) {
+        Var * v = pb.createVar("NFD3_bit" + std::to_string(i), pb.createZeroes());
+        NFD3_Vars.push_back(v);
+        unicodeCompiler.addTarget(v, re::makeCC(NFD3[i], &cc::Unicode));
+    }
+    for (unsigned i = 0; i < NFD4.size(); i++) {
+        Var * v = pb.createVar("NFD4_bit" + std::to_string(i), pb.createZeroes());
+        NFD4_Vars.push_back(v);
+        unicodeCompiler.addTarget(v, re::makeCC(NFD4[i], &cc::Unicode));
+    }
+    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
+        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
+    } else {
+        unicodeCompiler.compile();
+    }
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    Var * outputVar = getOutputStreamVar("Output");
+    std::vector<PabloAST *> output_basis(basis.size());
+    for (unsigned i = 0; i < basis.size(); i++) {
+        if (i < NFD1.size()) {
+            output_basis[i] = pb.createXor(basis[i], NFD1_Vars[i]);
+        } else {
+            output_basis[i] = basis[i];
+        }
+        if (i < NFD2.size()) {
+            output_basis[i] = pb.createOr(pb.createAdvance(NFD2_Vars[i], 1), output_basis[i]);
+        }
+        if (i < NFD3.size()) {
+            output_basis[i] = pb.createOr(pb.createAdvance(NFD3_Vars[i], 2), output_basis[i]);
+        }
+        if (i < NFD4.size()) {
+            output_basis[i] = pb.createOr(pb.createAdvance(NFD4_Vars[i], 3), output_basis[i]);
+        }
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), output_basis[i]);
+    }
 }
 
 //
@@ -174,7 +314,7 @@ void Hangul_VT_Indices::generatePabloMethod() {
     // The offset will have up to 14 significant bits.
     //
     BixNum rel_offset = bnc.ZeroExtend(L_index, 14);
-    rel_offset = bnc.MulModular(L_index, Hangul_NCount);
+    rel_offset = bnc.MulModular(rel_offset, Hangul_NCount);
     //
     // Compute the VT index as the index within the block of
     // Hangul_NCount entries.
@@ -240,37 +380,35 @@ void Hangul_NFD::generatePabloMethod() {
     std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
     std::vector<PabloAST *> V_index = getInputStreamSet("V_index");
     std::vector<PabloAST *> T_index = getInputStreamSet("T_index");
-    PabloAST * precomposed = pb.createOr(LV_LVT[0], LV_LVT[1]);
+    PabloAST * Hangul_L = pb.createOr(LV_LVT[0], LV_LVT[1]);
     // Set up Vars to receive the generated basis values.
     std::vector<Var *> basisVar(21);
     for (unsigned i = 0; i < 21; i++) {
-        basisVar[i] = pb.createVar("basisVar" + std::to_string(i), pb.createZeroes());
+        basisVar[i] = pb.createVar("basisVar" + std::to_string(i), basis[i]);
     }
     auto nested = pb.createScope();
-    pb.createIf(precomposed, nested);
+    pb.createIf(Hangul_L, nested);
     BixNumCompiler bnc(nested);
     BixNum LPart = bnc.ZeroExtend(L_index, 21);
     // The LPart will be encoded at the original precomposed position.
     LPart = bnc.AddModular(LPart, Hangul_LBase);
-    // The V Part, is one positions after the opening L Part.
-    PabloAST * V_position = nested.createAdvance(precomposed, 1);
+    // The V Part, when it exists, is one position after the opening L Part.
+    PabloAST * V_position = nested.createAdvance(Hangul_L, 1);
     for (unsigned i = 0; i < 5; i++) {
         V_index[i] = nested.createAdvance(V_index[i], 1);
     }
     BixNum VPart = bnc.ZeroExtend(V_index, 21);
     VPart = bnc.AddModular(VPart, Hangul_VBase);
     // The T Part, if it exists is two positions after the opening
-    // L Part.  A T Part only exists if the T_index is nonzero.
+    // L Part.  A T Part only exists for LVT initials.
     PabloAST * T_position = nested.createAdvance(LV_LVT[1], 2);
     for (unsigned i = 0; i < 5; i++) {
         T_index[i] = nested.createAdvance(T_index[i], 2);
-        //T_position = nested.createOr(T_index[i], T_position);
     }
-    //T_position = nested.createAnd(T_position, nested.createAdvance(V_position, 1));
     BixNum TPart = bnc.ZeroExtend(T_index, 21);
     TPart = bnc.AddModular(TPart, Hangul_TBase);
     for (unsigned i = 0; i < 21; i++) {
-        PabloAST * bit = nested.createSel(precomposed, LPart[i], basis[i]);
+        PabloAST * bit = nested.createSel(Hangul_L, LPart[i], basis[i]);
         bit = nested.createSel(V_position, VPart[i], bit);
         bit = nested.createSel(T_position, TPart[i], bit);
         nested.createAssign(basisVar[i], bit);
@@ -321,20 +459,24 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
-    auto insert_ccs = HangulInsertionBixNumCCs();
-    StreamSet * Hangul_Insertion_BixNum = P->CreateStreamSet(insert_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Hangul_Insertion_BixNum);
-    SHOW_BIXNUM(Hangul_Insertion_BixNum);
+    NFD_BixData NFD_Data;
+    auto insert_ccs = NFD_Data.NFD_Insertion_BixNumCCs();
 
-    StreamSet * SpreadMask = InsertionSpreadMask(P, Hangul_Insertion_BixNum, InsertPosition::After);
+    StreamSet * Insertion_BixNum = P->CreateStreamSet(insert_ccs.size());
+    P->CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
+    SHOW_BIXNUM(Insertion_BixNum);
+
+    StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
     StreamSet * ExpandedBasis = P->CreateStreamSet(21, 1);
     SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
-    StreamSet * LV_LVT =  P->CreateStreamSet(insert_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(insert_ccs, ExpandedBasis, LV_LVT);
+    auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
+
+    StreamSet * LV_LVT =  P->CreateStreamSet(LV_LVT_ccs.size());
+    P->CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
     SHOW_BIXNUM(LV_LVT);
 
     auto Lindex_ccs = LIndexBixNumCCs();
@@ -348,8 +490,12 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
     SHOW_BIXNUM(VIndexBixNum);
     SHOW_BIXNUM(TIndexBixNum);
 
+    StreamSet * Hangul_NFD_Basis = P->CreateStreamSet(21, 1);
+    P->CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+    SHOW_BIXNUM(Hangul_NFD_Basis);
+
     StreamSet * NFD_Basis = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, NFD_Basis);
+    P->CreateKernelCall<NFD_Translation>(NFD_Data, Hangul_NFD_Basis, NFD_Basis);
     SHOW_BIXNUM(NFD_Basis);
 
     StreamSet * const OutputBasis = P->CreateStreamSet(8);
