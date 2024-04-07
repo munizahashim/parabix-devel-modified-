@@ -732,7 +732,7 @@ void GrepEngine::grepCodeGen() {
 //  Default Report Match:  lines are emitted with whatever line terminators are found in the
 //  input.  However, if the final line is not terminated, a new line is appended.
 //
-const size_t batch_alignment = 64;
+constexpr size_t batch_alignment = 64;
 
 void EmitMatch::setFileLabel(std::string fileLabel) {
     if (mShowFileNames) {

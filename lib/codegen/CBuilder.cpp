@@ -1962,7 +1962,7 @@ static inline bool notConstantZeroArraySize(const AllocaInst * const Base) {
 }
 
 void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * const Name) {
-    __CreateAssert(CreateIsNotNull(Ptr), "%s was given a null address", {Name});
+    __CreateAssert(CreateOr(CreateIsNotNull(Ptr), CreateIsNull(Size)), "%s was given a null address", {Name});
     if (AllocaInst * Base = resolveStackAddress(Ptr)) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));

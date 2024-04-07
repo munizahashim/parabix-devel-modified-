@@ -90,7 +90,7 @@ const UnicodeSet EnumeratedPropertyObject::GetCodepointSet(const int property_en
 }
 
 const UnicodeSet EnumeratedPropertyObject::GetCodepointSetMatchingPattern(re::RE * re, GrepLinesFunctionType grep) {
-    AlignedAllocator<char, 32> alloc;
+    AlignedAllocator<char, 64> alloc;
     std::vector<std::string> accumulatedValues;
 
     const std::string & str = GetPropertyValueGrepString();
@@ -210,7 +210,7 @@ const UnicodeSet ExtensionPropertyObject::GetCodepointSet(const std::string & va
 }
 
 const UnicodeSet ExtensionPropertyObject::GetCodepointSetMatchingPattern(re::RE * re, GrepLinesFunctionType grep) {
-    AlignedAllocator<char, 32> alloc;
+    AlignedAllocator<char, 64> alloc;
     std::vector<std::string> accumulatedValues;
 
     UCD::EnumeratedPropertyObject * baseObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(base_property));
