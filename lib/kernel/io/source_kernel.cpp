@@ -90,7 +90,6 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const setTermination = b->CreateBasicBlock("setTermination");
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
-    Type * i8Ty = b->getInt8Ty();
     DataLayout DL(b->getModule());
     Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
 
@@ -105,11 +104,7 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
 
     ConstantInt * const MMAP_PAGE_SIZE = b->getSize(getPageSize());
     Value * const STRIDE_ITEMS = b->CreateMul(numOfStrides, b->getSize(stride));
-    ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
     ConstantInt * const CODE_UNIT_BYTES = b->getSize(codeUnitWidth / 8);
-
-    Value * const STRIDE_BYTES = b->CreateMul(numOfStrides, b->getSize((codeUnitWidth * stride) / 8));
-    ConstantInt * const PADDING_SIZE = b->getSize(b->getBitBlockWidth() * codeUnitWidth / 8);
 
     Value * const consumedItems = b->getConsumedItemCount("sourceBuffer");
     Value * const consumedBytes = b->CreateMul(consumedItems, CODE_UNIT_BYTES);
@@ -462,8 +457,6 @@ void MemorySourceKernel::generateInitializeMethod(BuilderRef b) {
 
 void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
-    const auto source = b->getOutputStreamSet("sourceBuffer");
-
     Value * const numOfStrides = b->getNumOfStrides();
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -471,13 +464,7 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
                         "Internal error: %s.numOfStrides cannot be 0", b->GetString(getName()));
     }
 
-    const auto codeUnitWidth = source->getFieldWidth();
-    Type * codeUnitTy = b->getIntNTy(codeUnitWidth);
-
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(getStride()));
-    Value * const segmentSize = b->CreateMul(numOfStrides, b->getSize(getStride() * codeUnitWidth));
-    Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
-
     BasicBlock * const createTemporary = b->CreateBasicBlock("createTemporary");
     BasicBlock * const exit = b->CreateBasicBlock("exit");
 

@@ -1423,9 +1423,7 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(BuilderRe
     for (; i < count; ++i) {
         const InternalScalar & scalar = mInternalScalars[i];
         if (scalar.getScalarType() == ScalarType::ThreadLocal) {
-            const auto g = scalar.getGroup();
-            auto f = threadLocalGroups.find(g);
-            threadLocalGroups.emplace(g, 0);
+            threadLocalGroups.emplace(scalar.getGroup(), 0);
         }
     }
 

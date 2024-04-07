@@ -968,7 +968,6 @@ Value * DynamicBuffer::getCapacity(BuilderPtr b) const {
         assert (mHandleType->getNumElements() == LinearFields);
         indices[1] = b->getInt32(LinearEffectiveCapacity);
         Value * ptr = b->CreateInBoundsGEP(mHandleType, mHandle, indices);
-        ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
         capacity = b->CreateLoad(b->getSizeTy(), ptr);
     } else {
 
@@ -995,7 +994,6 @@ Value * DynamicBuffer::getInternalCapacity(BuilderPtr b) const {
     if (mLinear) {
         indices[1] = b->getInt32(LinearInternalCapacity);
         Value * ptr = b->CreateInBoundsGEP(mHandleType, mHandle, indices);
-        ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
         capacity = b->CreateLoad(b->getSizeTy(), ptr);
     } else {
         assert (mHandleType->getNumElements() == CircularFields);
