@@ -271,14 +271,11 @@ Value * PipelineCompiler::calculateTransferableItemCounts(BuilderRef b, Value * 
         } else {
             penultimateNumOfStrides = numOfLinearStrides;
         }
-
         BasicBlock * const enteringFinalStride = b->CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
         BasicBlock * const penultimateSegmentExit = b->GetInsertBlock();
-
         b->CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringNonFinalSegment);
 
         b->SetInsertPoint(enteringFinalStride);
-
         Value * fixedItemFactor = nullptr;
         Value * partialPartitionStride = nullptr;
         calculateFinalItemCounts(b, accessibleItems, writableItems, fixedItemFactor, partialPartitionStride);

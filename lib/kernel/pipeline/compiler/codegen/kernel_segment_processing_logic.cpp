@@ -201,11 +201,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
-//    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-//        const BufferPort & port = mBufferGraph[e];
-//        assert (port.Port.Type == PortType::Input);
-//        mAvailableInputItemCount[port.Port] = mAvailableInputItemCountPhi[port.Port];
-//    }
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);

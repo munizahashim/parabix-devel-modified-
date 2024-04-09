@@ -726,7 +726,8 @@ Value * CBuilder::CreateFTruncate(Value * const fd, Value * size) {
 Value * CBuilder::CreateMAdvise(Value * addr, Value * length, const int advice) {
     Triple T(mTriple);
     Value * result = nullptr;
-    if (T.isOSLinux() || T.isOSDarwin()) {        
+
+    if (T.isOSLinux() || T.isTargetMachineMac()) {
         Module * const m = getModule();
         IntegerType * const intTy = getInt32Ty();
         IntegerType * const sizeTy = getSizeTy();
@@ -2102,6 +2103,13 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                         return !(isa<Function>(V) || isa<Constant>(V));
                         #endif
                     };
+                    if (!(ci.getCalledFunction() || isIndirectCall())) {
+                        auto & out = llvm::errs();
+                        B.print(out);
+                        errs() << "\n\n";
+                        ci.print(out);
+                    }
+
                     assert ("null pointer for function call?" && (ci.getCalledFunction() || isIndirectCall()));
                     // if we're using address sanitizer, try to determine whether we're
                     // rechecking the same address

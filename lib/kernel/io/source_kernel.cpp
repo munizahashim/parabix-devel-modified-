@@ -16,8 +16,13 @@
 #include <unistd.h>
 
 #ifdef __APPLE__
-#define PREAD pread
+
 #else
+
+
+#endif
+
+#if !defined(__APPLE__) && _POSIX_C_SOURCE >= 200809L
 #define PREAD pread64
 #endif
 
@@ -35,12 +40,24 @@ extern "C" uint64_t file_size(const uint32_t fd) {
     return st.st_size;
 }
 
+//int madvise_wrapper(void * addr, size_t length, int flags) {
+//    const auto r = madvise(addr, length, flags);
+//    if (r) {
+//        const auto e = errno;
+//        errs() << "MADV:" << strerror(e) << "\n";
+//    }
+//    return r;
+//}
+
 namespace kernel {
 
 /// MMAP SOURCE KERNEL
 
 void MMapSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
     b->LinkFunction("file_size", file_size);
+    b->LinkFunction("mmap", mmap);
+    b->LinkFunction("madvise", madvise);
+    b->LinkFunction("munmap", munmap);
 }
 
 void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
@@ -61,7 +78,6 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     Value * const fileBuffer = b->CreatePointerCast(b->CreateFileSourceMMap(fd, fileSize), codeUnitPtrTy);
     b->setScalarField("buffer", fileBuffer);
     b->setBaseAddress("sourceBuffer", fileBuffer);
-    b->CreateMAdvise(fileBuffer, fileSize, MADV_SEQUENTIAL | MADV_WILLNEED);
     Value * fileItems = fileSize;
     if (LLVM_UNLIKELY(codeUnitWidth > 8)) {
         fileItems = b->CreateUDiv(fileSize, b->getSize(codeUnitWidth / 8));
@@ -90,9 +106,6 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const setTermination = b->CreateBasicBlock("setTermination");
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
-    DataLayout DL(b->getModule());
-    Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
-
     Value * const numOfStrides = b->getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         b->CreateAssert(b->CreateIsNotNull(numOfStrides),
@@ -102,30 +115,41 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     // TODO: could we improve overall performance by trying to "preload" the data by reading it? This would increase
     // the cost of this kernel but might allow the first kernel to read the file data be better balanced with it.
 
-    ConstantInt * const MMAP_PAGE_SIZE = b->getSize(getPageSize());
-    Value * const STRIDE_ITEMS = b->CreateMul(numOfStrides, b->getSize(stride));
+    const auto pageSize = getPageSize();
+    Value * const desiredItems = b->CreateMul(numOfStrides, b->getSize(stride));
     ConstantInt * const CODE_UNIT_BYTES = b->getSize(codeUnitWidth / 8);
 
     Value * const consumedItems = b->getConsumedItemCount("sourceBuffer");
     Value * const consumedBytes = b->CreateMul(consumedItems, CODE_UNIT_BYTES);
-    Value * const consumedPageOffset = b->CreateAnd(consumedBytes, ConstantExpr::getNeg(MMAP_PAGE_SIZE));
+    Value * const consumedPageOffset = b->CreateRoundDownRational(consumedBytes, pageSize);
     Value * const consumedBuffer = b->getRawOutputPointer("sourceBuffer", consumedPageOffset);
     Value * const readableBuffer = b->getScalarField("buffer");
-    Value * const unnecessaryBytes =
-      b->CreateSub(b->CreatePtrToInt(consumedBuffer, intPtrTy),
-                   b->CreatePtrToInt(readableBuffer, intPtrTy));
+    Value * const unnecessaryBytes = b->CreateSub(consumedPageOffset, b->CreatePtrToInt(readableBuffer, b->getSizeTy()));
+
+    Module * const m = b->getModule();
+    Function * MAdviseFunc = m->getFunction("madvise");
+    assert (MAdviseFunc);
+    FixedArray<Value *, 3> args;
 
     // avoid calling madvise unless an actual page table change could occur
     b->CreateLikelyCondBr(b->CreateIsNotNull(unnecessaryBytes), dropPages, checkRemaining);
     b->SetInsertPoint(dropPages);
     // instruct the OS that it can safely drop any fully consumed pages
-    b->CreateMAdvise(readableBuffer, unnecessaryBytes, MADV_DONTNEED);
+
+
+//    args[0] = readableBuffer;
+//    args[1] = consumedPageOffset;
+//    args[2] = b->getInt32(MADV_DONTNEED);
+//    Value * const r0 = b->CreateCall(MAdviseFunc, args);
+//    assert (r0);
+//    b->CallPrintInt("r0", r0);
+//    b->setScalarField("buffer", consumedBuffer);
     b->CreateBr(checkRemaining);
 
     // determine whether or not we've exhausted the "safe" region of the file buffer
     b->SetInsertPoint(checkRemaining);
     Value * const producedItems = b->getProducedItemCount("sourceBuffer");
-    Value * const nextProducedItems = b->CreateAdd(producedItems, STRIDE_ITEMS);
+    Value * const nextProducedItems = b->CreateAdd(producedItems, desiredItems);
     Value * const fileItems = b->getScalarField("fileItems");
     Value * const lastPage = b->CreateICmpULE(fileItems, nextProducedItems);
     b->CreateUnlikelyCondBr(lastPage, setTermination, exit);
@@ -138,13 +162,29 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b->CreateBr(exit);
 
     b->SetInsertPoint(exit);
+    PHINode * producedPhi = b->CreatePHI(b->getSizeTy(), 2);
+    producedPhi->addIncoming(nextProducedItems, checkRemaining);
+    producedPhi->addIncoming(fileItems, setTermination);
+    Value * const producedBytes = b->CreateMul(producedPhi, CODE_UNIT_BYTES);
+    Value * const length = b->CreateSub(producedBytes, consumedPageOffset);
+
+    args[0] = consumedBuffer;
+    args[1] = length;
+    args[2] = b->getInt32(MADV_WILLNEED);
+    b->CreateCall(MAdviseFunc, args);
+
 }
 void MMapSourceKernel::freeBuffer(BuilderRef b, const unsigned codeUnitWidth) {
-    b->CreateFree(b->getScalarField("ancillaryBuffer"));
     Value * const fileItems = b->getScalarField("fileItems");
     Constant * const CODE_UNIT_BYTES = b->getSize(codeUnitWidth / 8);
     Value * const fileSize = b->CreateMul(fileItems, CODE_UNIT_BYTES);
-    b->CreateMUnmap(b->getScalarField("buffer"), fileSize);
+    Module * const m = b->getModule();
+    Function * MUnmapFunc = m->getFunction("munmap");
+    assert (MUnmapFunc);
+    FixedArray<Value *, 2> args;
+    args[0] = b->CreatePointerCast(b->getBaseAddress("sourceBuffer"), b->getVoidPtrTy());
+    args[1] = fileSize;
+    b->CreateCall(MUnmapFunc, args);
 }
 
 Value * MMapSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, BuilderRef b) {
@@ -158,7 +198,11 @@ void MMapSourceKernel::linkExternalMethods(BuilderRef b) {
 /// READ SOURCE KERNEL
 
 void ReadSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
+    #ifdef PREAD
+    b->LinkFunction("pread64", PREAD);
+    #else
     b->LinkFunction("read", read);
+    #endif
 }
 
 void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
@@ -294,12 +338,22 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     producedSoFar->addIncoming(produced, prepareBuffer);
     Value * const sourceBuffer = b->getRawOutputPointer("sourceBuffer", producedSoFar);
 
+
+
+    #ifdef PREAD
+    FixedArray<Value *, 4> args;
+    args[0] = fd;
+    args[1] = sourceBuffer;
+    args[2] = bytesToRead;
+    args[3] = producedSoFar;
+    Function *  const preadFunc = b->getModule()->getFunction("pread64");
+    #else
     FixedArray<Value *, 3> args;
     args[0] = fd;
     args[1] = sourceBuffer;
     args[2] = bytesToRead;
-//    args[3] = producedSoFar;
     Function *  const preadFunc = b->getModule()->getFunction("read");
+    #endif
     Value * const bytesRead = b->CreateCall(preadFunc, args);
 
     // There are 4 possibile results from read:
