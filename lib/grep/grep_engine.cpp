@@ -136,7 +136,7 @@ extern "C" void set_batch_line_number_wrapper(intptr_t accum_addr, unsigned file
 GrepEngine::GrepEngine(BaseDriver &driver) :
     mSuppressFileMessages(false),
     mBinaryFilesMode(argv::Text),
-    mPreferMMap(true),
+    mPreferMMap(false),
     mColoring(false),
     mShowFileNames(false),
     mStdinLabel("(stdin)"),
