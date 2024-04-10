@@ -20,7 +20,6 @@ enable_testing()
 
 ###   Build Options   ###
 
-option(DISABLE_DUAL_ABI "Disable GCC Dual ABI support" OFF)
 option(USE_ADDRESS_SANITIZER "Enables use of address sanitizer in debug mode if available" OFF)
 option(ENABLE_PAPI "Enable PAPI support if available" OFF)
 option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
@@ -91,7 +90,7 @@ message(STATUS "LLVM Version Integer: ${LLVM_VERSION_INTEGER}")
 set(Boost_USE_STATIC_LIBS ${USE_STATIC_LIBS})
 set(Boost_USE_MULTITHREADED OFF)
 set(Boost_USE_STATIC_RUNTIME OFF)
-find_package(Boost 1.61 REQUIRED COMPONENTS system filesystem iostreams)
+find_package(Boost 1.61 REQUIRED COMPONENTS system filesystem iostreams regex)
 message(STATUS "Found Boost_LIBRARY_DIRS: ${Boost_LIBRARY_DIRS}")
 include_directories("${Boost_INCLUDE_DIRS}")
 link_directories(${Boost_LIBRARY_DIRS})
@@ -213,9 +212,7 @@ UNSET(HAS_EXECINFO CACHE)
 UNSET(HAS_MACH_VM_TYPES CACHE)
 
 # Disable Dual ABI support
-if(DISABLE_DUAL_ABI)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
-endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
 
 set(CMAKE_REQUIRED_FLAGS)
 
