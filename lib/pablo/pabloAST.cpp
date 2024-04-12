@@ -31,6 +31,10 @@ size_t constexpr __length(const char * const str) {
     return *str ? 1 + __length(str + 1) : 0;
 }
 
+#ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+size_t PabloAST::__AST_NODE_COUNT = 0;
+#endif
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief equals
  *

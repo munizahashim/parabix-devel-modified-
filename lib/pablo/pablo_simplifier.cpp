@@ -35,6 +35,17 @@ using EscapedVars = Branch::EscapedVars;
 using Allocator = SlabAllocator<uint8_t>;
 using KeySet = SmallVector<const Var *, 64>;
 
+#ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+inline bool lessThan(const PabloAST * a, const PabloAST * b) {
+    return a->getNodeId() < b->getNodeId();
+}
+#else
+inline bool lessThan(const PabloAST * a, const PabloAST * b) {
+    return a < b;
+}
+#endif
+
+
 // #define EXPERIMENTAL
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -376,7 +387,6 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
     };
 
     processBranchBody();
-
     // If this block has a branch statement leading into it, we can verify whether an escaped value
     // was updated within this block and update the preceeding block's variable state appropriately.
     if (phiEscapedVars(br, escaped, nestedVariables, variables)) {
@@ -434,6 +444,8 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
         }
     }
 
+#if 0
+
     // CASE 2:
 
     // Detect when two Vars, a and b, are assigned identical values and replace future uses
@@ -460,6 +472,8 @@ static bool phiEscapedVars(Branch * const br, const EscapedVars & escaped, Varia
             }
         }
     }
+
+#endif
 
     #ifdef EXPERIMENTAL
     // CASE 3:
@@ -753,7 +767,7 @@ PabloAST * triviallyFoldBinaryAndOr(Statement * stmt, PabloBlock * const block) 
     if (LLVM_UNLIKELY(op[0] == op[1])) {
         return op[0];
     } else {
-        if (op[1] < op[0]) {
+        if (lessThan(op[1], op[0])) {
             stmt->setOperand(0, op[1]);
             stmt->setOperand(1, op[0]);
         }
@@ -851,7 +865,7 @@ PabloAST * triviallyFoldXor(Statement * stmt, PabloBlock * const block) {
                 return block->createZeroes(stmt->getType());
             }
         }
-        if (op[1] < op[0]) {
+        if (lessThan(op[1], op[0])) {
             std::swap(op[0], op[1]);
         }
         expr = block->createXor(op[0], op[1]);

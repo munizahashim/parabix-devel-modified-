@@ -18,9 +18,14 @@ namespace llvm { class raw_ostream; }
 namespace pablo { class PabloBlock; }
 namespace pablo { class String; }
 
+// #define USE_THREAD_UNSAFE_CANONICALIZATION
+
 namespace pablo {
 
 class PabloAST {
+    #ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+    static size_t __AST_NODE_COUNT;
+    #endif
     friend class Statement;
     friend class StatementList;
     friend class Branch;
@@ -164,10 +169,17 @@ public:
 
     void print(llvm::raw_ostream & O) const;
 
+    #ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+    size_t getNodeId() const { return mNodeId; }
+    #endif
+
 protected:
 
     PabloAST(const ClassTypeId id, llvm::Type * const type, Allocator & allocator) noexcept
     : mClassTypeId(id)
+    #ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+    , mNodeId(__AST_NODE_COUNT++)
+    #endif
     , mType(type)
     , mSideEffecting(false)
     , mUsers(allocator) {
@@ -196,6 +208,9 @@ protected:
 
 private:
     const ClassTypeId       mClassTypeId;
+    #ifdef USE_THREAD_UNSAFE_CANONICALIZATION
+    const size_t            mNodeId;
+    #endif
     llvm::Type * const      mType;
     bool                    mSideEffecting;
     Users                   mUsers;
