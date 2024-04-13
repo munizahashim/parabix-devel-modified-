@@ -1,10 +1,8 @@
 # Parabix
 > Parabix technology is a high-performance programming framework for streaming text processing applications, leveraging both SIMD and multicore parallel processing features.
 
-[![pipeline status](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/badges/master/pipeline.svg)](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/commits/master) [![Gitter](https://badges.gitter.im/parabix-devel/community.svg)](https://gitter.im/parabix-devel/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
-
 ### Documentation
-For more information about Parabix, please check our [wiki](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/wikis/home) or reach out to us on [Gitter](https://gitter.im/parabix-devel/community).
+For more information about Parabix, please check our [wiki](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/wikis/home).
 
 ### Tools
 Parabix includes a set of built-in [tools](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/tree/master/tools), such as [`icgrep`](README-icgrep.md), which is a very fast regular expression search program.
@@ -14,11 +12,11 @@ Parabix includes a set of built-in [tools](https://cs-git-research.cs.surrey.sfu
 To build Parabix, you need a development environment that meets a few requirements.
 
 -  Standard C++ development tools including git, C++, etc.
--  A modern C++ compiler supporting at least C++ 14.
--  The [`cmake`](https://cmake.org/download/) build system version 2.8 or better.
+-  A modern C++ compiler supporting at least C++17.
+-  The [`cmake`](https://cmake.org/download/) build system version 3.12 or better.
 -  [`Boost`](https://www.boost.org/users/download/) libraries version `1.61` or better (Ubuntu `libboost-all-dev`).
 -  [`Z3`](https://github.com/Z3Prover/z3) Theorem Prover (Ubuntu `libz3-dev`).
--  [`LLVM`](https://releases.llvm.org/download.html) system version `12`.  
+-  [`LLVM`](https://releases.llvm.org/download.html) system version `12` or later (built in Release mode).  
 
 ### Build
 
