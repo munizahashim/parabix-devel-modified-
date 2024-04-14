@@ -1,5 +1,4 @@
-#ifndef GREP_TOOLCHAIN_H
-#define GREP_TOOLCHAIN_H
+#pragma once
 
 namespace grep {
 
@@ -15,4 +14,3 @@ extern bool ShowExternals;
 extern bool UseNestedColourizationPipeline;
 }
 
-#endif // GREP_TOOLCHAIN_H

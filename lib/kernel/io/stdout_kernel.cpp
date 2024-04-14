@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/io/stdout_kernel.h>
@@ -147,7 +147,3 @@ FileSink::FileSink(BuilderRef b, Scalar * outputFileName, StreamSet * codeUnitBu
 }
 
 }
-
-
-
-

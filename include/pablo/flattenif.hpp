@@ -1,5 +1,4 @@
-#ifndef FLATTENIF_H
-#define FLATTENIF_H
+#pragma once
 
 namespace pablo {
 
@@ -17,4 +16,3 @@ private:
 
 }
 
-#endif // FLATTENIF_H

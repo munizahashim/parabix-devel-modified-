@@ -1,5 +1,4 @@
-#ifndef RE_LOCAL_H
-#define RE_LOCAL_H
+#pragma once
 
 namespace re {
 
@@ -11,4 +10,3 @@ struct RE_Local {
 
 }
 
-#endif

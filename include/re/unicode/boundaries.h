@@ -1,5 +1,4 @@
-#ifndef BOUNDARIES_H
-#define BOUNDARIES_H
+#pragma once
 
 namespace UCD { class EnumeratedPropertyObject;}
 
@@ -24,6 +23,4 @@ RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj);
 
 RE * resolveBoundaryProperties(RE * r);
 }
-
-#endif
 

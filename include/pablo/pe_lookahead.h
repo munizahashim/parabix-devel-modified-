@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2014 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef PE_LOOKAHEAD_H
-#define PE_LOOKAHEAD_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <pablo/pe_integer.h>
@@ -38,8 +36,4 @@ protected:
 };
 
 }
-
-#endif // PE_LOOKAHEAD_H
-
-
 

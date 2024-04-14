@@ -1,5 +1,4 @@
-#ifndef SCHEDULINGPREPASS_H
-#define SCHEDULINGPREPASS_H
+#pragma once
 
 namespace pablo {
 
@@ -12,4 +11,3 @@ public:
 
 }
 
-#endif // SCHEDULINGPREPASS_H

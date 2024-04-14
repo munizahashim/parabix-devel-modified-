@@ -1,5 +1,4 @@
-#ifndef PE_STRING_H
-#define PE_STRING_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <llvm/ADT/StringRef.h>
@@ -26,4 +25,3 @@ protected:
 
 }
 
-#endif // PE_STRING_H

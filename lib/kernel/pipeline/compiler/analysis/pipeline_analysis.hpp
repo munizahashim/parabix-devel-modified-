@@ -1,5 +1,4 @@
-#ifndef PIPELINE_KERNEL_ANALYSIS_HPP
-#define PIPELINE_KERNEL_ANALYSIS_HPP
+#pragma once
 
 #include "../config.h"
 #include "../common/common.hpp"
@@ -344,4 +343,3 @@ void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") 
 
 }
 
-#endif

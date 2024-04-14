@@ -1,5 +1,4 @@
-#ifndef PABLO_CODESINKING_HPP
-#define PABLO_CODESINKING_HPP
+#pragma once
 
 namespace pablo {
 class PabloKernel;
@@ -9,4 +8,3 @@ public:
 };
 }
 
-#endif // PABLO_CODESINKING_HPP

@@ -1,5 +1,4 @@
-#ifndef RE_NAME_GATHER_H
-#define RE_NAME_GATHER_H
+#pragma once
 
 #include <string>
 #include <set>
@@ -14,4 +13,3 @@ namespace re {
     std::vector<std::string> gatherExternals(RE * const re);
 
 }
-#endif

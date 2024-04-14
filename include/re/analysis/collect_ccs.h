@@ -1,5 +1,4 @@
-#ifndef COLLECT_CCS_H
-#define COLLECT_CCS_H
+#pragma once
 
 #include <vector>
 #include <set>
@@ -26,4 +25,3 @@ void collectAlphabets(RE * const re, Alphabet_Set & s,
                       re::NameProcessingMode m = re::NameProcessingMode::None);
 
 }
-#endif

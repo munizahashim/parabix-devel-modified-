@@ -1,5 +1,4 @@
-#ifndef XORSHIFT128_HPP
-#define XORSHIFT128_HPP
+#pragma once
 
 #if 0
 
@@ -69,4 +68,3 @@ bool operator!=(xoroshiro128 const &lhs, xoroshiro128 const &rhs)
 
 #endif
 
-#endif // XORSHIFT128_HPP

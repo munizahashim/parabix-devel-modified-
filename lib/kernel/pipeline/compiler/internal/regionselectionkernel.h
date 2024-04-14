@@ -1,5 +1,4 @@
-#ifndef REGIONSELECTIONKERNEL_H
-#define REGIONSELECTIONKERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -52,4 +51,3 @@ private:
 
 }
 
-#endif // REGIONSELECTIONKERNEL_H

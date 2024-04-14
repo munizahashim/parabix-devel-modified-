@@ -1,5 +1,4 @@
-#ifndef RE_MULTIPLEX_H
-#define RE_MULTIPLEX_H
+#pragma once
 
 #include <set>
 #include <memory>
@@ -19,4 +18,3 @@ inline RE * transformCCs(const std::shared_ptr<cc::MultiplexedAlphabet> & mpx, R
     return transformCCs(mpx.get(), r, mode);
 }
 }
-#endif

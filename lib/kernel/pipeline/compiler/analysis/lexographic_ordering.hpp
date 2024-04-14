@@ -1,5 +1,4 @@
-#ifndef LEXOGRAPHIC_ORDERING_HPP
-#define LEXOGRAPHIC_ORDERING_HPP
+#pragma once
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/topological_sort.hpp>
@@ -188,4 +187,3 @@ bool enumerateUpToNTopologicalOrderings(const Graph & G, const unsigned N, Funct
 }
 
 
-#endif // LEXOGRAPHIC_ORDERING_HPP

@@ -1,5 +1,4 @@
-#ifndef RE_ANALYSIS_H
-#define RE_ANALYSIS_H
+#pragma once
 
 #include <utility>
 namespace re { class RE; class Name; class CC; class Capture; class Reference;}
@@ -52,4 +51,3 @@ bool DefiniteLengthBackReferencesOnly(const RE * re);
 unsigned grepOffset(const RE * re);
 }
 
-#endif // RE_ANALYSIS_H

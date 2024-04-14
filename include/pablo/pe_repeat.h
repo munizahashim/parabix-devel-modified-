@@ -1,5 +1,4 @@
-#ifndef PE_REPEAT_H
-#define PE_REPEAT_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 
@@ -33,4 +32,3 @@ protected:
 
 }
 
-#endif // PE_REPEAT_H

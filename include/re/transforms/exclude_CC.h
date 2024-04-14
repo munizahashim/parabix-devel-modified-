@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef EXCLUDE_CC_H
-#define EXCLUDE_CC_H
+#pragma once
 
 namespace re {
     class RE;
@@ -18,4 +16,3 @@ namespace re {
     RE * exclude_CC(RE * r, CC * cc, bool processAsserted = false);
 }
 
-#endif // EXCLUDE_CC_H

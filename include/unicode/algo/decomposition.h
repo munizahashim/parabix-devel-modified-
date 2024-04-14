@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2024 Parabix Group
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #pragma once
@@ -44,4 +44,3 @@ protected:
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
 };
 }
-

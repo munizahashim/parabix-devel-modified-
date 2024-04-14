@@ -1,5 +1,4 @@
-#ifndef GRAPHFACADE_HPP
-#define GRAPHFACADE_HPP
+#pragma once
 
 #include <boost/graph/adjacency_list.hpp>
 #include <vector>
@@ -113,4 +112,3 @@ DirectedGraphFacade<Graph, true> makeTransposedGraphFacade(Graph & G) {
     return DirectedGraphFacade<Graph, true>(G);
 }
 
-#endif // GRAPHFACADE_HPP

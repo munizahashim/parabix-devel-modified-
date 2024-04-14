@@ -1,5 +1,4 @@
-#ifndef SLAB_ALLOCATOR_H
-#define SLAB_ALLOCATOR_H
+#pragma once
 
 #include <llvm/Support/Allocator.h>
 
@@ -131,4 +130,3 @@ private:
     LLVMAllocator * const mAllocator;
 };
 
-#endif // SLAB_ALLOCATOR_H

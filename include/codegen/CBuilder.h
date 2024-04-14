@@ -1,9 +1,8 @@
 /*
- *  Copyright (c) 2017 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef CBUILDER_H
-#define CBUILDER_H
+#pragma once
 
 #include <toolchain/toolchain.h>
 #include <codegen/FunctionTypeBuilder.h>
@@ -519,4 +518,3 @@ using FixedArray = std::array<T, N>;
 #endif
 
 
-#endif

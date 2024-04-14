@@ -1,5 +1,4 @@
-#ifndef DIRECTORYSEARCH_H
-#define DIRECTORYSEARCH_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -34,4 +33,3 @@ private:
 
 }
 
-#endif // DIRECTORYSEARCH_H

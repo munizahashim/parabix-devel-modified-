@@ -1,5 +1,4 @@
-#ifndef PABLO_AUTOMULTIPLEXING_HPP
-#define PABLO_AUTOMULTIPLEXING_HPP
+#pragma once
 
 #include <pablo/codegenstate.h>
 #include <util/slab_allocator.h>
@@ -88,4 +87,3 @@ private:
 
 }
 
-#endif // PABLO_AUTOMULTIPLEXING_HPP

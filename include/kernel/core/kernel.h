@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef KERNEL_H
-#define KERNEL_H
+#pragma once
 
 #include "binding_map.hpp"
 #include "relationship.h"
@@ -685,4 +684,3 @@ private:
 
 }
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef EXTENDED_BOOST_GRAPH_CONTAINERS_H
-#define EXTENDED_BOOST_GRAPH_CONTAINERS_H
+#pragma once
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/container/flat_set.hpp>
@@ -50,4 +49,3 @@ namespace boost {
 
 }
 
-#endif // EXTENDED_BOOST_GRAPH_CONTAINERS_H

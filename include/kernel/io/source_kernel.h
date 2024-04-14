@@ -1,5 +1,4 @@
-#ifndef SOURCE_KERNEL_H
-#define SOURCE_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 namespace kernel { class KernelBuilder; }
@@ -87,4 +86,3 @@ protected:
 
 }
 
-#endif // SOURCE_KERNEL_H

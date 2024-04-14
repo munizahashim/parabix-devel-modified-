@@ -1,9 +1,8 @@
-#ifndef IDISA_SSE_BUILDER_H
-#define IDISA_SSE_BUILDER_H
+#pragma once
 
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <idisa/idisa_builder.h>
@@ -66,4 +65,3 @@ public:
 
 }
 
-#endif // IDISA_SSE_BUILDER_H

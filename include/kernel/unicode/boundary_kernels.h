@@ -1,9 +1,8 @@
 /*
- *  Copyright (c) 2020 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef BOUNDARY_KERNELS_H
-#define BOUNDARY_KERNELS_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 
@@ -28,4 +27,3 @@ protected:
 };
 
 }
-#endif

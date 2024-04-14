@@ -1,5 +1,4 @@
-#ifndef RE_NAME_H
-#define RE_NAME_H
+#pragma once
 
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -276,4 +275,3 @@ inline void UnresolvedPropertyExpressionError(const PropertyExpression * pe) {
 
 
 }
-#endif // RE_NAME_H

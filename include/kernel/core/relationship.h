@@ -1,5 +1,4 @@
-#ifndef ABSTRACT_STREAMSET_H
-#define ABSTRACT_STREAMSET_H
+#pragma once
 
 #include <vector>
 #include <memory>
@@ -244,4 +243,3 @@ private:
 
 }
 
-#endif // ABSTRACT_STREAMSET_H

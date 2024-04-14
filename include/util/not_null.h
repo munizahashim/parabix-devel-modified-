@@ -1,5 +1,4 @@
-#ifndef NOT_NULL_H
-#define NOT_NULL_H
+#pragma once
 
 template<typename T>
 struct not_null {
@@ -24,4 +23,3 @@ private:
 };
 
 
-#endif // NOT_NULL_H

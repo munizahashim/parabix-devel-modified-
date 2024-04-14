@@ -1,5 +1,4 @@
-#ifndef SEARCHABLE_BUFFER_H
-#define SEARCHABLE_BUFFER_H
+#pragma once
 
 #include <llvm/ADT/StringRef.h>
 #include <util/aligned_allocator.h>
@@ -52,4 +51,3 @@ private:
 
 }
 
-#endif // SEARCHABLE_BUFFER_H

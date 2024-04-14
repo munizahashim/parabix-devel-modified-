@@ -1,5 +1,4 @@
-#ifndef PIPELINE_KERNEL_HEADER_GRAPHS_H
-#define PIPELINE_KERNEL_HEADER_GRAPHS_H
+#pragma once
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/adjacency_matrix.hpp>
@@ -605,4 +604,3 @@ using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property
 
 }
 
-#endif // PIPELINE_KERNEL_HEADER_GRAPHS_H

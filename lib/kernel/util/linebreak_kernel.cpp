@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/util/linebreak_kernel.h>
@@ -366,4 +366,3 @@ void LineSpansKernel::generatePabloMethod() {
     PabloAST * lineSpans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {lineStarts, lineEnds});
     pb.createAssign(pb.createExtract(getOutputStreamVar("LineSpans"), 0), lineSpans);
 }
-

@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef END_H
-#define END_H
+#pragma once
 
 #include <re/adt/re_re.h>
 
@@ -23,4 +21,3 @@ inline End * makeEnd() {return End::Create();}
 
 }
 
-#endif // END_H

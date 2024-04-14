@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2014 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef SHOW_H
-#define SHOW_H
+#pragma once
 
 namespace llvm { class raw_ostream; }
 
@@ -26,4 +24,3 @@ public:
 
 }
 
-#endif // SHOW_H

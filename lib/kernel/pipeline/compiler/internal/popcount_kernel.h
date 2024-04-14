@@ -1,5 +1,4 @@
-#ifndef INTERNAL_POPCOUNT_KERNEL_H
-#define INTERNAL_POPCOUNT_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -27,4 +26,3 @@ private:
 
 }
 
-#endif // REGIONSELECTIONKERNEL_H

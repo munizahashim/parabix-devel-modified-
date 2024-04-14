@@ -1,5 +1,4 @@
-#ifndef PIPELINE_KERNEL_COMPILER_CONFIG_H
-#define PIPELINE_KERNEL_COMPILER_CONFIG_H
+#pragma once
 
 // #define PRINT_DEBUG_MESSAGES
 
@@ -59,4 +58,3 @@
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
 
-#endif // PIPELINE_KERNEL_COMPILER_CONFIG_H

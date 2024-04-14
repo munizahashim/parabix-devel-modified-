@@ -1,5 +1,4 @@
-#ifndef RANDOM_STREAM_H
-#define RANDOM_STREAM_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 namespace kernel { class KernelBuilder; }
@@ -19,4 +18,3 @@ protected:
 
 }
 
-#endif // RANDOM_STREAM_H

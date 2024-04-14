@@ -1,5 +1,4 @@
-#ifndef DRIVER_H
-#define DRIVER_H
+#pragma once
 
 #include <codegen/FunctionTypeBuilder.h>
 #include <codegen/virtual_driver.h>
@@ -109,4 +108,3 @@ void BaseDriver::LinkFunction(not_null<Kernel *> kernel, llvm::StringRef name, E
     kernel->link<ExternalFunctionType>(name, functionPtr);
 }
 
-#endif // DRIVER_H
