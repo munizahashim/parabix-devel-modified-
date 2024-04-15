@@ -35,9 +35,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(BuilderRef b, const unsi
             } else if (LLVM_LIKELY(bn.isOwned() || bn.hasZeroElementsOrWidth())) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
-//                if (LLVM_LIKELY(!bn.hasZeroElementsOrWidth())) {
-//                    mTarget->addNonPersistentScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
-//                }
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
                 mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);

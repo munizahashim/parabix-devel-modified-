@@ -168,7 +168,7 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     Value * const producedBytes = b->CreateMul(producedPhi, CODE_UNIT_BYTES);
     Value * const length = b->CreateSub(producedBytes, consumedPageOffset);
 
-    args[0] = consumedBuffer;
+    args[0] = b->CreatePointerCast(consumedBuffer, cast<PointerType>(MAdviseFunc->getArg(0)->getType()));
     args[1] = length;
     args[2] = b->getInt32(MADV_WILLNEED);
     b->CreateCall(MAdviseFunc, args);

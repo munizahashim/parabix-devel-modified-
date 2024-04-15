@@ -1474,9 +1474,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     BasicBlock * const popCountEntry = b->GetInsertBlock();
 
     Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
-//    if (peekableItemCount) {
-        cond = b->CreateAnd(cond, b->CreateICmpUGE(currentItemCount, minimumItemCount));
-//    }
+
+//        cond = b->CreateAnd(cond, b->CreateICmpUGE(currentItemCount, minimumItemCount));
 
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 

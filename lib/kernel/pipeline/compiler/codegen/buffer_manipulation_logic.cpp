@@ -151,7 +151,7 @@ void PipelineCompiler::addZeroInputStructProperties(BuilderRef b) const {
         FixedArray<Type *, 2> fields;
         fields[0] = int8PtrTy;
         fields[1] = sizeTy;
-        StructType * const truncTy = StructType::create(b->getContext(), fields);
+        StructType * const truncTy = StructType::get(b->getContext(), fields);
         ArrayType * const arTy = ArrayType::get(truncTy, n);
         mTarget->addThreadLocalScalar(arTy, ZERO_INPUT_BUFFER_STRUCT, getCacheLineGroupId(PipelineOutput));
     }
@@ -335,7 +335,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
 
             Value * const requiredItemsPerStream = b->CreateAdd(end, itemsPerSegment);
-            Value * const requiredBlocksPerStream = b->CreateLShr(requiredItemsPerStream, LOG_2_BLOCK_WIDTH);
+            Value * const requiredBlocksPerStream = b->CreateCeilUDivRational(requiredItemsPerStream, blockWidth);
             Value * const requiredBlocks = b->CreateMul(requiredBlocksPerStream, numOfStreams);
             Value * const requiredPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, requiredBlocks);
             Value * const requiredPtrInt = b->CreatePtrToInt(requiredPtr, intPtrTy);
@@ -357,7 +357,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
             Value * const existingSize = b->CreateLoad(sizeTy, mallocedSizePtr);
             Value * const needsRealloc = b->CreateICmpUGT(mallocBytes, existingSize);
-
             b->CreateCondBr(needsRealloc, allocateNewBuffer, allocateNewBufferExit);
 
             b->SetInsertPoint(allocateNewBuffer);
@@ -382,7 +381,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
             Value * const outputVBA = tmp.getStreamBlockPtr(b, mallocedAddress, sz_ZERO, b->CreateNeg(initial));
             Value * const maskedAddress = b->CreatePointerCast(outputVBA, bufferPtrTy);
             assert (maskedAddress->getType() == inputAddress->getType());
-
             b->CreateCondBr(b->CreateIsNull(mallocBytes), maskedInputExit, hasDataToCopy);
 
             b->SetInsertPoint(hasDataToCopy);
@@ -444,16 +442,20 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
 
 
         FixedArray<Value *, 6> args;
+
         args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
+
         const auto ic = port.Maximum * StrideStepLength[mKernelId];
         assert (ic.denominator() == 1);
         assert (ic.numerator() > 0);
         args[1] = b->getSize(ic.numerator());
+        Value * processed = nullptr;
         if (port.isDeferred()) {
-            args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
+            processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
         } else {
-            args[2] = mCurrentProcessedItemCountPhi[inputPort];
+            processed = mCurrentProcessedItemCountPhi[inputPort];
         }
+        args[2] = processed;
         args[3] = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], selected);
         args[4] = buffer->getStreamSetCount(b);
         args[5] = b->CreateGEP(traceArTy, base, indices);

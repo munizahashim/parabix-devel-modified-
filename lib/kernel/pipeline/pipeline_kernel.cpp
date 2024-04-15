@@ -784,6 +784,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
+
     PHINode * successPhi = nullptr;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) ||
                       codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
