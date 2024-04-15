@@ -1,5 +1,4 @@
-#ifndef PIPELINE_KERNEL_HEADER_GRAPHS_H
-#define PIPELINE_KERNEL_HEADER_GRAPHS_H
+#pragma once
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/adjacency_matrix.hpp>
@@ -610,4 +609,3 @@ using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsign
 
 }
 
-#endif // PIPELINE_KERNEL_HEADER_GRAPHS_H

@@ -1,5 +1,4 @@
-#ifndef RE_INTERSECT_H
-#define RE_INTERSECT_H
+#pragma once
 
 #include <re/adt/re_re.h>
 
@@ -21,4 +20,3 @@ RE * makeIntersect(RE * lh, RE * rh);
 
 }
 
-#endif // RE_INTERSECT_H

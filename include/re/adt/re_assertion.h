@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2017 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef RE_ASSERTION_H
-#define RE_ASSERTION_H
+#pragma once
 
 #include <re/adt/adt.h>
 #include <re/adt/re_empty_set.h>
@@ -56,6 +54,4 @@ RE * makeSOT();
 RE * makeEOT();
 
 } // namespace re
-
-#endif // RE_ASSERTION_H
 

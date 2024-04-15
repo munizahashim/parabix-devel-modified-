@@ -1,5 +1,4 @@
-#ifndef PROCESSING_RATE_PROBABILITY_FUNCTION_H
-#define PROCESSING_RATE_PROBABILITY_FUNCTION_H
+#pragma once
 
 #include <assert.h>
 #include <limits>
@@ -110,4 +109,3 @@ inline ProcessingRateProbabilityDistribution MaximumDistribution() {
 
 }
 
-#endif // PROCESSING_RATE_PROBABILITY_FUNCTION_H

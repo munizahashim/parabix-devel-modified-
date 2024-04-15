@@ -1,5 +1,4 @@
-#ifndef ATTRIBUTES_H
-#define ATTRIBUTES_H
+#pragma once
 
 #include <vector>
 #include <llvm/ADT/StringRef.h>
@@ -551,4 +550,3 @@ inline Attribute InternallyGenerated() {
 }
 
 }
-#endif // ATTRIBUTES_H

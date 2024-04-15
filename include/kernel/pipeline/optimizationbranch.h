@@ -1,5 +1,4 @@
-#ifndef OPTIMIZATIONBRANCH_H
-#define OPTIMIZATIONBRANCH_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -81,4 +80,3 @@ private:
 
 }
 
-#endif // OPTIMIZATIONBRANCH_H

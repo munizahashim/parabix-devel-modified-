@@ -1,5 +1,4 @@
-#ifndef RUN_INDEX_H
-#define RUN_INDEX_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 
@@ -39,4 +38,3 @@ private:
 
 }
 
-#endif // RUN_INDEX_H

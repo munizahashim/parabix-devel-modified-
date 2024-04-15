@@ -1,5 +1,4 @@
-#ifndef RE_CASING_H
-#define RE_CASING_H
+#pragma once
 
 namespace re {
 
@@ -9,4 +8,3 @@ RE * resolveCaseInsensitiveMode(RE * re, const bool globallyCaseInsensitive);
 
 }
 
-#endif

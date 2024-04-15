@@ -1,5 +1,4 @@
-#ifndef STRING_INSERT_H
-#define STRING_INSERT_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>
 
@@ -56,4 +55,3 @@ private:
 };
 }
 
-#endif // STRING_INSERT_H

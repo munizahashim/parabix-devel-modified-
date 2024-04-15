@@ -1,5 +1,4 @@
-#ifndef ARITHMETIC_H
-#define ARITHMETIC_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 
@@ -71,4 +70,3 @@ CREATE_OPERATOR_TYPE(NotEquals)
 
 }
 
-#endif // ARITHMETIC_H

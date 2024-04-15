@@ -1,5 +1,4 @@
-#ifndef GREP_TOOLCHAIN_H
-#define GREP_TOOLCHAIN_H
+#pragma once
 
 namespace grep {
 
@@ -16,4 +15,3 @@ extern bool UseNestedColourizationPipeline;
 extern bool NoOSFileCaching;
 }
 
-#endif // GREP_TOOLCHAIN_H

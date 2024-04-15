@@ -1,5 +1,4 @@
-#ifndef RE_ALT_MINIMIZATION_H
-#define RE_ALT_MINIMIZATION_H
+#pragma once
 
 namespace re {
 
@@ -9,4 +8,3 @@ RE * minimizeRE(RE * re);
 
 }
 
-#endif // RE_ALT_MINIMIZATION_H

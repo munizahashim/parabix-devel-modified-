@@ -1,5 +1,4 @@
-#ifndef SENTINEL_H
-#define SENTINEL_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 
@@ -15,4 +14,3 @@ public:
 
 }
 
-#endif // SENTINEL_H

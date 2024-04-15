@@ -1,5 +1,4 @@
-#ifndef EXPRESSION_MAP_HPP
-#define EXPRESSION_MAP_HPP
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <pablo/pablo_intrinsic.h>
@@ -311,4 +310,3 @@ private:
 
 }
 
-#endif // EXPRESSION_MAP_HPP

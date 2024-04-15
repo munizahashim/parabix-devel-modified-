@@ -1,5 +1,4 @@
-#ifndef PABLOVERIFIER_HPP
-#define PABLOVERIFIER_HPP
+#pragma once
 
 #include <string>
 
@@ -14,4 +13,3 @@ public:
 
 }
 
-#endif // PABLOVERIFIER_HPP

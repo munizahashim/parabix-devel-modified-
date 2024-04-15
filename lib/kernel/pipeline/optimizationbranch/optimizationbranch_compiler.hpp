@@ -1,5 +1,4 @@
-#ifndef OPTIMIZATIONBRANCH_COMPILER_HPP
-#define OPTIMIZATIONBRANCH_COMPILER_HPP
+#pragma once
 
 #include <kernel/core/kernel_compiler.h>
 #include <kernel/pipeline/optimizationbranch.h>
@@ -897,4 +896,3 @@ OptimizationBranchCompiler::OptimizationBranchCompiler(BuilderRef b, Optimizatio
 
 }
 
-#endif // OPTIMIZATIONBRANCH_COMPILER_HPP

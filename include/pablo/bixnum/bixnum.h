@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef PARABIX_ARITHMETIC_COMPILER_H
-#define PARABIX_ARITHMETIC_COMPILER_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <pablo/builder.hpp>
@@ -131,5 +130,3 @@ private:
                              unsigned outputBitsToSet) override;
 };
 }
-#endif
-

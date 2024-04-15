@@ -1,5 +1,4 @@
-#ifndef PROCESSING_RATE_H
-#define PROCESSING_RATE_H
+#pragma once
 
 #include <assert.h>
 #include <boost/rational.hpp>
@@ -205,4 +204,3 @@ unsigned ceiling(const ProcessingRate::Rational & r);
 
 }
 
-#endif // PROCESSING_RATE_H

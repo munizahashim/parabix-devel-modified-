@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef TOOLCHAIN_H
-#define TOOLCHAIN_H
+#pragma once
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CodeGen.h>
@@ -120,4 +118,3 @@ void AddParabixVersionPrinter();
 void setTaskThreads(unsigned taskThreads);
 }
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef PTRWRAPPER_HPP
-#define PTRWRAPPER_HPP
+#pragma once
 
 #include <memory>
 #include <assert.h>
@@ -28,4 +27,3 @@ constexpr inline bool operator< (const PtrWrapper<T> & a, const PtrWrapper<T> & 
 }
 
 
-#endif // PTRWRAPPER_HPP

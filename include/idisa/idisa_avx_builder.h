@@ -1,9 +1,8 @@
-#ifndef IDISA_AVX_BUILDER_H
-#define IDISA_AVX_BUILDER_H
+#pragma once
 
 /*
- *  Copyright (c) 2015 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
 */
 
 #include <idisa/idisa_sse_builder.h>
@@ -106,4 +105,3 @@ private:
 #endif
 
 }
-#endif // IDISA_AVX_BUILDER_H

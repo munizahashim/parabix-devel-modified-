@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2024 The Parabix Group at Simon Fraser University
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  *
  */
 #include <unicode/utf/transchar.h>

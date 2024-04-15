@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2024 Parabix Group at Simon Fraser University
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 #pragma once
 
@@ -74,4 +74,3 @@ BitTranslationSets ComputeUTF8_insertionBixNum(const TranslationMap & map);
 //
 BitTranslationSets ComputeUTF8_deletionBixNum(const TranslationMap & map);
 }
-

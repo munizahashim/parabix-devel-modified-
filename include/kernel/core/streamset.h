@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef STREAMSET_H
-#define STREAMSET_H
+#pragma once
 
 #include <llvm/IR/Type.h>  // for Type
 #include <llvm/IR/DerivedTypes.h>  // for Type
@@ -459,4 +458,3 @@ private:
 };
 
 }
-#endif // STREAMSET_H

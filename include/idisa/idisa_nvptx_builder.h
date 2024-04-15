@@ -1,9 +1,8 @@
-#ifndef IDISA_NVPTX_BUILDER_H
-#define IDISA_NVPTX_BUILDER_H
+#pragma once
 
 /*
- *  Copyright (c) 2015 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
 */
 
 #include <idisa/idisa_i64_builder.h>
@@ -95,4 +94,3 @@ class IDISA_NVPTX35_Builder : public IDISA_NVPTX20_Builder {
 #endif
 
 }
-#endif // IDISA_NVPTX_BUILDER_H

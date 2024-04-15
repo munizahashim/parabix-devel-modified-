@@ -1,5 +1,4 @@
-#ifndef RE_RANGE_H
-#define RE_RANGE_H
+#pragma once
 
 #include <re/adt/re_re.h>
 
@@ -24,4 +23,3 @@ private:
 RE * makeRange(RE * lh, RE * rh);
 }
 
-#endif // RE_RANGE_H

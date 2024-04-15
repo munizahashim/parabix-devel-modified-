@@ -1,5 +1,4 @@
-#ifndef CC_SEQUENCE_SEARCH_H
-#define CC_SEQUENCE_SEARCH_H
+#pragma once
 
 #include <vector>
 
@@ -17,4 +16,3 @@ class RE;
 bool CC_Sequence_Search(std::vector<CC *> & CC_seq, RE * re);
 
 }
-#endif

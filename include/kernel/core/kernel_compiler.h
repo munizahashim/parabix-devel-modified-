@@ -1,5 +1,4 @@
-#ifndef KERNEL_COMPILER_H
-#define KERNEL_COMPILER_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/binding_map.hpp>
@@ -439,4 +438,3 @@ protected:
 
 }
 
-#endif // KERNEL_COMPILER_H

@@ -37,7 +37,7 @@ def parse_Unihan_file(unihan_file):
         Unihan_map[field_name][cp] = value_part
     return Unihan_map
 
-kRSUnicode_regexp = re.compile("^([0-9]{1,3}'?)\.(-?[0-9]+)$")
+kRSUnicode_regexp = re.compile("^([0-9]{1,3}'{0,2})\.(-?[0-9]+)$")
 
 def generate_Radical_sets():
     Unihan_prop_map = parse_Unihan_file("Unihan_IRGSources.txt")
@@ -56,13 +56,16 @@ def generate_Radical_sets():
                 radical_map[radical] = uset_union(radical_map[radical], cp_set)
     return radical_map
 
-CJKradicals_regexp = re.compile("^([0-9]{1,3}'?);\s+([0-9A-F]{4,6});\s+([0-9A-F]{4,6})\s*$")
+CJKradicals_regexp = re.compile("^([0-9]{1,3}'{0,2});\s+([0-9A-F]{0,6});\s+([0-9A-F]{4,6})\s*$")
 
 
 def radicalIdent(radicalCode):
     radical_id = radicalCode
-    if radicalCode[-1] == "'":
-        radical_id = radical_id[:-1] + "s"
+    if radicalCode[-1] == "'":  # traditional or simplified
+        if radicalCode[-2] == "'":  # traditional radical
+            radical_id = radical_id[:-2] + "t"
+        else:  # simplified radical
+            radical_id = radical_id[:-1] + "s"
     return "kangXi_" + radical_id
 
 def parse_CJK_Radicals_txt():
@@ -77,9 +80,11 @@ def parse_CJK_Radicals_txt():
         m = CJKradicals_regexp.match(t)
         if not m: raise Exception("Unexpected CJKRadicals syntax: %s" % t)
         radical = m.group(1)
-        rad_cp = int(m.group(2), 16)
+        g2 = m.group(2)
+        if g2 != "":
+            rad_cp = int(g2, 16)
+            radical_map[radical] = rad_cp
         ideograph_cp = int(m.group(3), 16)
-        radical_map[radical] = rad_cp
         ideograph_map[radical] = ideograph_cp
     return (radical_map, ideograph_map)
 

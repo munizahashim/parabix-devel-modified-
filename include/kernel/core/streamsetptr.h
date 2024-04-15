@@ -1,5 +1,4 @@
-#ifndef STREAMSETWRAPPER_H
-#define STREAMSETWRAPPER_H
+#pragma once
 
 #include <stdint.h>
 #include <boost/integer.hpp>
@@ -38,4 +37,3 @@ private:
 
 }
 
-#endif // STREAMSETWRAPPER_H

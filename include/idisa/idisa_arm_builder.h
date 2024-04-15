@@ -1,5 +1,4 @@
-#ifndef IDISA_ARM_BUILDER_H
-#define IDISA_ARM_BUILDER_H
+#pragma once
 
 #include <idisa/idisa_builder.h>
 
@@ -30,4 +29,3 @@ public:
 
 }
 
-#endif // IDISA_ARM_BUILDER_H

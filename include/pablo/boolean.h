@@ -1,5 +1,4 @@
-#ifndef BOOLEAN_H
-#define BOOLEAN_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <pablo/pe_integer.h>
@@ -151,4 +150,3 @@ protected:
 
 }
 
-#endif // BOOLEAN_H

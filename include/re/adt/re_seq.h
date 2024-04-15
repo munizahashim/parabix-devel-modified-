@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef RE_SEQ_H
-#define RE_SEQ_H
+#pragma once
 
 #include <string>
 #include <vector>
@@ -81,9 +79,4 @@ inline RE * u32string2re(std::u32string s) {
 }
 
 }
-
-#endif // RE_SEQ_H
-
-
-
 

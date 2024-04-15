@@ -1,5 +1,4 @@
-#ifndef PIPELINE_KERNEL_H
-#define PIPELINE_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 #include <type_traits>
@@ -217,4 +216,3 @@ protected:
 
 }
 
-#endif // PIPELINE_KERNEL_H

@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2014 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef ALT_H
-#define ALT_H
+#pragma once
 
 #include <vector>
 #include <llvm/Support/Casting.h>
@@ -126,6 +124,4 @@ inline RE * makeAlt(std::initializer_list<RE *> list) {
 }
 
 }
-
-#endif // ALT_H
 

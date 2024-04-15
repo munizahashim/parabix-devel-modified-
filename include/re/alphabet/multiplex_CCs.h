@@ -1,9 +1,8 @@
 /*
- *  Copyright (c) 2017 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef MULTIPLEX_CCS_H
-#define MULTIPLEX_CCS_H
+#pragma once
 
 #include <re/alphabet/alphabet.h>
 
@@ -57,4 +56,3 @@ inline MultiplexedAlphabet * makeMultiplexedAlphabet(const std::string alphabetN
 }
 
 
-#endif

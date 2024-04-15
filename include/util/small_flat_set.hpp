@@ -1,5 +1,4 @@
-#ifndef SMALL_FLAT_SET_HPP
-#define SMALL_FLAT_SET_HPP
+#pragma once
 
 #include <boost/container/flat_set.hpp>
 
@@ -19,4 +18,3 @@ using SmallFlatSet = boost::container::flat_set<T, std::less<T>, boost::containe
 
 #endif
 
-#endif // SMALL_FLAT_SET_HPP
