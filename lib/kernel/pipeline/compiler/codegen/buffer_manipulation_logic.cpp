@@ -1,6 +1,11 @@
 #include "../pipeline_compiler.hpp"
+#include <boost/interprocess/mapped_region.hpp>
 
 using namespace IDISA;
+
+inline unsigned getPageSize() {
+    return boost::interprocess::mapped_region::get_page_size();
+}
 
 namespace kernel {
 
@@ -135,15 +140,58 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(BuilderRef b,
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addZeroInputStructProperties
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::addZeroInputStructProperties(BuilderRef b) const {
+
+    const auto n = num_vertices(mZeroInputGraph) - ((LastKernel - FirstKernel) + 1);
+    if (n > 0) {
+        PointerType * const int8PtrTy = b->getInt8PtrTy();
+        IntegerType * const sizeTy = b->getSizeTy();
+        FixedArray<Type *, 2> fields;
+        fields[0] = int8PtrTy;
+        fields[1] = sizeTy;
+        StructType * const truncTy = StructType::get(b->getContext(), fields);
+        ArrayType * const arTy = ArrayType::get(truncTy, n);
+        mTarget->addThreadLocalScalar(arTy, ZERO_INPUT_BUFFER_STRUCT, getCacheLineGroupId(PipelineOutput));
+    }
+
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroInputAfterFinalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses) {
     #ifndef DISABLE_INPUT_ZEROING
+    const auto n = out_degree(mKernelId - FirstKernel, mZeroInputGraph);
+    if (n == 0) {
+        return;
+    }
+
 
     Constant * const sz_ZERO = b->getSize(0);
     Constant * const sz_ONE = b->getSize(1);
 
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+    ZeroInputGraph::out_edge_iterator ei_begin, ei_end;
+    std::tie(ei_begin, ei_end) = out_edges(mKernelId - FirstKernel, mZeroInputGraph);
+
+    Value * base;
+    Type * traceArTy;
+
+    std::tie(base, traceArTy) = b->getScalarFieldPtr(ZERO_INPUT_BUFFER_STRUCT);
+
+    FixedArray<Value *, 2> indices;
+
+    ConstantInt * i32_ZERO = b->getInt32(0);
+    ConstantInt * i32_ONE = b->getInt32(1);
+
+    indices[0] = i32_ZERO;
+
+    for (auto p : make_iterator_range(out_edges(mKernelId - FirstKernel, mZeroInputGraph))) {
+        const auto portNum = mZeroInputGraph[p];
+
+        const auto e = getInput(mKernelId, StreamSetPort{PortType::Input, portNum});
 
         const auto streamSet = source(e, mBufferGraph);
 
@@ -153,274 +201,282 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
         const auto inputPort = port.Port;
         assert (inputPort.Type == PortType::Input);
         const Binding & input = port.Binding;
-        const ProcessingRate & rate = input.getRate();
+        const auto unaligned = input.hasAttribute(AttrId::AllowsUnalignedAccess);
 
-        // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
-        // nested pipelines but could replace the source output.
+        const auto z = target(p, mZeroInputGraph);
+        assert (z >= LastKernel);
+        assert (z < LastKernel + traceArTy->getArrayNumElements());
+
+        indices[1] = b->getInt32(z - LastKernel);
+
+        StructType * const truncTy = cast<StructType>(traceArTy->getArrayElementType());
+
+        const auto prefix = makeBufferName(mKernelId, inputPort);
+
+        const auto itemWidth = getItemWidth(buffer->getBaseType());
+        Constant * const ITEM_WIDTH = b->getSize(itemWidth);
+
+        PointerType * const bufferType = buffer->getPointerType();
+
+        BasicBlock * const maskedInput = b->CreateBasicBlock(prefix + "_maskInput", mKernelCheckOutputSpace);
+        BasicBlock * const selectedInput = b->CreateBasicBlock(prefix + "_selectInput", mKernelCheckOutputSpace);
+
+        BasicBlock * const entryBlock = b->GetInsertBlock();
+
+        Value * const selected = accessibleItems[inputPort.Number];
+        Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
 
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
-        if (LLVM_UNLIKELY(rate.isGreedy() && !alwaysTruncate)) {
-            continue;
+        if (LLVM_UNLIKELY(alwaysTruncate)) {
+            b->CreateBr(maskedInput);
+        } else {
+            Value * const tooMany = b->CreateICmpULT(selected, totalNumOfItems);
+            Value * computeMask = tooMany;
+            if (mIsInputZeroExtended[inputPort]) {
+                computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
+            }
+            b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
         }
 
-        //if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || bn.isTruncated() || bn.isConstant())) {
+        b->SetInsertPoint(maskedInput);
+
+        // if this is a deferred fixed rate stream, we cannot be sure how many
+        // blocks will have to be provided to the kernel in order to mask out
+        // the truncated input stream.
 
 
+        // Generate a name to describe this masking function.
+        SmallVector<char, 32> tmp;
+        raw_svector_ostream name(tmp);
 
-            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
-                continue;
+        name << "__maskInput" << itemWidth;
+
+        if (unaligned) {
+            name << "U";
+        }
+
+        Module * const m = b->getModule();
+
+        PointerType * const int8PtrTy = b->getInt8PtrTy();
+
+        Function * maskInput = m->getFunction(name.str());
+
+        if (maskInput == nullptr) {
+
+
+            IntegerType * const sizeTy = b->getSizeTy();
+
+            const auto blockWidth = b->getBitBlockWidth();
+            const auto log2BlockWidth = floor_log2(blockWidth);
+            Constant * const BLOCK_MASK = b->getSize(blockWidth - 1);
+            Constant * const LOG_2_BLOCK_WIDTH = b->getSize(log2BlockWidth);
+
+            const auto ip = b->saveIP();
+
+            FixedArray<Type *, 6> params;
+            params[0] = int8PtrTy; // input buffer
+            params[1] = sizeTy; // items per stride
+            params[2] = sizeTy; // start
+            params[3] = sizeTy; // end
+            params[4] = sizeTy; // numOfStreams
+            params[5] = truncTy->getPointerTo(); // masked buffer storage ptr
+
+            LLVMContext & C = m->getContext();
+
+            FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
+            maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
+            if (LLVM_UNLIKELY(CheckAssertions)) {
+                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+                maskInput->setHasUWTable();
+                #else
+                maskInput->setUWTableKind(UWTableKind::Default);
+                #endif
             }
 
-            // TODO: for fixed rate inputs, so long as the actual number of items is aa even
-            // multiple of the stride*rate, we can ignore masking.
+            BasicBlock * const entry = BasicBlock::Create(C, "entry", maskInput);
+            b->SetInsertPoint(entry);
 
-            // TODO: if we can prove that this will be the last kernel invocation that will ever touch this stream)
-            // and is not an input to the pipeline (which we cannot prove will have space after the last item), we
-            // can avoid copying the buffer and instead just mask out the surpressed items.
-
-
-            AllocaInst * bufferStorage = nullptr;
-            PointerType * const int8PtrTy = b->getInt8PtrTy();
-            Constant * const nullPtr = ConstantPointerNull::get(int8PtrTy);
-            if (mNumOfTruncatedInputBuffers < mTruncatedInputBuffer.size()) {
-                bufferStorage = mTruncatedInputBuffer[mNumOfTruncatedInputBuffers];
-            } else { // create a stack entry for this buffer at the start of the pipeline
-                bufferStorage = b->CreateAllocaAtEntryPoint(int8PtrTy);
-                Instruction * const nextNode = bufferStorage->getNextNode(); assert (nextNode);
-                new StoreInst(ConstantPointerNull::get(int8PtrTy), bufferStorage, nextNode);
-                mTruncatedInputBuffer.push_back(bufferStorage);
-            }
-            ++mNumOfTruncatedInputBuffers;
-
-            const auto prefix = makeBufferName(mKernelId, inputPort);
-
-            const auto itemWidth = getItemWidth(buffer->getBaseType());
-            Constant * const ITEM_WIDTH = b->getSize(itemWidth);
-
-            PointerType * const bufferType = buffer->getPointerType();
-
-            BasicBlock * const maskedInput = b->CreateBasicBlock(prefix + "_maskInput", mKernelCheckOutputSpace);
-            BasicBlock * const selectedInput = b->CreateBasicBlock(prefix + "_selectInput", mKernelCheckOutputSpace);
-
-            BasicBlock * const entryBlock = b->GetInsertBlock();
-
-            Value * const selected = accessibleItems[inputPort.Number];
-            Value * const totalNumOfItems = getAccessibleInputItems(b, port);
+            auto arg = maskInput->arg_begin();
+            auto nextArg = [&]() {
+                assert (arg != maskInput->arg_end());
+                Value * const v = &*arg;
+                std::advance(arg, 1);
+                return v;
+            };
 
 
+            DataLayout DL(b->getModule());
+            Type * const intPtrTy = DL.getIntPtrType(int8PtrTy);
 
-            if (LLVM_UNLIKELY(alwaysTruncate)) {
-                b->CreateBr(maskedInput);
-            } else {
-                Value * const tooMany = b->CreateICmpULT(selected, totalNumOfItems);
-                Value * computeMask = tooMany;
-                if (mIsInputZeroExtended[inputPort]) {
-                    computeMask = b->CreateAnd(tooMany, b->CreateNot(mIsInputZeroExtended[inputPort]));
-                }
-                b->CreateStore(nullPtr, bufferStorage);
-                b->CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
-            }
-
-            b->SetInsertPoint(maskedInput);
-
-            // if this is a deferred fixed rate stream, we cannot be sure how many
-            // blocks will have to be provided to the kernel in order to mask out
-            // the truncated input stream.
+            Value * const inputBuffer = nextArg();
+            inputBuffer->setName("inputBuffer");
+            Value * const itemsPerSegment = nextArg();
+            itemsPerSegment->setName("itemsPerSegment");
+            Value * const start = nextArg();
+            start->setName("start");
+            Value * const end = nextArg();
+            end->setName("end");
+            Value * const numOfStreams = nextArg();
+            numOfStreams->setName("numOfStreams");
+            Value * const bufferStorage = nextArg();
+            bufferStorage->setName("bufferStorage");
+            assert (arg == maskInput->arg_end());
 
 
-            // Generate a name to describe this masking function.
-            SmallVector<char, 32> tmp;
-            raw_svector_ostream name(tmp);
+            Type * const singleElementStreamSetTy = ArrayType::get(FixedVectorType::get(IntegerType::get(C, itemWidth), static_cast<unsigned>(0)), 1);
+            ExternalBuffer tmp(0, b, singleElementStreamSetTy, true, 0);
+            PointerType * const bufferPtrTy = tmp.getPointerType();
 
-            name << "__maskInput" << itemWidth;
-
-            const auto unaligned = input.hasAttribute(AttrId::AllowsUnalignedAccess);
-            if (unaligned) {
-                name << "U";
-            }
-
-            Module * const m = b->getModule();
-
-            Function * maskInput = m->getFunction(name.str());
-
-            if (maskInput == nullptr) {
-
-                IntegerType * const sizeTy = b->getSizeTy();
-
-                const auto blockWidth = b->getBitBlockWidth();
-                const auto log2BlockWidth = floor_log2(blockWidth);
-                Constant * const BLOCK_MASK = b->getSize(blockWidth - 1);
-                Constant * const LOG_2_BLOCK_WIDTH = b->getSize(log2BlockWidth);
-
-                const auto ip = b->saveIP();
-
-                FixedArray<Type *, 6> params;
-                params[0] = int8PtrTy; // input buffer
-                params[1] = sizeTy; // bytes per stride
-                params[2] = sizeTy; // start
-                params[3] = sizeTy; // end
-                params[4] = sizeTy; // numOfStreams
-                params[5] = int8PtrTy->getPointerTo(); // masked buffer storage ptr
-
-                LLVMContext & C = m->getContext();
-
-                FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
-                maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-                if (LLVM_UNLIKELY(CheckAssertions)) {
-                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
-                    maskInput->setHasUWTable();
-                    #else
-                    maskInput->setUWTableKind(UWTableKind::Default);
-                    #endif
-                }
-                b->SetInsertPoint(BasicBlock::Create(C, "entry", maskInput));
-
-                auto arg = maskInput->arg_begin();
-                auto nextArg = [&]() {
-                    assert (arg != maskInput->arg_end());
-                    Value * const v = &*arg;
-                    std::advance(arg, 1);
-                    return v;
-                };
+            Value * const inputAddress = b->CreatePointerCast(inputBuffer, bufferPtrTy);
+            Value * const initial = b->CreateMul(b->CreateLShr(start, LOG_2_BLOCK_WIDTH), numOfStreams);
+            Value * const initialPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, initial);
+            Value * const initialPtrInt = b->CreatePtrToInt(initialPtr, intPtrTy);
 
 
-                DataLayout DL(b->getModule());
-                Type * const intPtrTy = DL.getIntPtrType(int8PtrTy);
+            Value * const requiredItemsPerStream = b->CreateAdd(end, itemsPerSegment);
+            Value * const requiredBlocksPerStream = b->CreateCeilUDivRational(requiredItemsPerStream, blockWidth);
+            Value * const requiredBlocks = b->CreateMul(requiredBlocksPerStream, numOfStreams);
+            Value * const requiredPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, requiredBlocks);
+            Value * const requiredPtrInt = b->CreatePtrToInt(requiredPtr, intPtrTy);
 
-                Value * const inputBuffer = nextArg();
-                inputBuffer->setName("inputBuffer");
-                Value * const itemsPerSegment = nextArg();
-                itemsPerSegment->setName("itemsPerSegment");
-                Value * const start = nextArg();
-                start->setName("start");
-                Value * const end = nextArg();
-                end->setName("end");
-                Value * const numOfStreams = nextArg();
-                numOfStreams->setName("numOfStreams");
-                Value * const bufferStorage = nextArg();
-                bufferStorage->setName("bufferStorage");
-                assert (arg == maskInput->arg_end());
+            Value * const mallocBytes = b->CreateSub(requiredPtrInt, initialPtrInt);
+            const auto blockSize = b->getBitBlockWidth() / 8;
+            const auto alignment = unaligned ? 1 : blockSize;
 
+            BasicBlock * const allocateNewBuffer = b->CreateBasicBlock("allocateNewBuffer");
+            BasicBlock * const allocateNewBufferExit = b->CreateBasicBlock("allocateNewBufferExit");
 
-                Type * const singleElementStreamSetTy = ArrayType::get(FixedVectorType::get(IntegerType::get(C, itemWidth), static_cast<unsigned>(0)), 1);
-                ExternalBuffer tmp(0, b, singleElementStreamSetTy, true, 0);
-                PointerType * const bufferPtrTy = tmp.getPointerType();
+            FixedArray<Value *, 2> offset;
+            offset[0] = i32_ZERO;
+            offset[1] = i32_ZERO;
+            Value * const mallocedPtr = b->CreateGEP(truncTy, bufferStorage, offset);
+            Value * const existingBuffer = b->CreateLoad(int8PtrTy, mallocedPtr);
+            offset[1] = i32_ONE;
+            Value * const mallocedSizePtr = b->CreateGEP(truncTy, bufferStorage, offset);
 
-                Value * const inputAddress = b->CreatePointerCast(inputBuffer, bufferPtrTy);
-                Value * const initial = b->CreateMul(b->CreateLShr(start, LOG_2_BLOCK_WIDTH), numOfStreams);
-                Value * const initialPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, initial);
-                Value * const initialPtrInt = b->CreatePtrToInt(initialPtr, intPtrTy);
+            Value * const existingSize = b->CreateLoad(sizeTy, mallocedSizePtr);
+            Value * const needsRealloc = b->CreateICmpUGT(mallocBytes, existingSize);
+            b->CreateCondBr(needsRealloc, allocateNewBuffer, allocateNewBufferExit);
 
+            b->SetInsertPoint(allocateNewBuffer);
+            Value * const allocedBytes = b->CreateRoundUpRational(mallocBytes, getPageSize());
+            b->CreateFree(existingBuffer);
+            Value * const newBuffer = b->CreateAlignedMalloc(allocedBytes, blockSize);
+            b->CreateStore(newBuffer, mallocedPtr);
+            b->CreateStore(allocedBytes, mallocedSizePtr);
 
-                Value * const requiredItemsPerStream = b->CreateAdd(end, itemsPerSegment);
-                Value * const requiredBlocksPerStream = b->CreateLShr(requiredItemsPerStream, LOG_2_BLOCK_WIDTH);
-                Value * const requiredBlocks = b->CreateMul(requiredBlocksPerStream, numOfStreams);
-                Value * const requiredPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, requiredBlocks);
-                Value * const requiredPtrInt = b->CreatePtrToInt(requiredPtr, intPtrTy);
+            b->CreateBr(allocateNewBufferExit);
 
-                Value * const mallocBytes = b->CreateSub(requiredPtrInt, initialPtrInt);
+            b->SetInsertPoint(allocateNewBufferExit);
+            PHINode * maskedBuffer = b->CreatePHI(int8PtrTy, 2);
+            maskedBuffer->addIncoming(existingBuffer, entry);
+            maskedBuffer->addIncoming(newBuffer, allocateNewBuffer);
 
+            BasicBlock * const hasDataToCopy = b->CreateBasicBlock("hasDataToCopy");
+            BasicBlock * const maskedInputLoop = BasicBlock::Create(C, "maskInputLoop", maskInput);
+            BasicBlock * const maskedInputExit = BasicBlock::Create(C, "maskInputExit", maskInput);
 
+            Value * const mallocedAddress = b->CreatePointerCast(maskedBuffer, bufferPtrTy);
+            Value * const outputVBA = tmp.getStreamBlockPtr(b, mallocedAddress, sz_ZERO, b->CreateNeg(initial));
+            Value * const maskedAddress = b->CreatePointerCast(outputVBA, bufferPtrTy);
+            assert (maskedAddress->getType() == inputAddress->getType());
+            b->CreateCondBr(b->CreateIsNull(mallocBytes), maskedInputExit, hasDataToCopy);
 
-                const auto blockSize = b->getBitBlockWidth() / 8;
-                const auto alignment = unaligned ? 1 : blockSize;
+            b->SetInsertPoint(hasDataToCopy);
+            b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
+            Value * const total = b->CreateLShr(end, LOG_2_BLOCK_WIDTH);
+            Value * const fullCopyEnd = b->CreateMul(total, numOfStreams);
+            Value * const fullCopyEndPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, fullCopyEnd);
+            Value * const fullCopyEndPtrInt = b->CreatePtrToInt(fullCopyEndPtr, intPtrTy);
+            Value * const fullBytesToCopy = b->CreateSub(fullCopyEndPtrInt, initialPtrInt);
+            b->CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, alignment);
 
-                Value * const maskedBuffer = b->CreateAlignedMalloc(mallocBytes, blockSize);
-                b->CreateMemZero(maskedBuffer, mallocBytes, blockSize);
-                b->CreateStore(maskedBuffer, bufferStorage);
-                Value * const mallocedAddress = b->CreatePointerCast(maskedBuffer, bufferPtrTy);
-                Value * const total = b->CreateLShr(end, LOG_2_BLOCK_WIDTH);
-                Value * const fullCopyEnd = b->CreateMul(total, numOfStreams);
-                Value * const fullCopyEndPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, fullCopyEnd);
-                Value * const fullCopyEndPtrInt = b->CreatePtrToInt(fullCopyEndPtr, intPtrTy);
-                Value * const fullBytesToCopy = b->CreateSub(fullCopyEndPtrInt, initialPtrInt);
-
-                b->CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, alignment);
-                Value * const outputVBA = tmp.getStreamBlockPtr(b, mallocedAddress, sz_ZERO, b->CreateNeg(initial));
-                Value * const maskedAddress = b->CreatePointerCast(outputVBA, bufferPtrTy);
-                assert (maskedAddress->getType() == inputAddress->getType());
-
-                Value * packIndex = nullptr;
-                Value * maskOffset = b->CreateAnd(end, BLOCK_MASK);
-                if (itemWidth > 1) {
-                    Value * const position = b->CreateMul(maskOffset, ITEM_WIDTH);
-                    packIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
-                    maskOffset = b->CreateAnd(position, BLOCK_MASK);
-                }
-
-                Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
-                BasicBlock * const loopEntryBlock = b->GetInsertBlock();
-
-                BasicBlock * const maskedInputLoop = BasicBlock::Create(C, "maskInputLoop", maskInput);
-                BasicBlock * const maskedInputExit = BasicBlock::Create(C, "maskInputExit", maskInput);
-                b->CreateBr(maskedInputLoop);
-
-                b->SetInsertPoint(maskedInputLoop);
-                PHINode * const streamIndex = b->CreatePHI(b->getSizeTy(), 2);
-                streamIndex->addIncoming(sz_ZERO, loopEntryBlock);
-
-                Value * inputPtr = tmp.getStreamBlockPtr(b, inputAddress, streamIndex, fullCopyEnd);
-                Value * outputPtr = tmp.getStreamBlockPtr(b, maskedAddress, streamIndex, fullCopyEnd);
-                assert (inputPtr->getType() == outputPtr->getType());
-                if (itemWidth > 1) {
-                    Value * const partialCopyInputEndPtr = tmp.getStreamPackPtr(b, inputAddress, streamIndex, fullCopyEnd, packIndex);
-                    Value * const partialCopyInputEndPtrInt = b->CreatePtrToInt(partialCopyInputEndPtr, intPtrTy);
-                    Value * const partialCopyInputStartPtrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
-                    Value * const bytesToCopy = b->CreateSub(partialCopyInputEndPtrInt, partialCopyInputStartPtrInt);
-                    b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, alignment);
-                    inputPtr = partialCopyInputEndPtr;
-                    outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
-                }
-                assert (inputPtr->getType() == outputPtr->getType());
-                Value * const val = b->CreateAlignedLoad(mask->getType(), inputPtr, alignment);
-                Value * const maskedVal = b->CreateAnd(val, mask);
-                b->CreateAlignedStore(maskedVal, outputPtr, alignment);
-
-                Value * const nextIndex = b->CreateAdd(streamIndex, sz_ONE);
-                Value * const notDone = b->CreateICmpNE(nextIndex, numOfStreams);
-                streamIndex->addIncoming(nextIndex, maskedInputLoop);
-
-                b->CreateCondBr(notDone, maskedInputLoop, maskedInputExit);
-
-                b->SetInsertPoint(maskedInputExit);
-                b->CreateRet(b->CreatePointerCast(maskedAddress, int8PtrTy));
-
-                b->restoreIP(ip);
+            Value * packIndex = nullptr;
+            Value * maskOffset = b->CreateAnd(end, BLOCK_MASK);
+            Value * initialMaskOffset = maskOffset;
+            if (itemWidth > 1) {
+                Value * const position = b->CreateMul(maskOffset, ITEM_WIDTH);
+                packIndex = b->CreateLShr(position, LOG_2_BLOCK_WIDTH);
+                maskOffset = b->CreateAnd(position, BLOCK_MASK);
             }
 
-            FixedArray<Value *, 6> args;
-            args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
-            const auto itemsPerSegment = ceiling(mKernel->getStride() * rate.getUpperBound());
-            assert (itemsPerSegment >= 1 || rate.isGreedy());
-            args[1] = b->getSize(std::max(itemsPerSegment, b->getBitBlockWidth()));
-            if (port.isDeferred()) {
-                args[2] = mCurrentProcessedDeferredItemCountPhi[inputPort];
-            } else {
-                args[2] = mCurrentProcessedItemCountPhi[inputPort];
+            Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
+            BasicBlock * const loopEntryBlock = b->GetInsertBlock();
+            b->CreateCondBr(b->CreateICmpNE(initialMaskOffset, sz_ZERO), maskedInputLoop, maskedInputExit);
+
+            b->SetInsertPoint(maskedInputLoop);
+            PHINode * const streamIndex = b->CreatePHI(b->getSizeTy(), 2);
+            streamIndex->addIncoming(sz_ZERO, loopEntryBlock);
+
+            Value * inputPtr = tmp.getStreamBlockPtr(b, inputAddress, streamIndex, fullCopyEnd);
+            Value * outputPtr = tmp.getStreamBlockPtr(b, maskedAddress, streamIndex, fullCopyEnd);
+
+            assert (inputPtr->getType() == outputPtr->getType());
+            if (itemWidth > 1) {
+                Value * const partialCopyInputEndPtr = tmp.getStreamPackPtr(b, inputAddress, streamIndex, fullCopyEnd, packIndex);
+                Value * const partialCopyInputEndPtrInt = b->CreatePtrToInt(partialCopyInputEndPtr, intPtrTy);
+                Value * const partialCopyInputStartPtrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
+                Value * const bytesToCopy = b->CreateSub(partialCopyInputEndPtrInt, partialCopyInputStartPtrInt);
+                b->CreateMemCpy(outputPtr, inputPtr, bytesToCopy, alignment);
+                inputPtr = partialCopyInputEndPtr;
+                outputPtr = tmp.getStreamPackPtr(b, maskedAddress, streamIndex, fullCopyEnd, packIndex);
             }
-            args[3] = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], selected);
-            args[4] = buffer->getStreamSetCount(b);
-            args[5] = bufferStorage;
+            assert (inputPtr->getType() == outputPtr->getType());
+            Value * const val = b->CreateAlignedLoad(mask->getType(), inputPtr, alignment);
+            Value * const maskedVal = b->CreateAnd(val, mask);
+            b->CreateAlignedStore(maskedVal, outputPtr, alignment);
 
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + " truncating item count from %" PRIu64 " to %" PRIu64,
-                      totalNumOfItems, selected);
-            #endif
+            Value * const nextIndex = b->CreateAdd(streamIndex, sz_ONE);
+            Value * const notDone = b->CreateICmpNE(nextIndex, numOfStreams);
+            streamIndex->addIncoming(nextIndex, maskedInputLoop);
 
-            Value * const maskedAddress = b->CreatePointerCast(b->CreateCall(maskInput->getFunctionType(), maskInput, args), bufferType);
-            BasicBlock * const maskedInputLoopExit = b->GetInsertBlock();
-            b->CreateBr(selectedInput);
+            b->CreateCondBr(notDone, maskedInputLoop, maskedInputExit);
 
-            b->SetInsertPoint(selectedInput);
-            PHINode * const phi = b->CreatePHI(bufferType, 2);
-            if (!alwaysTruncate) {
-                phi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
-            }
-            phi->addIncoming(maskedAddress, maskedInputLoopExit);
-            inputBaseAddresses[inputPort.Number] = phi;
+            b->SetInsertPoint(maskedInputExit);
+            b->CreateRet(b->CreatePointerCast(maskedAddress, int8PtrTy));
 
-        //}
+            b->restoreIP(ip);
+        }
+
+
+
+        FixedArray<Value *, 6> args;
+
+        args[0] = b->CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
+
+        const auto ic = port.Maximum * StrideStepLength[mKernelId];
+        assert (ic.denominator() == 1);
+        assert (ic.numerator() > 0);
+        args[1] = b->getSize(ic.numerator());
+        Value * processed = nullptr;
+        if (port.isDeferred()) {
+            processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
+        } else {
+            processed = mCurrentProcessedItemCountPhi[inputPort];
+        }
+        args[2] = processed;
+        args[3] = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], selected);
+        args[4] = buffer->getStreamSetCount(b);
+        args[5] = b->CreateGEP(traceArTy, base, indices);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + " truncating item count from %" PRIu64 " to %" PRIu64,
+                  totalNumOfItems, selected);
+        #endif
+
+        Value * const maskedAddress = b->CreatePointerCast(b->CreateCall(maskInput->getFunctionType(), maskInput, args), bufferType);
+        BasicBlock * const maskedInputLoopExit = b->GetInsertBlock();
+        b->CreateBr(selectedInput);
+
+        b->SetInsertPoint(selectedInput);
+        PHINode * const phi = b->CreatePHI(bufferType, 2);
+        if (!alwaysTruncate) {
+            phi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
+        }
+        phi->addIncoming(maskedAddress, maskedInputLoopExit);
+        inputBaseAddresses[inputPort.Number] = phi;
+
     }
     #endif
 }
@@ -429,9 +485,22 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Valu
  * @brief freeZeroedInputBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::freeZeroedInputBuffers(BuilderRef b) {
-    // free any truncated input buffers
-    for (unsigned i = 0; i < mNumOfTruncatedInputBuffers; ++i) {
-        b->CreateFree(b->CreateLoad(b->getInt8PtrTy(), mTruncatedInputBuffer[i]));
+
+    const auto n = num_vertices(mZeroInputGraph) - ((LastKernel - FirstKernel) + 1);
+    if (n > 0) {
+        Value * base;
+        Type * traceArTy;
+        std::tie(base, traceArTy) = b->getScalarFieldPtr(ZERO_INPUT_BUFFER_STRUCT);
+        ConstantInt * const i32_ZERO = b->getInt32(0);
+        FixedArray<Value *, 3> offset;
+        offset[0] = i32_ZERO;
+        offset[2] = i32_ZERO;
+        // free any truncated input buffers
+        for (size_t i = 0; i < n; ++i) {
+            offset[1] = b->getInt32(i);
+            Value * ptr = b->CreateLoad(b->getInt8PtrTy(), b->CreateGEP(traceArTy, base, offset));
+            b->CreateFree(ptr);
+        }
     }
 }
 
@@ -498,10 +567,6 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         DataLayout DL(b->getModule());
         Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        Value * const epoch = buffer->getStreamPackPtr(b, baseAddress, sz_ZERO, sz_ZERO, sz_ZERO);
-        Value * const epochInt = b->CreatePtrToInt(epoch, intPtrTy);
-        #endif
         BasicBlock * const entry = b->GetInsertBlock();
         b->CreateCondBr(b->CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
 
@@ -549,16 +614,15 @@ void PipelineCompiler::clearUnwrittenOutputData(BuilderRef b) {
         b->CreateCondBr(notDone, maskLoop, maskExit);
 
         b->SetInsertPoint(maskExit);
+
         // Zero out any blocks we could potentially touch
-        Rational strideLength{0};
+        const BufferPort & rd = mBufferGraph[e];
+        auto strideLength = rd.Maximum + rd.Add;
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];
-            const Binding & input = rd.Binding;
-            Rational R{rd.Maximum};
-            if (LLVM_UNLIKELY(input.hasLookahead())) {
-                R += input.getLookahead();
-            }
-            strideLength = std::max(strideLength, R);
+            const auto d = std::max(rd.LookAhead, rd.Add);
+            const auto r = rd.Maximum + d;
+            strideLength = std::max(strideLength, r);
         }
 
         const auto blocksToZero = ceiling(Rational{strideLength.numerator(), blockWidth * strideLength.denominator()});

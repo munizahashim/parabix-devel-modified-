@@ -310,12 +310,6 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         }
 
         #ifndef USE_SIMPLE_BUFFER_GRAPH
-        if (bn.CopyBack) {
-            out << "|CB:" << bn.CopyBack;
-        }
-        if (bn.CopyForwards) {
-            out << "|CF:" << bn.CopyForwards;
-        }
         if (bn.LookBehind) {
             out << "|LB:" << bn.LookBehind;
         }
@@ -421,7 +415,9 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
             }
             out << "\\n";
         }
+
         assert (kernelObj);
+
         if (kernelObj->hasAttribute(AttrId::InternallySynchronized)) {
             out << "<InternallySynchronized>\\n";
         }
@@ -431,6 +427,7 @@ void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
         if (isKernelStateFree(kernel)) {
             out << "<StateFree>\\n";
         }
+
         if (isKernelFamilyCall(kernel)) {
             out << "<Family>\\n";
         }

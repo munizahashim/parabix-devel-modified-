@@ -360,11 +360,14 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(BuilderRef b) {
     for (unsigned i = 0; i < numOfOutputStreams; ++i) {
         const Binding & output = mOutputStreamSets[i];
         StreamSetBuffer * buffer = nullptr;
-        if (Kernel::isLocalBuffer(output)) {
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        if (Kernel::isLocalBuffer(output, isShared, isManaged, isReturned)) {
             const ProcessingRate & rate = output.getRate();
             const auto ub = rate.getUpperBound() * mTarget->getStride();
             const auto bufferSize = ceiling(ub);
-            buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(), bufferSize, 0, 0, true, 0);
+            buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(), bufferSize,  0, true, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
         }
@@ -425,7 +428,10 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
     const auto n = mTarget->getNumOfStreamOutputs();
     for (unsigned i = 0; i != n; ++i) {
         const Binding & output = mTarget->getOutputStreamSetBinding(i);
-        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, false))) {
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
             auto & buffer = mStreamSetOutputBuffers[i];
             assert (buffer->getHandle());
             buffer->allocateBuffer(b, expectedNumOfStrides);
@@ -801,7 +807,10 @@ void OptimizationBranchCompiler::generateFinalizeMethod(BuilderRef b) {
     const auto n = mTarget->getNumOfStreamOutputs();
     for (unsigned i = 0; i != n; ++i) {
         const Binding & output = mTarget->getOutputStreamSetBinding(i);
-        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, false))) {
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
             auto & buffer = mStreamSetOutputBuffers[i];
             assert (buffer->getHandle());
             buffer->releaseBuffer(b);

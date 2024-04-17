@@ -3,6 +3,7 @@
 #include "compiler/pipeline_compiler.hpp"
 #include <llvm/IR/Function.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/core/streamset.h>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(15, 0, 0)
 #include <llvm/Analysis/ConstantFolding.h>
 #endif
@@ -217,6 +218,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
+    StreamSetBuffer::linkFunctions(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);
@@ -706,6 +708,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                 case C::DynamicMultithreadingPeriod:
                     value = b->getSize(codegen::DynamicMultithreadingPeriod);
                     break;
+                case C::BufferSegmentLength:
+                    value = b->getSize(codegen::BufferSegments);
+                    break;
                 case C::DynamicMultithreadingAddSynchronizationThreshold:
                     value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
                     break;
@@ -755,16 +760,18 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         report_fatal_error(StringRef(doSegment->getName()) + " cannot be externally synchronized");
     }
 
+
+
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
+        Constant * const sz_ONE = b->getSize(1);
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
         SmallVector<Value *, 2> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
-        Constant * const bufferSegments = b->getSize(codegen::BufferSegments);
-        allocArgs.push_back(bufferSegments);
+        allocArgs.push_back(sz_ONE);
         b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
@@ -773,10 +780,11 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
                 allocArgs.push_back(sharedHandle);
             }
             allocArgs.push_back(threadLocalHandle);
-            allocArgs.push_back(bufferSegments);
+            allocArgs.push_back(sz_ONE);
             b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
+
     PHINode * successPhi = nullptr;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) ||
                       codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {

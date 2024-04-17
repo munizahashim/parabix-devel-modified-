@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setActiveKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal) {
+void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal, const bool getCommonThreadLocal) {
     assert (kernelId >= FirstKernel && kernelId <= LastKernel);
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
@@ -21,7 +21,12 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
     mKernelThreadLocalHandle = nullptr;
     if (mKernel->hasThreadLocal() && allowThreadLocal) {
         mKernelThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId);
+        if (getCommonThreadLocal) {
+            mKernelCommonThreadLocalHandle = getThreadLocalHandlePtr(b, mKernelId, true);
+        }
     }
+
+
     mCurrentKernelName = mKernelName[mKernelId];
 }
 
@@ -139,11 +144,18 @@ Value * PipelineCompiler::subtractLookahead(BuilderRef b, const BufferPort & inp
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadLocalHandlePtr
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
+Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal) const {
     const Kernel * const kernel = getKernel(kernelIndex);
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+    Value * handle = nullptr;
+    if (LLVM_UNLIKELY(commonThreadLocal)) {
+        assert (mCommonThreadLocalHandle);
+        handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        assert (handle);
+    } else {
+        handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+    }
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
         if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -153,117 +165,6 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
     }
     assert (handle->getType()->isPointerTy());
     return handle;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getCommonThreadLocalHandlePtr
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const {
-    const Kernel * const kernel = getKernel(kernelIndex);
-    assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
-    const auto prefix = makeKernelName(kernelIndex);
-    Value * handle = getCommonThreadLocalScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
-    if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
-        StructType * const localStateTy = kernel->getThreadLocalStateType();
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            b->CreateAssert(handle, "null handle load");
-        }
-        handle = b->CreateLoad(localStateTy->getPointerTo(), handle);
-    }
-    assert (handle->getType()->isPointerTy());
-    return handle;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isBounded
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isBounded() const {
-    assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isNonThreadLocal()) {
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & binding = br.Binding;
-            const ProcessingRate & rate = binding.getRate();
-            switch (rate.getKind()) {
-                case RateId::Bounded:
-                case RateId::Fixed:
-                case RateId::PartialSum:
-                    return true;
-                case RateId::Greedy:
-                    if (rate.getLowerBound() > Rational{0, 1}) {
-                        return true;
-                    }
-                default: break;
-            }
-        }
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief requiresExplicitFinalStride
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::requiresExplicitFinalStride() const {
-    assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
-    if (mKernel->requiresExplicitPartialFinalStride()) {
-        return true;
-    }
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isOwned()) {
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & binding = br.Binding;
-            const ProcessingRate & rate = binding.getRate();
-            switch (rate.getKind()) {
-                case RateId::Fixed:
-                case RateId::PartialSum:
-                    return true;
-                default: break;
-            }
-        }
-    }
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isOwned()) {
-            const BufferPort & br = mBufferGraph[e];
-            const Binding & binding = br.Binding;
-            const ProcessingRate & rate = binding.getRate();
-            switch (rate.getKind()) {
-                case RateId::Fixed:
-                case RateId::PartialSum:
-                    return true;
-                default: break;
-            }
-        }
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyPipelineInputs
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::identifyPipelineInputs(const unsigned kernelId) {
-    mHasPipelineInput.reset();
-    mHasPipelineInput.resize(in_degree(kernelId, mBufferGraph));
-
-    if (LLVM_LIKELY(out_degree(PipelineInput, mBufferGraph) > 0)) {
-        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);
-            if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
-                assert ("non-constant streamset without a producer?" && mBufferGraph[streamSet].isConstant());
-                continue;
-            }
-            const auto producer = parent(streamSet, mBufferGraph);
-            if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                const BufferPort & br = mBufferGraph[e];
-                mHasPipelineInput.set(br.Port.Number);
-            }
-        }
-    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -303,6 +204,40 @@ bool PipelineCompiler::isDataParallel(const size_t kernel) const {
     #else
     return mIsStatelessKernel.test(kernel);
     #endif
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasPrincipalInputRate
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::hasPrincipalInputRate() const {
+    unsigned numOfPrincipalInputs = 0;
+    unsigned totalNumOfFixedRateInputs = 0;
+    bool nonFixedPrincipalAttribute = false;
+    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[e];
+        assert (port.Port.Type == PortType::Input);
+        if (LLVM_UNLIKELY(port.isPrincipal())) {
+            nonFixedPrincipalAttribute |= !port.isFixed();
+            ++numOfPrincipalInputs;
+            assert (totalNumOfFixedRateInputs == 0);
+        }
+        if (port.isFixed()) {
+            ++totalNumOfFixedRateInputs;
+        }
+    }
+    if (LLVM_UNLIKELY(numOfPrincipalInputs > 1 || nonFixedPrincipalAttribute)) {
+        SmallVector<char, 512> tmp;
+        raw_svector_ostream msg(tmp);
+        msg << "Error: " << mKernel->getName();
+        if (nonFixedPrincipalAttribute) {
+            msg << " has a Principal attribute assigned to a non-Fixed rate input";
+        } else {
+            msg << " has more than one input with a Principal attribute";
+        }
+        report_fatal_error(msg.str());
+    }
+    assert (totalNumOfFixedRateInputs >= numOfPrincipalInputs);
+    return (numOfPrincipalInputs == 1 && numOfPrincipalInputs < totalNumOfFixedRateInputs);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -384,8 +319,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
 
     // TODO: make it so these are only needed in debug mode for assertion checks?
 
-    mNumOfTruncatedInputBuffers = 0;
-
     mExecuteStridesIndividually = false;
     mCurrentKernelIsStateFree = false;
     mAllowDataParallelExecution = false;
@@ -395,9 +328,10 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mHasZeroExtendedInput = nullptr;
     mStrideStepSize = nullptr;
     mAnyClosed = nullptr;
+
+    mPrincipalFixedRateFactor = nullptr;
     mHasExhaustedClosedInput = nullptr;
     mStrideStepSizeAtLoopEntryPhi = nullptr;
-
     mKernelInsufficientInput = nullptr;
     mKernelTerminated = nullptr;
     mKernelInitiallyTerminated = nullptr;
@@ -416,7 +350,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     assert (mKernelId <= LastKernel);
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
-    reset(mInternalAccessibleInputItems, numOfInputs);
+    mInternalAccessibleInputItems.reset(numOfInputs);
     mInitiallyProcessedItemCount.reset(numOfInputs);
     mInitiallyProcessedDeferredItemCount.reset(numOfInputs);
     mAlreadyProcessedPhi.reset(numOfInputs);
@@ -441,7 +375,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mFullyProcessedItemCount.reset(numOfInputs);
 
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
-    reset(mInternalWritableOutputItems, numOfOutputs);
+    mInternalWritableOutputItems.reset(numOfOutputs);
     mAlreadyProducedPhi.reset(numOfOutputs);
     mAlreadyProducedDelayedPhi.reset(numOfOutputs);
     mAlreadyProducedDeferredPhi.reset(numOfOutputs);

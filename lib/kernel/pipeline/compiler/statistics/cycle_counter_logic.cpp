@@ -137,6 +137,7 @@ void PipelineCompiler::startCycleCounter(BuilderRef b, const std::initializer_li
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId, const CycleCounter type) const {
     if (trackCycleCounter(type)) {
+        assert (FirstKernel <= kernelId && kernelId <= LastKernel);
         Value * const end = b->CreateReadCycleCounter();
         Value * const start = mCycleCounters[(unsigned)type]; assert (start);
         Value * const duration = b->CreateSub(end, start);
@@ -217,6 +218,12 @@ void PipelineCompiler::updateCycleCounter(BuilderRef b, const unsigned kernelId,
 void PipelineCompiler::updateTotalCycleCounterTime(BuilderRef b) const {
     if (trackCycleCounter(FULL_PIPELINE_TIME)) {
         Value * const end = b->CreateReadCycleCounter();
+        Value * const start = mCycleCounters[(unsigned)FULL_PIPELINE_TIME];
+        if (LLVM_UNLIKELY(CheckAssertions)) {
+            b->CreateAssert (b->CreateICmpULT(start, end), "???");
+        }
+
+
         Value * const duration = b->CreateSub(end, mCycleCounters[(unsigned)FULL_PIPELINE_TIME]);
         // total is thread local but gets summed at the end; no need to worry about
         // multiple threads updating it.
@@ -253,7 +260,7 @@ StreamSetPort PipelineCompiler::selectPrincipleCycleCountBinding(const unsigned 
 namespace {
 extern "C"
 BOOST_NOINLINE
-void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
+void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
                                            const char ** kernelNames,
                                            const uint64_t * const values,
                                            const uint64_t totalCycles,
@@ -434,8 +441,6 @@ void __print_pipeline_cycle_counter_report(const unsigned numOfKernels,
 void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
 
-        IntegerType * const intTy = TypeBuilder<int, false>::get(b->getContext());
-
         ConstantInt * const ZERO = b->getInt32(0);
 
         auto toGlobal = [&](ArrayRef<Constant *> array, Type * const type, size_t size) {
@@ -454,6 +459,8 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
             const Kernel * const kernel = getKernel(i);
             kernelNames.push_back(b->GetString(kernel->getName()));
         }
+
+        assert (LastKernel < PipelineOutput);
 
         const auto numOfKernels = LastKernel - FirstKernel + 1U;
 
@@ -485,6 +492,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
 
 
         for (unsigned i = 0; i < numOfKernels; ++i) {
+            assert (FirstKernel + i <= LastKernel);
             const auto prefix = makeKernelName(FirstKernel + i);
 
             const auto partitionId = KernelPartitionId[FirstKernel + i];
@@ -534,7 +542,7 @@ void PipelineCompiler::printOptionalCycleCounter(BuilderRef b) {
         assert (k == REQ_INTEGERS);
 
         FixedArray<Value *, 5> args;
-        args[0] = ConstantInt::get(intTy, numOfKernels);
+        args[0] = ConstantInt::get(int64Ty, numOfKernels);
         args[1] = arrayOfKernelNames;
         args[2] = values;
         args[3] = b->getScalarField(STATISTICS_CYCLE_COUNT_TOTAL);

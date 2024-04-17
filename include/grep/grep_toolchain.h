@@ -12,5 +12,6 @@ extern unsigned ByteCClimit;
 extern bool TraceFiles;
 extern bool ShowExternals;
 extern bool UseNestedColourizationPipeline;
+extern bool NoOSFileCaching;
 }
 

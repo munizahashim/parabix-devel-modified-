@@ -607,6 +607,14 @@ Value * CBuilder::CreateAnonymousMMap(Value * size, const unsigned flags) {
     return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, intflags, fd, offset);
 }
 
+#if __linux__
+#include <linux/version.h>
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,22)
+#undef MAP_POPULATE_FLAGS
+#define HAS_MAP_POPULATE
+#endif
+#endif
+
 Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
     PointerType * const voidPtrTy = getVoidPtrTy();
     IntegerType * const intTy = getInt32Ty();
@@ -614,7 +622,12 @@ Value * CBuilder::CreateFileSourceMMap(Value * fd, Value * size) {
     IntegerType * const sizeTy = getSizeTy();
     size = CreateZExtOrTrunc(size, sizeTy);
     ConstantInt * const prot =  ConstantInt::get(intTy, PROT_READ);
-    ConstantInt * const flags =  ConstantInt::get(intTy, MAP_PRIVATE);
+    #ifdef HAS_MAP_POPULATE
+    #define MMAP_FLAGS MAP_POPULATE|MAP_NONBLOCK|MAP_PRIVATE
+    #else
+    #define MMAP_FLAGS MAP_PRIVATE
+    #endif
+    ConstantInt * const flags =  ConstantInt::get(intTy, MMAP_FLAGS);
     Constant * const offset = ConstantInt::get(sizeTy, 0);
     return CreateMMap(ConstantPointerNull::getNullValue(voidPtrTy), size, prot, flags, fd, offset);
 }
@@ -712,7 +725,8 @@ Value * CBuilder::CreateFTruncate(Value * const fd, Value * size) {
 Value * CBuilder::CreateMAdvise(Value * addr, Value * length, const int advice) {
     Triple T(mTriple);
     Value * result = nullptr;
-    if (T.isOSLinux() || T.isOSDarwin()) {        
+
+    if (T.isOSLinux() || T.isTargetMachineMac()) {
         Module * const m = getModule();
         IntegerType * const intTy = getInt32Ty();
         IntegerType * const sizeTy = getSizeTy();
@@ -1543,7 +1557,7 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(Val->getType()), "CreateStore");
     }
-    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     Val = IRBuilder<>::CreateBitCast(Val, Ptr->getType()->getPointerElementType());
     #endif
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);
@@ -1784,7 +1798,11 @@ BasicBlock * CBuilder::WriteDefaultRethrowBlock() {
     Function * const f = current->getParent();
 
     f->setPersonalityFn(getDefaultPersonalityFunction());
-    f->addFnAttr(Attribute::UWTable);
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
+    f->setHasUWTable();
+    #else
+    f->setUWTableKind(UWTableKind::Default);
+    #endif
 
     LLVMContext & C = getContext();
 
@@ -1944,7 +1962,7 @@ static inline bool notConstantZeroArraySize(const AllocaInst * const Base) {
 }
 
 void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * const Name) {
-    __CreateAssert(CreateIsNotNull(Ptr), "%s was given a null address", {Name});
+    __CreateAssert(CreateOr(CreateIsNotNull(Ptr), CreateIsNull(Size)), "%s was given a null address", {Name});
     if (AllocaInst * Base = resolveStackAddress(Ptr)) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
@@ -2084,6 +2102,13 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                         return !(isa<Function>(V) || isa<Constant>(V));
                         #endif
                     };
+                    if (!(ci.getCalledFunction() || isIndirectCall())) {
+                        auto & out = llvm::errs();
+                        B.print(out);
+                        errs() << "\n\n";
+                        ci.print(out);
+                    }
+
                     assert ("null pointer for function call?" && (ci.getCalledFunction() || isIndirectCall()));
                     // if we're using address sanitizer, try to determine whether we're
                     // rechecking the same address

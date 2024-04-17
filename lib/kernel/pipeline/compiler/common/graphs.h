@@ -284,18 +284,16 @@ struct BufferNode {
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
-    unsigned CopyBack = 0;
-    unsigned CopyForwards = 0;
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
     unsigned BufferStart = 0;
     unsigned BufferEnd = 0;
 
-    unsigned RequiredCapacity = 0;
-    unsigned OverflowCapacity = 0;
-    unsigned UnderflowCapacity = 0;
+    bool RequiresUnderflow = false;
 
+    unsigned RequiredCapacity = 0;
+    unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
 
@@ -350,10 +348,11 @@ struct BufferNode {
 
 enum BufferPortType : unsigned {
     IsPrincipal = 1,
-    IsZeroExtended = 2,
-    IsDeferred = 4,
-    IsShared = 8,
-    IsManaged = 16,
+    IsFixed = 2,
+    IsZeroExtended = 4,
+    IsDeferred = 8,
+    IsShared = 16,
+    IsManaged = 32,
     CanModifySegmentLength = 64
 };
 
@@ -381,6 +380,10 @@ struct BufferPort {
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
+    }
+
+    bool isFixed() const {
+        return (Flags & BufferPortType::IsFixed) != 0;
     }
 
     bool isZeroExtended() const {
@@ -600,6 +603,8 @@ struct FamilyScalarData {
 };
 
 using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, FamilyScalarData>;
+
+using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsigned>;
 
 
 }

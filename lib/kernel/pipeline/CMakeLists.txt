@@ -27,6 +27,7 @@ SRC
     compiler/analysis/internallygeneratedstreamset_analysis.cpp
     compiler/analysis/partitioning_analysis.cpp
     compiler/analysis/pipeline_graph_printers.cpp
+    compiler/analysis/principal_input_analysis.cpp
     compiler/analysis/relationship_analysis.cpp
     compiler/analysis/scheduling_analysis.cpp
     compiler/analysis/simple_scheduling_analysis.cpp

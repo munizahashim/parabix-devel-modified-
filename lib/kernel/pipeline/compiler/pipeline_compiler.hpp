@@ -75,6 +75,7 @@ const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
 
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
+const static std::string BUFFER_SEGMENT_LENGTH = "BSL";
 const static std::string DYNAMIC_MULTITHREADING_SEGMENT_PERIOD = "SEG.C";
 const static std::string DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTA";
 const static std::string DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTR";
@@ -134,6 +135,9 @@ const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDM
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
+const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
+
+const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
 
 using ArgVec = Vec<Value *, 64>;
 
@@ -203,7 +207,7 @@ public:
 // main doSegment functions
 
     void start(BuilderRef b);
-    void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal);
+    void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal, const bool getCommonThreadLocal = false);
     void executeKernel(BuilderRef b);
     void end(BuilderRef b);
 
@@ -235,8 +239,6 @@ public:
     void checkForPartitionEntry(BuilderRef b);
 
     void determinePartitionStrideRateScalingFactor();
-
-    bool hasJumpedOverConsumer(const unsigned streamSet, const unsigned targetPartitionId) const;
 
     void writePartitionEntryIOGuard(BuilderRef b);
     Value * calculatePartitionSegmentLength(BuilderRef b);
@@ -290,7 +292,6 @@ public:
     };
 
     Value * checkIfInputIsExhausted(BuilderRef b, InputExhaustionReturnType returnValType);
-    void determineIsFinal(BuilderRef b, Value * const numOfLinearStrides);
     Value * hasMoreInput(BuilderRef b);
 
     struct FinalItemCount {
@@ -320,14 +321,6 @@ public:
     void writeInsufficientIOExit(BuilderRef b);
     void writeJumpToNextPartition(BuilderRef b);
 
-    void writeCopyBackLogic(BuilderRef b);
-    void writeLookAheadLogic(BuilderRef b);
-    void writeLookBehindLogic(BuilderRef b);
-    void writeDelayReflectionLogic(BuilderRef b);
-    enum class CopyMode { CopyBack, LookAhead, LookBehind, Delay };
-    void copy(BuilderRef b, const CopyMode mode, Value * cond, const StreamSetPort outputPort, const StreamSetBuffer * const buffer, const unsigned itemsToCopy);
-
-
     void computeFullyProcessedItemCounts(BuilderRef b, Value * const terminated);
     void computeFullyProducedItemCounts(BuilderRef b, Value * const terminated);
 
@@ -353,7 +346,7 @@ public:
     Value * calculateNumOfLinearItems(BuilderRef b, const BufferPort &port, Value * const adjustment, StringRef location);
     Value * getAccessibleInputItems(BuilderRef b, const BufferPort & inputPort, const bool useOverflow = true);
     Value * getNumOfAccessibleStrides(BuilderRef b, const BufferPort & inputPort, Value * const numOfLinearStrides);
-    Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool useOverflow = true);
+    Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool force = false);
     Value * getNumOfWritableStrides(BuilderRef b, const BufferPort & port, Value * const numOfLinearStrides);
     Value * addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const;
     Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
@@ -406,11 +399,14 @@ public:
     void freePendingFreeableDynamicBuffers(BuilderRef b);
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
+
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
     Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
     void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
+
+    void addZeroInputStructProperties(BuilderRef b) const;
 
 // repeating streamset functions
 
@@ -477,13 +473,6 @@ public:
     void simplifyPhiNodes(Module * const m) const;
     void replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock *& toReplace, BasicBlock * const phiContainer);
 
-// kernel config functions
-
-    bool isBounded() const;
-    bool requiresExplicitFinalStride() const ;
-    void identifyPipelineInputs(const unsigned kernelId);
-    void identifyLocalPortIds(const unsigned kernelId);
-
 // synchronization functions
 
     void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
@@ -504,8 +493,7 @@ public:
 
 // thread local functions
 
-    Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
-    Value * getCommonThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex) const;
+    Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal = false) const;
 
 // optimization branch functions
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
@@ -606,6 +594,7 @@ public:
     bool hasAnyGreedyInput(const unsigned kernelId) const;
     bool isDataParallel(const size_t kernel) const;
     bool isCurrentKernelStateFree() const;
+    bool hasPrincipalInputRate() const;
 
 protected:
 
@@ -671,13 +660,14 @@ protected:
     const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
     const FamilyScalarGraph                     mFamilyScalarGraph;
-
+    const ZeroInputGraph                        mZeroInputGraph;
 
     // pipeline state
     unsigned                                    mKernelId = 0;
     const Kernel *                              mKernel = nullptr;
     Value *                                     mKernelSharedHandle = nullptr;
     Value *                                     mKernelThreadLocalHandle = nullptr;
+    Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -689,12 +679,6 @@ protected:
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
-
-    Value *                                     mMinimumNumOfThreads = nullptr;
-    Value *                                     mMaximumNumOfThreads = nullptr;
-    Value *                                     mBufferSegments = nullptr;
-    Value *                                     mDynamicMultithreadingSegmentsPerCheck = nullptr;
-    Value *                                     mDynamicMultithreadingAdditionalThreadSynchronizationThreshold = nullptr;
 
     BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
@@ -719,7 +703,6 @@ protected:
 
     Vec<AllocaInst *, 16>                       mAddressableItemCountPtr;
     Vec<AllocaInst *, 16>                       mVirtualBaseAddressPtr;
-    Vec<AllocaInst *, 4>                        mTruncatedInputBuffer;
     FixedVector<PHINode *>                      mInitiallyAvailableItemsPhi;
     FixedVector<Value *>                        mLocallyAvailableItems;
 
@@ -795,17 +778,14 @@ protected:
     PHINode *                                   mStrideStepSizeAtLoopEntryPhi = nullptr;
     Value *                                     mStrideStepSize = nullptr;
     Value *                                     mAnyClosed = nullptr;
+    Value *                                     mPrincipalFixedRateFactor = nullptr;
     Value *                                     mHasExhaustedClosedInput = nullptr;
-    BitVector                                   mHasPipelineInput;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
     Value *                                     mBranchToLoopExit = nullptr;
 
-
-    bool                                        mIsBounded = false;
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
-    bool                                        mHasExplicitFinalPartialStride = false;
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
@@ -814,8 +794,7 @@ protected:
     bool                                        mExecuteStridesIndividually = false;
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
-
-    unsigned                                    mNumOfTruncatedInputBuffers = 0;
+    bool                                        mHasPrincipalInputRate = false;
 
     InputPortVector<Value *>                    mInitiallyProcessedItemCount; // *before* entering the kernel
     InputPortVector<Value *>                    mInitiallyProcessedDeferredItemCount;
@@ -826,7 +805,7 @@ protected:
     InputPortVector<PHINode *>                  mInputVirtualBaseAddressPhi;
     InputPortVector<Value *>                    mFirstInputStrideLength;
 
-    OverflowItemCounts                          mInternalAccessibleInputItems;
+    InputPortVector<Value *>                    mInternalAccessibleInputItems;
     InputPortVector<PHINode *>                  mLinearInputItemsPhi;
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
     InputPortVector<Value *>                    mProcessedItemCountPtr; // exiting the segment loop
@@ -854,7 +833,7 @@ protected:
     OutputPortVector<PHINode *>                 mAlreadyProducedDeferredPhi;
     OutputPortVector<Value *>                   mFirstOutputStrideLength;
 
-    OverflowItemCounts                          mInternalWritableOutputItems;
+    OutputPortVector<Value *>                   mInternalWritableOutputItems;
     OutputPortVector<PHINode *>                 mLinearOutputItemsPhi;
     OutputPortVector<Value *>                   mReturnedOutputVirtualBaseAddressPtr; // written by the kernel
     OutputPortVector<Value *>                   mReturnedProducedItemCountPtr; // written by the kernel
@@ -880,7 +859,7 @@ protected:
     FixedArray<Value *, TOTAL_NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
 
     // dynamic multithreading cycle counter state
-    Value *                                     mFullSegmentStartTime = nullptr;
+//    Value *                                     mFullSegmentStartTime = nullptr;
     Value *                                     mAccumulatedSynchronizationTimePtr = nullptr;
 
     // papi counter state
@@ -996,6 +975,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
 
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
+, mZeroInputGraph(std::move(P.mZeroInputGraph))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
@@ -1021,6 +1001,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mIsInputZeroExtended(P.MaxNumOfInputPorts, mAllocator)
 , mInputVirtualBaseAddressPhi(P.MaxNumOfInputPorts, mAllocator)
 , mFirstInputStrideLength(P.MaxNumOfInputPorts, mAllocator)
+, mInternalAccessibleInputItems(P.MaxNumOfInputPorts, mAllocator)
 , mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
@@ -1045,6 +1026,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mAlreadyProducedDelayedPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mAlreadyProducedDeferredPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mFirstOutputStrideLength(P.MaxNumOfOutputPorts, mAllocator)
+, mInternalWritableOutputItems(P.MaxNumOfOutputPorts, mAllocator)
 , mLinearOutputItemsPhi(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedOutputVirtualBaseAddressPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)

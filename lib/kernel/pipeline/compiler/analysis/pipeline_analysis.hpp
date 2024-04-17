@@ -67,8 +67,11 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
-
         P.identifyTerminationChecks();
+
+        P.makeTerminationPropagationGraph();
+
+        P.analyzePrincipalRateIO();
 
         P.determinePartitionJumpIndices();
 
@@ -81,15 +84,16 @@ public:
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
         P.identifyZeroExtendedStreamSets();
+
         P.identifyLinearBuffers();
+
+        P.calculatePartialSumStepFactors(b);
 
         P.determineBufferSize(b);
 
         P.makeConsumerGraph();
 
-        P.calculatePartialSumStepFactors(b);
-
-        P.makeTerminationPropagationGraph();
+        P.buildZeroInputGraph();
 
         P.identifyPortsThatModifySegmentLength();
 
@@ -199,6 +203,8 @@ private:
 
     void identifyPortsThatModifySegmentLength();
 
+    void buildZeroInputGraph();
+
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng);
@@ -220,6 +226,10 @@ private:
     void calculatePartialSumStepFactors(BuilderRef b);
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
+
+    // princpal rate analysis functions
+
+    void analyzePrincipalRateIO();
 
     // zero extension analysis function
 
@@ -314,6 +324,7 @@ public:
     BitVector                           HasTerminationSignal;
 
     FamilyScalarGraph               mFamilyScalarGraph;
+    ZeroInputGraph                  mZeroInputGraph;
 
     OwningVector<Kernel>            mInternalKernels;
     OwningVector<Binding>           mInternalBindings;
