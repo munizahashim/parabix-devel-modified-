@@ -881,7 +881,7 @@ void CodePointMatchKernel::generatePabloMethod() {
         std::vector<re::CC *> xfrm_ccs;
         for (auto & b : xfrms) xfrm_ccs.push_back(makeCC(b, &cc::Unicode));
         UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-        Var * nullVar;
+        Var * nullVar = nullptr;
         if (!nullSet.empty()) {
             re::CC * nullCC = makeCC(nullSet, &cc::Unicode);
             nullVar = pb.createVar("null_set", pb.createZeroes());
