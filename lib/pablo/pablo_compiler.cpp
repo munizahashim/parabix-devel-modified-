@@ -162,8 +162,8 @@ void PabloCompiler::compile(BuilderRef b) {
         b->CreateStore(val, ptr);
         Function * enterKernel = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_ENTER_KERNEL);
         FixedArray<Value *, 2> args;
-        args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
-        args[1] = getHandle();
+        args[0] = b->CreatePointerCast(b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b->getVoidPtrTy());
+        args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
         b->CreateCall(enterKernel, args);
     }
     compileBlock(b, entryBlock);
@@ -172,7 +172,7 @@ void PabloCompiler::compile(BuilderRef b) {
         Function * exitKernel = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_EXIT_KERNEL);
         FixedArray<Value *, 2> args;
         args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
-        args[1] = getHandle();
+        args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
         b->CreateCall(exitKernel, args);
     }
 }
@@ -433,7 +433,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
             Function * fIllustratorEnterLoop = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_ENTER_LOOP);
             FixedArray<Value *, 2> args;
             args[0] = illustratorObj;
-            args[1] = getHandle();
+            args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
             b->CreateCall(fIllustratorEnterLoop, args);
         }
     }
@@ -505,7 +505,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
         assert (fIllustratorIterateLoop);
         FixedArray<Value *, 2> args;
         args[0] = illustratorObj;
-        args[1] = getHandle();
+        args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
         b->CreateCall(fIllustratorIterateLoop, args);
     }
     compileBlock(b, whileStatement->getBody());
@@ -582,7 +582,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
         assert (fIllustratorExitLoop);
         FixedArray<Value *, 2> args;
         args[0] = illustratorObj;
-        args[1] = getHandle();
+        args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
         b->CreateCall(fIllustratorExitLoop, args);
     }
 

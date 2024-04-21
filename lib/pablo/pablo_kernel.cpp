@@ -189,7 +189,7 @@ void PabloKernel::linkExternalMethods(BuilderRef b) {
         BEGIN_SCOPED_REGION
         FixedArray<Type *, 2> params;
         params[0] = b->getVoidPtrTy();
-        params[1] = mSharedStateType->getPointerTo();
+        params[1] = b->getVoidPtrTy();
         FunctionType * funTy = FunctionType::get(b->getVoidTy(), params, false);
         b->LinkFunction(KERNEL_ILLUSTRATOR_ENTER_KERNEL, funTy, (void*)&illustratorEnterKernel);
         b->LinkFunction(KERNEL_ILLUSTRATOR_ENTER_LOOP, funTy, (void*)&illustratorEnterLoop);
