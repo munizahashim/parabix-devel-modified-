@@ -1,5 +1,4 @@
-#ifndef BLOCK_KERNEL_COMPILER_H
-#define BLOCK_KERNEL_COMPILER_H
+#pragma once
 
 #include <kernel/core/kernel_compiler.h>
 
@@ -37,4 +36,3 @@ private:
 
 }
 
-#endif // BLOCK_KERNEL_COMPILER_H

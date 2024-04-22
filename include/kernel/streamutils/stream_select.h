@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef STREAM_SELECT_H
-#define STREAM_SELECT_H
+#pragma once
 
 #include <initializer_list>
 #include <utility>
@@ -490,4 +489,3 @@ StreamSet * Intersect(const std::unique_ptr<ProgramBuilder> & P, std::vector<std
 
 } // namespace kernel
 
-#endif // STREAM_SELECT_H

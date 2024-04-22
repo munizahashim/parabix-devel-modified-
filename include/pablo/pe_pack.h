@@ -1,5 +1,4 @@
-#ifndef PE_PACK_H
-#define PE_PACK_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 
@@ -58,4 +57,3 @@ protected:
 
 }
 
-#endif // PE_PACK_H

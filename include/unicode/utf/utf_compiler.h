@@ -1,5 +1,4 @@
-#ifndef UTF_COMPILER_HPP
-#define UTF_COMPILER_HPP
+#pragma once
 
 #include <unicode/core/UCD_Config.h>
 #include <unicode/utf/utf_encoder.h>
@@ -91,4 +90,3 @@ private:
 
 }
 
-#endif // UTF_COMPILER_HPP

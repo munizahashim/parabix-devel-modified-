@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/io/stdout_kernel.h>
@@ -9,27 +9,51 @@
 #include <kernel/core/kernel_builder.h>
 #include <toolchain/toolchain.h>
 #include <kernel/core/streamset.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
 
 namespace llvm { class Type; }
 
 using namespace llvm;
 
+#ifdef __APPLE__
+#define PWRITE pwrite
+#else
+#define PWRITE pwrite64
+#endif
+
 namespace kernel {
 
-void StdOutKernel::generateDoSegmentMethod(BuilderRef b) {
-    Value * codeUnitBuffer = b->getInputStreamBlockPtr("codeUnitBuffer", b->getInt32(0));
-    codeUnitBuffer = b->CreatePointerCast(codeUnitBuffer, b->getInt8PtrTy());
-    Value * length = b->getAccessibleItemCount("codeUnitBuffer");
+void StdOutKernel::linkExternalMethods(BuilderRef b) {
+    b->LinkFunction("write", write);
+}
 
+void StdOutKernel::generateDoSegmentMethod(BuilderRef b) {
+
+    Module * const m = b->getModule();
+
+    Value * bytesDone = b->getProcessedItemCount("codeUnitBuffer");
+    Value * codeUnitBuffer = b->getRawInputPointer("codeUnitBuffer", bytesDone);
+    codeUnitBuffer = b->CreatePointerCast(codeUnitBuffer, b->getInt8PtrTy());
+
+    Value * bytesToDo = b->getAccessibleItemCount("codeUnitBuffer");
     if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
-        Constant * const scale = b->getSize(mCodeUnitWidth / 8);
-        length = b->CreateMul(length, scale);
+        bytesDone = b->CreateMul(bytesDone, b->getSize(mCodeUnitWidth / 8));
+        bytesToDo = b->CreateMul(bytesToDo, b->getSize(mCodeUnitWidth / 8));
     } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
-        Constant * const scale = b->getSize(8 / mCodeUnitWidth);
-        length = b->CreateUDiv(length, scale);
+        bytesDone = b->CreateUDiv(bytesDone, b->getSize(8 / mCodeUnitWidth));
+        bytesToDo = b->CreateUDiv(bytesToDo, b->getSize(8 / mCodeUnitWidth));
     }
+
     Constant * const stdOutFd = b->getInt32(STDOUT_FILENO);
-    b->CreateWriteCall(stdOutFd, codeUnitBuffer, length);
+
+    FixedArray<Value *, 3> args3;
+    args3[0] = stdOutFd;
+    args3[1] = codeUnitBuffer;
+    args3[2] = bytesToDo;
+    Function * writeFunc = m->getFunction("write");
+    b->CreateCall(writeFunc, args3);
 }
 
 StdOutKernel::StdOutKernel(BuilderRef b, StreamSet *codeUnitBuffer)
@@ -41,6 +65,10 @@ StdOutKernel::StdOutKernel(BuilderRef b, StreamSet *codeUnitBuffer)
 , mCodeUnitWidth(codeUnitBuffer->getFieldWidth()) {
     setStride((8 * BUFSIZ) / mCodeUnitWidth);
     addAttribute(SideEffecting());
+}
+
+void FileSink::linkExternalMethods(BuilderRef b) {
+    b->LinkFunction("pwrite", PWRITE);
 }
 
 void FileSink::generateInitializeMethod(BuilderRef b) {
@@ -99,16 +127,29 @@ void FileSink::generateInitializeMethod(BuilderRef b) {
 }
 
 void FileSink::generateDoSegmentMethod(BuilderRef b) {
-    Value * codeUnitBuffer = b->getInputStreamBlockPtr("codeUnitBuffer", b->getInt32(0));
+    Value * bytesDone = b->getProcessedItemCount("codeUnitBuffer");
+    Value * codeUnitBuffer = b->getRawInputPointer("codeUnitBuffer", bytesDone);
     codeUnitBuffer = b->CreatePointerCast(codeUnitBuffer, b->getInt8PtrTy());
     Value * bytesToDo = b->getAccessibleItemCount("codeUnitBuffer");
     if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
+        bytesDone = b->CreateMul(bytesDone, b->getSize(mCodeUnitWidth / 8));
         bytesToDo = b->CreateMul(bytesToDo, b->getSize(mCodeUnitWidth / 8));
     } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
+        bytesDone = b->CreateUDiv(bytesDone, b->getSize(8 / mCodeUnitWidth));
         bytesToDo = b->CreateUDiv(bytesToDo, b->getSize(8 / mCodeUnitWidth));
     }
     Value * const fileDescriptor = b->getScalarField("fileDescriptor");
-    b->CreateWriteCall(fileDescriptor, codeUnitBuffer, bytesToDo);
+
+    FixedArray<Value *, 4> args;
+    args[0] = fileDescriptor;
+    args[1] = codeUnitBuffer;
+    args[2] = bytesToDo;
+    args[3] = bytesDone;
+
+    Function * pwriteFunc = b->getModule()->getFunction("pwrite");
+    b->CreateCall(pwriteFunc, args);
+
+    //b->CreateWriteCall(fileDescriptor, codeUnitBuffer, bytesToDo);
 }
 
 void FileSink::generateFinalizeMethod(BuilderRef b) {
@@ -147,7 +188,3 @@ FileSink::FileSink(BuilderRef b, Scalar * outputFileName, StreamSet * codeUnitBu
 }
 
 }
-
-
-
-

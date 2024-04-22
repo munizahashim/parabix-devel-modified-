@@ -1,5 +1,4 @@
-#ifndef UNICODE_SET_H
-#define UNICODE_SET_H
+#pragma once
 
 #include <stdint.h>
 #include <vector>
@@ -245,6 +244,4 @@ private:
 };
 
 }
-
-#endif
 

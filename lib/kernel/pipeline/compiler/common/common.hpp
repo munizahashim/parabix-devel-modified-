@@ -1,5 +1,4 @@
-#ifndef COMMON_PIPELINE_GRAPH_FUNCTIONS_HPP
-#define COMMON_PIPELINE_GRAPH_FUNCTIONS_HPP
+#pragma once
 
 #include "graphs.h"
 #include <boost/iterator/iterator_facade.hpp>
@@ -474,4 +473,3 @@ using IllustratedStreamSetMap = std::vector<IllustratedStreamSet>;
 
 }
 
-#endif // COMMON_HPP

@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/unicode/UCD_property_kernel.h>
@@ -61,4 +61,3 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
     Var * const property_stream = getOutputStreamVar("property_stream");
     pb.createAssign(pb.createExtract(property_stream, pb.getInteger(0)), propertyVar);
 }
-

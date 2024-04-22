@@ -1,5 +1,4 @@
-#ifndef BINDING_H
-#define BINDING_H
+#pragma once
 
 #include "processing_rate.h"
 #include "processing_rate_probability_function.h"
@@ -223,4 +222,3 @@ inline Binding Bind(llvm::Type * const scalarType, std::string name, ParamTypes.
 
 }
 
-#endif // BINDING_H

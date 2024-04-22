@@ -44,4 +44,9 @@ static cl::opt<bool, true> OptShowExternals("ShowExternals", cl::location(ShowEx
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
                                          cl::desc("Use a nested pipeline for colourization."), cl::init(true));
+
+
+bool NoOSFileCaching;
+static cl::opt<bool, true> OptNoOSCaching("disable-file-caching", cl::location(NoOSFileCaching),
+                                         cl::desc("Disable OS file caching."), cl::init(false));
 }

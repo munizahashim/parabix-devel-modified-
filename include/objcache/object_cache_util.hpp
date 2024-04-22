@@ -1,5 +1,4 @@
-#ifndef OBJECT_CACHE_SETTINGS_H
-#define OBJECT_CACHE_SETTINGS_H
+#pragma once
 
 #include <boost/filesystem.hpp>
 #include <boost/lexical_cast.hpp>
@@ -91,4 +90,3 @@ private:
     const bool mLocked;
 };
 
-#endif // OBJECT_CACHE_SETTINGS_H

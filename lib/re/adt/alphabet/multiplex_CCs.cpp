@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2017 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <map>
@@ -174,4 +174,3 @@ re::CC * MultiplexedAlphabet::invertCC(const re::CC * transformedCC) const {
 
     
 }
-

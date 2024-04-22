@@ -1,5 +1,4 @@
-#ifndef PABLO_DISTRIBUTIVEPASS_H
-#define PABLO_DISTRIBUTIVEPASS_H
+#pragma once
 
 namespace pablo {
 
@@ -12,4 +11,3 @@ public:
 
 }
 
-#endif // DISTRIBUTIVEPASS_H

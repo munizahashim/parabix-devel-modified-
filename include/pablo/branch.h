@@ -1,5 +1,4 @@
-#ifndef BRANCH_H
-#define BRANCH_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 #include <llvm/ADT/SmallVector.h>
@@ -84,4 +83,3 @@ protected:
 
 }
 
-#endif // BRANCH_H

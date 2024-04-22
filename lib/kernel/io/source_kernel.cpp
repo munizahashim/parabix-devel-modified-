@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/io/source_kernel.h>
@@ -13,6 +13,18 @@
 #include <toolchain/toolchain.h>
 #include <boost/interprocess/mapped_region.hpp>
 #include <llvm/Support/raw_ostream.h>
+#include <unistd.h>
+
+#ifdef __APPLE__
+
+#else
+
+
+#endif
+
+#if !defined(__APPLE__) && _POSIX_C_SOURCE >= 200809L
+#define PREAD pread64
+#endif
 
 using namespace llvm;
 
@@ -28,12 +40,24 @@ extern "C" uint64_t file_size(const uint32_t fd) {
     return st.st_size;
 }
 
+//int madvise_wrapper(void * addr, size_t length, int flags) {
+//    const auto r = madvise(addr, length, flags);
+//    if (r) {
+//        const auto e = errno;
+//        errs() << "MADV:" << strerror(e) << "\n";
+//    }
+//    return r;
+//}
+
 namespace kernel {
 
 /// MMAP SOURCE KERNEL
 
 void MMapSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
     b->LinkFunction("file_size", file_size);
+    b->LinkFunction("mmap", mmap);
+    b->LinkFunction("madvise", madvise);
+    b->LinkFunction("munmap", munmap);
 }
 
 void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
@@ -54,7 +78,6 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     Value * const fileBuffer = b->CreatePointerCast(b->CreateFileSourceMMap(fd, fileSize), codeUnitPtrTy);
     b->setScalarField("buffer", fileBuffer);
     b->setBaseAddress("sourceBuffer", fileBuffer);
-    b->CreateMAdvise(fileBuffer, fileSize, MADV_SEQUENTIAL | MADV_WILLNEED);
     Value * fileItems = fileSize;
     if (LLVM_UNLIKELY(codeUnitWidth > 8)) {
         fileItems = b->CreateUDiv(fileSize, b->getSize(codeUnitWidth / 8));
@@ -83,10 +106,6 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     BasicBlock * const setTermination = b->CreateBasicBlock("setTermination");
     BasicBlock * const exit = b->CreateBasicBlock("mmapSourceExit");
 
-    Type * i8Ty = b->getInt8Ty();
-    DataLayout DL(b->getModule());
-    Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
-
     Value * const numOfStrides = b->getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         b->CreateAssert(b->CreateIsNotNull(numOfStrides),
@@ -96,34 +115,41 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     // TODO: could we improve overall performance by trying to "preload" the data by reading it? This would increase
     // the cost of this kernel but might allow the first kernel to read the file data be better balanced with it.
 
-    ConstantInt * const MMAP_PAGE_SIZE = b->getSize(getPageSize());
-    Value * const STRIDE_ITEMS = b->CreateMul(numOfStrides, b->getSize(stride));
-    ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+    const auto pageSize = getPageSize();
+    Value * const desiredItems = b->CreateMul(numOfStrides, b->getSize(stride));
     ConstantInt * const CODE_UNIT_BYTES = b->getSize(codeUnitWidth / 8);
-
-    Value * const STRIDE_BYTES = b->CreateMul(numOfStrides, b->getSize((codeUnitWidth * stride) / 8));
-    ConstantInt * const PADDING_SIZE = b->getSize(b->getBitBlockWidth() * codeUnitWidth / 8);
 
     Value * const consumedItems = b->getConsumedItemCount("sourceBuffer");
     Value * const consumedBytes = b->CreateMul(consumedItems, CODE_UNIT_BYTES);
-    Value * const consumedPageOffset = b->CreateAnd(consumedBytes, ConstantExpr::getNeg(MMAP_PAGE_SIZE));
+    Value * const consumedPageOffset = b->CreateRoundDownRational(consumedBytes, pageSize);
     Value * const consumedBuffer = b->getRawOutputPointer("sourceBuffer", consumedPageOffset);
     Value * const readableBuffer = b->getScalarField("buffer");
-    Value * const unnecessaryBytes =
-      b->CreateSub(b->CreatePtrToInt(consumedBuffer, intPtrTy),
-                   b->CreatePtrToInt(readableBuffer, intPtrTy));
+    Value * const unnecessaryBytes = b->CreateSub(consumedPageOffset, b->CreatePtrToInt(readableBuffer, b->getSizeTy()));
+
+    Module * const m = b->getModule();
+    Function * MAdviseFunc = m->getFunction("madvise");
+    assert (MAdviseFunc);
+    FixedArray<Value *, 3> args;
 
     // avoid calling madvise unless an actual page table change could occur
     b->CreateLikelyCondBr(b->CreateIsNotNull(unnecessaryBytes), dropPages, checkRemaining);
     b->SetInsertPoint(dropPages);
     // instruct the OS that it can safely drop any fully consumed pages
-    b->CreateMAdvise(readableBuffer, unnecessaryBytes, MADV_DONTNEED);
+
+
+//    args[0] = readableBuffer;
+//    args[1] = consumedPageOffset;
+//    args[2] = b->getInt32(MADV_DONTNEED);
+//    Value * const r0 = b->CreateCall(MAdviseFunc, args);
+//    assert (r0);
+//    b->CallPrintInt("r0", r0);
+//    b->setScalarField("buffer", consumedBuffer);
     b->CreateBr(checkRemaining);
 
     // determine whether or not we've exhausted the "safe" region of the file buffer
     b->SetInsertPoint(checkRemaining);
     Value * const producedItems = b->getProducedItemCount("sourceBuffer");
-    Value * const nextProducedItems = b->CreateAdd(producedItems, STRIDE_ITEMS);
+    Value * const nextProducedItems = b->CreateAdd(producedItems, desiredItems);
     Value * const fileItems = b->getScalarField("fileItems");
     Value * const lastPage = b->CreateICmpULE(fileItems, nextProducedItems);
     b->CreateUnlikelyCondBr(lastPage, setTermination, exit);
@@ -131,42 +157,34 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     // If this is the last page, create a temporary buffer of up to two pages size, copy the unconsumed data
     // and zero any bytes that are not used.
     b->SetInsertPoint(setTermination);
-    if (!codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-        Value * const consumedOffset = b->CreateAnd(consumedItems, ConstantExpr::getNeg(BLOCK_WIDTH));
-        Value * const readStart = b->getRawOutputPointer("sourceBuffer", consumedOffset);
-        Value * const readEnd = b->getRawOutputPointer("sourceBuffer", fileItems);
-
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(readEnd->getType());
-        Value * const readEndInt = b->CreatePtrToInt(readEnd, intPtrTy);
-        Value * const readStartInt = b->CreatePtrToInt(readStart, intPtrTy);
-        Value * unconsumedBytes = b->CreateSub(readEndInt, readStartInt);
-        unconsumedBytes = b->CreateTrunc(unconsumedBytes, b->getSizeTy());
-        Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, PADDING_SIZE), STRIDE_BYTES);
-        Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
-        b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-        b->CreateMemZero(b->CreateGEP(i8Ty, buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
-        // get the difference between our base and from position then compute an offsetted temporary buffer address
-        Value * const base = b->getBaseAddress("sourceBuffer");
-        Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
-        Value * const diff = b->CreateSub(baseInt, readStartInt);
-        Value * const offsettedBuffer = b->CreateGEP(i8Ty, buffer, diff);
-        PointerType * const codeUnitPtrTy = b->getIntNTy(codeUnitWidth)->getPointerTo();
-        b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
-        b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
-    }
     b->setTerminationSignal();
     b->setProducedItemCount("sourceBuffer", fileItems);
     b->CreateBr(exit);
 
     b->SetInsertPoint(exit);
+    PHINode * producedPhi = b->CreatePHI(b->getSizeTy(), 2);
+    producedPhi->addIncoming(nextProducedItems, checkRemaining);
+    producedPhi->addIncoming(fileItems, setTermination);
+    Value * const producedBytes = b->CreateMul(producedPhi, CODE_UNIT_BYTES);
+    Value * const length = b->CreateSub(producedBytes, consumedPageOffset);
+
+    args[0] = b->CreatePointerCast(consumedBuffer, cast<PointerType>(MAdviseFunc->getArg(0)->getType()));
+    args[1] = length;
+    args[2] = b->getInt32(MADV_WILLNEED);
+    b->CreateCall(MAdviseFunc, args);
+
 }
 void MMapSourceKernel::freeBuffer(BuilderRef b, const unsigned codeUnitWidth) {
-    b->CreateFree(b->getScalarField("ancillaryBuffer"));
     Value * const fileItems = b->getScalarField("fileItems");
     Constant * const CODE_UNIT_BYTES = b->getSize(codeUnitWidth / 8);
     Value * const fileSize = b->CreateMul(fileItems, CODE_UNIT_BYTES);
-    b->CreateMUnmap(b->getScalarField("buffer"), fileSize);
+    Module * const m = b->getModule();
+    Function * MUnmapFunc = m->getFunction("munmap");
+    assert (MUnmapFunc);
+    FixedArray<Value *, 2> args;
+    args[0] = b->CreatePointerCast(b->getBaseAddress("sourceBuffer"), b->getVoidPtrTy());
+    args[1] = fileSize;
+    b->CreateCall(MUnmapFunc, args);
 }
 
 Value * MMapSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, BuilderRef b) {
@@ -178,6 +196,14 @@ void MMapSourceKernel::linkExternalMethods(BuilderRef b) {
 }
 
 /// READ SOURCE KERNEL
+
+void ReadSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
+    #ifdef PREAD
+    b->LinkFunction("pread64", PREAD);
+    #else
+    b->LinkFunction("read", read);
+    #endif
+}
 
 void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
     ConstantInt * const bufferItems = b->getSize(stride * 4);
@@ -311,7 +337,25 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     producedSoFar->addIncoming(produced, entryBB);
     producedSoFar->addIncoming(produced, prepareBuffer);
     Value * const sourceBuffer = b->getRawOutputPointer("sourceBuffer", producedSoFar);
-    Value * const bytesRead = b->CreateReadCall(fd, sourceBuffer, bytesToRead);
+
+
+
+    #ifdef PREAD
+    FixedArray<Value *, 4> args;
+    args[0] = fd;
+    args[1] = sourceBuffer;
+    args[2] = bytesToRead;
+    args[3] = producedSoFar;
+    Function *  const preadFunc = b->getModule()->getFunction("pread64");
+    #else
+    FixedArray<Value *, 3> args;
+    args[0] = fd;
+    args[1] = sourceBuffer;
+    args[2] = bytesToRead;
+    Function *  const preadFunc = b->getModule()->getFunction("read");
+    #endif
+    Value * const bytesRead = b->CreateCall(preadFunc, args);
+
     // There are 4 possibile results from read:
     // bytesRead == -1: an error occurred
     // bytesRead == 0: EOF, no bytes read
@@ -351,6 +395,10 @@ Value * ReadSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUn
     Function * const fileSizeFn = b->getModule()->getFunction("file_size"); assert (fileSizeFn);
     FunctionType * fTy = fileSizeFn->getFunctionType();
     return b->CreateZExtOrTrunc(b->CreateCall(fTy, fileSizeFn, fd), b->getSizeTy());
+}
+
+void ReadSourceKernel::linkExternalMethods(BuilderRef b) {
+    ReadSourceKernel::generatLinkExternalFunctions(b);
 }
 
 /// Hybrid MMap/Read source kernel
@@ -446,6 +494,7 @@ Value * FDSourceKernel::generateExpectedOutputSizeMethod(BuilderRef b) {
 
 void FDSourceKernel::linkExternalMethods(BuilderRef b) {
     MMapSourceKernel::generatLinkExternalFunctions(b);
+    ReadSourceKernel::generatLinkExternalFunctions(b);
 }
 
 /// MEMORY SOURCE KERNEL
@@ -462,8 +511,6 @@ void MemorySourceKernel::generateInitializeMethod(BuilderRef b) {
 
 void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
 
-    const auto source = b->getOutputStreamSet("sourceBuffer");
-
     Value * const numOfStrides = b->getNumOfStrides();
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -471,13 +518,7 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
                         "Internal error: %s.numOfStrides cannot be 0", b->GetString(getName()));
     }
 
-    const auto codeUnitWidth = source->getFieldWidth();
-    Type * codeUnitTy = b->getIntNTy(codeUnitWidth);
-
     Value * const segmentItems = b->CreateMul(numOfStrides, b->getSize(getStride()));
-    Value * const segmentSize = b->CreateMul(numOfStrides, b->getSize(getStride() * codeUnitWidth));
-    Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
-
     BasicBlock * const createTemporary = b->CreateBasicBlock("createTemporary");
     BasicBlock * const exit = b->CreateBasicBlock("exit");
 
@@ -488,54 +529,6 @@ void MemorySourceKernel::generateDoSegmentMethod(BuilderRef b) {
     b->CreateUnlikelyCondBr(lastPage, createTemporary, exit);
 
     b->SetInsertPoint(createTemporary);
-    // (!codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-    Value * const consumedItems = b->getConsumedItemCount("sourceBuffer");
-    Value * readStart = nullptr;
-    Value * readEnd = nullptr;
-
-    // compute the range of our unconsumed buffer slice
-
-    const auto streamSetCount = source->getNumElements();
-    if (LLVM_UNLIKELY(streamSetCount > 1)) {
-        Constant * const ZERO = b->getSize(0);
-        const StreamSetBuffer * const sourceBuffer = b->getOutputStreamSetBuffer("sourceBuffer");
-        Value * const fromIndex = b->CreateUDiv(consumedItems, BLOCK_WIDTH);
-        Value * const sourceBufferBaseAddress = sourceBuffer->getBaseAddress(b);
-        readStart = sourceBuffer->getStreamBlockPtr(b, sourceBufferBaseAddress, ZERO, fromIndex);
-        Value * const toIndex = b->CreateCeilUDiv(fileItems, BLOCK_WIDTH);
-        // since we know this is an ExternalBuffer, we don't need to consider any potential modulus calculations.
-        readEnd = sourceBuffer->getStreamBlockPtr(b, sourceBufferBaseAddress, ZERO, toIndex);
-    } else {
-        // make sure our copy is block-aligned
-        Value * const consumedOffset = b->CreateAnd(consumedItems, ConstantExpr::getNeg(BLOCK_WIDTH));
-        readStart = b->getRawOutputPointer("sourceBuffer", consumedOffset);
-        Value * lastFileByte = fileItems;
-        if (codeUnitWidth < 8) {
-            // If trying to load a bitstream and the number of items is not byte-aligned, load an extra byte.
-            lastFileByte = b->CreateRoundUpRational(fileItems, Rational{8, codeUnitWidth});
-        }
-        readEnd = b->getRawOutputPointer("sourceBuffer", lastFileByte);
-    }
-
-    DataLayout DL(b->getModule());
-    Type * const intPtrTy = DL.getIntPtrType(readEnd->getType());
-    Value * const readEndInt = b->CreatePtrToInt(readEnd, intPtrTy);
-    Value * const readStartInt = b->CreatePtrToInt(readStart, intPtrTy);
-    Value * const unconsumedBytes = b->CreateTrunc(b->CreateSub(readEndInt, readStartInt), b->getSizeTy());
-    Value * const bufferSize = b->CreateRoundUp(b->CreateAdd(unconsumedBytes, BLOCK_WIDTH), segmentSize);
-    Value * const buffer = b->CreateAlignedMalloc(bufferSize, b->getCacheAlignment());
-    PointerType * const codeUnitPtrTy = codeUnitTy->getPointerTo();
-    b->setScalarField("ancillaryBuffer", b->CreatePointerCast(buffer, codeUnitPtrTy));
-    b->CreateMemCpy(buffer, readStart, unconsumedBytes, 1);
-    b->CreateMemZero(b->CreateGEP(b->getInt8Ty(), buffer, unconsumedBytes), b->CreateSub(bufferSize, unconsumedBytes), 1);
-
-    // get the difference between our base and from position then compute an offsetted temporary buffer address
-    Value * const base = b->getBaseAddress("sourceBuffer");
-    Value * const baseInt = b->CreatePtrToInt(base, intPtrTy);
-    Value * const diff = b->CreateSub(baseInt, readStartInt);
-    Value * const offsettedBuffer = b->CreateGEP(b->getInt8Ty(), buffer, diff);
-    // set the temporary buffer as the new source buffer
-    b->setBaseAddress("sourceBuffer", b->CreatePointerCast(offsettedBuffer, codeUnitPtrTy));
     b->setTerminationSignal();
     b->setProducedItemCount("sourceBuffer", fileItems);
     b->CreateBr(exit);
@@ -558,9 +551,6 @@ std::string makeSourceName(StringRef prefix, const unsigned fieldWidth, const un
     out << prefix << codegen::SegmentSize << '@' << fieldWidth;
     if (numOfStreams != 1) {
         out << ':' << numOfStreams;
-    }
-    if (codegen::DebugOptionIsSet(codegen::AllowUnsafeFileIO)) {
-        out << 'U';
     }
     out.flush();
     return tmp;

@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef TO_UTF8_H
-#define TO_UTF8_H
+#pragma once
 
 #include <unicode/utf/utf_encoder.h>
 #include <re/adt/adt.h>
@@ -51,4 +49,3 @@ private:
 RE * toUTF8(RE * r, bool useInternalNaming = false);
 }
 
-#endif // TO_UTF8_H

@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef ZTF_SCAN_H
-#define ZTF_SCAN_H
+#pragma once
 
 #include <pablo/pablo_kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -87,4 +85,3 @@ private:
     size_t mSubTableSize;
 };
 }
-#endif

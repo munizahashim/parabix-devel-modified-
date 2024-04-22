@@ -1,6 +1,5 @@
 
-#ifndef ICGREP_LZ4_FAKE_STREAM_GENERATING_KERNEL_H
-#define ICGREP_LZ4_FAKE_STREAM_GENERATING_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -18,4 +17,3 @@ namespace kernel {
 }
 
 
-#endif //ICGREP_LZ4_FAKE_STREAM_GENERATING_KERNEL_H

@@ -1,5 +1,4 @@
-#ifndef PE_INTEGER_H
-#define PE_INTEGER_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 
@@ -33,4 +32,3 @@ private:
 
 }
 
-#endif // PE_INTEGER_H

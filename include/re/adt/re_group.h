@@ -1,5 +1,4 @@
-#ifndef RE_GROUP_H
-#define RE_GROUP_H
+#pragma once
 
 #include <llvm/Support/Casting.h>
 #include <re/adt/re_re.h>
@@ -33,4 +32,3 @@ inline Group * makeGroup(Group::Mode m, RE * r, Group::Sense s = Group::Sense::O
 }
 }
 
-#endif // RE_GROUP_H

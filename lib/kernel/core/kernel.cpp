@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <kernel/core/kernel.h>
@@ -57,19 +57,23 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::isLocalBuffer(const Binding & output, const bool includeShared) {
+/* static */ bool Kernel::isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool &returned) {
     // NOTE: if this function is modified, fix the PipelineCompiler to match it.
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
             case Binding::AttributeId::SharedManagedBuffer:
-                if (!includeShared) break;
+                shared = true;
+                break;
             case Binding::AttributeId::ManagedBuffer:
+                managed = true;
+                break;
             case Binding::AttributeId::ReturnedBuffer:
-                return true;
+                returned = true;
+                break;
             default: break;
         }
     }
-    return output.getRate().isUnknown();
+    return shared | managed | returned | output.getRate().isUnknown();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -921,8 +925,10 @@ std::vector<Type *> Kernel::getDoSegmentFields(BuilderRef b) const {
 
     for (unsigned i = 0; i < m; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        const auto isShared = output.hasAttribute(AttrId::SharedManagedBuffer);
-        const auto isLocal = Kernel::isLocalBuffer(output, false);
+        bool isShared = false;
+        bool isManaged = false;
+        bool isReturned = false;
+        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
 
         // shared dynamic buffer handle or virtual base output address
         if (LLVM_UNLIKELY(isShared)) {
@@ -1034,7 +1040,10 @@ Function * Kernel::addDoSegmentDeclaration(BuilderRef b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output))) {
+            bool isShared = false;
+            bool isManaged = false;
+            bool isReturned = false;
+            if (LLVM_UNLIKELY(isLocalBuffer(output, isShared, isManaged, isReturned))) {
                 setNextArgName(output.getName() + "_consumed");
             } else if (isMainPipeline || requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");

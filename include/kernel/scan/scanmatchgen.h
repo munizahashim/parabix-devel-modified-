@@ -1,9 +1,8 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef SCANMATCHGEN_H
-#define SCANMATCHGEN_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 namespace IDISA { class IDISA_Builder; }
@@ -72,4 +71,3 @@ private:
 };
 
 }
-#endif // SCANMATCHGEN_H

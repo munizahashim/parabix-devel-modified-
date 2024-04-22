@@ -1,10 +1,8 @@
-#ifndef IDISA_BUILDER_H
-#define IDISA_BUILDER_H
+#pragma once
 
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 #include <codegen/CBuilder.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -265,4 +263,3 @@ protected:
 };
 
 }
-#endif // IDISA_BUILDER_H

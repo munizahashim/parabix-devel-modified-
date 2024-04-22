@@ -148,8 +148,6 @@ def parse_missing_spec(data_line):
     if not m: raise Exception("UCD missing spec parsing error: " + data_line)
     cp_lo = int(m.group(1), 16)
     cp_hi = int(m.group(2), 16)
-    # We may have to restructure in the event that missing specs do not cover the full Unicode range.
-    if cp_lo != 0 or cp_hi != 0x10FFFF: raise Exception("Unexpected range error in missing spec: " + data_line)
     field_data = m.group(3)
     fields = field_data.split(';')
     fields = [f.lstrip().rstrip() for f in fields]
@@ -314,8 +312,12 @@ def parse_property_data(property_object, pfile):
     for t in lines:
         if UCD_missing_regexp.match(t):
             (cp_lo, cp_hi, fields) = parse_missing_spec(t)
+            # We may have to restructure in the event that missing specs do not cover the full Unicode range.
             if len(fields) != 1: raise Exception("Expecting exactly 1 field")
-            property_object.setDefaultValue(fields[0])
+            if cp_lo == 0 and cp_hi == 0x10FFFF:
+                property_object.setDefaultValue(fields[0])
+            else:
+                property_object.addDataRecord(cp_lo, cp_hi, fields[0])
         elif UCD_skip.match(t):
             continue
         else:

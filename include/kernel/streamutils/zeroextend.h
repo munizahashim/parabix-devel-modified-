@@ -1,5 +1,4 @@
-#ifndef ZEROEXTEND_H
-#define ZEROEXTEND_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 
@@ -14,4 +13,3 @@ public:
 
 }
 
-#endif // ZEROEXTEND_H

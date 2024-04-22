@@ -1,5 +1,4 @@
-#ifndef FUNCTIONTYPEBUILDER_H
-#define FUNCTIONTYPEBUILDER_H
+#pragma once
 
 #include <codegen/TypeBuilder.h>
 
@@ -47,4 +46,3 @@ struct FunctionTypeBuilder<R()> {
     }
 };
 
-#endif // FUNCTIONTYPEBUILDER_H

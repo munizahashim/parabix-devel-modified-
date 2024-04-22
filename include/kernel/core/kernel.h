@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef KERNEL_H
-#define KERNEL_H
+#pragma once
 
 #include "binding_map.hpp"
 #include "relationship.h"
@@ -427,7 +426,7 @@ public:
     template <typename ExternalFunctionType>
     void link(std::string name, ExternalFunctionType & functionPtr);
 
-    static bool isLocalBuffer(const Binding & output, const bool includeShared = true);
+    static bool isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned);
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 
@@ -700,4 +699,3 @@ private:
 
 }
 
-#endif

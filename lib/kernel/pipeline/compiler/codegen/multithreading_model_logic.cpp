@@ -755,13 +755,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
         fieldIndex[1] = b->getInt32(THREAD_LOCAL_PARAM);
         Type * const handlePtrTy = getThreadLocalHandle()->getType();
         Value * const jThreadLocal = b->CreateLoad(handlePtrTy, b->CreateGEP(threadStructTy, threadStateArray, fieldIndex));
-        SmallVector<Value *, 2> threadLocalArgs;
+        SmallVector<Value *, 3> threadLocalArgs;
         if (LLVM_LIKELY(mTarget->isStateful())) {
             threadLocalArgs.push_back(initialSharedState);
         }
-        if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
-            threadLocalArgs.push_back(initialThreadLocal);
-        }
+        threadLocalArgs.push_back(initialThreadLocal);
         threadLocalArgs.push_back(jThreadLocal);
         mTarget->finalizeThreadLocalInstance(b, threadLocalArgs);
         b->CreateFree(jThreadLocal);
@@ -846,8 +844,6 @@ void PipelineCompiler::start(BuilderRef b) {
     mKernelId = 0;
     mAddressableItemCountPtr.clear();
     mVirtualBaseAddressPtr.clear();
-    mNumOfTruncatedInputBuffers = 0;
-    mTruncatedInputBuffer.clear();
     mPipelineProgress = b->getFalse();
 
 }

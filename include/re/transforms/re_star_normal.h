@@ -1,5 +1,4 @@
-#ifndef RE_STAR_NORMAL_H
-#define RE_STAR_NORMAL_H
+#pragma once
 
 namespace re {
 
@@ -17,4 +16,3 @@ RE * convertToStarNormalForm(RE * re);
 
 }
 
-#endif // RE_STAR_NORMAL_H

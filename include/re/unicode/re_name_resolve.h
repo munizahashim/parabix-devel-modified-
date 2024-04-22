@@ -1,5 +1,4 @@
-#ifndef RE_NAME_RESOLVE_H
-#define RE_NAME_RESOLVE_H
+#pragma once
 
 #include <re/transforms/re_transformer.h>
 
@@ -13,4 +12,3 @@ namespace re {
                         NameTransformationMode m = NameTransformationMode::None);
 
 }
-#endif

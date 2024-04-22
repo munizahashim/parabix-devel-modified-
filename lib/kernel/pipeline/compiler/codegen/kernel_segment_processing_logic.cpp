@@ -24,6 +24,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
             || ((mRecordHistogramData || mUsesIllustrator) && !hasAnyGreedyInput(mKernelId));
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId) && !mUsesIllustrator;
+    mHasPrincipalInputRate = hasPrincipalInputRate();
     assert (mIsStatelessKernel.test(mKernelId) == isCurrentKernelStateFree());
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
@@ -32,10 +33,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     mAllowDataParallelExecution = mCurrentKernelIsStateFree;
     #endif
     #endif
-    identifyPipelineInputs(mKernelId);
 
-    mIsBounded = isBounded();
-    mHasExplicitFinalPartialStride = requiresExplicitFinalStride();
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
@@ -162,10 +160,7 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     /// -------------------------------------------------------------------------------------
 
     b->SetInsertPoint(mKernelLoopCall);
-    writeLookBehindLogic(b);
     writeKernelCall(b);
-    writeCopyBackLogic(b);
-    writeDelayReflectionLogic(b);
 
     /// -------------------------------------------------------------------------------------
     /// KERNEL EXPLICIT TERMINATION CHECK
@@ -207,11 +202,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
-//    for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-//        const BufferPort & port = mBufferGraph[e];
-//        assert (port.Port.Type == PortType::Input);
-//        mAvailableInputItemCount[port.Port] = mAvailableInputItemCountPhi[port.Port];
-//    }
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
@@ -226,7 +216,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
-    freeZeroedInputBuffers(b);
     updatePhisAfterTermination(b);
     b->CreateBr(mKernelLoopExit);
 
@@ -252,7 +241,6 @@ void PipelineCompiler::executeKernel(BuilderRef b) {
     Value * const terminated = b->CreateICmpNE(mTerminatedAtLoopExitPhi, unterminated);
     computeFullyProcessedItemCounts(b, terminated);
     computeMinimumConsumedItemCounts(b);
-    writeLookAheadLogic(b);
     computeFullyProducedItemCounts(b, terminated);
     if (mIsPartitionRoot) {
         updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);

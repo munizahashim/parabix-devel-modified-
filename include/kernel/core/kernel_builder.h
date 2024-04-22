@@ -1,5 +1,4 @@
-#ifndef KERNEL_BUILDER_H
-#define KERNEL_BUILDER_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 #include <idisa/idisa_builder.h>
@@ -317,4 +316,3 @@ inline bool isFromCurrentFunction(const std::unique_ptr<KernelBuilder> & b, cons
 
 }
 
-#endif // KERNEL_BUILDER_H

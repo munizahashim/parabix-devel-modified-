@@ -1,5 +1,4 @@
-#ifndef ALIGNED_ALLOCATOR_H
-#define ALIGNED_ALLOCATOR_H
+#pragma once
 
 #include <boost/version.hpp>
 #if (BOOST_VERSION >= 105600)
@@ -54,4 +53,3 @@ public:
     }
 };
 #endif
-#endif // ALIGNED_ALLOCATOR_H

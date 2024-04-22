@@ -1,5 +1,4 @@
-#ifndef MEMOIZER_MAP_HPP
-#define MEMOIZER_MAP_HPP
+#pragma once
 
 #include <re/transforms/re_transformer.h>
 #include <re/adt/memoization.h>
@@ -23,4 +22,3 @@ private:
 
 }
 
-#endif // MEMOIZER_MAP_HPP

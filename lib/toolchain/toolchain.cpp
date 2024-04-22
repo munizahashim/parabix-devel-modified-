@@ -1,7 +1,6 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <toolchain/toolchain.h>
@@ -66,9 +65,6 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
                         clEnumVal(EnableAnonymousMMapedDynamicLinearBuffers, "Use anonymous mmap for dynamic linear buffers instead of copyback mechanism."),
 
-                        clEnumVal(AllowUnsafeFileIO, "Force the MMap and Memory source kernel to always provide raw file data "
-                                                     "to the system instead of allocating a safe buffer for the final stride. "
-                                                     "Can improve performance at the cost of potential segfaults."),
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
                         #endif

@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef ICGREP_RE_PARSER_PROSITE_H
-#define ICGREP_RE_PARSER_PROSITE_H
+#pragma once
 
 #include <re/parse/parser.h>
 
@@ -30,4 +28,3 @@ namespace re {
 }
 
 
-#endif //ICGREP_RE_PARSER_PROSITE_H

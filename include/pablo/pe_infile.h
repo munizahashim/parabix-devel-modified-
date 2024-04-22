@@ -1,11 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef PE_INFILE_H
-#define PE_INFILE_H
+#pragma once
 
 #include <pablo/pabloAST.h>
 
@@ -55,4 +53,3 @@ protected:
     
 }
 
-#endif // PE_INFILE_H

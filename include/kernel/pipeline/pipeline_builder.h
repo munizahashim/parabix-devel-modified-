@@ -1,5 +1,4 @@
-#ifndef PIPELINE_BUILDER_H
-#define PIPELINE_BUILDER_H
+#pragma once
 
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <boost/integer.hpp>
@@ -236,4 +235,3 @@ private:
 
 }
 
-#endif // PIPELINE_BUILDER_H

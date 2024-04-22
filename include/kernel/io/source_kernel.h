@@ -1,5 +1,4 @@
-#ifndef SOURCE_KERNEL_H
-#define SOURCE_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 namespace kernel { class KernelBuilder; }
@@ -41,6 +40,7 @@ class ReadSourceKernel final : public SegmentOrientedKernel {
     friend class FDSourceKernel;
 public:
     ReadSourceKernel(BuilderRef b, Scalar * const fd, StreamSet * const outputStream);
+    void linkExternalMethods(BuilderRef b) override;
     void generateInitializeMethod(BuilderRef b) override {
         generateInitializeMethod(mCodeUnitWidth, mStride, b);
     }
@@ -54,6 +54,7 @@ public:
         return generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
     }
 protected:
+    static void generatLinkExternalFunctions(BuilderRef b);
     static void generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
     static void generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b);
     static llvm::Value * generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, BuilderRef b);
@@ -87,4 +88,3 @@ protected:
 
 }
 
-#endif // SOURCE_KERNEL_H

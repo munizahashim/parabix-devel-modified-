@@ -1,14 +1,12 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  *
  *  This file defines commmand-line options and parameters for 
  *  file selection as used by various command line tools.
  *
  */
-#ifndef FILE_SELECT_H
-#define FILE_SELECT_H
+#pragma once
  
 #include <string>
 #include <vector>
@@ -36,4 +34,3 @@ extern bool UseStdIn;
     
 std::vector<boost::filesystem::path> getFullFileList(CPUDriver & driver, llvm::cl::list<std::string> & inputFiles);
 }
-#endif

@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef STREAMSET_H
-#define STREAMSET_H
+#pragma once
 
 #include <llvm/IR/Type.h>  // for Type
 #include <llvm/IR/DerivedTypes.h>  // for Type
@@ -55,22 +54,6 @@ public:
         return getType()->getPointerTo(getAddressSpace());
     }
 
-    bool hasOverflow() const {
-        return mOverflow != 0;
-    }
-
-    unsigned getOverflow() const {
-        return mOverflow;
-    }
-
-    bool hasUnderflow() const {
-        return mUnderflow != 0;
-    }
-
-    unsigned getUnderflow() const {
-        return mUnderflow;
-    }
-
     bool isLinear() const {
         return mLinear;
     }
@@ -80,10 +63,6 @@ public:
     }
 
     unsigned getFieldWidth() const;
-
-    size_t getUnderflowCapacity(BuilderPtr b) const;
-
-    size_t getOverflowCapacity(BuilderPtr b) const;
 
     bool isEmptySet() const;
 
@@ -110,10 +89,12 @@ public:
 
     virtual void releaseBuffer(BuilderPtr b) const = 0;
 
-    // The number of items that cam be linearly accessed from a given logical stream position.
-    virtual llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * overflowItems = nullptr) const = 0;
+    virtual void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
 
-    virtual llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * overflowItems = nullptr) const = 0;
+    // The number of items that cam be linearly accessed from a given logical stream position.
+    virtual llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
+
+    virtual llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const = 0;
 
     virtual llvm::StructType * getHandleType(BuilderPtr b) const = 0;
 
@@ -137,8 +118,6 @@ public:
 
     virtual void setBaseAddress(BuilderPtr b, llvm::Value * addr) const = 0;
 
-    virtual llvm::Value * getOverflowAddress(BuilderPtr b) const = 0;
-
     virtual void setCapacity(BuilderPtr b, llvm::Value * size) const = 0;
 
     virtual llvm::Value * getCapacity(BuilderPtr b) const = 0;
@@ -159,11 +138,11 @@ public:
 
     static llvm::Type * resolveType(BuilderPtr b, llvm::Type * const streamSetType);
 
+    static void linkFunctions(BuilderPtr b); // temporary function
+
 protected:
 
-    llvm::Value * addOverflow(BuilderPtr b, llvm::Value * const bufferCapacity, llvm::Value * const overflowItems, llvm::Value * const consumedOffset) const;
-
-    StreamSetBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType, const size_t overflowBlocks, const size_t underflowSize, const bool linear, const unsigned AddressSpace);
+    StreamSetBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType, const bool linear, const unsigned AddressSpace);
 
 private:
 
@@ -179,8 +158,6 @@ protected:
     llvm::Type * const              mType;
     llvm::Type * const              mBaseType;
     mutable llvm::StructType *      mHandleType;
-    const unsigned                  mOverflow;
-    const unsigned                  mUnderflow;
     const unsigned                  mAddressSpace;
     const bool                      mLinear;
 };
@@ -199,11 +176,13 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+
     llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems) const override;
 
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
 
     llvm::StructType * getHandleType(BuilderPtr b) const override;
 
@@ -227,8 +206,6 @@ public:
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
-
 private:
 
     void assertValidBlockIndex(BuilderPtr b, llvm::Value * blockIndex) const;
@@ -248,16 +225,13 @@ public:
 
     llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-//    llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const final;
+    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * overflowItems = nullptr) const final;
-
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * overflowItems = nullptr) const override;
+    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
 
 protected:
 
     InternalBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType,
-                   const size_t overflowBlocks, const size_t underflowSize,
                    const bool linear, const unsigned AddressSpace);
 
 
@@ -270,7 +244,7 @@ public:
     }
 
     StaticBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type,
-                 const size_t capacity, const size_t overflowBlocks, const size_t underflowSize,
+                 const size_t capacity,
                  const bool linear, const unsigned AddressSpace);
 
     enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, PriorAddress };
@@ -279,6 +253,8 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+
     llvm::StructType * getHandleType(BuilderPtr b) const override;
 
     llvm::Value * getBaseAddress(BuilderPtr b) const override;
@@ -286,8 +262,6 @@ public:
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
-
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
 
     void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
 
@@ -315,7 +289,18 @@ private:
 
 class DynamicBuffer final : public InternalBuffer {
 
-    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, InitialConsumedCount };
+    enum { LinearMallocedAddress = 0,
+           LinearInternalCapacity = 1,
+           LinearBaseAddress = 2,
+           LinearEffectiveCapacity = 3,
+           LinearFields = 4,
+           // -------------------------------
+           CircularAddressSelector = 0,
+           CircularBaseAddress = 1,
+           CircularSecondaryBaseAddress = 2,
+           CircularInternalCapacity = 3,
+           CircularSecondaryInternalCapacity = 4,
+           CircularFields = 5 };
 
 public:
 
@@ -324,12 +309,14 @@ public:
     }
 
     DynamicBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
-                  const size_t overflowSize, const size_t underflowSize,
+                  const bool hasUnderflow,
                   const bool linear, const unsigned AddressSpace);
 
     void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
 
     void releaseBuffer(BuilderPtr b) const override;
+
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
@@ -347,8 +334,6 @@ public:
 
     llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * const fromPosition, llvm::Value * const consumedItems, llvm::Value * overflowItems = nullptr) const override;
-
     size_t getInitialCapacity() const {
         return mInitialCapacity;
     }
@@ -359,12 +344,10 @@ public:
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
 
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
-
 private:
 
     const size_t    mInitialCapacity;
-
+    const bool      mHasUnderflow;
 };
 
 class MMapedBuffer final : public InternalBuffer {
@@ -385,6 +368,8 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     llvm::Value * getCapacity(BuilderPtr b) const override;
@@ -410,8 +395,6 @@ public:
     llvm::Value * getBaseAddress(BuilderPtr b) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
-
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
 
 private:
 
@@ -437,6 +420,8 @@ public:
 
     void releaseBuffer(BuilderPtr b) const override;
 
+    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+
     llvm::StructType * getHandleType(BuilderPtr b) const override;
 
     llvm::Value * getBaseAddress(BuilderPtr b) const override;
@@ -444,8 +429,6 @@ public:
     llvm::Value * getMallocAddress(BuilderPtr b) const override;
 
     void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
-
-    llvm::Value * getOverflowAddress(BuilderPtr b) const override;
 
     void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
 
@@ -475,4 +458,3 @@ private:
 };
 
 }
-#endif // STREAMSET_H

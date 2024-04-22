@@ -1,5 +1,4 @@
-#ifndef PE_CONSTANT_H
-#define PE_CONSTANT_H
+#pragma once
 
 #if 0
 
@@ -38,4 +37,3 @@ private:
 
 #endif
 
-#endif // PE_CONSTANT_H

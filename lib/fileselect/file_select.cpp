@@ -1,7 +1,6 @@
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <fileselect/file_select.h>
@@ -50,9 +49,8 @@ bool DereferenceRecursiveFlag;
 static cl::opt<bool, true> DereferenceRecursiveOption("R", cl::location(DereferenceRecursiveFlag), cl::desc("Recursively process files within directories, following symlinks at all levels."), cl::cat(Input_Options), cl::Grouping);
 static cl::alias DereferenceRecursiveAlias("dereference-recursive", cl::desc("Alias for -R"), cl::aliasopt(DereferenceRecursiveOption));
 
-
 bool MmapFlag;
-static cl::opt<bool, true> MmapOption("mmap", cl::location(MmapFlag),  cl::init(1), cl::desc("Use mmap for file input (default)."), cl::cat(Input_Options));
+static cl::opt<bool, true> MmapOption("mmap", cl::location(MmapFlag),  cl::init(true), cl::desc("Use mmap for file input (default)."), cl::cat(Input_Options));
 
 static cl::list<std::string> ExcludeFiles("exclude", cl::ZeroOrMore,
                                           cl::desc("Exclude files matching the given filename GLOB pattern."), cl::cat(Input_Options));

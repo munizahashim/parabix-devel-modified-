@@ -1,5 +1,4 @@
-#ifndef REFWRAPPER_H
-#define REFWRAPPER_H
+#pragma once
 
 #include <assert.h>
 
@@ -36,4 +35,3 @@ constexpr inline bool operator< (const RefWrapper<T> & a, const RefWrapper<T> & 
 
 }
 
-#endif // REFWRAPPER_H

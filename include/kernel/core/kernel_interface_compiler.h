@@ -1,5 +1,4 @@
-#ifndef KERNEL_INTERFACE_COMPILER_H
-#define KERNEL_INTERFACE_COMPILER_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -11,4 +10,3 @@ namespace kernel {
 
 }
 
-#endif // KERNEL_INTERFACE_COMPILER_H

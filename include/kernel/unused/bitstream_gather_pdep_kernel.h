@@ -1,6 +1,5 @@
 
-#ifndef ICGREP_BITSTREAM_GATHER_PDEP_KERNEL_H
-#define ICGREP_BITSTREAM_GATHER_PDEP_KERNEL_H
+#pragma once
 
 #include <kernel/core/kernel.h>
 #include <llvm/IR/Value.h>
@@ -21,4 +20,3 @@ private:
 
 }
 
-#endif //ICGREP_BITSTREAM_GATHER_PDEP_KERNEL_H

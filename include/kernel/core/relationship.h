@@ -1,5 +1,4 @@
-#ifndef ABSTRACT_STREAMSET_H
-#define ABSTRACT_STREAMSET_H
+#pragma once
 
 #include <vector>
 #include <memory>
@@ -197,6 +196,7 @@ enum class CommandLineScalarType {
     , DynamicMultithreadingAddSynchronizationThreshold
     , DynamicMultithreadingRemoveSynchronizationThreshold
     , ParabixIllustratorObject
+    , BufferSegmentLength
     #ifdef ENABLE_PAPI
     , PAPIEventSet
     , PAPIEventList
@@ -246,4 +246,3 @@ private:
 
 }
 
-#endif // ABSTRACT_STREAMSET_H

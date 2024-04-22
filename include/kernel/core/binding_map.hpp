@@ -1,5 +1,4 @@
-#ifndef BINDING_MAP_HPP
-#define BINDING_MAP_HPP
+#pragma once
 
 #include "binding.h"
 #include <llvm/ADT/StringMap.h>
@@ -30,4 +29,3 @@ using BindingMap = llvm::StringMap<BindingMapEntry>;
 
 }
 
-#endif // BINDING_MAP_HPP

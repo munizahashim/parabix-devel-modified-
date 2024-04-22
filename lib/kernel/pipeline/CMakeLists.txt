@@ -1,5 +1,5 @@
-# Copyright (c) 2019 International Characters.
-# This software is licensed to the public under the Open Software License 3.0.
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
 
 # module: kernel.pipeline
 
@@ -24,6 +24,7 @@ SRC
     compiler/analysis/internallygeneratedstreamset_analysis.cpp
     compiler/analysis/partitioning_analysis.cpp
     compiler/analysis/pipeline_graph_printers.cpp
+    compiler/analysis/principal_input_analysis.cpp
     compiler/analysis/relationship_analysis.cpp
     compiler/analysis/scheduling_analysis.cpp
     compiler/analysis/simple_scheduling_analysis.cpp

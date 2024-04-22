@@ -1,10 +1,9 @@
 /*
- *  Copyright (c) 2019 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
-#ifndef CC_COMPILER_TARGET_H
-#define CC_COMPILER_TARGET_H
+#pragma once
 
 #include <re/cc/cc_compiler.h>
 
@@ -25,4 +24,3 @@ protected:
 
 }
 
-#endif

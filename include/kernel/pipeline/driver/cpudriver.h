@@ -1,5 +1,4 @@
-#ifndef CPUDRIVER_H
-#define CPUDRIVER_H
+#pragma once
 #include <kernel/pipeline/driver/driver.h>
 #include <toolchain/toolchain.h>
 namespace llvm { class ExecutionEngine; }
@@ -41,4 +40,3 @@ private:
     std::vector<std::pair<llvm::Function *, void *>>        mCachedFunctionMappings;
 };
 
-#endif // CPUDRIVER_H

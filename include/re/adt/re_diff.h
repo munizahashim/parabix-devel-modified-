@@ -1,5 +1,4 @@
-#ifndef RE_DIFF_H
-#define RE_DIFF_H
+#pragma once
 
 #include <re/adt/re_re.h>
 
@@ -21,4 +20,3 @@ RE * makeDiff(RE * lh, RE * rh);
 
 }
 
-#endif // RE_DIFF_H

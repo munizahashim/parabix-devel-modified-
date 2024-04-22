@@ -1,9 +1,7 @@
-#ifndef CASEFOLDING_H
-#define CASEFOLDING_H
+#pragma once
 /*
- *  Copyright (c) 2021 International Characters, Inc.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters, Inc.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  *
  */
 
@@ -12,4 +10,3 @@
 UCD::UnicodeSet caseInsensitize(const UCD::UnicodeSet & cc);
 
 
-#endif

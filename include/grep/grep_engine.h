@@ -1,11 +1,9 @@
 
 /*
- *  Copyright (c) 2018 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
- *  icgrep is a trademark of International Characters.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-#ifndef GREP_ENGINE_H
-#define GREP_ENGINE_H
+#pragma once
 
 #include "../../tools/icgrep/grep_interface.h" // TODO: consider moving grep_interface to this library
 #include <string>
@@ -345,4 +343,3 @@ bool matchOnlyGrep(re::RE * pattern, const char * buffer, size_t bufSize);
 
 }
 
-#endif

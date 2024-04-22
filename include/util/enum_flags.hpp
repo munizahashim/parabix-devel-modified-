@@ -1,5 +1,4 @@
-#ifndef ENUM_FLAGS_HPP
-#define ENUM_FLAGS_HPP
+#pragma once
 
 #include <type_traits>
 namespace {
@@ -66,4 +65,3 @@ operator^=(EnumType & lhs, EnumType rhs) {
     return lhs = static_cast<EnumType>(static_cast<IntType>(lhs) ^ static_cast<IntType>(rhs));
 }
 
-#endif

@@ -188,12 +188,27 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(BuilderRef b) {
 void PipelineCompiler::checkPropagatedTerminationSignals(BuilderRef b) {
     const auto n = in_degree(mKernelId, mTerminationPropagationGraph);
     if (n != 0) {
+
         Value * const val = b->getScalarField(CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(mKernelId));
         Value * const allConsumersFinished = b->CreateICmpEQ(val, b->getSize(n));
-        BasicBlock * const np = b->CreateBasicBlock(makeKernelName(mKernelId) + "_noPropagatedTerminationSignal", mKernelCheckOutputSpace);
+        const auto prefix = makeKernelName(mKernelId);
+        BasicBlock * const np = b->CreateBasicBlock(prefix + "_noPropagatedTerminationSignal", mKernelCheckOutputSpace);
+
+        BasicBlock * caughtPropagatedTerminationSignal = nullptr;
+        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+            caughtPropagatedTerminationSignal = b->CreateBasicBlock(prefix + "_caughtPropagatedTerminationSignal", mKernelTerminated);
+        } else {
+            caughtPropagatedTerminationSignal = mKernelTerminated;
+        }
+
+        b->CreateUnlikelyCondBr(allConsumersFinished, caughtPropagatedTerminationSignal, np);
+        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+            b->SetInsertPoint(caughtPropagatedTerminationSignal);
+            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            b->CreateBr(mKernelTerminated);
+        }
         BasicBlock * const entryPoint = b->GetInsertBlock();
-        b->CreateUnlikelyCondBr(allConsumersFinished, mKernelTerminated, np);
-        mTerminatedSignalPhi->addIncoming(getTerminationSignal(b, TerminationSignal::Completed), entryPoint);
+        mTerminatedSignalPhi->addIncoming(getTerminationSignal(b, TerminationSignal::Aborted), entryPoint);
         mCurrentNumOfStridesAtTerminationPhi->addIncoming(mCurrentNumOfStridesAtLoopEntryPhi, entryPoint);
         if (mIsPartitionRoot) {
             Constant * const ZERO = b->getSize(0);
@@ -289,7 +304,6 @@ void PipelineCompiler::propagateTerminationSignal(BuilderRef b) {
             if (LLVM_UNLIKELY(bn.isConstant())) continue;
 
             Value * const closed = isClosed(b, br.Port);
-
             Value * fullyConsumed = nullptr;
             if (LLVM_UNLIKELY(br.isZeroExtended())) {
                 fullyConsumed = closed;

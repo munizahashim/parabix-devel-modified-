@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2016 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 #include "editd_gpu_kernel.h"
 #include <kernel/core/kernel_builder.h>
@@ -116,5 +116,3 @@ Binding{PointerType::get(ArrayType::get(b->getBitBlockType(), pattLen * (dist + 
 }
 
 }
-
-

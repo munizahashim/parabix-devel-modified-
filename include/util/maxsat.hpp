@@ -1,5 +1,4 @@
-#ifndef MAXSAT_HPP
-#define MAXSAT_HPP
+#pragma once
 
 #include <llvm/Support/ErrorHandling.h>
 #include <algorithm>
@@ -278,4 +277,3 @@ static int Z3_maxsat(Z3_context ctx, Z3_optimize solver, std::vector<Z3_ast> sof
 }
 #endif
 
-#endif // MAXSAT_HPP

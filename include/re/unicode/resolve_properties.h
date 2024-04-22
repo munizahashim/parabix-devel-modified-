@@ -1,5 +1,4 @@
-#ifndef RESOLVE_PROPERTIES_H
-#define RESOLVE_PROPERTIES_H
+#pragma once
 
 #include <string>
 #include <set>
@@ -61,4 +60,3 @@ re::RE * externalizeAnyNodes(re::RE * r);
 
 }
 
-#endif // RESOLVE_PROPERTIES_H

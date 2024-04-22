@@ -1,5 +1,4 @@
-#ifndef BUILDER_HPP
-#define BUILDER_HPP
+#pragma once
 
 #include <pablo/codegenstate.h>
 #include <pablo/expression_map.hpp>
@@ -389,4 +388,3 @@ private:
 }
 
 
-#endif // BUILDER_HPP

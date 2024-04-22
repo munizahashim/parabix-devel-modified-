@@ -707,7 +707,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                 const auto streamSet = target(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (LLVM_LIKELY(bn.isInternal() && bn.isOwned() && bn.isNonThreadLocal())) {
-                    Value * const writable = getWritableOutputItems(b, mBufferGraph[port], true);
+                    Value * const writable = getWritableOutputItems(b, mBufferGraph[port]);
                     Value * const delta = b->CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
                     Value * const withinCapacity = b->CreateICmpULE(delta, writable);
                     const Binding & output = getOutputBinding(outputPort);

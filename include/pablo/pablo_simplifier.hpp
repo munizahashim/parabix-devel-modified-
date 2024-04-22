@@ -1,5 +1,4 @@
-#ifndef PABLO_SIMPLIFIER_HPP
-#define PABLO_SIMPLIFIER_HPP
+#pragma once
 
 namespace pablo {
 
@@ -13,4 +12,3 @@ protected:
 };
 
 }
-#endif // PABLO_SIMPLIFIER_HPP
