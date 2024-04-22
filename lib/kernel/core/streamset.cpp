@@ -17,8 +17,9 @@
 #include <llvm/Analysis/ConstantFolding.h>
 
 #include <array>
-
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <sys/mman.h>
 
 

@@ -1486,41 +1486,20 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
 
     Value * initialItemCount = nullptr;
     Value * sourceItemCount = nullptr;
-    Value * currentItemCount = nullptr;
-    Value * peekableItemCount = nullptr;
     Value * minimumItemCount = MAX_INT;
-    Value * nonOverflowItems = nullptr;
 
     const auto port = partialSumPort.Port;
 
     if (port.Type == PortType::Input) {
         initialItemCount = mCurrentProcessedItemCountPhi[port];
-        Value * const accessible = getAccessibleInputItems(b, partialSumPort, true);
-        currentItemCount = accessible;
-        const auto streamSet = getInputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyForwards) {
-            nonOverflowItems = getAccessibleInputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = subtractLookahead(b, partialSumPort, b->CreateAdd(initialItemCount, accessible));
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, accessible);
-        }
+        Value * const accessible = getAccessibleInputItems(b, partialSumPort);
+        sourceItemCount = b->CreateAdd(initialItemCount, accessible);
         minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
-        Value * const writable = getWritableOutputItems(b, partialSumPort, true);
-        currentItemCount = writable;
-        const auto streamSet = getOutputBufferVertex(port);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.CopyBack) {
-            nonOverflowItems = getWritableOutputItems(b, partialSumPort, false);
-            sourceItemCount = b->CreateAdd(initialItemCount, nonOverflowItems);
-            peekableItemCount = b->CreateAdd(initialItemCount, writable);
-        } else {
-            sourceItemCount = b->CreateAdd(initialItemCount, writable);
-        }
+        Value * const writable = getWritableOutputItems(b, partialSumPort);
+        sourceItemCount = b->CreateAdd(initialItemCount, writable);
         minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
@@ -1541,9 +1520,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     BasicBlock * const popCountEntry = b->GetInsertBlock();
 
     Value * cond = b->CreateICmpNE(numOfLinearStrides, sz_ZERO);
-//    if (peekableItemCount) {
-        cond = b->CreateAnd(cond, b->CreateICmpUGE(currentItemCount, minimumItemCount));
-//    }
+
+//        cond = b->CreateAnd(cond, b->CreateICmpUGE(currentItemCount, minimumItemCount));
 
     b->CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 
@@ -1614,18 +1592,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
 
     Value * finalNumOfStrides = numOfStridesPhi;
-    if (peekableItemCount) {
-        // Since we want to allow the stream to peek into the overflow but not start
-        // in it, check to see if we can support one more stride by using it.
-//        Value * const internalCapacity = sourceBuffer->getInternalCapacity(b);
-//        Value * const pos = b->CreateURem(nextRequiredItemsPhi, internalCapacity);
-//        ConstantInt * const overflowLimit = b->getSize(numOfPeekableItems);
-//        Value * const hasOverwrittenData = b->CreateICmpUGE(nextRequiredItemsPhi, overflowLimit);
-//        Value * const canPeekIntoOverflow = b->CreateAnd(hasOverwrittenData, b->CreateICmpULE(nextRequiredItemsPhi, overflowLimit));
-
-        Value * const canPeekIntoOverflow = b->CreateICmpULE(nextRequiredItemsPhi, peekableItemCount);
-        finalNumOfStrides = b->CreateAdd(finalNumOfStrides, b->CreateZExt(canPeekIntoOverflow, sizeTy));
-    }
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & binding = getInputBinding(ref);
         b->CreateAssert(b->CreateICmpNE(finalNumOfStrides, MAX_INT),
@@ -1635,6 +1601,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(BuilderRef b,
     }
     return finalNumOfStrides;
 }
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief splatMultiStepPartialSumValues

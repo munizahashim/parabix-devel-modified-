@@ -212,7 +212,9 @@ void KernelCompiler::callGenerateExpectedOutputSizeMethod(BuilderRef b) {
     mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
     b->SetInsertPoint(mEntryPoint);
     auto arg = mCurrentMethod->arg_begin();
+    #ifndef NDEBUG
     const auto arg_end = mCurrentMethod->arg_end();
+    #endif
     auto nextArg = [&]() {
         assert (arg != arg_end);
         Value * const v = &*arg;

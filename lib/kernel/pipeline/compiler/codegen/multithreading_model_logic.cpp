@@ -104,13 +104,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(BuilderRef b) {
     // use the process thread to handle the initial segment function after spawning
     // (n - 1) threads to handle the subsequent offsets
 
-    Function * const pthreadSelfFn = m->getFunction("pthread_self");
     Function * const pthreadCreateFn = m->getFunction("pthread_create");
     Function * const pthreadExitFn = m->getFunction("pthread_exit");
     Function * const pthreadJoinFn = m->getFunction("pthread_join");
 
     Type * const pThreadTy = TypeBuilder<pthread_t, false>::get(b->getContext());
-    assert (pThreadTy == pthreadSelfFn->getReturnType());
 
     Value * minimumNumOfThreads = nullptr;
     Value * const maximumNumOfThreads = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
