@@ -34,7 +34,6 @@ using PortType = Kernel::PortType;
 
 constexpr static auto BUFFER_HANDLE_SUFFIX = "_buffer";
 constexpr static auto TERMINATION_SIGNAL = "__termination_signal";
-constexpr static auto INTERNAL_COMMON_THREAD_LOCAL_PREFIX = "!__ctl__";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
@@ -1642,10 +1641,10 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
 
     Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
     FixedArray<Value *, 12> args;
-    args[0] = illustratorObject;
+    args[0] = b->CreatePointerCast(illustratorObject, b->getVoidPtrTy());
     args[1] = kernelName;
     args[2] = streamName;
-    args[3] = handle;
+    args[3] = b->CreatePointerCast(handle, b->getVoidPtrTy());
     args[4] = b->getSize(rows);
     args[5] = b->getSize(cols);
     args[6] = b->getSize(itemWidth);
@@ -1685,10 +1684,10 @@ void KernelCompiler::captureStreamData(BuilderRef b, Constant * kernelName, Cons
                                        Value * streamData, Value * from, Value * to)  const {
 
     FixedArray<Value *, 9> args;
-    args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+    args[0] = b->CreatePointerCast(b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b->getVoidPtrTy());
     args[1] = kernelName;
     args[2] = streamName;
-    args[3] = handle;
+    args[3] = b->CreatePointerCast(handle, b->getVoidPtrTy());
     args[4] = strideNum;
     args[5] = streamData;
     args[6] = from;

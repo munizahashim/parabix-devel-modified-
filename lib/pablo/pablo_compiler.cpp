@@ -99,7 +99,6 @@ void PabloCompiler::initializeIllustrator(BuilderRef b) {
 
 bool PabloCompiler::identifyIllustratedValues(BuilderRef b, const PabloBlock * const block, SmallVector<size_t, 8> & loopIds, size_t & currentLoopId) {
     bool containsAnyIllustratedValue = false;
-    const auto outerLoopId = currentLoopId;
     for (const Statement * statement : *block) {
         if (const Illustrate * il = dyn_cast<Illustrate>(statement)) {
             Constant * kernelName = b->GetString(getName());
@@ -170,7 +169,7 @@ void PabloCompiler::compile(BuilderRef b) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator && !mContainsIllustratedValue.empty())) {
         Function * exitKernel = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_EXIT_KERNEL);
         FixedArray<Value *, 2> args;
-        args[0] = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+        args[0] = b->CreatePointerCast(b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b->getVoidPtrTy());
         args[1] = b->CreatePointerCast(getHandle(), b->getVoidPtrTy());
         b->CreateCall(exitKernel, args);
     }
@@ -428,7 +427,7 @@ void PabloCompiler::compileWhile(BuilderRef b, const While * const whileStatemen
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         const auto f = std::find(mContainsIllustratedValue.begin(), mContainsIllustratedValue.end(), whileStatement);
         if (LLVM_UNLIKELY(f != mContainsIllustratedValue.end())) {
-            illustratorObj = b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT);
+            illustratorObj = b->CreatePointerCast(b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b->getVoidPtrTy());
             Function * fIllustratorEnterLoop = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_ENTER_LOOP);
             FixedArray<Value *, 2> args;
             args[0] = illustratorObj;

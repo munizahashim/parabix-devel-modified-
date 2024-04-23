@@ -1,6 +1,6 @@
 /*
- *  Part of the Parabix Project, under the Open Software License 3.0.
- *  SPDX-License-Identifier: OSL-3.0
+ *  Copyright (c) 2022 International Characters.
+ *  This software is licensed to the public under the Open Software License 3.0.
  */
 
 
@@ -26,7 +26,6 @@
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
@@ -59,9 +58,9 @@ using namespace pablo;
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
 
-#define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
-#define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
-#define SHOW_BYTES(name) if (illustratorAddr) illustrator.captureByteData(P, #name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
 const UCD::codepoint_t Hangul_SBase = 0xAC00;
 const UCD::codepoint_t Hangul_LBase = 0x1100;
@@ -83,6 +82,7 @@ public:
     unicode::BitTranslationSets NFD_3rd_BitCCs();
     unicode::BitTranslationSets NFD_4th_BitCCs();
 private:
+    bool mInitialized;
     std::unordered_map<codepoint_t, unsigned> mNFD_length;
     unicode::TranslationMap mNFD_CharMap[4];
     UCD::UnicodeSet mHangul_Precomposed_LV;
@@ -418,10 +418,9 @@ void Hangul_NFD::generatePabloMethod() {
     }
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+typedef void (*XfrmFunctionType)(uint32_t fd);
 
-XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
-                                      ParabixIllustrator & illustrator) {
+XfrmFunctionType generate_pipeline(CPUDriver & pxDriver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
@@ -429,13 +428,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver,
         Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    //   If the --illustrator-width= parameter is specified, bitstream
-    //   data is to be displayed.
-    Scalar * illustratorAddr = nullptr;
-    if (codegen::IllustratorDisplay > 0) {
-        illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -514,21 +506,17 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
     CPUDriver driver("NFD_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
-    fn = generate_pipeline(driver, illustrator);
+    fn = generate_pipeline(driver);
     //
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
     } else {
-        fn(fd, &illustrator);
+        fn(fd);
         close(fd);
-        if (codegen::IllustratorDisplay > 0) {
-            illustrator.displayAllCapturedData();
-        }
     }
     return 0;
 }
