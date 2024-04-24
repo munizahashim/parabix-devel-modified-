@@ -14,7 +14,10 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
             assert (entry.Type == RelationshipNode::IsStreamSet);
             const StreamSet * const ss = cast <StreamSet>(entry.Relationship);
 
-            assert (mKernelSharedHandle);
+            Value * handle = mKernelSharedHandle;
+            if (LLVM_UNLIKELY(handle == nullptr)) {
+                handle = b->CreateIntToPtr(b->getInt64(mKernelId), b->getVoidPtrTy());
+            }
 
             assert (mKernel);
 
@@ -46,8 +49,6 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
 
             const auto & bn = mBufferGraph[streamSet];
 
-            assert (bn.IsLinear);
-
             StreamSetBuffer * const buffer = bn.Buffer;
 
             const auto & rt = mBufferGraph[in_edge(streamSet, mBufferGraph)];
@@ -58,7 +59,13 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
 
             // TODO: if this kernel is state-free, we need to pass in some other value for the handle.
             // We can easily use kernel # for it here but what if we capture a value in the kernel itself?
-            assert (mKernelSharedHandle);
+
+            assert (mKernel);
+
+            Value * handle = mKernelSharedHandle;
+            if (LLVM_UNLIKELY(handle == nullptr)) {
+                handle = b->CreateIntToPtr(b->getInt64(mKernelId), b->getVoidPtrTy());
+            }
 
             // TODO: should we pass the values of the min repetition vector to better group the output?
 

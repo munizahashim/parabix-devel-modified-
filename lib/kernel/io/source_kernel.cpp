@@ -135,15 +135,12 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b->CreateLikelyCondBr(b->CreateIsNotNull(unnecessaryBytes), dropPages, checkRemaining);
     b->SetInsertPoint(dropPages);
     // instruct the OS that it can safely drop any fully consumed pages
-
-
-//    args[0] = readableBuffer;
-//    args[1] = consumedPageOffset;
-//    args[2] = b->getInt32(MADV_DONTNEED);
-//    Value * const r0 = b->CreateCall(MAdviseFunc, args);
-//    assert (r0);
-//    b->CallPrintInt("r0", r0);
-//    b->setScalarField("buffer", consumedBuffer);
+    #ifndef __APPLE__
+    args[0] = readableBuffer;
+    args[1] = consumedPageOffset;
+    args[2] = b->getInt32(MADV_DONTNEED);
+    Value * const r0 = b->CreateCall(MAdviseFunc, args);
+    #endif
     b->CreateBr(checkRemaining);
 
     // determine whether or not we've exhausted the "safe" region of the file buffer

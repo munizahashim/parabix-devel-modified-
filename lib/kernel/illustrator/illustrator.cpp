@@ -59,7 +59,8 @@ inline size_t get_terminal_width(const size_t fileDefault) {
     if (isatty(STDERR_FILENO)) {
         struct winsize w;
         ioctl(STDERR_FILENO, TIOCGWINSZ, &w);
-        return w.ws_col;
+        auto len = w.ws_col;
+        return len == 0 ? fileDefault : len;
     } else {
         return fileDefault;
     }
@@ -759,7 +760,7 @@ updated_trie:
     std::vector<std::vector<char>> FormattedOutput(maxNumOfRows);
 
     const size_t consoleWidth = get_terminal_width(blockWidth);
-    assert (consoleWidth > 0);
+
     size_t charsPerRow = codegen::IllustratorDisplay;
     if (charsPerRow == 0) {
         if (LLVM_LIKELY(longestNameLength + 3 < consoleWidth)) {
