@@ -29,7 +29,7 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
                                 b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT),
                                 b->GetString(mKernel->getName()),
                                 b->GetString(bind.Name),
-                                mKernelSharedHandle,
+                                handle,
                                 ss->getNumElements(), 1, ss->getFieldWidth(), MemoryOrdering::RowMajor,
                                 bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1],
                                 emptyLoopVec);
@@ -73,7 +73,7 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
             captureStreamData(b,
                               b->GetString(mKernel->getName()),
                               b->GetString(bind.Name),
-                              mKernelSharedHandle,
+                              handle,
                               mInternallySynchronizedSubsegmentNumber,
                               buffer->getType(), MemoryOrdering::RowMajor,
                               vba, initial, current);

@@ -58,3 +58,5 @@
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
 
+#define OVERRIDE_BLOCK_WIDTH (512)
+

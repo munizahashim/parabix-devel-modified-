@@ -267,6 +267,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
         partitionId = curPartitionId;
         // Family kernels must be initialized in the "main" method.
         setActiveKernel(b, i, false);
+        assert (mKernelId == i);
         assert (mKernel->isGenerated());
         if (isRoot) {
             initializeStridesPerSegment(b);

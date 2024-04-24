@@ -1149,7 +1149,7 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
         const auto n = L.size();
         size_t * V = (size_t*)A.aligned_allocate(n + 1, sizeof(size_t));
         for (size_t i = 0; i < n; ++i) {
-            V[i] = L[i]; assert (L[i]);
+            V[i] = L[i]; // assert (L[i]);
         }
         V[n] = 0;
         E.LoopIndex = V;

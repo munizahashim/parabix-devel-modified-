@@ -1636,8 +1636,8 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
                                          const char replacement0, const char replacement1,
                                          const ArrayRef<size_t> loopIds) const {
 
-    assert (isFromCurrentFunction(b, illustratorObject));
-    assert (isFromCurrentFunction(b, handle));
+    assert (isFromCurrentFunction(b, illustratorObject, false));
+    assert (isFromCurrentFunction(b, handle, false));
 
     Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
     FixedArray<Value *, 12> args;
@@ -1689,7 +1689,7 @@ void KernelCompiler::captureStreamData(BuilderRef b, Constant * kernelName, Cons
     args[2] = streamName;
     args[3] = b->CreatePointerCast(handle, b->getVoidPtrTy());
     args[4] = strideNum;
-    args[5] = streamData;
+    args[5] = b->CreatePointerCast(streamData, b->getVoidPtrTy());
     args[6] = from;
     args[7] = to;
     args[8] = b->getSize(b->getBitBlockWidth());

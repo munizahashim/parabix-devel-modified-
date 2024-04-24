@@ -753,6 +753,7 @@ check_for_additional_remapping:
                     }
                 }
                 bp.Flags |= BufferPortType::Illustrated;
+                mBufferGraph[streamSet].IsLinear = true;
                 mIllustratedStreamSetBindings.emplace_back(streamSet, p);
 ignore_duplicate_entry:
                 break;
