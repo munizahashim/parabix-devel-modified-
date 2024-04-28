@@ -127,7 +127,6 @@ struct StreamDataCapture {
     inline void append(StreamDataStateObject * stateObjectEntry,
                        const size_t strideNum, const uint8_t * streamData, const size_t from, const size_t to, const size_t blockWidth);
 
-
     StreamDataCapture(const char * streamName, size_t rows, size_t cols, size_t iw, uint8_t ordering,
                       IllustratorTypeId typeId, const char rep0, const char rep1,
                       const size_t * loopIdArray)
@@ -149,6 +148,7 @@ struct StreamDataStateObject {
 
     inline void enterKernel() {
         assert (!InKernel);
+        assert (LoopIteration.empty());
         InKernel = true;
     }
 
@@ -158,20 +158,30 @@ struct StreamDataStateObject {
     }
 
     inline void iterateLoop() {
+        assert (InKernel);
         assert (!LoopIteration.empty());
         LoopIteration.back()++;
     }
 
     inline void exitLoop() {
+        assert (InKernel);
         assert (!LoopIteration.empty());
         LoopIteration.pop_back();
     }
 
     inline void exitKernel() {
         assert (InKernel);
+        assert (LoopIteration.empty());
         InKernel = false;
     }
 
+    StreamDataStateObject(const char * kernelName, const char * streamName, size_t rows, size_t cols, size_t iw, uint8_t ordering,
+                      IllustratorTypeId typeId, const char rep0, const char rep1,
+                      const size_t * loopIdArray)
+    : KernelName(kernelName)
+    , First(streamName, rows, cols, iw, ordering, typeId, rep0, rep1, loopIdArray) {
+
+    }
 
     // Even when executed in multi-threaded mode, each kernel instance is guaranteed to be executed
     // in lock step manner. To ensure this, the pipeline disables state-free/data-parallel execution
@@ -201,6 +211,7 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
     auto r = RegisteredStateObjects.find(stateObject);
     if (r == RegisteredStateObjects.end()) {
         StreamDataStateObject * newStateObjectEntry = GroupAllocator.allocate<StreamDataStateObject>(1);
+        new (newStateObjectEntry) StreamDataStateObject(kernelName, streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1, loopIdArray);
         #ifndef NDEBUG
         so = newStateObjectEntry;
         #endif
@@ -228,11 +239,10 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
             current = next;
         }
         newCapture = GroupAllocator.allocate<StreamDataCapture>(1);
+        new (newCapture) StreamDataCapture(streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1, loopIdArray);
         current->Next = newCapture;
     }
     assert (newCapture);
-
-    new (newCapture) StreamDataCapture(streamName, rows, cols, itemWidth, memoryOrdering, illustratorType, replacement0, replacement1, loopIdArray);
     #ifndef NDEBUG
     newCapture->StateObject = so;
     #endif
@@ -1126,12 +1136,15 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
         E.Data = nullptr;
     } else if (LLVM_UNLIKELY(ItemWidth >= CHAR_BIT && Rows == 1 && Cols == 1)) {
         // may be unsafe; do not memcpy any data that isn't explicitly given
+        assert (ItemWidth % CHAR_BIT == 0);
+        assert (ItemWidth > 0);
         const auto offset = udiv(from * ItemWidth, CHAR_BIT);
         const uint8_t * start = streamData + offset;
-        const size_t length  = (to - from) * ItemWidth / CHAR_BIT;
-        assert (length > 0);
-        assert (ItemWidth % CHAR_BIT == 0);
-        E.Data = A.aligned_allocate(length, ItemWidth / CHAR_BIT);
+        const auto ItemBytes = (ItemWidth / CHAR_BIT);
+        const size_t length  = (to - from) * ItemBytes;
+        assert ((length % ItemBytes) == 0);
+        E.Data = A.aligned_allocate(length, ItemBytes);
+        assert (E.Data);
         std::memcpy(E.Data, start, length);
     } else {
         // each "block" of streamData will contain blockWidth items, regardless of the item width.
@@ -1141,20 +1154,23 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
         const auto length = ceil_udiv(end, blockWidth) * blockSize;
         assert (length > 0);
         E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
+        assert (E.Data);
         std::memcpy(E.Data, start, length);
     }
 
     if (stateObjectEntry->InKernel) {
         const auto & L = stateObjectEntry->LoopIteration;
         const auto n = L.size();
-        size_t * V = (size_t*)A.aligned_allocate(n + 1, sizeof(size_t));
+        size_t * const V = (size_t*)A.aligned_allocate(n + 1, sizeof(size_t));
+        assert (V);
         for (size_t i = 0; i < n; ++i) {
-            V[i] = L[i]; // assert (L[i]);
+            V[i] = L[i]; assert (L[i]);
         }
         V[n] = 0;
         E.LoopIndex = V;
     } else {
         assert (stateObjectEntry->LoopIteration.empty());
+        E.LoopIndex = nullptr;
     }
 
 }

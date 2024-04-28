@@ -312,9 +312,9 @@ Kernel * PipelineBuilder::makeKernel() {
             }
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
                 const auto & S = obj->getInternallyGeneratedStreamSets();
-                for (int k = 0; k < S.size(); ++k) {
+                for (size_t k = 0; k < S.size(); ++k) {
                     const auto j = addAndMapInternallyGenerated(S[k]);
-                    add_edge((firstKernel + i), j, -(k + 1), G);
+                    add_edge((firstKernel + i), j, -((int)k + 1), G);
                 }
             }
         }
