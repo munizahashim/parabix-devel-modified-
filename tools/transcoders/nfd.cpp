@@ -82,7 +82,6 @@ public:
     unicode::BitTranslationSets NFD_3rd_BitCCs();
     unicode::BitTranslationSets NFD_4th_BitCCs();
 private:
-    bool mInitialized;
     std::unordered_map<codepoint_t, unsigned> mNFD_length;
     unicode::TranslationMap mNFD_CharMap[4];
     UCD::UnicodeSet mHangul_Precomposed_LV;
