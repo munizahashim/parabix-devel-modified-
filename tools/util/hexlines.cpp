@@ -107,6 +107,10 @@
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
 
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+
 using namespace kernel;
 using namespace llvm;
 using namespace pablo;
@@ -190,11 +194,13 @@ HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
     P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
 
     //  We need to know which input positions are LFs and which are not.
     //  The nonLF positions need to be expanded to generate two hex digits each.
@@ -205,13 +211,15 @@ HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
     StreamSet * nonLF = P->CreateStreamSet(1);
     std::vector<re::CC *> nonLF_CC = {re::makeCC(re::makeByte(0,9), re::makeByte(0xB, 0xff))};
     P->CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, BasisBits, nonLF);
-    
+    SHOW_STREAM(nonLF);
+
     //  We need to spread out the basis bits to make room for two positions for
     //  each non LF in the input.   The Parabix function UnitInsertionSpreadMask
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
     StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
+    SHOW_STREAM(hexInsertMask);
 
     // The parabix SpreadByMask function copies bits from an input stream
     // set to an output stream set, to positions marked by 1s in the first
@@ -219,15 +227,18 @@ HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
     // This function performs STEP 1 in the comments above.
     StreamSet * spreadBasis = P->CreateStreamSet(8);
     SpreadByMask(P, hexInsertMask, BasisBits, spreadBasis);
-    
+    SHOW_BIXNUM(spreadBasis);
+
     // Perform the logic of the Hexify kernel.
     StreamSet * hexBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<Hexify>(hexInsertMask, spreadBasis, hexBasis);
+    SHOW_BIXNUM(hexBasis);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
     StreamSet * hexLines = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(hexBasis, hexLines);
+    SHOW_BYTES(hexLines);
 
     //  The StdOut kernel writes a byte stream to standard output.
     P->CreateKernelCall<StdOutKernel>(hexLines);
