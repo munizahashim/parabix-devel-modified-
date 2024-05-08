@@ -82,7 +82,7 @@ MatchPriorFunctionType mpPipelineGen(CPUDriver & pxDriver) {
                                    {Binding{b->getInt64Ty(), "countResult"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     StreamSet * BasisBits = P->CreateStreamSet(8, 1);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     P->CreateKernelCall<MatchPriorKernel>(BasisBits, P->getOutputScalar("countResult"));

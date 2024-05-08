@@ -398,7 +398,7 @@ typedef size_t (*IDISAtestFunctionType)(int32_t fd1, int32_t fd2);
 StreamSet * readHexToBinary(std::unique_ptr<ProgramBuilder> & P, const std::string & fd) {
     StreamSet * const hexStream = P->CreateStreamSet(1, 8);
     Scalar * const fileDecriptor = P->getInputScalar(fd);
-    P->CreateKernelCall<MMapSourceKernel>(fileDecriptor, hexStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDecriptor, hexStream);
     StreamSet * const bitStream = P->CreateStreamSet(1, 1);
     P->CreateKernelCall<HexToBinary>(hexStream, bitStream);
     return bitStream;

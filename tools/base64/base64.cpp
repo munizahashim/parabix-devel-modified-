@@ -38,7 +38,7 @@ base64FunctionType base64PipelineGen(CPUDriver & pxDriver) {
     auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     StreamSet * const Expanded3_4Out = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<expand3_4Kernel>(ByteStream, Expanded3_4Out);
     StreamSet * const Radix64out = P->CreateStreamSet(1, 8);

@@ -109,11 +109,10 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> 
         illustratorAddr = P->getInputScalar("illustratorAddr");
         illustrator.registerIllustrator(illustratorAddr);
     }
-    // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
-    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.

@@ -93,7 +93,7 @@ jsonFunctionType json_parsing_gen(
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
     StreamSet * const u8basis = P->CreateStreamSet(8);
     Selected_S2P(P, codeUnitStream, u8basis);
 

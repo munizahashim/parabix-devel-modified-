@@ -241,7 +241,7 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illu
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);

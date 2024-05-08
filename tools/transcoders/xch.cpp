@@ -508,11 +508,10 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
         illustratorAddr = P->getInputScalar("illustratorAddr");
         illustrator.registerIllustrator(illustratorAddr);
     }
-    // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
-    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
@@ -574,11 +573,10 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
         illustratorAddr = P->getInputScalar("illustratorAddr");
         illustrator.registerIllustrator(illustratorAddr);
     }
-    // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
-    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.

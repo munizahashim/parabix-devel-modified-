@@ -75,7 +75,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
@@ -139,7 +139,7 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
 
     // Source data
     StreamSet * const source = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, source);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, source);
     StreamSet * const ztfHashBasis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(source, ztfHashBasis);
     StreamSet * const ztfInsertionLengths = P->CreateStreamSet(4);

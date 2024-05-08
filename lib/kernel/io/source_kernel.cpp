@@ -200,6 +200,7 @@ void ReadSourceKernel::generatLinkExternalFunctions(BuilderRef b) {
     #else
     b->LinkFunction("read", read);
     #endif
+    b->LinkFunction("file_size", file_size);
 }
 
 void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, BuilderRef b) {
