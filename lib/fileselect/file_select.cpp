@@ -50,7 +50,7 @@ static cl::opt<bool, true> DereferenceRecursiveOption("R", cl::location(Derefere
 static cl::alias DereferenceRecursiveAlias("dereference-recursive", cl::desc("Alias for -R"), cl::aliasopt(DereferenceRecursiveOption));
 
 bool MmapFlag;
-static cl::opt<bool, true> MmapOption("mmap", cl::location(MmapFlag),  cl::init(true), cl::desc("Use mmap for file input (default)."), cl::cat(Input_Options));
+static cl::opt<bool, true> MmapOption("mmap", cl::location(MmapFlag),  cl::init(false), cl::desc("Use mmap for file input."), cl::cat(Input_Options));
 
 static cl::list<std::string> ExcludeFiles("exclude", cl::ZeroOrMore,
                                           cl::desc("Exclude files matching the given filename GLOB pattern."), cl::cat(Input_Options));
