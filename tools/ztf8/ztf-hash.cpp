@@ -35,7 +35,6 @@
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/util/bixhash.h>
-#include <kernel/util/debug_display.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/builder.hpp>

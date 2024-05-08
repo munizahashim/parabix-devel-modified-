@@ -13,7 +13,6 @@
 #include <re/analysis/re_name_gather.h>
 #include <re/transforms/to_utf8.h>
 #include <kernel/pipeline/pipeline_builder.h>
-#include <kernel/util/debug_display.h>
 #include <util/slab_allocator.h>
 
 namespace IDISA { class IDISA_Builder; }

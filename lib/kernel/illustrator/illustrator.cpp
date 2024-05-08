@@ -815,13 +815,6 @@ updated_trie:
                         any |= parse_tree(j, first, depth + 1);
                         first = false;
                     }
-//                    if (depth == 1 && any) {
-//                        const char sep = '-'; // inNestedLoop ? '-' : '=';
-//                        for (size_t k = 0; k < consoleWidth; ++k) {
-//                            out << sep;
-//                        }
-//                        out << '\n';
-//                    }
                     return any;
 
                 } else {
@@ -870,39 +863,6 @@ updated_trie:
                         if (from > endPosition) {
                             break;
                         }
-
-//                        if (LLVM_UNLIKELY(isFirst)) {
-
-//                            const char sep = '-'; // inNestedLoop ? '-' : '=';
-//                            size_t length = 3;
-//                            char joiner = ' ';
-//                            for (size_t k = 0; k < length; ++k) {
-//                                out << sep;
-//                            }
-//                            size_t k = 0;
-//                            if (LLVM_UNLIKELY(E->LoopIndex)) {
-//                                for (;;++k) {
-//                                    assert (E);
-//                                    const auto v = E->LoopIndex[k];
-//                                    if (v == 0) {
-//                                        break;
-//                                    }
-//                                    const auto val = std::to_string(v);
-//                                    length += val.length() + 1;
-//                                    out << joiner << val;
-//                                }
-//                            }
-//                            if (k) {
-//                                out << ' ';
-//                                ++length;
-//                            }
-//                            for (size_t k = length; k < consoleWidth; ++k) {
-//                                out << sep;
-//                            }
-//                            out << '\n';
-
-//                            isFirst = false;
-//                        }
 
                         assert (position >= from);
                         assert (position < to);
@@ -1149,13 +1109,18 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
     } else {
         // each "block" of streamData will contain blockWidth items, regardless of the item width.
         const size_t blockSize = (Rows * Cols * ItemWidth * blockWidth) / CHAR_BIT;
-        const uint8_t * start = streamData + (udiv(from, blockWidth) * blockSize);
-        const auto end = (from & (blockWidth - 1)) + (to - from);
-        const auto length = ceil_udiv(end, blockWidth) * blockSize;
-        assert (length > 0);
-        E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
-        assert (E.Data);
-        std::memcpy(E.Data, start, length);
+        if (LLVM_UNLIKELY(blockSize == 0)) {
+            E.Data = nullptr;
+        } else {
+            const auto offset = (udiv(from, blockWidth) * blockSize);
+            const uint8_t * start = streamData + offset;
+            const auto end = (from & (blockWidth - 1)) + (to - from);
+            const auto length = udiv(end + blockWidth - 1, blockWidth) * blockSize;
+            assert (length > 0);
+            E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
+            assert (E.Data);
+            std::memcpy(E.Data, start, length);
+        }
     }
 
     if (stateObjectEntry->InKernel) {

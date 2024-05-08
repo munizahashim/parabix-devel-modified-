@@ -22,7 +22,6 @@
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/streamutils/multiplex.h>
 #include <kernel/util/linebreak_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Path.h>
 #include <pablo/pablo_toolchain.h>

@@ -18,7 +18,6 @@
 #include <kernel/core/streamset.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/streamutils/stream_select.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
@@ -52,22 +51,17 @@ static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character
 static cl::list<std::string> inputFiles(cl::Positional, cl::desc("<input file ...>"), cl::OneOrMore, cl::cat(ucFlags));
 
 static cl::opt<bool> U21("u21", cl::desc("Use Unicode 21 bits"), cl::cat(ucFlags));
-static cl::opt<bool> ShowStreams("show-streams", cl::desc("Show UTF streams"), cl::init(false), cl::cat(ucFlags));
-
 
 std::vector<fs::path> allFiles;
 
-ParabixIllustrator illustrator(50);  // display width 50
-
-typedef uint64_t (*UCountFunctionType)(uint32_t fd,  ParabixIllustrator * illustrator);
+typedef uint64_t (*UCountFunctionType)(uint32_t fd);
 
 UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
 
     auto & B = pxDriver.getBuilder();
 
     auto P = pxDriver.makePipeline(
-                {Binding{B->getInt32Ty(), "fileDescriptor"},
-                 Binding{B->getIntAddrTy(), "illustratorAddr"}},
+                {Binding{B->getInt32Ty(), "fileDescriptor"}},
                 {Binding{B->getInt64Ty(), "countResult"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
@@ -88,13 +82,11 @@ UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
         StreamSet * const u21_Basis = P->CreateStreamSet(21, 1);
         P->CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
         BasisBits = u21_Basis;
-        if (ShowStreams) {
-            Scalar * illustratorAddr = P->getInputScalar("illustratorAddr");
-            illustrator.registerIllustrator(illustratorAddr);
-            illustrator.captureByteData(P, "bytedata", ByteStream, '.');
+        if (codegen::EnableIllustrator) {
+            P->captureByteData("bytedata", ByteStream, '.');
             for (unsigned i = 0; i < 21; i++) {
                 StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
-                illustrator.captureBitstream(P, "u21_" + std::to_string(i), u21_basis_i);
+                P->captureBitstream("u21_" + std::to_string(i), u21_basis_i);
             }
         }
 
@@ -135,7 +127,7 @@ uint64_t ucount1(UCountFunctionType fn_ptr, const uint32_t fileIdx) {
         close(fd);
         return 0;
     }
-    auto r = fn_ptr(fd, &illustrator);
+    auto r = fn_ptr(fd);
     close(fd);
     return r;
 }
@@ -186,9 +178,6 @@ int main(int argc, char *argv[]) {
         std::cout << std::setw(displayColumnWidth-1);
         std::cout << totalCount;
         std::cout << " total" << std::endl;
-    }
-    if (ShowStreams) {
-        illustrator.displayAllCapturedData();
     }
 
     return 0;

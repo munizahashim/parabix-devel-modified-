@@ -26,7 +26,6 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamsetptr.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
@@ -62,9 +61,9 @@ static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-b
 static cl::opt<bool> Buffering("buf", cl::desc("buffer pipeline output"),  cl::cat(Xch_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(Xch_Options));
 
-#define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
-#define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
-#define SHOW_BYTES(name) if (illustratorAddr) illustrator.captureByteData(P, #name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
 class AdjustU8bixnum : public pablo::PabloKernel {
 public:
@@ -484,30 +483,19 @@ void ApplyTransform::generatePabloMethod() {
     }
 }
 
-//typedef void (*XfrmFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
-
-typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd, ParabixIllustrator * illustrator);
+typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
 
 
 XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
-                                      unicode::BitTranslationSets tr,
-                                      ParabixIllustrator & illustrator) {
+                                      unicode::BitTranslationSets tr) {
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                              Binding{b->getIntAddrTy(), "illustratorAddr"}});
+                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"}});
     //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
         //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    //   If the --illustrator-width= parameter is specified, bitstream
-    //   data is to be displayed.
-    Scalar * illustratorAddr = nullptr;
-    if (codegen::IllustratorDisplay > 0) {
-        illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -556,24 +544,15 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
 XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
                                        unicode::BitTranslationSets tr,
                                        unicode::BitTranslationSets ins_bixnum,
-                                       unicode::BitTranslationSets del_bixnum,
-                                       ParabixIllustrator & illustrator) {
+                                       unicode::BitTranslationSets del_bixnum) {
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                              Binding{b->getIntAddrTy(), "illustratorAddr"}});
+                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"}});
     //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
         //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    //   If the --illustrator-width= parameter is specified, bitstream
-    //   data is to be displayed.
-    Scalar * illustratorAddr = nullptr;
-    if (codegen::IllustratorDisplay > 0) {
-        illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -663,7 +642,6 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
 
     unicode::BitTranslationSets xfrms;
     unicode::BitTranslationSets insertion_bixnum;
@@ -703,20 +681,17 @@ int main(int argc, char *argv[]) {
     XfrmFunctionType fn;
     StreamSetPtr xlated;
     if (U21) {
-        fn = generateU21_pipeline(driver, xfrms, illustrator);
+        fn = generateU21_pipeline(driver, xfrms);
     } else {
-        fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum, illustrator);
+        fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum);
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        fn(xlated, fd, &illustrator);
+        fn(xlated, fd);
         llvm::errs() << "xlated buffer length: " << xlated.length() << "\n";
         close(fd);
-        if (codegen::IllustratorDisplay > 0) {
-            illustrator.displayAllCapturedData();
-        }
     }
     return 0;
 }

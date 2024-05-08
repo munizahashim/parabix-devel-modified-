@@ -26,7 +26,6 @@
 #include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/scan/scanmatchgen.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
@@ -45,9 +44,9 @@
 #include <util/papi_helper.hpp>
 #endif
 
-#define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
-#define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
-#define SHOW_BYTES(name) if (illustratorAddr) illustrator.captureByteData(P, #name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -63,7 +62,7 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(CSV_Options));
 static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(CSV_Options));
 
-typedef void (*CSVFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+typedef void (*CSVFunctionType)(uint32_t fd);
 
 class Invert : public PabloKernel {
 public:
@@ -119,19 +118,13 @@ void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
     P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs, ParabixIllustrator & illustrator) {
+CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::string> & templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                    Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    Scalar * illustratorAddr = nullptr;
-    if (codegen::IllustratorDisplay > 0) {
-        illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-    }
     // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
     //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
@@ -252,7 +245,6 @@ int main(int argc, char *argv[]) {
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
 
-    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
     std::vector<std::string> headers;
     if (HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
@@ -266,7 +258,7 @@ int main(int argc, char *argv[]) {
             s = s.substr(0, MaxHeaderSize);
         }
     }
-    std::vector<std::string> templateStrs = JSONfieldPrefixes(headers);
+    const auto templateStrs = JSONfieldPrefixes(headers);
     //for (auto & s : templateStrs) {
     //    llvm::errs() << "template string: |" << s << "|\n";
     //}
@@ -275,7 +267,7 @@ int main(int argc, char *argv[]) {
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    CSVFunctionType fn = generatePipeline(driver, templateStrs, illustrator);
+    CSVFunctionType fn = generatePipeline(driver, templateStrs);
     //  The compile function "fn"  can now be used.   It takes a file
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
@@ -292,16 +284,13 @@ int main(int argc, char *argv[]) {
         //  Run the pipeline.
         printf("%s", templatePrologue.c_str());
         fflush(stdout);
-        fn(fd, &illustrator);
+        fn(fd);
         close(fd);
         printf("%s", templateEpilogue.c_str());
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);
         #endif
-        if (codegen::IllustratorDisplay > 0) {
-            illustrator.displayAllCapturedData();
-        }
     }
     return 0;
 }

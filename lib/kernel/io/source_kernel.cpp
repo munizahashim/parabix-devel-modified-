@@ -458,7 +458,6 @@ void FDSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     BasicBlock * DoSegmentMMap = b->CreateBasicBlock("DoSegmentMMap");
     BasicBlock * DoSegmentDone = b->CreateBasicBlock("DoSegmentDone");
     Value * const useMMap = b->CreateIsNotNull(b->getScalarField("useMMap"));
-
     b->CreateCondBr(useMMap, DoSegmentMMap, DoSegmentRead);
     b->SetInsertPoint(DoSegmentMMap);
     MMapSourceKernel::generateDoSegmentMethod(mCodeUnitWidth, mStride, b);

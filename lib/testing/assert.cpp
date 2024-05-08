@@ -6,7 +6,6 @@
 #include <testing/assert.h>
 
 #include <kernel/core/kernel_builder.h>
-#include <kernel/util/debug_display.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -149,23 +148,20 @@ void StreamEquivalenceKernel::generateFinalizeMethod(BuilderRef b) {
 namespace testing {
 
 void AssertEQ(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    using namespace kernel;
     auto ptr = P->getInputScalar("output");
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
 }
 
 void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    using namespace kernel;
     auto ptr = P->getInputScalar("output");
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
 }
 
 void AssertDebug(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
-    using namespace kernel;
-    P->CreateKernelCall<DebugDisplayKernel>("lhs", lhs);
-    P->CreateKernelCall<DebugDisplayKernel>("rhs", rhs);
+    P->captureBitstream("lhs", lhs);
+    P->captureBitstream("rhs", rhs);
     // return false
     auto ptr = P->getInputScalar("output");
     P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);

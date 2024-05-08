@@ -173,13 +173,6 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
             ext->installStreamSet(filtered);
         }
         StreamSet * s = ext->getStreamSet();
-        if (mIllustrator) {
-            if (s->getNumElements() == 1) {
-                mIllustrator->captureBitstream(b, mStreamIndices[c].name + "_" + ssname, s);
-            } else {
-                mIllustrator->captureBixNum(b, mStreamIndices[c].name + "_" + ssname, s);
-            }
-        }
         if (codegen::EnableIllustrator) {
             if (s->getNumElements() == 1) {
                 b->captureBitstream(mStreamIndices[c].name + "_" + ssname, s);

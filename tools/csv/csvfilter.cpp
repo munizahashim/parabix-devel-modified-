@@ -24,7 +24,6 @@
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/scan/scanmatchgen.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>

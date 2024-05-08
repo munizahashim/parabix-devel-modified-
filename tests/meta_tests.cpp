@@ -7,7 +7,6 @@
 
 #include <testing/testing.h>
 #include <kernel/streamutils/stream_select.h>
-#include <kernel/util/debug_display.h>
 
 using namespace testing;
 using namespace kernel;

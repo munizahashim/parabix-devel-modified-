@@ -13,7 +13,6 @@
 #include <kernel/scan/scan.h>
 #include <kernel/scan/reader.h>
 #include <kernel/util/linebreak_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/util/nesting.h>
 #include <grep/grep_kernel.h>
 #include <llvm/IR/Function.h>                      // for Function, Function...
@@ -60,36 +59,30 @@ bool ToCSVFlag;
 static cl::opt<bool, true> ToCSVOption("to-csv", cl::location(ToCSVFlag), cl::desc("Print equivalent CSV"), cl::cat(jsonOptions));
 bool ShowLinesFlag;
 static cl::opt<bool, true> ShowLinesOption("show-lines", cl::location(ShowLinesFlag), cl::desc("Display line number on error"), cl::cat(jsonOptions));
-bool ShowStreamsFlag;
-static cl::opt<bool, true> ShowStreamsOption("show-streams", cl::location(ShowStreamsFlag), cl::desc("Show streams with Parabix illustrator."), cl::cat(jsonOptions));
 unsigned MaxDepth;
 static cl::opt<unsigned, true> MaxDepthOption("max-depth", cl::location(MaxDepth), cl::desc("Max nesting depth for JSON."), cl::cat(jsonOptions), cl::init(15));
 int OnlyDepth;
 static cl::opt<int, true> OnlyDepthOption("only-depth", cl::location(OnlyDepth), cl::desc("Only generate code for depth n of JSON."), cl::cat(jsonOptions), cl::init(-1));
 
-typedef void (*jsonFunctionType)(uint32_t fd, ParabixIllustrator *);
+typedef void (*jsonFunctionType)(uint32_t fd);
 
 jsonFunctionType json_parsing_gen(
     CPUDriver & driver,
     std::shared_ptr<PabloParser> parser,
-    std::shared_ptr<SourceFile> jsonPabloSrc,
-    ParabixIllustrator & illustrator) {
+    std::shared_ptr<SourceFile> jsonPabloSrc) {
 
     auto & b = driver.getBuilder();
     Type * const int32Ty = b->getInt32Ty();
     Type * const int64Ty = b->getInt64Ty();
-    Type * const intPtrTy = b->getIntAddrTy();
-    bool ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
+
+    const auto ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
     Bindings bindingsParallel = {Binding{int64Ty, "errCount"}};
     Bindings bindingsRegular = {};
-    auto P = driver.makePipeline(
-        {Binding{int32Ty, "fd"}, Binding{intPtrTy, "illustratorAddr"}},
+    auto P = driver.makePipeline({Binding{int32Ty, "fd"}},
         (ParallelProcess ? bindingsParallel : bindingsRegular)
     );
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
-    Scalar * const illustratorAddr = P->getInputScalar("illustratorAddr");
-    illustrator.registerIllustrator(illustratorAddr);
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
@@ -167,10 +160,10 @@ jsonFunctionType json_parsing_gen(
         extraErr
     );
 
-    if (ShowStreamsFlag) {
-        illustrator.captureByteData(P, "codeUnitStream", codeUnitStream);
-        illustrator.captureBitstream(P, "stringSpan", stringSpan);
-        illustrator.captureBitstream(P, "numberSpan", numberSpan);
+    if (codegen::EnableIllustrator) {
+        P->captureByteData("codeUnitStream", codeUnitStream);
+        P->captureBitstream("stringSpan", stringSpan);
+        P->captureBitstream("numberSpan", numberSpan);
     }
 
     // 9.1 Prepare and validate StreamSets
@@ -219,15 +212,15 @@ jsonFunctionType json_parsing_gen(
         P->CreateKernelCall<PopcountKernel>(Errs, errCount);
         P->CreateCall(simpleErrFn.name, *simpleErrFn.func, { errCount });
 
-        if (ShowStreamsFlag) {
-            illustrator.captureBixNum(P, "encDepth", encDepth);
-            illustrator.captureBitstream(P, "extraErr", extraErr);
-            illustrator.captureBitstream(P, "utf8Err", utf8Err);
-            illustrator.captureBitstream(P, "numberErr", numberErr);
-            illustrator.captureBitstream(P, "depthErr", depthErr);
-            illustrator.captureBitstream(P, "syntaxArrErr", syntaxArrErr);
-            illustrator.captureBitstream(P, "syntaxObjErr", syntaxObjErr);
-            illustrator.captureBitstream(P, "Errs", Errs);
+        if (codegen::EnableIllustrator) {
+            P->captureBixNum("encDepth", encDepth);
+            P->captureBitstream("extraErr", extraErr);
+            P->captureBitstream("utf8Err", utf8Err);
+            P->captureBitstream("numberErr", numberErr);
+            P->captureBitstream("depthErr", depthErr);
+            P->captureBitstream("syntaxArrErr", syntaxArrErr);
+            P->captureBitstream("syntaxObjErr", syntaxObjErr);
+            P->captureBitstream("Errs", Errs);
         }
     } else {
         StreamSet * collapsedLex;
@@ -291,11 +284,9 @@ int main(int argc, char ** argv) {
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        ParabixIllustrator illustrator(64);
-        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource, illustrator);
-        jsonParsingFunction(fd, &illustrator);
+        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
+        jsonParsingFunction(fd);
         close(fd);
-        if (ShowStreamsFlag) illustrator.displayAllCapturedData();
     }
     return 0;
 }

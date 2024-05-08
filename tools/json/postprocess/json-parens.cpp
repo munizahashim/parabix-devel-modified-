@@ -8,6 +8,7 @@
 #include <llvm/Support/Compiler.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/ADT/SmallVector.h>
+#include <toolchain/toolchain.h>
 
 /*
  * <Json> ::= <Value>
@@ -115,10 +116,9 @@ void postproc_parensValidate(const uint8_t * ptr) {
     jsonJumpTable[currentState](ptr);
 }
 
-extern bool ShowStreamsFlag;
 void postproc_parensError(const uint64_t errsCount) {
     if (errsCount > 0) {
         fprintf(stderr, "The JSON document has an improper structure: parentheses don't match.\n");
-        if (!ShowStreamsFlag) exit(-1);
+        if (!codegen::EnableIllustrator) exit(-1);
     }
 }

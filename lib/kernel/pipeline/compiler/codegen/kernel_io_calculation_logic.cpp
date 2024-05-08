@@ -898,7 +898,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(BuilderRef b, const BufferPor
     // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
     // which could result in free'ing the "old" buffer twice.
 
-    if (isa<DynamicBuffer>(buffer)) {
+    if (bn.isDeallocatable()) {
         Value * expandedStruct = buffer->expandBuffer(b, produced, consumed, required);
         Value * priorBuffer = b->CreateExtractValue(expandedStruct, 0);
         assert (priorBuffer->getType()->isPointerTy());

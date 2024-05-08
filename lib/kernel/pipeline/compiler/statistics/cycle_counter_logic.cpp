@@ -1089,35 +1089,38 @@ void PipelineCompiler::initializeBufferExpansionHistory(BuilderRef b) const {
         Constant * const SZ_ZERO = b->getSize(0);
         Constant * const SZ_ONE = b->getSize(1);
 
+
+
         for (unsigned i = firstBuffer; i < lastBuffer; ++i) {
             const BufferNode & bn = mBufferGraph[i];
-            if (LLVM_LIKELY(bn.isOwned())) {
+
+            const StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
+
+            if (buffer->isDynamic()) {
                 const auto pe = in_edge(i, mBufferGraph);
                 const auto p = source(pe, mBufferGraph);
                 const BufferPort & rd = mBufferGraph[pe];
                 const auto prefix = makeBufferName(p, rd.Port);
-                const StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
 
-                if (buffer->isDynamic()) {
-                    Value * traceData; Type * traceTy;
-                    std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+                Value * traceData; Type * traceTy;
+                std::tie(traceData, traceTy) = b->getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
 
-                    const auto numOfConsumers = std::max(out_degree(i, mConsumerGraph), 1UL);
-                    const auto n = numOfConsumers + 3;
-                    Type * const entryTy = ArrayType::get(b->getSizeTy(), n);
+                const auto numOfConsumers = std::max(out_degree(i, mConsumerGraph), 1UL);
+                const auto n = numOfConsumers + 3;
+                Type * const entryTy = ArrayType::get(b->getSizeTy(), n);
 
-                    Value * const entryData = b->CreatePageAlignedMalloc(entryTy, SZ_ONE);
-                    // fill in the struct
-                    b->CreateStore(entryData, b->CreateGEP(traceTy, traceData, {ZERO, ZERO}));
-                    b->CreateStore(SZ_ONE, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
-                    // then the initial record
-                    b->CreateStore(SZ_ZERO, b->CreateGEP(entryTy, entryData, {ZERO, ZERO}));
-                    b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryTy, entryData, {ZERO, ONE}));
+                Value * const entryData = b->CreatePageAlignedMalloc(entryTy, SZ_ONE);
+                // fill in the struct
+                b->CreateStore(entryData, b->CreateGEP(traceTy, traceData, {ZERO, ZERO}));
+                b->CreateStore(SZ_ONE, b->CreateGEP(traceTy, traceData, {ZERO, ONE}));
+                // then the initial record
+                b->CreateStore(SZ_ZERO, b->CreateGEP(entryTy, entryData, {ZERO, ZERO}));
+                b->CreateStore(buffer->getInternalCapacity(b), b->CreateGEP(entryTy, entryData, {ZERO, ONE}));
 
-                    unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
-                    Constant * const length = b->getSize(sizeTyWidth * (n - 2));
-                    b->CreateMemZero(b->CreateGEP(entryTy, entryData, {ZERO, TWO}), length, sizeTyWidth);
-                }
+                unsigned sizeTyWidth = b->getSizeTy()->getIntegerBitWidth() / 8;
+                Constant * const length = b->getSize(sizeTyWidth * (n - 2));
+                b->CreateMemZero(b->CreateGEP(entryTy, entryData, {ZERO, TWO}), length, sizeTyWidth);
+
             }
         }
 
