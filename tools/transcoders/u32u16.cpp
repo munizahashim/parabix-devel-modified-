@@ -55,7 +55,7 @@ u32u16FunctionType u32u16_gen (CPUDriver & driver, cc::ByteNumbering byteNumberi
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 32);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     // Source buffers for transposed UTF-32 basis bits.
     StreamSet * const u32basis = P->CreateStreamSet(21);

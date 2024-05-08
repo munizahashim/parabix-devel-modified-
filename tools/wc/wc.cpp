@@ -247,7 +247,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
 
-    Kernel * mmapK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    Kernel * sourceK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     auto CountableStream = ByteStream;
     if (CountWords || CountChars) {
@@ -261,7 +261,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
     Scalar * const lineCount = wck->getOutputScalarAt(0);
     Scalar * const wordCount = wck->getOutputScalarAt(1);
     Scalar * const charCount = wck->getOutputScalarAt(2);
-    Scalar * const fileSize = mmapK->getOutputScalarAt(0);
+    Scalar * const fileSize = sourceK->getOutputScalarAt(0);
 
     P->CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
 

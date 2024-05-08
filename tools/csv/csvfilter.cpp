@@ -169,11 +169,10 @@ void filtration(string inputFile, string HeaderInput, string DataInput, bool dro
 //    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
 //    //  The program will use a file descriptor as an input.
 //    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-//    // File data from mmap
 //    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
-//    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+//    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
 //    //  from a file descriptor.
-//    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+//    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 //
 //    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
 //    //  S2P stands for serial-to-parallel.

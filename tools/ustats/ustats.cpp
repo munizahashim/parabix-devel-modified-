@@ -91,7 +91,7 @@ namespace ustats
 
             kernel::Scalar* fileDescriptor = program->getInputScalar("inputFileDescriptor");
             kernel::StreamSet* byteStream = program->CreateStreamSet(1, 8);
-            program->CreateKernelCall<kernel::MMapSourceKernel>(
+            program->CreateKernelCall<kernel::ReadSourceKernel>(
                 fileDescriptor,
                 byteStream
             );

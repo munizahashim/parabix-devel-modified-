@@ -61,7 +61,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     StreamSet * const BasisBits = P->CreateStreamSet(8, 1);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);

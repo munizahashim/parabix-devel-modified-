@@ -427,11 +427,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & pxDriver) {
         Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    // File data from mmap
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);
-    //  MMapSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     StreamSet * BasisBits = P->CreateStreamSet(8, 1);

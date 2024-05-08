@@ -56,7 +56,7 @@ ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<Pablo
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, codeUnitStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
@@ -90,7 +90,7 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
 
     // Source data
     StreamSet * const ztf1stream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ztf1stream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ztf1stream);
     StreamSet * const ztf1basis = P->CreateStreamSet(8);
     P->CreateKernelCall<S2PKernel>(ztf1stream, ztf1basis);
 

@@ -272,9 +272,8 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}, Binding{b->getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    // File data from mmap
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
@@ -365,10 +364,9 @@ u8u16FunctionType generatePipeline2(CPUDriver & pxDriver, cc::ByteNumbering byte
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}, Binding{b->getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    // File data from mmap
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     StreamSet * const u16bytes = P->CreateStreamSet(1, 16);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     StreamSet * const nonAscii =  P->CreateStreamSet();
 

@@ -170,9 +170,8 @@ x8u16FunctionType generatePipeline(CPUDriver & pxDriver) {
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}, Binding{b->getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    // File data from mmap
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);

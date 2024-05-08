@@ -110,7 +110,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloP
     Scalar * const fileIdx = P->getInputScalar("fileIdx");
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    Kernel * mmapK = P->CreateKernelCall<MMapSourceKernel>(fileDescriptor, ByteStream);
+    Kernel * sourceK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     StreamSet * const BasisBits = P->CreateStreamSet(8, 1);
     P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -148,7 +148,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloP
     Scalar * const lineCount = lck->getOutputScalar("lc");
     Scalar * const wordCount = wck->getOutputScalar("wc");
     Scalar * const charCount = cck->getOutputScalar("cc");
-    Scalar * const fileSize = mmapK->getOutputScalar("fileItems");
+    Scalar * const fileSize = sourceK->getOutputScalar("fileItems");
     P->CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
     return reinterpret_cast<WordCountFunctionType>(P->compile());
 }
