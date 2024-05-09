@@ -2,10 +2,10 @@
 > Parabix technology is a high-performance programming framework for streaming text processing applications, leveraging both SIMD and multicore parallel processing features.
 
 ### Documentation
-For more information about Parabix, please check our [wiki](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/wikis/home).
+For more information about Parabix, please check our [wiki](https://cs-git-research.cs.sfu.ca/cameron/parabix-devel.git/-/wikis/home).
 
 ### Tools
-Parabix includes a set of built-in [tools](https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel/-/tree/master/tools), such as [`icgrep`](README-icgrep.md), which is a very fast regular expression search program.
+Parabix includes a set of built-in [tools](https://cs-git-research.cs.sfu.ca/cameron/parabix-devel/-/tree/master/tools), such as [`icgrep`](README-icgrep.md), which is a very fast regular expression search program.
 
 ### Requirements
 
@@ -21,7 +21,7 @@ To build Parabix, you need a development environment that meets a few requiremen
 ### Build
 
 - Clone parabix-devel from the repository:
-  `git clone https://cs-git-research.cs.surrey.sfu.ca/cameron/parabix-devel.git`
+  `git clone https://cs-git-research.cs.sfu.ca/cameron/parabix-devel.git`
 - Create a build subdirectory
   - `cd parabix-devel`
   - `mkdir build`
