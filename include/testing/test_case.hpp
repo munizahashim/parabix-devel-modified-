@@ -27,8 +27,6 @@ namespace testing {
 
 namespace tc {
 
-using BuilderRef = kernel::Kernel::BuilderRef;
-
 using ProgramBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
 
 /*
@@ -159,8 +157,8 @@ struct binding_list_construct_iterator {};
 /// terminus case
 template<>
 struct binding_list_construct_iterator<> {
-    static void call(BuilderRef b, kernel::Bindings & bindings) {
-        bindings.push_back({b->getInt32Ty()->getPointerTo(), "output"});
+    static void call(kernel::KernelBuilder & b, kernel::Bindings & bindings) {
+        bindings.push_back({b.getInt32Ty()->getPointerTo(), "output"});
     }
 };
 
@@ -168,10 +166,10 @@ struct binding_list_construct_iterator<> {
 template<typename I, typename... Rest>
 struct binding_list_construct_iterator<I, Rest...> {
     static_assert(std::is_integral<I>::value, "`I` must be an integer type");
-    static void call(BuilderRef b, kernel::Bindings & bindings) {
+    static void call(kernel::KernelBuilder & b, kernel::Bindings & bindings) {
         auto i = bindings.size();
         auto name = "scalar-" + std::to_string(i);
-        auto type = b->getIntNTy(streamgen::field_width<I>::value);
+        auto type = b.getIntNTy(streamgen::field_width<I>::value);
         bindings.push_back({type, name});
         binding_list_construct_iterator<Rest...>::call(b, bindings);
     }
@@ -180,21 +178,21 @@ struct binding_list_construct_iterator<I, Rest...> {
 /// stream case
 template<typename I, typename Decoder, typename... Rest>
 struct binding_list_construct_iterator<streamgen::basic_stream<I, Decoder>, Rest...> {
-    static void call(BuilderRef b, kernel::Bindings & bindings) {
+    static void call(kernel::KernelBuilder & b, kernel::Bindings & bindings) {
         auto i = std::to_string(bindings.size());
         auto ptr_name = "stream-ptr-" + i;
         auto len_name = "stream-len-" + i;
         auto buf_fw = streamgen::field_width<I>::value;
-        auto ptr_type = llvm::IntegerType::getIntNPtrTy(b->getContext(), buf_fw);
+        auto ptr_type = llvm::IntegerType::getIntNPtrTy(b.getContext(), buf_fw);
         bindings.push_back({ptr_type, ptr_name});
-        bindings.push_back({b->getSizeTy(), len_name});
+        bindings.push_back({b.getSizeTy(), len_name});
         binding_list_construct_iterator<Rest...>::call(b, bindings);
     }
 };
 
 /// Constructs pipeline input bindings based on a set of `PipelineParameters`.
 template<typename... PipelineParameters>
-inline kernel::Bindings construct_bindings(BuilderRef b) {
+inline kernel::Bindings construct_bindings(kernel::KernelBuilder & b) {
     kernel::Bindings bindings{};
     binding_list_construct_iterator<PipelineParameters...>::call(b, bindings);
     return bindings;
@@ -350,7 +348,7 @@ public:
     ProgramBuilderRef pipeline() noexcept { return mPipelineBuilder; }
 
     /// Returns a reference the the engine driver's `KernelBuilder`.
-    BuilderRef builder() { return mDriver.getBuilder(); }
+    kernel::KernelBuilder & builder() { return mDriver.getBuilder(); }
 
     /// Implicit cast to `ProgramBuilder` reference.
     operator ProgramBuilderRef () { return pipeline(); }

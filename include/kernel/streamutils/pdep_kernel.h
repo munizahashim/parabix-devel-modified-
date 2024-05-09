@@ -148,7 +148,7 @@ inline StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> &P,
 
 class StreamExpandKernel final : public MultiBlockKernel {
 public:
-    StreamExpandKernel(BuilderRef b,
+    StreamExpandKernel(KernelBuilder & b,
                        StreamSet * mask,
                        StreamSet * source,
                        StreamSet * expanded,
@@ -158,7 +158,7 @@ public:
                        const unsigned FieldWidth = sizeof(size_t) * 8,
                        ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability = UniformDistribution());
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfBlocks) override;
 private:
     const unsigned mFieldWidth;
     const unsigned mSelectedStreamCount;
@@ -168,7 +168,7 @@ private:
 /**********************************/
 class StreamMergeKernel final : public MultiBlockKernel {
 public:
-    StreamMergeKernel(BuilderRef b,
+    StreamMergeKernel(KernelBuilder & b,
                        StreamSet * mask,
                        StreamSet * source1,
                        StreamSet * source2,
@@ -176,7 +176,7 @@ public:
                        Scalar * base,
                        const unsigned FieldWidth = sizeof(size_t) * 8);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfBlocks) override;
 private:
     const unsigned mFieldWidth;
     const unsigned mSelectedStreamCount;
@@ -185,9 +185,9 @@ private:
 /*******************************************************/
 class FieldDepositKernel final : public MultiBlockKernel {
 public:
-    FieldDepositKernel(BuilderRef, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
+    FieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
     const unsigned mFieldWidth;
     const unsigned mStreamCount;
@@ -196,9 +196,9 @@ private:
 
 class PDEPFieldDepositKernel final : public MultiBlockKernel {
 public:
-    PDEPFieldDepositKernel(BuilderRef, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
+    PDEPFieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
     const unsigned mPDEPWidth;
     const unsigned mStreamCount;
@@ -233,9 +233,9 @@ private:
  */
 class PDEPkernel final : public MultiBlockKernel {
 public:
-    PDEPkernel(BuilderRef b, const unsigned swizzleFactor = 4, std::string name = "PDEP");
+    PDEPkernel(KernelBuilder & b, const unsigned swizzleFactor = 4, std::string name = "PDEP");
 private:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:
     const unsigned mSwizzleFactor;
 };

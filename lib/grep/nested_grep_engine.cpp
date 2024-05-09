@@ -23,7 +23,7 @@ namespace grep {
 class CopyBreaksToMatches final : public MultiBlockKernel {
 public:
 
-    CopyBreaksToMatches(BuilderRef b,
+    CopyBreaksToMatches(KernelBuilder & b,
                StreamSet * const BasisBits,
                StreamSet * const u8index,
                StreamSet * const breaks,
@@ -40,14 +40,14 @@ public:
     }
 
 protected:
-    void generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) override {
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
-        Value * const processed = b->getProcessedItemCount("breaks");
-        Value * const source = b->CreatePointerCast(b->getRawInputPointer("breaks", processed), int8PtrTy);
-        Value * const produced = b->getProducedItemCount("matches");
-        Value * const target = b->CreatePointerCast(b->getRawOutputPointer("matches", produced), int8PtrTy);
-        Value * const toCopy = b->CreateMul(numOfStrides, b->getSize(getStride()));
-        b->CreateMemCpy(target, source, toCopy, b->getBitBlockWidth() / 8);
+    void generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) override {
+        PointerType * const int8PtrTy = b.getInt8PtrTy();
+        Value * const processed = b.getProcessedItemCount("breaks");
+        Value * const source = b.CreatePointerCast(b.getRawInputPointer("breaks", processed), int8PtrTy);
+        Value * const produced = b.getProducedItemCount("matches");
+        Value * const target = b.CreatePointerCast(b.getRawOutputPointer("matches", produced), int8PtrTy);
+        Value * const toCopy = b.CreateMul(numOfStrides, b.getSize(getStride()));
+        b.CreateMemCpy(target, source, toCopy, b.getBitBlockWidth() / 8);
     }
 
 };
@@ -261,9 +261,9 @@ void NestedInternalSearchEngine::grepCodeGen() {
     const auto preserve = mGrepDriver.getPreservesKernels();
     mGrepDriver.setPreserveKernels(true);
 
-    Scalar * const buffer = mGrepDriver.CreateScalar(b->getInt8PtrTy());
-    Scalar * const length = mGrepDriver.CreateScalar(b->getSizeTy());
-    Scalar * const accumulator = mGrepDriver.CreateScalar(b->getIntAddrTy());
+    Scalar * const buffer = mGrepDriver.CreateScalar(b.getInt8PtrTy());
+    Scalar * const length = mGrepDriver.CreateScalar(b.getSizeTy());
+    Scalar * const accumulator = mGrepDriver.CreateScalar(b.getIntAddrTy());
 
     auto E = mGrepDriver.makePipeline({Binding{"buffer", buffer},
         Binding{"length", length},

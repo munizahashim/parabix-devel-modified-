@@ -9,10 +9,10 @@ namespace kernel {
 
     class FakeStreamGeneratingKernel final : public SegmentOrientedKernel {
     public:
-        FakeStreamGeneratingKernel(BuilderRef b, StreamSet * refStream, StreamSet * outputStream);
-        FakeStreamGeneratingKernel(BuilderRef b, StreamSet * refStream, const StreamSets & outputStreams);
+        FakeStreamGeneratingKernel(KernelBuilder & b, StreamSet * refStream, StreamSet * outputStream);
+        FakeStreamGeneratingKernel(KernelBuilder & b, StreamSet * refStream, const StreamSets & outputStreams);
     protected:
-        void generateDoSegmentMethod(BuilderRef) final;
+        void generateDoSegmentMethod(KernelBuilder &) final;
     };
 }
 

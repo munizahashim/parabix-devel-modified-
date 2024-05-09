@@ -20,9 +20,9 @@ namespace kernel {
 
 class SwizzledMultiplePDEPkernel final : public MultiBlockKernel {
 public:
-    SwizzledMultiplePDEPkernel(BuilderRef b, const unsigned swizzleFactor = 4, const unsigned numberOfStreamSet = 1, std::string name = "SwizzledMultiplePDEP");
+    SwizzledMultiplePDEPkernel(KernelBuilder & b, const unsigned swizzleFactor = 4, const unsigned numberOfStreamSet = 1, std::string name = "SwizzledMultiplePDEP");
 private:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:
     const unsigned mSwizzleFactor;
     const unsigned mNumberOfStreamSet;

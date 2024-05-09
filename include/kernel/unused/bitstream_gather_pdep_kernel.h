@@ -9,13 +9,13 @@ namespace kernel {
 
 class BitStreamGatherPDEPKernel final : public MultiBlockKernel {
 public:
-    BitStreamGatherPDEPKernel(BuilderRef b, const unsigned numberOfStream = 8, std::string name = "BitStreamGatherPDEPKernel");
+    BitStreamGatherPDEPKernel(KernelBuilder & b, const unsigned numberOfStream = 8, std::string name = "BitStreamGatherPDEPKernel");
 private:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:
     const unsigned mNumberOfStream;
 
-    llvm::Value* fill_address(BuilderRef b, unsigned fw, unsigned field_count, llvm::Value* a);
+    llvm::Value* fill_address(KernelBuilder & b, unsigned fw, unsigned field_count, llvm::Value* a);
 };
 
 }

@@ -79,34 +79,33 @@ namespace kernel {
  */
 class ScanReader : public MultiBlockKernel {
 public:
-    using BuilderRef = BuilderRef;
-    ScanReader(BuilderRef b,
+    ScanReader(KernelBuilder & b,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName);
 
-    ScanReader(BuilderRef b,
+    ScanReader(KernelBuilder & b,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::string const & doneCallbackName);
 
     ScanReader(
-        BuilderRef b,
+        KernelBuilder & b,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::initializer_list<StreamSet *> additionalStreams);
 
     ScanReader(
-        BuilderRef b,
+        KernelBuilder & b,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::string const & doneCallbackName,
         std::initializer_list<StreamSet *> additionalStreams);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
     std::string              mCallbackName;
     std::string              mDoneCallbackName;

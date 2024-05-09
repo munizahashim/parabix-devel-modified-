@@ -414,7 +414,7 @@ private:
 //
 class UTF8_index : public pablo::PabloKernel {
 public:
-    UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, StreamSet * linebreak = nullptr);
+    UTF8_index(KernelBuilder & kb, StreamSet * Source, StreamSet * u8index, StreamSet * linebreak = nullptr);
 protected:
     void generatePabloMethod() override;
 };
@@ -463,7 +463,7 @@ private:
 
 class ICGrepKernel : public pablo::PabloKernel {
 public:
-    ICGrepKernel(BuilderRef iBuilder,
+    ICGrepKernel(KernelBuilder & b,
                  std::unique_ptr<GrepKernelOptions> && options);
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
@@ -478,21 +478,21 @@ private:
 
 class MatchedLinesKernel : public pablo::PabloKernel {
 public:
-    MatchedLinesKernel(BuilderRef builder, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
+    MatchedLinesKernel(KernelBuilder & builder, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
 protected:
     void generatePabloMethod() override;
 };
 
 class InvertMatchesKernel : public BlockOrientedKernel {
 public:
-    InvertMatchesKernel(BuilderRef b, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
+    InvertMatchesKernel(KernelBuilder & b, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
 private:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
-    FixedMatchSpansKernel(BuilderRef builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
+    FixedMatchSpansKernel(KernelBuilder & builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;
@@ -509,7 +509,7 @@ protected:
 //
 class SpansToMarksKernel : public pablo::PabloKernel {
 public:
-    SpansToMarksKernel(BuilderRef builder, StreamSet * Spans, StreamSet * EndMarks);
+    SpansToMarksKernel(KernelBuilder & builder, StreamSet * Spans, StreamSet * EndMarks);
 protected:
     void generatePabloMethod() override;
 };
@@ -523,7 +523,7 @@ protected:
 //  in the BitMovementMode::LookAhead mode (default).
 class U8Spans : public pablo::PabloKernel {
 public:
-    U8Spans(BuilderRef builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans,
+    U8Spans(KernelBuilder & builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans,
             pablo::BitMovementMode m = pablo::BitMovementMode::LookAhead);
 protected:
     void generatePabloMethod() override;
@@ -533,14 +533,14 @@ private:
 
 class PopcountKernel : public pablo::PabloKernel {
 public:
-    PopcountKernel(BuilderRef builder, StreamSet * const toCount, Scalar * countResult);
+    PopcountKernel(KernelBuilder & builder, StreamSet * const toCount, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
 class FixedDistanceMatchesKernel : public pablo::PabloKernel {
 public:
-    FixedDistanceMatchesKernel(BuilderRef b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck  = nullptr);
+    FixedDistanceMatchesKernel(KernelBuilder & b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck  = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -550,7 +550,7 @@ private:
 
 class CodePointMatchKernel : public pablo::PabloKernel {
 public:
-    CodePointMatchKernel(BuilderRef b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
+    CodePointMatchKernel(KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
 protected:
     void generatePabloMethod() override;
 private:
@@ -560,9 +560,9 @@ private:
 
 class AbortOnNull final : public MultiBlockKernel {
 public:
-    AbortOnNull(BuilderRef, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);
+    AbortOnNull(KernelBuilder &, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);
 private:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 
 };
 
@@ -575,7 +575,7 @@ private:
 
 class ContextSpan final : public pablo::PabloKernel {
 public:
-    ContextSpan(BuilderRef b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after);
+    ContextSpan(KernelBuilder & b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after);
 protected:
     void generatePabloMethod() override;
 private:
@@ -606,7 +606,7 @@ void WordBoundaryLogic(ProgBuilderRef P,
 
 class LongestMatchMarks final : public pablo::PabloKernel {
 public:
-    LongestMatchMarks(BuilderRef b, StreamSet * start_ends, StreamSet * marks);
+    LongestMatchMarks(KernelBuilder & b, StreamSet * start_ends, StreamSet * marks);
 protected:
     void generatePabloMethod() override;
 };
@@ -623,7 +623,7 @@ protected:
 //
 class InclusiveSpans final : public pablo::PabloKernel {
 public:
-    InclusiveSpans(BuilderRef b, unsigned prefixOffset, unsigned suffixOffset,
+    InclusiveSpans(KernelBuilder & b, unsigned prefixOffset, unsigned suffixOffset,
                    StreamSet * marks, StreamSet * spans);
 protected:
     void generatePabloMethod() override;
@@ -634,7 +634,7 @@ private:
 
 class MaskCC final : public pablo::PabloKernel {
 public:
-    MaskCC(BuilderRef b, const re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
+    MaskCC(KernelBuilder & b, const re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -657,7 +657,7 @@ private:
 
 class MaskSelfTransitions final : public pablo::PabloKernel {
 public:
-    MaskSelfTransitions(BuilderRef b, const std::vector<const re::CC *> transitionCCs,
+    MaskSelfTransitions(KernelBuilder & b, const std::vector<const re::CC *> transitionCCs,
                         StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;

@@ -50,7 +50,7 @@ enum Combined {
 */
 class JSONStringMarker : public pablo::PabloKernel {
 public:
-    JSONStringMarker(const std::unique_ptr<KernelBuilder> & b,
+    JSONStringMarker(KernelBuilder & b,
                      StreamSet * const basis,
                      StreamSet * strMarker, StreamSet * strSpan)
     : pablo::PabloKernel(b,
@@ -65,7 +65,7 @@ protected:
 
 class JSONClassifyBytes : public pablo::PabloKernel {
 public:
-    JSONClassifyBytes(const std::unique_ptr<KernelBuilder> & b,
+    JSONClassifyBytes(KernelBuilder & b,
                       StreamSet * const basis, StreamSet * const strSpan,
                       StreamSet * lexStream)
     : pablo::PabloKernel(b,
@@ -91,7 +91,7 @@ protected:
 */
 class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
-    JSONKeywordEndMarker(const std::unique_ptr<KernelBuilder> & b,
+    JSONKeywordEndMarker(KernelBuilder & b,
                       StreamSet * const basis,
                       StreamSet * const lexIn,
                       StreamSet * kwMarker)
@@ -117,7 +117,7 @@ protected:
 */
 class JSONNumberSpan : public pablo::PabloKernel {
 public:
-    JSONNumberSpan(const std::unique_ptr<KernelBuilder> & b,
+    JSONNumberSpan(KernelBuilder & b,
                    StreamSet * const basis,
                    StreamSet * const lexIn,
                    StreamSet * const strSpan,
@@ -157,7 +157,7 @@ protected:
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
 public:
     JSONFindKwAndExtraneousChars(
-                        const std::unique_ptr<KernelBuilder> & b,
+                        KernelBuilder & b,
                         StreamSet * const lexIn,
                         StreamSet * const stringSpan,
                         StreamSet * const numberSpan,
@@ -186,7 +186,7 @@ protected:
 class JSONParserArr : public pablo::PabloKernel {
 public:
     JSONParserArr(
-        const std::unique_ptr<KernelBuilder> & b,
+        KernelBuilder & b,
         StreamSet * const lexIn,
         StreamSet * const strMarker,
         StreamSet * const combinedLexs,
@@ -219,7 +219,7 @@ protected:
 class JSONParserObj: public pablo::PabloKernel {
 public:
     JSONParserObj(
-        const std::unique_ptr<KernelBuilder> & b,
+        KernelBuilder & b,
         StreamSet * const lexIn,
         StreamSet * const strMarker,
         StreamSet * const combinedLexs,

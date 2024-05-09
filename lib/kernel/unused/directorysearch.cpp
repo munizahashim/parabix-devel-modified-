@@ -15,12 +15,12 @@ using namespace llvm;
 
 namespace kernel {
 
-void DirectorySearch::linkExternalMethods(BuilderRef b) {
+void DirectorySearch::linkExternalMethods(KernelBuilder & b) {
     fOpen = b->LinkFunction("open", open);
     fSysCall = b->LinkFunction("syscall", syscall);
 }
 
-void DirectorySearch::generateInitializeMethod(BuilderRef b) {
+void DirectorySearch::generateInitializeMethod(KernelBuilder & b) {
 
     Value * const buffer = b->CreateCacheAlignedMalloc(b->getSize(PATH_MAX * 2));
     b->setScalarField("buffer", buffer);
@@ -84,7 +84,7 @@ StructType * getDirEntTy(llvm::LLVMContext & c) {
 #define NON_NAME_PADDING_BYTES 2
 #endif
 
-void DirectorySearch::addToOutputStream(BuilderRef b, Value * const name, Value * const nameLength, StringRef field, Value * const consumed) {
+void DirectorySearch::addToOutputStream(KernelBuilder & b, Value * const name, Value * const nameLength, StringRef field, Value * const consumed) {
     Value * const produced = b->getProducedItemCount(field);
     StreamSetBuffer * buffer = getStreamSetBuffer(field);
     Value * const writable = buffer->getLinearlyWritableItems(b, produced, consumed);
@@ -107,7 +107,7 @@ void DirectorySearch::addToOutputStream(BuilderRef b, Value * const name, Value 
 }
 
 
-void DirectorySearch::generateDoSegmentMethod(BuilderRef b) {
+void DirectorySearch::generateDoSegmentMethod(KernelBuilder & b) {
 
     BasicBlock * const readDirectory = b->CreateBasicBlock("readDirectory");
     BasicBlock * const processDirEnts = b->CreateBasicBlock("processBuffer");
@@ -295,12 +295,12 @@ void DirectorySearch::generateDoSegmentMethod(BuilderRef b) {
     b->setInsertPoint(filledSegment);
 }
 
-void DirectorySearch::generateFinalizeMethod(BuilderRef b) {
+void DirectorySearch::generateFinalizeMethod(KernelBuilder & b) {
 
 
 }
 
-DirectorySearch::DirectorySearch(BuilderRef b,
+DirectorySearch::DirectorySearch(KernelBuilder & b,
                                  Scalar * const rootPath,
                                  StreamSet * const directoryNameStream,
                                  StreamSet * const fileDirectoryStream, // stores an offset number to the directoryNameStream

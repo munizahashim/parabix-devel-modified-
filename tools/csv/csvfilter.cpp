@@ -166,7 +166,7 @@ void filtration(string inputFile, string HeaderInput, string DataInput, bool dro
 //    // A Parabix program is build as a set of kernel calls called a pipeline.
 //    // A pipeline is construction using a Parabix driver object.
 //    auto & b = pxDriver.getBuilder();
-//    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+//    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
 //    //  The program will use a file descriptor as an input.
 //    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 //    StreamSet * ByteStream = P->CreateStreamSet(1, 8);

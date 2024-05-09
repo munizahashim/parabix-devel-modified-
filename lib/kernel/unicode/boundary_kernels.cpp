@@ -21,7 +21,7 @@
 using namespace kernel;
 using namespace pablo;
 
-BoundaryKernel::BoundaryKernel(BuilderRef kb, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert)
+BoundaryKernel::BoundaryKernel(KernelBuilder & kb, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert)
 : PabloKernel(kb, "boundary_" + std::to_string(PropertyBasis->getNumElements()) + (invert ? "x1_negated" : "x1"),
               {Binding{"basis", PropertyBasis}, Binding{"index", IndexStream, FixedRate(), ZeroExtended()}},
               {Binding{"boundary", BoundaryStream, FixedRate(), Add1()}}),

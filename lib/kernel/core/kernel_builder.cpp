@@ -33,7 +33,7 @@ Value * KernelBuilder::getThreadLocalHandle() const noexcept {
  * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
 KernelBuilder::ScalarRef KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
-    return COMPILER->getScalarFieldPtr(this, fieldName);
+    return COMPILER->getScalarFieldPtr(*this, fieldName);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -123,7 +123,7 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+    return buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
@@ -135,7 +135,7 @@ Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+    return buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
 }
 
 Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
@@ -149,7 +149,7 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return buf->loadStreamBlock(this, buf->getBaseAddress(this), streamIndex, blockIndex, unaligned);
+    return buf->loadStreamBlock(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, unaligned);
 }
 
 Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
@@ -163,12 +163,12 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return buf->loadStreamPack(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex, unaligned);
+    return buf->loadStreamPack(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex, unaligned);
 }
 
 Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    return buf->getStreamSetCount(this);
+    return buf->getStreamSetCount(*this);
 }
 
 Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * streamIndex, Value * const blockOffset) {
@@ -180,7 +180,7 @@ Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * str
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    return buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+    return buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
 }
 
 Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset) {
@@ -192,7 +192,7 @@ Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * stre
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    return buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+    return buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
 }
 
 StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * streamIndex, Value * blockOffset, Value * toStore) {
@@ -212,7 +212,7 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const ptr = buf->getStreamBlockPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex);
+    Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     const auto bw = getBitBlockWidth();
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
@@ -235,7 +235,7 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    Value * const ptr = buf->getStreamPackPtr(this, buf->getBaseAddress(this), streamIndex, blockIndex, packIndex);
+    Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     const auto bw = getBitBlockWidth();
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
@@ -243,51 +243,51 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
 
 Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    return buf->getStreamSetCount(this);
+    return buf->getStreamSetCount(*this);
 }
 
 Value * KernelBuilder::getRawInputPointer(const StringRef name, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(this), getSize(1));
+        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
     }
-    return buf->getRawItemPointer(this, getSize(0), absolutePosition);
+    return buf->getRawItemPointer(*this, getSize(0), absolutePosition);
 }
 
 Value * KernelBuilder::getRawInputPointer(const StringRef name, Value * const streamIndex, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    return buf->getRawItemPointer(this, streamIndex, absolutePosition);
+    return buf->getRawItemPointer(*this, streamIndex, absolutePosition);
 }
 
 Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(this), getSize(1));
+        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
     }
-    return buf->getRawItemPointer(this, getSize(0), absolutePosition);
+    return buf->getRawItemPointer(*this, getSize(0), absolutePosition);
 }
 
 Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * const streamIndex, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    return buf->getRawItemPointer(this, streamIndex, absolutePosition);
+    return buf->getRawItemPointer(*this, streamIndex, absolutePosition);
 }
 
 Value * KernelBuilder::getBaseAddress(const StringRef name) {
-    return COMPILER->getStreamSetBuffer(name)->getBaseAddress(this);
+    return COMPILER->getStreamSetBuffer(name)->getBaseAddress(*this);
 }
 
 void KernelBuilder::setBaseAddress(const StringRef name, Value * const addr) {
-    return COMPILER->getStreamSetBuffer(name)->setBaseAddress(this, addr);
+    return COMPILER->getStreamSetBuffer(name)->setBaseAddress(*this, addr);
 }
 
 Value * KernelBuilder::getCapacity(const StringRef name) {
-    return COMPILER->getStreamSetBuffer(name)->getCapacity(this);
+    return COMPILER->getStreamSetBuffer(name)->getCapacity(*this);
 }
 
 void KernelBuilder::setCapacity(const StringRef name, Value * capacity) {
-    COMPILER->getStreamSetBuffer(name)->setCapacity(this, capacity);
+    COMPILER->getStreamSetBuffer(name)->setCapacity(*this, capacity);
 }
 
 
@@ -758,11 +758,11 @@ std::string KernelBuilder::getKernelName() const noexcept {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isFromCurrentFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-bool isFromCurrentFunction(const KernelBuilder * const b, const Value * const value, const bool allowNull) {
+bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, const bool allowNull) {
     if (value == nullptr) {
         return allowNull;
     }
-    BasicBlock * const ip = b->GetInsertBlock();
+    BasicBlock * const ip = b.GetInsertBlock();
     assert (ip);
     if (isa<Constant>(value)) {
         return true;
@@ -776,7 +776,7 @@ bool isFromCurrentFunction(const KernelBuilder * const b, const Value * const va
         function = cast<Instruction>(value)->getParent()->getParent();
     }
     assert (function);
-    if (LLVM_UNLIKELY(&b->getContext() != &value->getContext())) {
+    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
         return false;
     }
     return (builderFunction == function);

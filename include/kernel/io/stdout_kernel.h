@@ -12,10 +12,10 @@ namespace kernel {
 
 class StdOutKernel final : public SegmentOrientedKernel {
 public:
-    StdOutKernel(BuilderRef iBuilder, StreamSet * codeUnitBuffer);
+    StdOutKernel(KernelBuilder & b, StreamSet * codeUnitBuffer);
 private:
-    void linkExternalMethods(BuilderRef b) override;
-    void generateDoSegmentMethod(BuilderRef b) override;
+    void linkExternalMethods(KernelBuilder & b) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
 private:
     const unsigned mCodeUnitWidth;
 
@@ -23,12 +23,12 @@ private:
 
 class FileSink final : public SegmentOrientedKernel {
 public:
-    FileSink(BuilderRef iBuilder, Scalar * outputFileName, StreamSet * codeUnitBuffer);
+    FileSink(KernelBuilder & b, Scalar * outputFileName, StreamSet * codeUnitBuffer);
 protected:
-    void linkExternalMethods(BuilderRef b) override;
-    void generateInitializeMethod(BuilderRef b) override;
-    void generateDoSegmentMethod(BuilderRef b) override;
-    void generateFinalizeMethod(BuilderRef b) override;
+    void linkExternalMethods(KernelBuilder & b) override;
+    void generateInitializeMethod(KernelBuilder & b) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 private:
     const unsigned mCodeUnitWidth;
 

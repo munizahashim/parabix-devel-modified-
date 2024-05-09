@@ -19,7 +19,7 @@ namespace kernel {
 
 const unsigned ScanKernelBase::ScanWordContext::maxStrideWidth = 4096; // gives scan word width of 64-bits;
 
-ScanKernelBase::ScanWordContext::ScanWordContext(BuilderRef b, unsigned strideWidth)
+ScanKernelBase::ScanWordContext::ScanWordContext(KernelBuilder & b, unsigned strideWidth)
 : width(std::max(minScanWordWidth, strideWidth / strideMaskWidth))
 , wordsPerBlock(b->getBitBlockWidth() / width)
 , wordsPerStride(strideMaskWidth)
@@ -34,32 +34,32 @@ ScanKernelBase::ScanWordContext::ScanWordContext(BuilderRef b, unsigned strideWi
     assert (IS_POW_2(strideWidth) && strideWidth >= b->getBitBlockWidth() && strideWidth <= maxStrideWidth);
 }
 
-void ScanKernelBase::initializeBase(BuilderRef b) {
+void ScanKernelBase::initializeBase(KernelBuilder & b) {
     mInitialPos = b->getProcessedItemCount(mScanStreamSetName);
 }
 
-Value * ScanKernelBase::computeStridePosition(BuilderRef b, Value * strideNumber) const {
+Value * ScanKernelBase::computeStridePosition(KernelBuilder & b, Value * strideNumber) const {
     return b->CreateAdd(mInitialPos, b->CreateMul(strideNumber, sz_STRIDE_WIDTH));
 }
 
-Value * ScanKernelBase::computeStrideBlockOffset(BuilderRef b, Value * strideNo) const {
+Value * ScanKernelBase::computeStrideBlockOffset(KernelBuilder & b, Value * strideNo) const {
     return b->CreateMul(strideNo, sz_NUM_BLOCKS_PER_STRIDE);
 }
 
-Value * ScanKernelBase::loadScanStreamBitBlock(BuilderRef b, Value * strideNo, Value * blockNo, llvm::Value * streamIndex) {
+Value * ScanKernelBase::loadScanStreamBitBlock(KernelBuilder & b, Value * strideNo, Value * blockNo, llvm::Value * streamIndex) {
     Value * const sidx = streamIndex == nullptr ? b->getSize(0) : streamIndex;
     Value * idx = b->CreateAdd(blockNo, computeStrideBlockOffset(b, strideNo));
     return b->loadInputStreamBlock(mScanStreamSetName, sidx, idx);
 }
 
-Value * ScanKernelBase::orBlockIntoMask(BuilderRef b, ScanWordContext const & sw, Value * maskAccum, Value * block, Value * blockNo) {
+Value * ScanKernelBase::orBlockIntoMask(KernelBuilder & b, ScanWordContext const & sw, Value * maskAccum, Value * block, Value * blockNo) {
     Value * const any = b->simd_any(sw.fieldWidth, block);
     Value * const signMask = b->CreateZExt(b->hsimd_signmask(sw.fieldWidth, any), sw.StrideMaskTy);
     Value * const shiftedSignMask = b->CreateShl(signMask, b->CreateZExtOrTrunc(b->CreateMul(blockNo, sw.WORDS_PER_BLOCK), sw.StrideMaskTy));
     return b->CreateOr(maskAccum, shiftedSignMask);
 }
 
-Value * ScanKernelBase::loadScanWord(BuilderRef b, ScanWordContext const & sw, Value * wordOffset, Value * strideNo, llvm::Value * streamIndex) {
+Value * ScanKernelBase::loadScanWord(KernelBuilder & b, ScanWordContext const & sw, Value * wordOffset, Value * strideNo, llvm::Value * streamIndex) {
     Value * const index = streamIndex == nullptr ? b->getSize(0) : streamIndex;
     Value * const strideOffset = b->CreateMul(strideNo, sz_NUM_BLOCKS_PER_STRIDE);
     Value * const blockNo = b->CreateUDiv(wordOffset, sw.WORDS_PER_BLOCK);
@@ -69,7 +69,7 @@ Value * ScanKernelBase::loadScanWord(BuilderRef b, ScanWordContext const & sw, V
     return b->CreateLoad(wordPtr);
 }
 
-void ScanKernelBase::createOptimizedContinueProcessingBr(BuilderRef b, Value * value, BasicBlock * trueBlock, BasicBlock * falseBlock) {
+void ScanKernelBase::createOptimizedContinueProcessingBr(KernelBuilder & b, Value * value, BasicBlock * trueBlock, BasicBlock * falseBlock) {
     switch (mOptimizeMode) {
     case OptimizeMode::Sparse:
         b->CreateUnlikelyCondBr(b->CreateICmpNE(value, Constant::getNullValue(value->getType())), trueBlock, falseBlock);
@@ -82,7 +82,7 @@ void ScanKernelBase::createOptimizedContinueProcessingBr(BuilderRef b, Value * v
     }
 }
 
-ScanKernelBase::ScanKernelBase(BuilderRef b, unsigned strideWidth, StringRef scanStreamSetName, OptimizeMode optimizeMode)
+ScanKernelBase::ScanKernelBase(KernelBuilder & b, unsigned strideWidth, StringRef scanStreamSetName, OptimizeMode optimizeMode)
 : mStrideWidth(strideWidth)
 , mScanStreamSetName(scanStreamSetName)
 , mInitialPos(nullptr)
@@ -91,7 +91,7 @@ ScanKernelBase::ScanKernelBase(BuilderRef b, unsigned strideWidth, StringRef sca
 , mOptimizeMode(optimizeMode)
 {}
 
-void ScanKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+void ScanKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     ScanWordContext sw(b, mStride);
     Module * const module = b->getModule();
 
@@ -185,7 +185,7 @@ static inline std::string ScanKernel_GenName(unsigned strideWidth, std::string c
     return "ScanKernel_sw" + std::to_string(strideWidth) + "_" + callbackName;
 }
 
-ScanKernel::ScanKernel(BuilderRef b, StreamSet * scanStream, StreamSet * sourceStream, StringRef callbackName, OptimizeMode optimizeMode)
+ScanKernel::ScanKernel(KernelBuilder & b, StreamSet * scanStream, StreamSet * sourceStream, StringRef callbackName, OptimizeMode optimizeMode)
 : ScanKernelBase(b, std::min(codegen::ScanBlocks * b->getBitBlockWidth(), ScanWordContext::maxStrideWidth), "scan", optimizeMode)
 , MultiBlockKernel(b, ScanKernel_GenName(ScanKernelBase::mStrideWidth, callbackName),
     {{"scan", scanStream}, {"source", sourceStream}}, {}, {}, {}, {})
@@ -203,7 +203,7 @@ ScanKernel::ScanKernel(BuilderRef b, StreamSet * scanStream, StreamSet * sourceS
 }
 
 
-static Value * collapseVector(BuilderRef b, Value * const vec) {
+static Value * collapseVector(KernelBuilder & b, Value * const vec) {
     assert (vec->getType()->isVectorTy());
     uint32_t count = vec->getType()->getVectorNumElements();
     Value * accum = b->CreateExtractElement(vec, (uint64_t) 0);
@@ -213,7 +213,7 @@ static Value * collapseVector(BuilderRef b, Value * const vec) {
     return accum;
 }
 
-static Value * vectorFromRepeating(BuilderRef b, Value * const value, size_t count) {
+static Value * vectorFromRepeating(KernelBuilder & b, Value * const value, size_t count) {
     Value * vec = Constant::getNullValue(VectorType::get(value->getType(), count));
     for (size_t i = 0; i < count; ++i) {
         vec = b->CreateInsertElement(vec, value, i);
@@ -221,7 +221,7 @@ static Value * vectorFromRepeating(BuilderRef b, Value * const value, size_t cou
     return vec;
 }
 
-void MultiStreamScanKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+void MultiStreamScanKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     ScanWordContext sw(b, mStrideWidth);
     Module * const module = b->getModule();
 
@@ -428,7 +428,7 @@ static inline std::string MultiStreamScanKernel_GenName(unsigned inputStreamCoun
     return "MultiStreamScanKerenl_x" + std::to_string(inputStreamCount) + "_sw" + std::to_string(strideWidth) + "_" + callbackName;
 }
 
-MultiStreamScanKernel::MultiStreamScanKernel(BuilderRef b, StreamSet * scanStream, StreamSet * sourceStream, StringRef callbackName, OptimizeMode optimizeMode)
+MultiStreamScanKernel::MultiStreamScanKernel(KernelBuilder & b, StreamSet * scanStream, StreamSet * sourceStream, StringRef callbackName, OptimizeMode optimizeMode)
 : ScanKernelBase(b, std::min(codegen::ScanBlocks * b->getBitBlockWidth(), ScanWordContext::maxStrideWidth), "scan", optimizeMode)
 , MultiBlockKernel(b, MultiStreamScanKernel_GenName(ScanKernelBase::mStrideWidth, scanStream->getNumElements(), callbackName),
     {{"scan", scanStream}, {"source", sourceStream}}, {}, {}, {}, {})

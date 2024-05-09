@@ -52,7 +52,7 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 
 class SelectField : public PabloKernel {
 public:
-    SelectField(BuilderRef b, StreamSet * csvMarks,
+    SelectField(KernelBuilder & b, StreamSet * csvMarks,
                               StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
@@ -62,7 +62,7 @@ protected:
     unsigned mColumnNo;
 };
 
-SelectField::SelectField(BuilderRef b,  StreamSet * csvMarks,
+SelectField::SelectField(KernelBuilder & b,  StreamSet * csvMarks,
                                         StreamSet * Record_separators,
                                         StreamSet * Field_separators,
                                         StreamSet * toKeep,
@@ -97,7 +97,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::st
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap

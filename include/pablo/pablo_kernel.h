@@ -143,7 +143,7 @@ public:
 
 protected:
 
-    PabloKernel(BuilderRef builder,
+    PabloKernel(KernelBuilder & builder,
                 std::string && kernelName,
                 std::vector<kernel::Binding> stream_inputs = {},
                 std::vector<kernel::Binding> stream_outputs = {},
@@ -173,24 +173,24 @@ protected:
     // A custom method for preparing kernel declarations is needed,
     // so that the carry data requirements may be accommodated before
     // finalizing the KernelStateType.
-    void addInternalProperties(BuilderRef b) final;
+    void addInternalProperties(KernelBuilder & b) final;
 
-    void linkExternalMethods(BuilderRef b) final;
+    void linkExternalMethods(KernelBuilder & b) final;
 
-    std::unique_ptr<kernel::KernelCompiler> instantiateKernelCompiler(BuilderRef b) const override;
+    std::unique_ptr<kernel::KernelCompiler> instantiateKernelCompiler(KernelBuilder & b) const override;
 
 private:
 
-    void generateInitializeMethod(BuilderRef b) final;
+    void generateInitializeMethod(KernelBuilder & b) final;
 
-    void generateDoBlockMethod(BuilderRef b) final;
+    void generateDoBlockMethod(KernelBuilder & b) final;
 
     // The default method for Pablo final block processing sets the
     // EOFmark bit and then calls the standard DoBlock function.
     // This may be overridden for specialized processing.
-    void generateFinalBlockMethod(BuilderRef b, llvm::Value * remainingBytes) final;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) final;
 
-    void generateFinalizeMethod(BuilderRef b) final;
+    void generateFinalizeMethod(KernelBuilder & b) final;
 
 private:
 

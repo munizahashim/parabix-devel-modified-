@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getFinalOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-std::vector<Value *> PipelineCompiler::getFinalOutputScalars(BuilderRef b) {
+std::vector<Value *> PipelineCompiler::getFinalOutputScalars(KernelBuilder & b) {
     std::vector<Value *> args;
     for (unsigned call = FirstCall; call <= LastCall; ++call) {
         writeOutputScalars(b, call, args);
@@ -15,10 +15,10 @@ std::vector<Value *> PipelineCompiler::getFinalOutputScalars(BuilderRef b) {
         auto i = f->arg_begin();
         for (auto j = args.begin(); j != args.end(); ++i, ++j) {
             assert (i != f->arg_end());
-            *j = b->CreateZExtOrTrunc(*j, i->getType());
+            *j = b.CreateZExtOrTrunc(*j, i->getType());
         }
         assert (i == f->arg_end());
-        mScalarValue[call] = b->CreateCall(f, args);
+        mScalarValue[call] = b.CreateCall(f, args);
     }
     writeOutputScalars(b, PipelineOutput, args);
     return args;
@@ -27,7 +27,7 @@ std::vector<Value *> PipelineCompiler::getFinalOutputScalars(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeOutputScalars(BuilderRef b, const size_t index, std::vector<Value *> & args) {
+void PipelineCompiler::writeOutputScalars(KernelBuilder & b, const size_t index, std::vector<Value *> & args) {
     const auto n = in_degree(index, mScalarGraph);
     args.resize(n);
     for (const auto e : make_iterator_range(in_edges(index, mScalarGraph))) {
@@ -40,7 +40,7 @@ void PipelineCompiler::writeOutputScalars(BuilderRef b, const size_t index, std:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarValues
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeScalarValues(BuilderRef b) {
+void PipelineCompiler::initializeScalarValues(KernelBuilder & b) {
     mScalarValue.reset(FirstKernel, LastScalar);
 
 
@@ -49,7 +49,7 @@ void PipelineCompiler::initializeScalarValues(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalar
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
+Value * PipelineCompiler::getScalar(KernelBuilder & b, const size_t index) {
     assert (index >= FirstKernel && index <= LastScalar);
     Value * value = mScalarValue[index];
     if (value) {
@@ -68,14 +68,14 @@ Value * PipelineCompiler::getScalar(BuilderRef b, const size_t index) {
         const RelationshipType & rt = mScalarGraph[producer];
         if (i == PipelineInput) {
             const Binding & input = mTarget->getInputScalarBinding(rt.Number);
-            value = b->getScalarField(input.getName());
+            value = b.getScalarField(input.getName());
         } else { // output scalar of some kernel
             Value * const outputScalars = getScalar(b, i);
             if (LLVM_UNLIKELY(outputScalars == nullptr)) {
                 report_fatal_error("Internal error: pipeline is unable to locate valid output scalar");
             }
             if (outputScalars->getType()->isAggregateType()) {
-                value = b->CreateExtractValue(outputScalars, {rt.Number});
+                value = b.CreateExtractValue(outputScalars, {rt.Number});
             } else { assert (rt.Number == 0 && "scalar type is not an aggregate");
                 value = outputScalars;
             }

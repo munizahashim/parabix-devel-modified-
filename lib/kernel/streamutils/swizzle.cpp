@@ -77,7 +77,7 @@ inline Bindings makeSwizzledOutputs(const std::vector<StreamSet *> & outputs, co
     return bindings;
 }
 
-SwizzleGenerator::SwizzleGenerator(BuilderRef b,
+SwizzleGenerator::SwizzleGenerator(KernelBuilder & b,
                                    const std::vector<StreamSet *> & inputs,
                                    const std::vector<StreamSet *> & outputs,
                                    const unsigned fieldWidth)
@@ -90,18 +90,18 @@ makeSwizzledOutputs(outputs, fieldWidth),
 
 }
 
-void SwizzleGenerator::generateDoBlockMethod(BuilderRef b) {
+void SwizzleGenerator::generateDoBlockMethod(KernelBuilder & b) {
 
     // We may need a few passes depending on the swizzle factor
 
     if (LLVM_UNLIKELY(!is_power_2(mFieldWidth))) {
         report_fatal_error("fieldWidth must be a power of 2");
     }
-    if (LLVM_UNLIKELY(mFieldWidth > b->getBitBlockWidth())) {
+    if (LLVM_UNLIKELY(mFieldWidth > b.getBitBlockWidth())) {
         report_fatal_error("fieldWidth must be a power of 2");
     }
 
-    const auto swizzleFactor = b->getBitBlockWidth() / mFieldWidth;
+    const auto swizzleFactor = b.getBitBlockWidth() / mFieldWidth;
     const auto passes = std::log2(swizzleFactor);
     const auto swizzleGroups = ceil_udiv(mBitStreamCount, swizzleFactor);
     const auto inputStreamsPerSet = ceil_udiv(mBitStreamCount, getNumOfStreamInputs());
@@ -116,17 +116,17 @@ void SwizzleGenerator::generateDoBlockMethod(BuilderRef b) {
             if (streamNo < mBitStreamCount) {
                 const auto inputSetNo = streamNo / inputStreamsPerSet;
                 const auto j = streamNo % inputStreamsPerSet;
-                sourceBlocks[i] = b->loadInputStreamBlock("inputGroup" + std::to_string(inputSetNo), b->getInt32(j));
+                sourceBlocks[i] = b.loadInputStreamBlock("inputGroup" + std::to_string(inputSetNo), b.getInt32(j));
             } else {
                 // Fill in the remaining logically required streams of the last swizzle group with null values.
-                sourceBlocks[i] = Constant::getNullValue(b->getBitBlockType());
+                sourceBlocks[i] = Constant::getNullValue(b.getBitBlockType());
             }
         }
         // Now perform the swizzle passes.
         for (unsigned p = 0; p < passes; p++) {
             for (unsigned i = 0; i < swizzleFactor / 2; i++) {
-                targetBlocks[i * 2] = b->esimd_mergel(mFieldWidth, sourceBlocks[i], sourceBlocks[i + (swizzleFactor / 2)]);
-                targetBlocks[(i * 2) + 1] = b->esimd_mergeh(mFieldWidth, sourceBlocks[i], sourceBlocks[i + (swizzleFactor / 2)]);
+                targetBlocks[i * 2] = b.esimd_mergel(mFieldWidth, sourceBlocks[i], sourceBlocks[i + (swizzleFactor / 2)]);
+                targetBlocks[(i * 2) + 1] = b.esimd_mergeh(mFieldWidth, sourceBlocks[i], sourceBlocks[i + (swizzleFactor / 2)]);
             }
             for (unsigned i = 0; i < swizzleFactor; i++) {
                 sourceBlocks[i] = targetBlocks[i];
@@ -136,52 +136,52 @@ void SwizzleGenerator::generateDoBlockMethod(BuilderRef b) {
             unsigned streamNo = grp * swizzleFactor + i;
             unsigned outputSetNo = streamNo / outputStreamsPerSet;
             unsigned j = streamNo % outputStreamsPerSet;
-            b->storeOutputStreamBlock("outputGroup" + std::to_string(outputSetNo), b->getInt32(j), b->bitCast(sourceBlocks[i]));
+            b.storeOutputStreamBlock("outputGroup" + std::to_string(outputSetNo), b.getInt32(j), b.bitCast(sourceBlocks[i]));
         }
     }
 }
 
 
-SwizzleByGather::SwizzleByGather(BuilderRef b)
+SwizzleByGather::SwizzleByGather(KernelBuilder & b)
 : BlockOrientedKernel(b, "swizzleByGather", {}, {}, {}, {}, {}){
     for (unsigned i = 0; i < 2; i++) {
-        mInputStreamSets.push_back(Binding{b->getStreamSetTy(4, 1), "inputGroup" + std::to_string(i)});
+        mInputStreamSets.push_back(Binding{b.getStreamSetTy(4, 1), "inputGroup" + std::to_string(i)});
     }
     for (unsigned i = 0; i < 1; i++) {
-        mOutputStreamSets.push_back(Binding{b->getStreamSetTy(8, 1), "outputGroup" + std::to_string(i), FixedRate(1)});
+        mOutputStreamSets.push_back(Binding{b.getStreamSetTy(8, 1), "outputGroup" + std::to_string(i), FixedRate(1)});
     }
 }
 
-void SwizzleByGather::generateDoBlockMethod(BuilderRef b) {
-    Value* outputStreamPtr = b->getOutputStreamBlockPtr("outputGroup0", b->getSize(0));
-    Function *gatherFunc = Intrinsic::getDeclaration(b->getModule(), Intrinsic::x86_avx2_gather_d_q_256);
+void SwizzleByGather::generateDoBlockMethod(KernelBuilder & b) {
+    Value* outputStreamPtr = b.getOutputStreamBlockPtr("outputGroup0", b.getSize(0));
+    Function *gatherFunc = Intrinsic::getDeclaration(b.getModule(), Intrinsic::x86_avx2_gather_d_q_256);
     FunctionType * fTy = gatherFunc->getFunctionType();
 
     for (unsigned i = 0; i < 2; i++) {
         std::vector<llvm::Value*> inputStream;
-        Value* inputPtr = b->getInputStreamBlockPtr("inputGroup" + std::to_string(i), b->getSize(0));
+        Value* inputPtr = b.getInputStreamBlockPtr("inputGroup" + std::to_string(i), b.getSize(0));
 
-        Value* inputBytePtr = b->CreatePointerCast(inputPtr, b->getInt8PtrTy());
+        Value* inputBytePtr = b.CreatePointerCast(inputPtr, b.getInt8PtrTy());
         Value *addresses = ConstantVector::get(
-                {b->getInt32(0), b->getInt32(32), b->getInt32(64), b->getInt32(96)});
+                {b.getInt32(0), b.getInt32(32), b.getInt32(64), b.getInt32(96)});
 
         for (unsigned j = 0; j < 4; j++) {
             Value *gather_result =
-                b->CreateCall(fTy,
+                b.CreateCall(fTy,
                     gatherFunc,
                     {
-                            UndefValue::get(b->getBitBlockType()),
+                            UndefValue::get(b.getBitBlockType()),
                             inputBytePtr,
                             addresses,
-                            Constant::getAllOnesValue(b->getBitBlockType()),
-                            b->getInt8(1)
+                            Constant::getAllOnesValue(b.getBitBlockType()),
+                            b.getInt8(1)
                     }
             );
 
-            inputBytePtr = b->CreateGEP(b->getInt8Ty(), inputBytePtr, b->getInt32(8));
+            inputBytePtr = b.CreateGEP(b.getInt8Ty(), inputBytePtr, b.getInt32(8));
 
-            b->CreateStore(gather_result, outputStreamPtr);
-            outputStreamPtr = b->CreateGEP(b->getBitBlockType(), outputStreamPtr, b->getSize(1));
+            b.CreateStore(gather_result, outputStreamPtr);
+            outputStreamPtr = b.CreateGEP(b.getBitBlockType(), outputStreamPtr, b.getSize(1));
         }
     }
 }

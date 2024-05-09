@@ -33,13 +33,13 @@ using Rational = ProcessingRate::Rational;
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void MultiBlockKernel::generateKernelMethod(BuilderRef b) {
-    generateMultiBlockLogic(b, b->getNumOfStrides());
+void MultiBlockKernel::generateKernelMethod(KernelBuilder & b) {
+    generateMultiBlockLogic(b, b.getNumOfStrides());
 }
 
 // MULTI-BLOCK KERNEL CONSTRUCTOR
 MultiBlockKernel::MultiBlockKernel(
-    BuilderRef b,
+    KernelBuilder & b,
     std::string && kernelName,
     Bindings && stream_inputs,
     Bindings && stream_outputs,
@@ -57,7 +57,7 @@ MultiBlockKernel::MultiBlockKernel(
 
 }
 
-MultiBlockKernel::MultiBlockKernel(BuilderRef b,
+MultiBlockKernel::MultiBlockKernel(KernelBuilder & b,
     const TypeId typeId,
     std::string && kernelName,
     Bindings && stream_inputs,

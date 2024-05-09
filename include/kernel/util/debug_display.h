@@ -17,10 +17,10 @@ namespace kernel {
  * either `PrintRegister` or `PrintInt` depending of the field width of `s`.
  */
 class DebugDisplayKernel : public MultiBlockKernel {
-    using BuilderRef = BuilderRef;
+    using KernelBuilder & = KernelBuilder &;
 public:
-    DebugDisplayKernel(BuilderRef b, llvm::StringRef name, StreamSet * s);
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    DebugDisplayKernel(KernelBuilder & b, llvm::StringRef name, StreamSet * s);
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
     llvm::StringRef mName;
     uint32_t        mFW;
@@ -64,7 +64,7 @@ inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::String
   ParabixIllustrator illustrator(50);  // an illustrator with width 50.
  
   To include an illustrator object in a Parabix pipeline, it should be passed
-  in as a pipeline parameter:   Binding{b->getIntAddrTy(), "illustratorAddr"}
+  in as a pipeline parameter:   Binding{b.getIntAddrTy(), "illustratorAddr"}
   Then this parameter should be registered in the illustrator object for
   code generation.
   Scalar * callback_obj = P->getInputScalar("illustrator");

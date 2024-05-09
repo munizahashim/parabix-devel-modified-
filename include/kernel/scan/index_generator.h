@@ -25,10 +25,10 @@ namespace kernel {
  */
 class ScanIndexGenerator : public SingleStreamScanKernelTemplate {
 public:
-    ScanIndexGenerator(BuilderRef b, StreamSet * scan, StreamSet * output);
+    ScanIndexGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * output);
 protected:
     void generateProcessingLogic(
-        BuilderRef b, 
+        KernelBuilder & b, 
         llvm::Value * const absoluteIndex, 
         llvm::Value * const blockIndex, 
         llvm::Value * const bitOffset) override;

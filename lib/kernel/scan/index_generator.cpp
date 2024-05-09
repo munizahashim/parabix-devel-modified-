@@ -11,7 +11,7 @@ using namespace llvm;
 
 namespace kernel {
 
-ScanIndexGenerator::ScanIndexGenerator(BuilderRef b, StreamSet * scan, StreamSet * output)
+ScanIndexGenerator::ScanIndexGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * output)
 : SingleStreamScanKernelTemplate(b, "ScanIndexGenerator", scan)
 {
     assert (scan->getNumElements() == 1 && scan->getFieldWidth() == 1);
@@ -20,15 +20,15 @@ ScanIndexGenerator::ScanIndexGenerator(BuilderRef b, StreamSet * scan, StreamSet
 }
 
 void ScanIndexGenerator::generateProcessingLogic(
-    BuilderRef b, 
+    KernelBuilder & b, 
     Value * const absoluteIndex, 
     Value * const blockIndex, 
     Value * const bitOffset) 
 {
-    Value * const producedItemCount = b->getProducedItemCount("output");
-    b->setProducedItemCount("output", b->CreateAdd(producedItemCount, b->getSize(1)));
-    Value * const val = b->CreateZExtOrBitCast(absoluteIndex, b->getInt64Ty());
-    b->CreateStore(val, b->getRawOutputPointer("output", b->getInt32(0), producedItemCount));
+    Value * const producedItemCount = b.getProducedItemCount("output");
+    b.setProducedItemCount("output", b.CreateAdd(producedItemCount, b.getSize(1)));
+    Value * const val = b.CreateZExtOrBitCast(absoluteIndex, b.getInt64Ty());
+    b.CreateStore(val, b.getRawOutputPointer("output", b.getInt32(0), producedItemCount));
 }
 
 }

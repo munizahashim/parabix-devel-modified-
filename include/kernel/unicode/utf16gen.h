@@ -49,10 +49,10 @@
 
 class UTF16fieldDepositMask final : public kernel::BlockOrientedKernel {
 public:
-    UTF16fieldDepositMask(BuilderRef b, kernel::StreamSet * u32basis, kernel::StreamSet * u16fieldMask, kernel::StreamSet * extractionMask, unsigned depositFieldWidth = sizeof(size_t) * 8);
+    UTF16fieldDepositMask(kernel::KernelBuilder & b, kernel::StreamSet * u32basis, kernel::StreamSet * u16fieldMask, kernel::StreamSet * extractionMask, unsigned depositFieldWidth = sizeof(size_t) * 8);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
-    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingBytes) override;
+    void generateDoBlockMethod(kernel::KernelBuilder & b) override;
+    void generateFinalBlockMethod(kernel::KernelBuilder & b, llvm::Value * const remainingBytes) override;
     const unsigned mDepositFieldWidth;
 };
 
@@ -63,7 +63,7 @@ private:
 //
 class UTF16_InitialMask : public pablo::PabloKernel {
 public:
-    UTF16_InitialMask(BuilderRef kb, kernel::StreamSet * u16final, kernel::StreamSet * u16initial);
+    UTF16_InitialMask(kernel::KernelBuilder & b, kernel::StreamSet * u16final, kernel::StreamSet * u16initial);
 protected:
     void generatePabloMethod() override;
 };
@@ -74,7 +74,7 @@ protected:
 // planes, determined by subtracting 1 from the Unicode plane number.
 class UTF16_SupplementaryBasis : public pablo::PabloKernel {
 public:
-    UTF16_SupplementaryBasis(BuilderRef kb, kernel::StreamSet * u32basis, kernel::StreamSet * u16_SMP_basis);
+    UTF16_SupplementaryBasis(kernel::KernelBuilder & b, kernel::StreamSet * u32basis, kernel::StreamSet * u16_SMP_basis);
 protected:
     void generatePabloMethod() override;
 };
@@ -85,7 +85,7 @@ protected:
 //
 class UTF16assembly : public pablo::PabloKernel {
 public:
-    UTF16assembly(BuilderRef kb,
+    UTF16assembly(kernel::KernelBuilder & b,
                  kernel::StreamSet * SMPbits4_0, kernel::StreamSet * u16bits15_10, kernel::StreamSet * u16bits9_0, kernel::StreamSet * u16final,
                  kernel::StreamSet * u16basis);
 protected:

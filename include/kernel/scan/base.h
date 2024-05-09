@@ -17,9 +17,8 @@ namespace kernel {
  */
 class SingleStreamScanKernelTemplate : public MultiBlockKernel {
 public:
-    using BuilderRef = BuilderRef;
 
-    SingleStreamScanKernelTemplate(BuilderRef b, std::string && name, StreamSet * scan);
+    SingleStreamScanKernelTemplate(KernelBuilder & b, std::string && name, StreamSet * scan);
 
     virtual ~SingleStreamScanKernelTemplate() {}
 
@@ -45,34 +44,34 @@ protected:
         llvm::Constant * const WORDS_PER_STRIDE;
         llvm::Constant * const NUM_BLOCKS_PER_STRIDE;
 
-        ScanWordContext(BuilderRef b, unsigned strideWidth);
+        ScanWordContext(KernelBuilder & b, unsigned strideWidth);
     };
 
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final override;
 
-    virtual void initialize(BuilderRef b) { }
+    virtual void initialize(KernelBuilder & b) { }
 
-    virtual void willProcessStride(BuilderRef b, llvm::Value * const strideNo) { }
+    virtual void willProcessStride(KernelBuilder & b, llvm::Value * const strideNo) { }
 
-    virtual void maskBuildingIterationHead(BuilderRef b) { }
+    virtual void maskBuildingIterationHead(KernelBuilder & b) { }
 
-    virtual void maskBuildingIterationBody(BuilderRef b, llvm::Value * const blockIndex) { }
+    virtual void maskBuildingIterationBody(KernelBuilder & b, llvm::Value * const blockIndex) { }
 
-    virtual void didBuildMask(BuilderRef b, llvm::Value * const mask) { }
+    virtual void didBuildMask(KernelBuilder & b, llvm::Value * const mask) { }
 
-    virtual void willProcessWord(BuilderRef b, llvm::Value * const word) { }
+    virtual void willProcessWord(KernelBuilder & b, llvm::Value * const word) { }
 
-    virtual void generateProcessingLogic(BuilderRef b, llvm::Value * const absoluteIndex) { }
+    virtual void generateProcessingLogic(KernelBuilder & b, llvm::Value * const absoluteIndex) { }
 
-    virtual void generateProcessingLogic(BuilderRef b, llvm::Value * const absoluteIndex, llvm::Value * const blockIndex, llvm::Value * const bitOffset) { 
+    virtual void generateProcessingLogic(KernelBuilder & b, llvm::Value * const absoluteIndex, llvm::Value * const blockIndex, llvm::Value * const bitOffset) { 
         generateProcessingLogic(b, absoluteIndex);
     }
 
-    virtual void didProcessWord(BuilderRef b) { }
+    virtual void didProcessWord(KernelBuilder & b) { }
 
-    virtual void didProcessStride(BuilderRef b, llvm::Value * strideNo) { }
+    virtual void didProcessStride(KernelBuilder & b, llvm::Value * strideNo) { }
 
-    virtual void finalize(BuilderRef b) { }
+    virtual void finalize(KernelBuilder & b) { }
 
     ScanWordContext mSW;
     llvm::BasicBlock * mEntryBlock = nullptr;

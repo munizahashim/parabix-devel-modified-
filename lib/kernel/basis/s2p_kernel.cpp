@@ -20,24 +20,22 @@ using namespace llvm;
 
 namespace kernel {
 
-using BuilderRef = Kernel::BuilderRef;
-
-void s2p_step(BuilderRef b, Value * s0, Value * s1, Value * hi_mask, unsigned shift, Value * &p0, Value * &p1) {
-    Value * t0 = b->hsimd_packh(16, s0, s1);
-    Value * t1 = b->hsimd_packl(16, s0, s1);
-    p0 = b->simd_if(1, hi_mask, t0, b->simd_srli(16, t1, shift));
-    p1 = b->simd_if(1, hi_mask, b->simd_slli(16, t0, shift), t1);
+void s2p_step(KernelBuilder & b, Value * s0, Value * s1, Value * hi_mask, unsigned shift, Value * &p0, Value * &p1) {
+    Value * t0 = b.hsimd_packh(16, s0, s1);
+    Value * t1 = b.hsimd_packl(16, s0, s1);
+    p0 = b.simd_if(1, hi_mask, t0, b.simd_srli(16, t1, shift));
+    p1 = b.simd_if(1, hi_mask, b.simd_slli(16, t0, shift), t1);
 }
 
-void s2p_bitpairs(BuilderRef b, Value * input[], Value * bitpairs[]) {
+void s2p_bitpairs(KernelBuilder & b, Value * input[], Value * bitpairs[]) {
     for (unsigned i = 0; i < 4; i++) {
         Value * s0 = input[2 * i];
         Value * s1 = input[2 * i + 1];
-        s2p_step(b, s0, s1, b->simd_himask(2), 1, bitpairs[2*i], bitpairs[2*i+1]);
+        s2p_step(b, s0, s1, b.simd_himask(2), 1, bitpairs[2*i], bitpairs[2*i+1]);
     }
 }
 
-void s2p_bitquads(BuilderRef b, Value * bitpairs[], Value * bitquads[]) {
+void s2p_bitquads(KernelBuilder & b, Value * bitpairs[], Value * bitquads[]) {
     Value * bit66442200[4];
     Value * bit77553311[4];
     for (unsigned i = 0; i < 4; i++) {
@@ -50,29 +48,29 @@ void s2p_bitquads(BuilderRef b, Value * bitpairs[], Value * bitquads[]) {
     Value * bit77773333[2];
     for (unsigned j = 0; j < 2; j++) {
         s2p_step(b, bit66442200[2*j], bit66442200[2*j+1],
-                 b->simd_himask(4), 2, bit66662222[j], bit44440000[j]);
+                 b.simd_himask(4), 2, bit66662222[j], bit44440000[j]);
         bitquads[j] = bit44440000[j];
         bitquads[4+j] = bit66662222[j];
         s2p_step(b, bit77553311[2*j], bit77553311[2*j+1],
-                 b->simd_himask(4), 2, bit77773333[j], bit55551111[j]);
+                 b.simd_himask(4), 2, bit77773333[j], bit55551111[j]);
         bitquads[2+j] = bit55551111[j];
         bitquads[6+j] = bit77773333[j];
     }
 }
 
-void s2p_completion_from_quads(BuilderRef b, Value * bitquads[], Value * output[]) {
+void s2p_completion_from_quads(KernelBuilder & b, Value * bitquads[], Value * output[]) {
     for (unsigned i = 0; i < 4; i++) {
-        s2p_step(b, bitquads[2*i], bitquads[2*i + 1], b->simd_himask(8), 4, output[i+4], output[i]);
+        s2p_step(b, bitquads[2*i], bitquads[2*i + 1], b.simd_himask(8), 4, output[i+4], output[i]);
     }
 }
 
-void s2p_completion_from_pairs(BuilderRef b, Value * bitpairs[], Value * output[]) {
+void s2p_completion_from_pairs(KernelBuilder & b, Value * bitpairs[], Value * output[]) {
     Value * bitquads[8];
     s2p_bitquads(b, bitpairs, bitquads);
     s2p_completion_from_quads(b, bitquads, output);
 }
 
-void s2p(BuilderRef b, Value * input[], Value * output[]) {
+void s2p(KernelBuilder & b, Value * input[], Value * output[]) {
     Value * bitpairs[8];
     s2p_bitpairs(b, input, bitpairs);
     s2p_completion_from_pairs(b, bitpairs, output);
@@ -80,105 +78,105 @@ void s2p(BuilderRef b, Value * input[], Value * output[]) {
 
 /* Alternative transposition model, but small field width packs are problematic. */
 #if 0
-void s2p_ideal(BuilderRef b, Value * input[], Value * output[]) {
+void s2p_ideal(KernelBuilder & b, Value * input[], Value * output[]) {
     Value * hi_nybble[4];
     Value * lo_nybble[4];
     for (unsigned i = 0; i<4; i++) {
         Value * s0 = input[2*i];
         Value * s1 = input[2*i+1];
-        hi_nybble[i] = b->hsimd_packh(8, s0, s1);
-        lo_nybble[i] = b->hsimd_packl(8, s0, s1);
+        hi_nybble[i] = b.hsimd_packh(8, s0, s1);
+        lo_nybble[i] = b.hsimd_packl(8, s0, s1);
     }
     Value * pair76[2];
     Value * pair54[2];
     Value * pair32[2];
     Value * pair10[2];
     for (unsigned i = 0; i<2; i++) {
-        pair76[i] = b->hsimd_packh(4, hi_nybble[2*i], hi_nybble[2*i+1]);
-        pair54[i] = b->hsimd_packl(4, hi_nybble[2*i], hi_nybble[2*i+1]);
-        pair32[i] = b->hsimd_packh(4, lo_nybble[2*i], lo_nybble[2*i+1]);
-        pair10[i] = b->hsimd_packl(4, lo_nybble[2*i], lo_nybble[2*i+1]);
+        pair76[i] = b.hsimd_packh(4, hi_nybble[2*i], hi_nybble[2*i+1]);
+        pair54[i] = b.hsimd_packl(4, hi_nybble[2*i], hi_nybble[2*i+1]);
+        pair32[i] = b.hsimd_packh(4, lo_nybble[2*i], lo_nybble[2*i+1]);
+        pair10[i] = b.hsimd_packl(4, lo_nybble[2*i], lo_nybble[2*i+1]);
     }
-    output[7] = b->hsimd_packh(2, pair76[0], pair76[1]);
-    output[6] = b->hsimd_packl(2, pair76[0], pair76[1]);
-    output[5] = b->hsimd_packh(2, pair54[0], pair54[1]);
-    output[4] = b->hsimd_packl(2, pair54[0], pair54[1]);
-    output[3] = b->hsimd_packh(2, pair32[0], pair32[1]);
-    output[2] = b->hsimd_packl(2, pair32[0], pair32[1]);
-    output[1] = b->hsimd_packh(2, pair10[0], pair10[1]);
-    output[0] = b->hsimd_packl(2, pair10[0], pair10[1]);
+    output[7] = b.hsimd_packh(2, pair76[0], pair76[1]);
+    output[6] = b.hsimd_packl(2, pair76[0], pair76[1]);
+    output[5] = b.hsimd_packh(2, pair54[0], pair54[1]);
+    output[4] = b.hsimd_packl(2, pair54[0], pair54[1]);
+    output[3] = b.hsimd_packh(2, pair32[0], pair32[1]);
+    output[2] = b.hsimd_packl(2, pair32[0], pair32[1]);
+    output[1] = b.hsimd_packh(2, pair10[0], pair10[1]);
+    output[0] = b.hsimd_packl(2, pair10[0], pair10[1]);
 }
 #endif
 
 // Transposition of each group of 64 bits.
-Value * s2p_bytes(BuilderRef b, Value * r) {
-    Value * b7531 = b->simd_select_hi(2, r);
-    Value * b6420 = b->simd_select_lo(2, r);
-    Value * b7531_2 = b->simd_slli(16, b7531, 7);
-    Value * b6420_2 = b->simd_srli(16, b7531, 7);
-    Value * pairs = b->simd_if(1, b->simd_himask(16), b->simd_or(b7531, b7531_2), b->simd_or(b6420, b6420_2));
-    Value * b7362 = b->simd_select_hi(4, pairs);
-    Value * b5140 = b->simd_select_lo(4, pairs);
-    Value * b7362_2 = b->simd_slli(32, b7362, 14);
-    Value * b5140_2 = b->simd_srli(32, b5140, 14);
-    Value * quads = b->simd_if(1, b->simd_himask(32), b->simd_or(b7362, b7362_2), b->simd_or(b5140, b5140_2));
-    Value * b7654 = b->simd_select_hi(8, quads);
-    Value * b3210 = b->simd_select_lo(8, quads);
-    Value * b7654_2 = b->simd_slli(64, b7654, 28);
-    Value * b3210_2 = b->simd_srli(64, b3210, 28);
-    return b->simd_if(1, b->simd_himask(64), b->simd_or(b7654, b7654_2), b->simd_or(b3210, b3210_2));
+Value * s2p_bytes(KernelBuilder & b, Value * r) {
+    Value * b7531 = b.simd_select_hi(2, r);
+    Value * b6420 = b.simd_select_lo(2, r);
+    Value * b7531_2 = b.simd_slli(16, b7531, 7);
+    Value * b6420_2 = b.simd_srli(16, b7531, 7);
+    Value * pairs = b.simd_if(1, b.simd_himask(16), b.simd_or(b7531, b7531_2), b.simd_or(b6420, b6420_2));
+    Value * b7362 = b.simd_select_hi(4, pairs);
+    Value * b5140 = b.simd_select_lo(4, pairs);
+    Value * b7362_2 = b.simd_slli(32, b7362, 14);
+    Value * b5140_2 = b.simd_srli(32, b5140, 14);
+    Value * quads = b.simd_if(1, b.simd_himask(32), b.simd_or(b7362, b7362_2), b.simd_or(b5140, b5140_2));
+    Value * b7654 = b.simd_select_hi(8, quads);
+    Value * b3210 = b.simd_select_lo(8, quads);
+    Value * b7654_2 = b.simd_slli(64, b7654, 28);
+    Value * b3210_2 = b.simd_srli(64, b3210, 28);
+    return b.simd_if(1, b.simd_himask(64), b.simd_or(b7654, b7654_2), b.simd_or(b3210, b3210_2));
 }
 
-void S2PKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * s2pLoop = b->CreateBasicBlock("s2pLoop");
+void S2PKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * s2pLoop = b.CreateBasicBlock("s2pLoop");
     BasicBlock * s2pBody = nullptr;     // conditional block dependent on mZeroMask
     BasicBlock * s2pStore =  nullptr;   // conditional block dependent on mZeroMask
-    BasicBlock * s2pDone = b->CreateBasicBlock("s2pDone");
-    Constant * const ZERO = b->getSize(0);
+    BasicBlock * s2pDone = b.CreateBasicBlock("s2pDone");
+    Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    b->CreateBr(s2pLoop);
+    b.CreateBr(s2pLoop);
 
-    b->SetInsertPoint(s2pLoop);
-    PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
+    b.SetInsertPoint(s2pLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
     Value * zeroMask = nullptr;
     Value * bytepack[8];
     Value * basisbits[8];
     if (mZeroMask) {
-        zeroMask = b->loadInputStreamBlock("mZeroMask", ZERO, blockOffsetPhi);
+        zeroMask = b.loadInputStreamBlock("mZeroMask", ZERO, blockOffsetPhi);
         for (unsigned i = 0; i < mNumOfStreams; ++i) {
-            basisbits[i] = b->allZeroes();
+            basisbits[i] = b.allZeroes();
         }
-        s2pBody = b->CreateBasicBlock("s2pBody");
-        s2pStore = b->CreateBasicBlock("s2pStore");
-        b->CreateCondBr(b->bitblock_any(zeroMask), s2pBody, s2pStore);
-        b->SetInsertPoint(s2pBody);
+        s2pBody = b.CreateBasicBlock("s2pBody");
+        s2pStore = b.CreateBasicBlock("s2pStore");
+        b.CreateCondBr(b.bitblock_any(zeroMask), s2pBody, s2pStore);
+        b.SetInsertPoint(s2pBody);
    }
     for (unsigned i = 0; i < 8; i++) {
-        bytepack[i] = b->loadInputStreamPack("byteStream", ZERO, b->getInt32(i), blockOffsetPhi);
+        bytepack[i] = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
     }
     s2p(b, bytepack, basisbits);
     if (mZeroMask) {
-        b->CreateBr(s2pStore);
-        b->SetInsertPoint(s2pStore);
+        b.CreateBr(s2pStore);
+        b.SetInsertPoint(s2pStore);
     }
     for (unsigned i = 0; i < mNumOfStreams; ++i) {
         if (mZeroMask) {
-            basisbits[i] = b->simd_and(basisbits[i], zeroMask);
+            basisbits[i] = b.simd_and(basisbits[i], zeroMask);
         }
-        b->storeOutputStreamBlock("basisBits", b->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    Value * nextBlk = b->CreateAdd(blockOffsetPhi, b->getSize(1));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, s2pLoop);
-    Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
 
-    b->CreateCondBr(moreToDo, s2pLoop, s2pDone);
+    b.CreateCondBr(moreToDo, s2pLoop, s2pDone);
 
-    b->SetInsertPoint(s2pDone);
+    b.SetInsertPoint(s2pDone);
 }
 
 inline Bindings S2PKernel::makeInputBindings(StreamSet * codeUnitStream, StreamSet * zeroMask) {
@@ -194,7 +192,7 @@ inline Bindings S2PKernel::makeOutputBindings(StreamSet * const BasisBits) {
     return {Binding("basisBits", BasisBits)};
 }
 
-S2PKernel::S2PKernel(BuilderRef b,
+S2PKernel::S2PKernel(KernelBuilder & b,
                      StreamSet * const codeUnitStream,
                      StreamSet * const BasisBits,
                      StreamSet * zeroMask)
@@ -209,131 +207,131 @@ S2PKernel::S2PKernel(BuilderRef b,
 
 class BitPairsKernel final : public MultiBlockKernel {
 public:
-    BitPairsKernel(BuilderRef b,
+    BitPairsKernel(KernelBuilder & b,
               StreamSet * const codeUnitStream,
               StreamSet * const bitPairs);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class BitQuadsKernel final : public MultiBlockKernel {
 public:
-    BitQuadsKernel(BuilderRef b,
+    BitQuadsKernel(KernelBuilder & b,
               StreamSet * const bitPairs,
               StreamSet * const bitQuads);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_CompletionKernel final : public MultiBlockKernel {
 public:
-    S2P_CompletionKernel(BuilderRef b,
+    S2P_CompletionKernel(KernelBuilder & b,
                          StreamSet * const bitPacks,
                          StreamSet * const BasisBits,
                          bool completionFromQuads = false);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     bool mCompletionFromQuads;
 };
 
-void BitPairsKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * bitPairLoop = b->CreateBasicBlock("bitPairLoop");
-    BasicBlock * bitPairFinalize = b->CreateBasicBlock("bitPairFinalize");
-    Constant * const ZERO = b->getSize(0);
+void BitPairsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * bitPairLoop = b.CreateBasicBlock("bitPairLoop");
+    BasicBlock * bitPairFinalize = b.CreateBasicBlock("bitPairFinalize");
+    Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    b->CreateBr(bitPairLoop);
-    b->SetInsertPoint(bitPairLoop);
-    PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2);
+    b.CreateBr(bitPairLoop);
+    b.SetInsertPoint(bitPairLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
     Value * bytepack[8];
     for (unsigned i = 0; i < 8; i++) {
-        bytepack[i] = b->loadInputStreamPack("byteStream", ZERO, b->getInt32(i), blockOffsetPhi);
+        bytepack[i] = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
     }
     Value * bitpairs[8];
     s2p_bitpairs(b, bytepack, bitpairs);
     for (unsigned i = 0; i < 8; ++i) {
-        b->storeOutputStreamBlock("bitPairs", b->getInt32(i), blockOffsetPhi, bitpairs[i]);
-        //b->CallPrintRegister("bp bitpairs[" + std::to_string(i) + "]", bitpairs[i]);
+        b.storeOutputStreamBlock("bitPairs", b.getInt32(i), blockOffsetPhi, bitpairs[i]);
+        //b.CallPrintRegister("bp bitpairs[" + std::to_string(i) + "]", bitpairs[i]);
     }
-    Value * nextBlk = b->CreateAdd(blockOffsetPhi, b->getSize(1));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, bitPairLoop);
-    Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
 
-    b->CreateCondBr(moreToDo, bitPairLoop, bitPairFinalize);
-    b->SetInsertPoint(bitPairFinalize);
+    b.CreateCondBr(moreToDo, bitPairLoop, bitPairFinalize);
+    b.SetInsertPoint(bitPairFinalize);
 }
 
-BitPairsKernel::BitPairsKernel(BuilderRef b,
+BitPairsKernel::BitPairsKernel(KernelBuilder & b,
                                StreamSet * const codeUnitStream,
                                StreamSet * const bitPairs)
 : MultiBlockKernel(b, "BitPairs"
 , {Binding{"byteStream", codeUnitStream, FixedRate(), Principal()}}
-                   , {Binding{"bitPairs", bitPairs, FixedRate(), RoundUpTo(2 * b->getBitBlockWidth())}}, {}, {}, {}) {
-    setStride(2 * b->getBitBlockWidth());
+                   , {Binding{"bitPairs", bitPairs, FixedRate(), RoundUpTo(2 * b.getBitBlockWidth())}}, {}, {}, {}) {
+    setStride(2 * b.getBitBlockWidth());
 }
 
-void BitQuadsKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * bitQuadLoop = b->CreateBasicBlock("bitQuadLoop");
-    BasicBlock * bitQuadFinalize = b->CreateBasicBlock("bitQuadFinalize");
-    Constant * const ZERO = b->getSize(0);
+void BitQuadsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * bitQuadLoop = b.CreateBasicBlock("bitQuadLoop");
+    BasicBlock * bitQuadFinalize = b.CreateBasicBlock("bitQuadFinalize");
+    Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    b->CreateBr(bitQuadLoop);
-    b->SetInsertPoint(bitQuadLoop);
-    PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2);
+    b.CreateBr(bitQuadLoop);
+    b.SetInsertPoint(bitQuadLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
     Value * bitpairs[8];
     for (unsigned i = 0; i < 8; i++) {
-        bitpairs[i] = b->loadInputStreamBlock("bitPairs", b->getInt32(i), blockOffsetPhi);
-        //b->CallPrintRegister("bq bitpairs[" + std::to_string(i) + "]", bitpairs[i]);
+        bitpairs[i] = b.loadInputStreamBlock("bitPairs", b.getInt32(i), blockOffsetPhi);
+        //b.CallPrintRegister("bq bitpairs[" + std::to_string(i) + "]", bitpairs[i]);
     }
     Value * bitquads[8];
     s2p_bitquads(b, bitpairs, bitquads);
     for (unsigned i = 0; i < 8; ++i) {
-        b->storeOutputStreamBlock("bitQuads", b->getInt32(i), blockOffsetPhi, bitquads[i]);
-        //b->CallPrintRegister("bq bitquads[" + std::to_string(i) + "]", bitquads[i]);
+        b.storeOutputStreamBlock("bitQuads", b.getInt32(i), blockOffsetPhi, bitquads[i]);
+        //b.CallPrintRegister("bq bitquads[" + std::to_string(i) + "]", bitquads[i]);
     }
-    Value * nextBlk = b->CreateAdd(blockOffsetPhi, b->getSize(1));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, bitQuadLoop);
-    Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
 
-    b->CreateCondBr(moreToDo, bitQuadLoop, bitQuadFinalize);
-    b->SetInsertPoint(bitQuadFinalize);
+    b.CreateCondBr(moreToDo, bitQuadLoop, bitQuadFinalize);
+    b.SetInsertPoint(bitQuadFinalize);
 }
 
-BitQuadsKernel::BitQuadsKernel(BuilderRef b,
+BitQuadsKernel::BitQuadsKernel(KernelBuilder & b,
                                StreamSet * const bitPairs,
                                StreamSet * const bitQuads)
 : MultiBlockKernel(b, "BitQuads"
 , {Binding{"bitPairs", bitPairs, FixedRate(), Principal()}}
-                   , {Binding{"bitQuads", bitQuads, FixedRate(), RoundUpTo(2 * b->getBitBlockWidth())}}, {}, {}, {}) {
-    setStride(2 * b->getBitBlockWidth());
+                   , {Binding{"bitQuads", bitQuads, FixedRate(), RoundUpTo(2 * b.getBitBlockWidth())}}, {}, {}, {}) {
+    setStride(2 * b.getBitBlockWidth());
 }
 
-void S2P_CompletionKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * s2pLoop = b->CreateBasicBlock("s2pLoop");
-    BasicBlock * s2pFinalize = b->CreateBasicBlock("s2pFinalize");
-    Constant * const ZERO = b->getSize(0);
+void S2P_CompletionKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * s2pLoop = b.CreateBasicBlock("s2pLoop");
+    BasicBlock * s2pFinalize = b.CreateBasicBlock("s2pFinalize");
+    Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != b->getBitBlockWidth()) {
-        numOfBlocks = b->CreateShl(numOfStrides, b->getSize(std::log2(getStride()/b->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    b->CreateBr(s2pLoop);
-    b->SetInsertPoint(s2pLoop);
-    PHINode * blockOffsetPhi = b->CreatePHI(b->getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
+    b.CreateBr(s2pLoop);
+    b.SetInsertPoint(s2pLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
     Value * basisbits[8];
     Value * bitPacks[8];
     for (unsigned i = 0; i < 8; i++) {
-        bitPacks[i] = b->loadInputStreamBlock("bitPacks", b->getInt32(i), blockOffsetPhi);
+        bitPacks[i] = b.loadInputStreamBlock("bitPacks", b.getInt32(i), blockOffsetPhi);
     }
     if (mCompletionFromQuads) {
         s2p_completion_from_quads(b, bitPacks, basisbits);
@@ -341,23 +339,23 @@ void S2P_CompletionKernel::generateMultiBlockLogic(BuilderRef b, Value * const n
         s2p_completion_from_pairs(b, bitPacks, basisbits);
     }
     for (unsigned i = 0; i < 8; ++i) {
-        b->storeOutputStreamBlock("basisBits", b->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    Value * nextBlk = b->CreateAdd(blockOffsetPhi, b->getSize(1));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, s2pLoop);
-    Value * moreToDo = b->CreateICmpNE(nextBlk, numOfBlocks);
-    b->CreateCondBr(moreToDo, s2pLoop, s2pFinalize);
-    b->SetInsertPoint(s2pFinalize);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
+    b.CreateCondBr(moreToDo, s2pLoop, s2pFinalize);
+    b.SetInsertPoint(s2pFinalize);
 }
 
-S2P_CompletionKernel::S2P_CompletionKernel(BuilderRef b,
+S2P_CompletionKernel::S2P_CompletionKernel(KernelBuilder & b,
                                            StreamSet * const bitPacks,
                                            StreamSet * const BasisBits,
                                            bool completionFromQuads)
     : MultiBlockKernel(b, completionFromQuads ? "S2PfromQuads" : "S2PfromPairs",
                        {Binding{"bitPacks", bitPacks, FixedRate(), Principal()}},
                        {Binding{"basisBits", BasisBits}}, {}, {}, {}), mCompletionFromQuads(completionFromQuads) {
-        setStride(2 * b->getBitBlockWidth());
+        setStride(2 * b.getBitBlockWidth());
     }
 
 void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
@@ -387,171 +385,171 @@ void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
 }
 
 
-S2P_i21_3xi8::S2P_i21_3xi8(BuilderRef b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
+S2P_i21_3xi8::S2P_i21_3xi8(KernelBuilder & b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
 : MultiBlockKernel(b, "s2p_i21_3xi8",
 {Binding{"i32Stream", i32Stream, FixedRate(), Principal()}},
                    {Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}}, {}, {}, {})  {}
 
-void S2P_i21_3xi8::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
-    BasicBlock * entry = kb->GetInsertBlock();
-    BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
-    BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
-    Constant * const ZERO = kb->getSize(0);
+void S2P_i21_3xi8::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * processBlock = b.CreateBasicBlock("s2p21_loop");
+    BasicBlock * s2pDone = b.CreateBasicBlock("s2p21_done");
+    Constant * const ZERO = b.getSize(0);
 
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != kb->getBitBlockWidth()) {
-        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    kb->CreateBr(processBlock);
+    b.CreateBr(processBlock);
 
-    kb->SetInsertPoint(processBlock);
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 3); // block offset from the base block, e.g. 0, 1, 2, ...
+    b.SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 3); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
     Value * UTF32units[4];
     for (unsigned i = 0; i < 8; i++) {
         for (unsigned j = 0; j < 4; j++) {
-            UTF32units[j] = kb->loadInputStreamPack("i32Stream", ZERO, kb->getInt32(4 * i + j), blockOffsetPhi);
+            UTF32units[j] = b.loadInputStreamPack("i32Stream", ZERO, b.getInt32(4 * i + j), blockOffsetPhi);
         }
-        Value * u32lo16_0 = kb->hsimd_packl(32, UTF32units[0], UTF32units[1]);
-        Value * u32lo16_1 = kb->hsimd_packl(32, UTF32units[2], UTF32units[3]);
-        Value * u32hi16_0 = kb->hsimd_packh(32, UTF32units[0], UTF32units[1]);
-        Value * u32hi16_1 = kb->hsimd_packh(32, UTF32units[2], UTF32units[3]);
-        Value * u32byte0 = kb->bitCast(kb->hsimd_packl(16, u32lo16_0, u32lo16_1));
-        Value * u32byte1 = kb->bitCast(kb->hsimd_packh(16, u32lo16_0, u32lo16_1));
-        Value * u32byte2 = kb->bitCast(kb->hsimd_packl(16, u32hi16_0, u32hi16_1));
-        Value * idx = kb->getInt32(i);
-        kb->storeOutputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi, u32byte0);
-        kb->storeOutputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi, u32byte1);
-        kb->storeOutputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi, u32byte2);
+        Value * u32lo16_0 = b.hsimd_packl(32, UTF32units[0], UTF32units[1]);
+        Value * u32lo16_1 = b.hsimd_packl(32, UTF32units[2], UTF32units[3]);
+        Value * u32hi16_0 = b.hsimd_packh(32, UTF32units[0], UTF32units[1]);
+        Value * u32hi16_1 = b.hsimd_packh(32, UTF32units[2], UTF32units[3]);
+        Value * u32byte0 = b.bitCast(b.hsimd_packl(16, u32lo16_0, u32lo16_1));
+        Value * u32byte1 = b.bitCast(b.hsimd_packh(16, u32lo16_0, u32lo16_1));
+        Value * u32byte2 = b.bitCast(b.hsimd_packl(16, u32hi16_0, u32hi16_1));
+        Value * idx = b.getInt32(i);
+        b.storeOutputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi, u32byte0);
+        b.storeOutputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi, u32byte1);
+        b.storeOutputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi, u32byte2);
     }
-    BasicBlock * const processBlockExit = kb->GetInsertBlock();
+    BasicBlock * const processBlockExit = b.GetInsertBlock();
     blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(s2pDone);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(s2pDone);
 }
 
-S2P_3xi8_21xi1::S2P_3xi8_21xi1(BuilderRef b, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits)
+S2P_3xi8_21xi1::S2P_3xi8_21xi1(KernelBuilder & b, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits)
 : MultiBlockKernel(b, "s2p_3xi8_21xi1",
 {Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}},
 {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
 
-void S2P_3xi8_21xi1::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
-    BasicBlock * entry = kb->GetInsertBlock();
-    BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
-    BasicBlock * write13_zeroes = kb->CreateBasicBlock("write13_zeroes");
-    BasicBlock * continue_s2p = kb->CreateBasicBlock("continue_s2p");
-    BasicBlock * write5_zeroes = kb->CreateBasicBlock("write5_zeroes");
-    BasicBlock * finish_s2p = kb->CreateBasicBlock("finish_s2p");
-    BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
-    Constant * const ZERO = kb->getSize(0);
-    Constant * ZERO_BLOCK = kb->allZeroes();
+void S2P_3xi8_21xi1::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * processBlock = b.CreateBasicBlock("s2p21_loop");
+    BasicBlock * write13_zeroes = b.CreateBasicBlock("write13_zeroes");
+    BasicBlock * continue_s2p = b.CreateBasicBlock("continue_s2p");
+    BasicBlock * write5_zeroes = b.CreateBasicBlock("write5_zeroes");
+    BasicBlock * finish_s2p = b.CreateBasicBlock("finish_s2p");
+    BasicBlock * s2pDone = b.CreateBasicBlock("s2p21_done");
+    Constant * const ZERO = b.getSize(0);
+    Constant * ZERO_BLOCK = b.allZeroes();
 
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != kb->getBitBlockWidth()) {
-        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    kb->CreateBr(processBlock);
+    b.CreateBr(processBlock);
 
-    kb->SetInsertPoint(processBlock);
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
+    b.SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
     Value * u32byte0[8];
     Value * u32byte1[8];
     Value * u32byte2[8];
     for (unsigned i = 0; i < 8; i++) {
-        Value * idx = kb->getInt32(i);
-        u32byte0[i] = kb->loadInputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi);
-        u32byte1[i] = kb->loadInputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi);
-        u32byte2[i] = kb->loadInputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi);
+        Value * idx = b.getInt32(i);
+        u32byte0[i] = b.loadInputStreamPack("i8stream0", ZERO, idx, blockOffsetPhi);
+        u32byte1[i] = b.loadInputStreamPack("i8stream1", ZERO, idx, blockOffsetPhi);
+        u32byte2[i] = b.loadInputStreamPack("i8stream2", ZERO, idx, blockOffsetPhi);
     }
     Value * basisbits[24];
     Value * anybyte1 = u32byte1[0];
     Value * anybyte2 = u32byte2[0];
     for (unsigned i = 1; i < 8; i++) {
-        anybyte1 = kb->simd_or(anybyte1, u32byte1[i]);
-        anybyte2 = kb->simd_or(anybyte2, u32byte2[i]);
+        anybyte1 = b.simd_or(anybyte1, u32byte1[i]);
+        anybyte2 = b.simd_or(anybyte2, u32byte2[i]);
     }
-    Value * anybyte1or2 = kb->simd_or(anybyte1, anybyte2, "anybyte1or2");
-    s2p(kb, u32byte0, basisbits);
+    Value * anybyte1or2 = b.simd_or(anybyte1, anybyte2, "anybyte1or2");
+    s2p(b, u32byte0, basisbits);
     for (unsigned i = 0; i < 8; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    kb->CreateCondBr(kb->bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
-    kb->SetInsertPoint(write13_zeroes);
+    b.CreateCondBr(b.bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
+    b.SetInsertPoint(write13_zeroes);
     for (unsigned i = 8; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, ZERO_BLOCK);
     }
     blockOffsetPhi->addIncoming(nextBlk, write13_zeroes);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(continue_s2p);
-    s2p(kb, u32byte1, &basisbits[8]);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(continue_s2p);
+    s2p(b, u32byte1, &basisbits[8]);
     for (unsigned i = 8; i < 16; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    kb->CreateCondBr(kb->bitblock_any(anybyte2), finish_s2p, write5_zeroes);
-    kb->SetInsertPoint(write5_zeroes);
+    b.CreateCondBr(b.bitblock_any(anybyte2), finish_s2p, write5_zeroes);
+    b.SetInsertPoint(write5_zeroes);
     for (unsigned i = 16; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, ZERO_BLOCK);
     }
     blockOffsetPhi->addIncoming(nextBlk, write5_zeroes);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(finish_s2p);
-    s2p(kb, u32byte2, &basisbits[16]);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(finish_s2p);
+    s2p(b, u32byte2, &basisbits[16]);
     for (unsigned i = 16; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    BasicBlock * const processBlockExit = kb->GetInsertBlock();
+    BasicBlock * const processBlockExit = b.GetInsertBlock();
     blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(s2pDone);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(s2pDone);
 }
 
-S2P_21Kernel::S2P_21Kernel(BuilderRef b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
+S2P_21Kernel::S2P_21Kernel(KernelBuilder & b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
 : MultiBlockKernel(b, "s2p_21",
 {Binding{"codeUnitStream", codeUnitStream, FixedRate(), Principal()}},
     {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
 
-void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStrides) {
-    BasicBlock * entry = kb->GetInsertBlock();
-    BasicBlock * processBlock = kb->CreateBasicBlock("s2p21_loop");
-    BasicBlock * write13_zeroes = kb->CreateBasicBlock("write13_zeroes");
-    BasicBlock * continue_s2p = kb->CreateBasicBlock("continue_s2p");
-    BasicBlock * write5_zeroes = kb->CreateBasicBlock("write5_zeroes");
-    BasicBlock * finish_s2p = kb->CreateBasicBlock("finish_s2p");
-    BasicBlock * s2pDone = kb->CreateBasicBlock("s2p21_done");
-    Constant * const ZERO = kb->getSize(0);
-    Constant * ZERO_BLOCK = kb->allZeroes();
+void S2P_21Kernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * processBlock = b.CreateBasicBlock("s2p21_loop");
+    BasicBlock * write13_zeroes = b.CreateBasicBlock("write13_zeroes");
+    BasicBlock * continue_s2p = b.CreateBasicBlock("continue_s2p");
+    BasicBlock * write5_zeroes = b.CreateBasicBlock("write5_zeroes");
+    BasicBlock * finish_s2p = b.CreateBasicBlock("finish_s2p");
+    BasicBlock * s2pDone = b.CreateBasicBlock("s2p21_done");
+    Constant * const ZERO = b.getSize(0);
+    Constant * ZERO_BLOCK = b.allZeroes();
 
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != kb->getBitBlockWidth()) {
-        numOfBlocks = kb->CreateShl(numOfStrides, kb->getSize(std::log2(getStride()/kb->getBitBlockWidth())));
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
     }
-    kb->CreateBr(processBlock);
+    b.CreateBr(processBlock);
 
-    kb->SetInsertPoint(processBlock);
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
+    b.SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 4); // block offset from the base block, e.g. 0, 1, 2, ...
     blockOffsetPhi->addIncoming(ZERO, entry);
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
     Value * u32byte0[8];
     Value * u32byte1[8];
     Value * u32byte2[8];
     for (unsigned i = 0; i < 8; i++) {
         Value * UTF32units[4];
         for (unsigned j = 0; j < 4; j++) {
-            UTF32units[j] = kb->loadInputStreamPack("codeUnitStream", ZERO, kb->getInt32(4 * i + j), blockOffsetPhi);
+            UTF32units[j] = b.loadInputStreamPack("codeUnitStream", ZERO, b.getInt32(4 * i + j), blockOffsetPhi);
         }
-        Value * u32lo16_0 = kb->hsimd_packl(32, UTF32units[0], UTF32units[1]);
-        Value * u32lo16_1 = kb->hsimd_packl(32, UTF32units[2], UTF32units[3]);
-        Value * u32hi16_0 = kb->hsimd_packh(32, UTF32units[0], UTF32units[1]);
-        Value * u32hi16_1 = kb->hsimd_packh(32, UTF32units[2], UTF32units[3]);
-        u32byte0[i] = kb->hsimd_packl(16, u32lo16_0, u32lo16_1);
-        u32byte1[i] = kb->hsimd_packh(16, u32lo16_0, u32lo16_1);
-        u32byte2[i] = kb->hsimd_packl(16, u32hi16_0, u32hi16_1);
+        Value * u32lo16_0 = b.hsimd_packl(32, UTF32units[0], UTF32units[1]);
+        Value * u32lo16_1 = b.hsimd_packl(32, UTF32units[2], UTF32units[3]);
+        Value * u32hi16_0 = b.hsimd_packh(32, UTF32units[0], UTF32units[1]);
+        Value * u32hi16_1 = b.hsimd_packh(32, UTF32units[2], UTF32units[3]);
+        u32byte0[i] = b.hsimd_packl(16, u32lo16_0, u32lo16_1);
+        u32byte1[i] = b.hsimd_packh(16, u32lo16_0, u32lo16_1);
+        u32byte2[i] = b.hsimd_packl(16, u32hi16_0, u32hi16_1);
     #ifdef VALIDATE_U32
         //  Validation should ensure that none of the high 11 bits are
         //  set for any UTF-32 code unit.   We simply combine the bits
@@ -564,42 +562,42 @@ void S2P_21Kernel::generateMultiBlockLogic(BuilderRef kb, Value * const numOfStr
     Value * anybyte1 = u32byte1[0];
     Value * anybyte2 = u32byte2[0];
     for (unsigned i = 1; i < 8; i++) {
-        anybyte1 = kb->simd_or(anybyte1, u32byte1[i]);
-        anybyte2 = kb->simd_or(anybyte2, u32byte2[i]);
+        anybyte1 = b.simd_or(anybyte1, u32byte1[i]);
+        anybyte2 = b.simd_or(anybyte2, u32byte2[i]);
     }
-    Value * anybyte1or2 = kb->simd_or(anybyte1, anybyte2, "anybyte1or2");
-    s2p(kb, u32byte0, basisbits);
+    Value * anybyte1or2 = b.simd_or(anybyte1, anybyte2, "anybyte1or2");
+    s2p(b, u32byte0, basisbits);
     for (unsigned i = 0; i < 8; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    kb->CreateCondBr(kb->bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
-    kb->SetInsertPoint(write13_zeroes);
+    b.CreateCondBr(b.bitblock_any(anybyte1or2), continue_s2p, write13_zeroes);
+    b.SetInsertPoint(write13_zeroes);
     for (unsigned i = 8; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, ZERO_BLOCK);
     }
     blockOffsetPhi->addIncoming(nextBlk, write13_zeroes);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(continue_s2p);
-    s2p(kb, u32byte1, &basisbits[8]);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(continue_s2p);
+    s2p(b, u32byte1, &basisbits[8]);
     for (unsigned i = 8; i < 16; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    kb->CreateCondBr(kb->bitblock_any(anybyte2), finish_s2p, write5_zeroes);
-    kb->SetInsertPoint(write5_zeroes);
+    b.CreateCondBr(b.bitblock_any(anybyte2), finish_s2p, write5_zeroes);
+    b.SetInsertPoint(write5_zeroes);
     for (unsigned i = 16; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, ZERO_BLOCK);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, ZERO_BLOCK);
     }
     blockOffsetPhi->addIncoming(nextBlk, write5_zeroes);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(finish_s2p);
-    s2p(kb, u32byte2, &basisbits[16]);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(finish_s2p);
+    s2p(b, u32byte2, &basisbits[16]);
     for (unsigned i = 16; i < 21; ++i) {
-        kb->storeOutputStreamBlock("basisBits", kb->getInt32(i), blockOffsetPhi, basisbits[i]);
+        b.storeOutputStreamBlock("basisBits", b.getInt32(i), blockOffsetPhi, basisbits[i]);
     }
-    BasicBlock * const processBlockExit = kb->GetInsertBlock();
+    BasicBlock * const processBlockExit = b.GetInsertBlock();
     blockOffsetPhi->addIncoming(nextBlk, processBlockExit);
-    kb->CreateCondBr(moreToDo, processBlock, s2pDone);
-    kb->SetInsertPoint(s2pDone);
+    b.CreateCondBr(moreToDo, processBlock, s2pDone);
+    b.SetInsertPoint(s2pDone);
 }
 
 void S2P_PabloKernel::generatePabloMethod() {
@@ -624,7 +622,7 @@ void S2P_PabloKernel::generatePabloMethod() {
     }
 }
 
-S2P_PabloKernel::S2P_PabloKernel(BuilderRef b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
+S2P_PabloKernel::S2P_PabloKernel(KernelBuilder & b, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
 : PabloKernel(b, "s2p_pablo" + std::to_string(codeUnitStream->getFieldWidth()),
 // input
 {Binding{"codeUnitStream", codeUnitStream}},

@@ -14,39 +14,39 @@ namespace kernel {
 // programmer. This is less general than the current method but no evidence that being able to reenter the
 // DoBlock method multiple times from the DoFinal block would ever be useful.
 
-#define COMPILER (static_cast<BlockKernelCompiler *>(b->getCompiler()))
+#define COMPILER (static_cast<BlockKernelCompiler *>(b.getCompiler()))
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<KernelCompiler> BlockOrientedKernel::instantiateKernelCompiler(BuilderRef /* b */) const {
+std::unique_ptr<KernelCompiler> BlockOrientedKernel::instantiateKernelCompiler(KernelBuilder & /* b */) const {
     return std::make_unique<BlockKernelCompiler>(const_cast<BlockOrientedKernel *>(this));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateMultiBlockLogic
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockOrientedKernel::generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) {
+void BlockOrientedKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfBlocks) {
     COMPILER->generateMultiBlockLogic(b, numOfBlocks);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief RepeatDoBlockLogic
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockOrientedKernel::RepeatDoBlockLogic(BuilderRef b) {
+void BlockOrientedKernel::RepeatDoBlockLogic(KernelBuilder & b) {
     COMPILER->generateDefaultFinalBlockMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalBlockMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockOrientedKernel::generateFinalBlockMethod(BuilderRef b, llvm::Value * /* remainingItems */) {
+void BlockOrientedKernel::generateFinalBlockMethod(KernelBuilder & b, llvm::Value * /* remainingItems */) {
     COMPILER->generateDefaultFinalBlockMethod(b);
 }
 
 // CONSTRUCTOR
 BlockOrientedKernel::BlockOrientedKernel(
-    BuilderRef b,
+    KernelBuilder & b,
     std::string && kernelName,
     Bindings && stream_inputs,
     Bindings && stream_outputs,

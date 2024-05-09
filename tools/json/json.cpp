@@ -72,8 +72,8 @@ jsonFunctionType json_parsing_gen(
     std::shared_ptr<SourceFile> jsonPabloSrc) {
 
     auto & b = driver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
-    Type * const int64Ty = b->getInt64Ty();
+    Type * const int32Ty = b.getInt32Ty();
+    Type * const int64Ty = b.getInt64Ty();
 
     const auto ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
     Bindings bindingsParallel = {Binding{int64Ty, "errCount"}};

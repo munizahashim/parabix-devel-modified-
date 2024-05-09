@@ -96,7 +96,7 @@ inline bool isNonMatchingSignature(const MDString * const received, const String
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadCachedObjectFile
  ** ------------------------------------------------------------------------------------------------------------- */
-CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel::Kernel * const kernel) noexcept {
+CacheObjectResult ParabixObjectCache::loadCachedObjectFile(kernel::KernelBuilder & b, kernel::Kernel * const kernel) noexcept {
 
     assert (kernel->getModule() == nullptr);
 
@@ -127,9 +127,9 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
         if (kernelBuffer) {
 
             #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-            auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b->getContext());
+            auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b.getContext());
             #else
-            auto loadedFile = getOwningLazyBitcodeModule(std::move(kernelBuffer.get()), b->getContext());
+            auto loadedFile = getOwningLazyBitcodeModule(std::move(kernelBuffer.get()), b.getContext());
             #endif
             // if there was no error when parsing the bitcode
             if (LLVM_LIKELY(loadedFile)) {
@@ -158,7 +158,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(BuilderRef b, kernel:
                     assert ("object cache file returned null module?" && m);
                     // defaults to <path>/<moduleId>.kernel
                     m->setModuleIdentifier(moduleId);
-                    b->setModule(m);
+                    b.setModule(m);
                     kernel->loadCachedKernel(b);
                     mCachedObject.emplace(moduleId, objectBuffer.get().release());
                     mKnownSignatures.emplace(signature, m);

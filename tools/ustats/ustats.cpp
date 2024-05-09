@@ -56,12 +56,12 @@ namespace ustats
         class OutputOccurencesKernel : public pablo::PabloKernel  
         {
         public:
-            OutputOccurencesKernel(BuilderRef b, kernel::StreamSet* streamData)
+            OutputOccurencesKernel(KernelBuilder & b, kernel::StreamSet* streamData)
                 : PabloKernel( b, "OutputOccurences",
                 { kernel::Binding{"streamData", streamData} },
                 {},
                 {},
-                { kernel::Binding{b->getSizeTy(), "occurences"} }
+                { kernel::Binding{b.getSizeTy(), "occurences"} }
                 )
             {}
 
@@ -81,10 +81,10 @@ namespace ustats
 
         UStatsPropertyType generatePipeline(CPUDriver & pxDriver, std::string property)
         {
-            BaseDriver::BuilderRef& builder = pxDriver.getBuilder();
+            auto & b = pxDriver.getBuilder();
             std::unique_ptr<kernel::ProgramBuilder> program = pxDriver.makePipeline(
                 {
-                    kernel::Binding{ builder->getInt32Ty(), "inputFileDescriptor" },
+                    kernel::Binding{ b.getInt32Ty(), "inputFileDescriptor" },
                 },
                 {}
             );

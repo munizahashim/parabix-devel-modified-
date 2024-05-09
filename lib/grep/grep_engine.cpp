@@ -724,16 +724,16 @@ StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) 
 //
 
 void GrepEngine::grepCodeGen() {
-    auto & idb = mGrepDriver.getBuilder();
+    auto & b = mGrepDriver.getBuilder();
 
     auto P = mGrepDriver.makePipeline(
                 // inputs
-                {Binding{idb->getSizeTy(), "useMMap"},
-                Binding{idb->getInt32Ty(), "fileDescriptor"},
-                Binding{idb->getIntAddrTy(), "callbackObject"},
-                Binding{idb->getSizeTy(), "maxCount"}}
+                {Binding{b.getSizeTy(), "useMMap"},
+                Binding{b.getInt32Ty(), "fileDescriptor"},
+                Binding{b.getIntAddrTy(), "callbackObject"},
+                Binding{b.getSizeTy(), "maxCount"}}
                 ,// output
-                {Binding{idb->getInt64Ty(), "countResult"}});
+                {Binding{b.getInt64Ty(), "countResult"}});
 
     Scalar * const useMMap = P->getInputScalar("useMMap");
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
@@ -831,7 +831,7 @@ void EmitMatch::finalize_match(char * buffer_end) {
 
 class GrepColourizationPipeline : public PipelineKernel {
 public:
-    GrepColourizationPipeline(BuilderRef b,
+    GrepColourizationPipeline(KernelBuilder & b,
                               StreamSet * SourceCoords,
                               StreamSet * MatchSpans,
                               StreamSet * Basis,
@@ -854,7 +854,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{b->getIntAddrTy(), "callbackObject", callbackObject}}
+                         , {Binding{b.getIntAddrTy(), "callbackObject", callbackObject}}
                          // output scalars
                          , {}
                          // internally generated streamsets
@@ -1101,23 +1101,23 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
 
 void EmitMatchesEngine::grepCodeGen() {
-    auto & idb = mGrepDriver.getBuilder();
+    auto & b = mGrepDriver.getBuilder();
 
     auto E2 = mGrepDriver.makePipeline(
                     // inputs
-                    {Binding{idb->getInt8PtrTy(), "buffer"},
-                    Binding{idb->getSizeTy(), "length"},
-                    Binding{idb->getIntAddrTy(), "callbackObject"},
-                    Binding{idb->getSizeTy(), "maxCount"}}
+                    {Binding{b.getInt8PtrTy(), "buffer"},
+                    Binding{b.getSizeTy(), "length"},
+                    Binding{b.getIntAddrTy(), "callbackObject"},
+                    Binding{b.getSizeTy(), "maxCount"}}
                     ,// output
-                    {Binding{idb->getInt64Ty(), "countResult"}});
+                    {Binding{b.getInt64Ty(), "countResult"}});
 
     Scalar * const buffer = E2->getInputScalar("buffer");
     Scalar * const length = E2->getInputScalar("length");
     StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
     E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
     grepPipeline(E2, InternalBytes);
-    E2->setOutputScalar("countResult", E2->CreateConstant(idb->getInt64(0)));
+    E2->setOutputScalar("countResult", E2->CreateConstant(b.getInt64(0)));
     mBatchMethod = E2->compile();
 }
 
@@ -1407,7 +1407,7 @@ mMainMethod(nullptr) {
 }
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
-    auto & idb = mGrepDriver.getBuilder();
+    auto & b = mGrepDriver.getBuilder();
 
     re::CC * breakCC = nullptr;
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
@@ -1422,9 +1422,9 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     matchingRE = regular_expression_passes(matchingRE);
     matchingRE = toUTF8(matchingRE);
 
-    auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
-                                       Binding{idb->getSizeTy(), "length"},
-                                       Binding{idb->getIntAddrTy(), "accumulator"}});
+    auto E = mGrepDriver.makePipeline({Binding{b.getInt8PtrTy(), "buffer"},
+                                       Binding{b.getSizeTy(), "length"},
+                                       Binding{b.getIntAddrTy(), "accumulator"}});
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);
@@ -1490,7 +1490,7 @@ InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep:
     InternalMultiSearchEngine(engine->mGrepDriver) {}
 
 void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) {
-    auto & idb = mGrepDriver.getBuilder();
+    auto & b = mGrepDriver.getBuilder();
 
     re::CC * breakCC = nullptr;
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
@@ -1499,9 +1499,9 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         breakCC = re::makeByte(0x0A);
     }
 
-    auto E = mGrepDriver.makePipeline({Binding{idb->getInt8PtrTy(), "buffer"},
-        Binding{idb->getSizeTy(), "length"},
-        Binding{idb->getIntAddrTy(), "accumulator"}});
+    auto E = mGrepDriver.makePipeline({Binding{b.getInt8PtrTy(), "buffer"},
+        Binding{b.getSizeTy(), "length"},
+        Binding{b.getIntAddrTy(), "accumulator"}});
 
     Scalar * const buffer = E->getInputScalar(0);
     Scalar * const length = E->getInputScalar(1);

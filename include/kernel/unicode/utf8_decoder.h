@@ -13,7 +13,7 @@ namespace kernel {
 
 class UTF8_Decoder final: public pablo::PabloKernel {
 public:
-UTF8_Decoder (BuilderRef b, StreamSet * u8_basis, StreamSet * unicode_basis,
+UTF8_Decoder (KernelBuilder & b, StreamSet * u8_basis, StreamSet * unicode_basis,
               pablo::BitMovementMode m = pablo::BitMovementMode::Advance)
     : PabloKernel(b, "UTF8_Decoder_" + pablo::BitMovementMode_string(m), {},
                   {Binding{"unicode_bit", unicode_basis}}), mBitMovement(m) {

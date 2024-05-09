@@ -67,7 +67,7 @@ EncodingInfo encodingScheme1(8,
 ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     auto & b = driver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
@@ -132,7 +132,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
 ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     auto & b = driver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 

@@ -17,17 +17,17 @@ public:
 
 protected:
 
-    llvm::StructType * analyse(BuilderRef b, const PabloBlock * const scope) override;
+    llvm::StructType * analyse(kernel::KernelBuilder & b, const PabloBlock * const scope) override;
 
-    llvm::Value * shortIndexedAdvanceCarryInCarryOut(BuilderRef b, const unsigned shiftAmount, llvm::Value * const strm, llvm::Value * const index_strm) override;
+    llvm::Value * shortIndexedAdvanceCarryInCarryOut(kernel::KernelBuilder & b, const unsigned shiftAmount, llvm::Value * const strm, llvm::Value * const index_strm) override;
 
-    llvm::Value * readCarryInSummary(BuilderRef b) const override;
+    llvm::Value * readCarryInSummary(kernel::KernelBuilder & b) const override;
 
-    void writeCurrentCarryOutSummary(BuilderRef b) override;
+    void writeCurrentCarryOutSummary(kernel::KernelBuilder & b) override;
 
-    void combineCarryOutSummary(BuilderRef b, const unsigned offset) override;
+    void combineCarryOutSummary(kernel::KernelBuilder & b, const unsigned offset) override;
 
-    llvm::Type * getSummaryTypeFromCurrentFrame(BuilderRef b) const override;
+    llvm::Type * getSummaryTypeFromCurrentFrame(kernel::KernelBuilder & b) const override;
 
 };
 

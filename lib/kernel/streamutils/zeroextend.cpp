@@ -17,7 +17,7 @@ inline static bool is_power_2(const unsigned n) {
     return ((n & (n - 1)) == 0) && n;
 }
 
-void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+void ZeroExtend::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
 
     const Binding & input = getInputStreamSetBinding(0);
     const auto inputFieldWidth = input.getFieldWidth();
@@ -40,7 +40,7 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
                            "output field width");
     }
 
-    const auto blockWidth = b->getBitBlockWidth();
+    const auto blockWidth = b.getBitBlockWidth();
 
     if (LLVM_UNLIKELY(notProperFactorOf(outputFieldWidth, blockWidth))) {
         report_fatal_error("ZeroExtend: output field width "
@@ -55,39 +55,39 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
 
     const auto inputVectorSize = (blockWidth / inputFieldWidth); assert (is_power_2(inputVectorSize));
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
-    Value * const ZERO = b->getSize(0);
+    Value * const ZERO = b.getSize(0);
 
-    VectorType * const inputTy = b->fwVectorType(inputFieldWidth);
+    VectorType * const inputTy = b.fwVectorType(inputFieldWidth);
     PointerType * const inputPtrTy = inputTy->getPointerTo();
 
-    VectorType * const outputTy = b->fwVectorType(outputFieldWidth);
+    VectorType * const outputTy = b.fwVectorType(outputFieldWidth);
     PointerType * const outputPtrTy = outputTy->getPointerTo();
 
-    Value * const processed = b->getProcessedItemCount(input.getName());
-    Value * const baseInputPtr = b->CreatePointerCast(b->getRawInputPointer(input.getName(), processed), inputPtrTy);
+    Value * const processed = b.getProcessedItemCount(input.getName());
+    Value * const baseInputPtr = b.CreatePointerCast(b.getRawInputPointer(input.getName(), processed), inputPtrTy);
 
-    Value * const produced = b->getProducedItemCount(output.getName());
-    Value * const baseOutputPtr = b->CreatePointerCast(b->getRawOutputPointer(output.getName(), produced), outputPtrTy);
+    Value * const produced = b.getProducedItemCount(output.getName());
+    Value * const baseOutputPtr = b.CreatePointerCast(b.getRawOutputPointer(output.getName(), produced), outputPtrTy);
 
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const loop = b->CreateBasicBlock("Loop");
-    b->CreateBr(loop);
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const loop = b.CreateBasicBlock("Loop");
+    b.CreateBr(loop);
 
     // TODO: investigate whether using memcpy + temporary stack buffer for could be more efficient
     // than short unaligned loads/stores?
 
-    b->SetInsertPoint(loop);
-    PHINode * const index = b->CreatePHI(sizeTy, 2);
+    b.SetInsertPoint(loop);
+    PHINode * const index = b.CreatePHI(sizeTy, 2);
     index->addIncoming(ZERO, entry);
     std::vector<Value *> inputBuffer(inputFieldWidth);
     // read the values from the input stream
-    Value * const baseInputOffset = b->CreateMul(index, b->getSize(inputFieldWidth));
+    Value * const baseInputOffset = b.CreateMul(index, b.getSize(inputFieldWidth));
     for (unsigned i = 0; i < inputFieldWidth; ++i) {
-        Value * const offset = b->CreateAdd(baseInputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(inputTy, baseInputPtr, offset);
-        inputBuffer[i] = b->CreateAlignedLoad(inputTy, ptr, (inputFieldWidth / CHAR_BIT));
+        Value * const offset = b.CreateAdd(baseInputOffset, b.getSize(i));
+        Value * const ptr = b.CreateGEP(inputTy, baseInputPtr, offset);
+        inputBuffer[i] = b.CreateAlignedLoad(inputTy, ptr, (inputFieldWidth / CHAR_BIT));
     }
 
     std::vector<Value *> outputBuffer(inputFieldWidth * 2);
@@ -106,25 +106,25 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
         const auto halfCount = (count / 2);
 
         for (unsigned i = 0; i < halfCount; ++i) {
-            lowerHalf[i * 2] = b->getInt32(i);
-            lowerHalf[(i * 2) + 1] = b->getInt32(count + i);
+            lowerHalf[i * 2] = b.getInt32(i);
+            lowerHalf[(i * 2) + 1] = b.getInt32(count + i);
         }
         Constant * const LOWER_MASK = ConstantVector::get(lowerHalf);
 
         for (unsigned i = 0; i < halfCount; ++i) {
-            upperHalf[i * 2] = b->getInt32(halfCount + i);
-            upperHalf[(i * 2) + 1] = b->getInt32(count + halfCount + i);
+            upperHalf[i * 2] = b.getInt32(halfCount + i);
+            upperHalf[(i * 2) + 1] = b.getInt32(count + halfCount + i);
         }
         Constant * const UPPER_MASK = ConstantVector::get(upperHalf);
 
-        FixedVectorType * const outputTy = b->fwVectorType(n * 2);
+        FixedVectorType * const outputTy = b.fwVectorType(n * 2);
 
         Constant * const ZEROES = ConstantVector::getNullValue(inputTy);
         for (unsigned i = 0; i < inputBuffer.size(); ++i) {
-            Value * const lower = b->CreateShuffleVector(ZEROES, inputBuffer[i], LOWER_MASK);
-            outputBuffer[i * 2] = b->CreateBitCast(lower, outputTy);
-            Value * const upper = b->CreateShuffleVector(ZEROES, inputBuffer[i], UPPER_MASK);
-            outputBuffer[(i * 2) + 1] = b->CreateBitCast(upper, outputTy);
+            Value * const lower = b.CreateShuffleVector(ZEROES, inputBuffer[i], LOWER_MASK);
+            outputBuffer[i * 2] = b.CreateBitCast(lower, outputTy);
+            Value * const upper = b.CreateShuffleVector(ZEROES, inputBuffer[i], UPPER_MASK);
+            outputBuffer[(i * 2) + 1] = b.CreateBitCast(upper, outputTy);
         }
 
         if (LLVM_LIKELY(outputBuffer.size() == outputFieldWidth)) {
@@ -138,23 +138,23 @@ void ZeroExtend::generateMultiBlockLogic(BuilderRef b, Value * const numOfStride
     }
 
     // write the values to the output stream
-    Value * const baseOutputOffset = b->CreateMul(index, b->getSize(outputFieldWidth));
+    Value * const baseOutputOffset = b.CreateMul(index, b.getSize(outputFieldWidth));
     for (unsigned i = 0; i < outputFieldWidth; ++i) {
-        Value * const offset = b->CreateAdd(baseOutputOffset, b->getSize(i));
-        Value * const ptr = b->CreateGEP(outputTy, baseOutputPtr, offset);
-        b->CreateAlignedStore(outputBuffer[i], ptr, (outputFieldWidth / CHAR_BIT));
+        Value * const offset = b.CreateAdd(baseOutputOffset, b.getSize(i));
+        Value * const ptr = b.CreateGEP(outputTy, baseOutputPtr, offset);
+        b.CreateAlignedStore(outputBuffer[i], ptr, (outputFieldWidth / CHAR_BIT));
     }
 
     // loop until done
-    BasicBlock * const exit = b->CreateBasicBlock("exit");
-    Value * const nextIndex = b->CreateAdd(index, b->getSize(1));
-    Value * const notDone = b->CreateICmpNE(nextIndex, numOfStrides);
-    index->addIncoming(nextIndex, b->GetInsertBlock());
-    b->CreateLikelyCondBr(notDone, loop, exit);
-    b->SetInsertPoint(exit);
+    BasicBlock * const exit = b.CreateBasicBlock("exit");
+    Value * const nextIndex = b.CreateAdd(index, b.getSize(1));
+    Value * const notDone = b.CreateICmpNE(nextIndex, numOfStrides);
+    index->addIncoming(nextIndex, b.GetInsertBlock());
+    b.CreateLikelyCondBr(notDone, loop, exit);
+    b.SetInsertPoint(exit);
 }
 
-ZeroExtend::ZeroExtend(BuilderRef b,
+ZeroExtend::ZeroExtend(KernelBuilder & b,
                        StreamSet * const input, StreamSet * const output)
 : MultiBlockKernel(b, "zeroextend" + std::to_string(input->getFieldWidth()) + "x" + std::to_string(output->getFieldWidth()),
 {Binding{"input", input}},

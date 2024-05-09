@@ -124,14 +124,14 @@ namespace iso_8859_5 {
 
 class TranscoderKernelBuilder : public PabloKernel {
 public:
-    TranscoderKernelBuilder(BuilderRef b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
+    TranscoderKernelBuilder(KernelBuilder & b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
     void generatePabloMethod() override;
 private:
     cc::UnicodeMappableAlphabet & mAlphabet;
 };
 
 TranscoderKernelBuilder::TranscoderKernelBuilder(
-        BuilderRef b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
+        KernelBuilder & b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
 : PabloKernel(b, a.getName() + "ToUnicode",
 {Binding{"sourceBasis", sourceBasis}},
 {Binding{"UnicodeBasis", UnicodeBasis}},
@@ -168,7 +168,7 @@ typedef void (*x8u16FunctionType)(uint32_t fd, const char *);
 x8u16FunctionType generatePipeline(CPUDriver & pxDriver) {
 
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}, Binding{b->getInt8PtrTy(), "outputFileName"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}, Binding{b.getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);

@@ -126,7 +126,7 @@ SelectOperation Intersect(std::vector<StreamSet *> sets) {
     return __selops::__selop_init(__selops::__op::__intersect, std::move(sets));
 }
 
-StreamSelect::StreamSelect(BuilderRef b, StreamSet * output, SelectOperation operation)
+StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
 : BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operation) == output->getNumElements());
@@ -142,7 +142,7 @@ StreamSelect::StreamSelect(BuilderRef b, StreamSet * output, SelectOperation ope
     }
 }
 
-StreamSelect::StreamSelect(BuilderRef b, StreamSet * output, SelectOperationList operations)
+StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperationList operations)
 : BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operations) == output->getNumElements());
@@ -153,14 +153,14 @@ StreamSelect::StreamSelect(BuilderRef b, StreamSet * output, SelectOperationList
     }
 }
 
-void StreamSelect::generateDoBlockMethod(BuilderRef b) {
-    std::vector<Value *> selectedSet = streamutils::loadInputSelectionsBlock(b, mOperations, b->getSize(0));
+void StreamSelect::generateDoBlockMethod(KernelBuilder & b) {
+    std::vector<Value *> selectedSet = streamutils::loadInputSelectionsBlock(b, mOperations, b.getSize(0));
     for (unsigned i = 0; i < selectedSet.size(); i++) {
-        b->storeOutputStreamBlock("output", b->getInt32(i), selectedSet[i]);
+        b.storeOutputStreamBlock("output", b.getInt32(i), selectedSet[i]);
     }
 }
 
-IStreamSelect::IStreamSelect(BuilderRef b, StreamSet * output, SelectOperation operation)
+IStreamSelect::IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
 : MultiBlockKernel(b, "IStreamSelect" + streamutils::genSignature(operation),
     {},
     {{"output", output, BoundedRate(0, 1)}},
@@ -184,35 +184,35 @@ IStreamSelect::IStreamSelect(BuilderRef b, StreamSet * output, SelectOperation o
     setStride(1);
 }
 
-void IStreamSelect::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    BasicBlock * const block_Entry = b->GetInsertBlock();
-    BasicBlock * const block_Loop = b->CreateBasicBlock("loop");
-    BasicBlock * const block_Exit = b->CreateBasicBlock("exit");
-    Value * const initialStride = b->getProducedItemCount("output");
-    b->CreateCondBr(b->isFinal(), block_Exit, block_Loop);
+void IStreamSelect::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * const block_Entry = b.GetInsertBlock();
+    BasicBlock * const block_Loop = b.CreateBasicBlock("loop");
+    BasicBlock * const block_Exit = b.CreateBasicBlock("exit");
+    Value * const initialStride = b.getProducedItemCount("output");
+    b.CreateCondBr(b.isFinal(), block_Exit, block_Loop);
 
-    b->SetInsertPoint(block_Loop);
-    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
-    strideNo->addIncoming(b->getSize(0), block_Entry);
+    b.SetInsertPoint(block_Loop);
+    PHINode * const strideNo = b.CreatePHI(b.getSizeTy(), 2);
+    strideNo->addIncoming(b.getSize(0), block_Entry);
     uint32_t outIdx = 0;
-    Value * const absPos = b->CreateAdd(strideNo, initialStride);
-    IntegerType * const fieldTy = b->getIntNTy(mFieldWidth);
+    Value * const absPos = b.CreateAdd(strideNo, initialStride);
+    IntegerType * const fieldTy = b.getIntNTy(mFieldWidth);
     for (auto const & binding : mOperation.bindings) {
         auto const & name = binding.first;
         for (auto const & idx : binding.second) {
-            Value * const ptr = b->getRawInputPointer(name, b->getInt32(idx), absPos);
-            Value * const val = b->CreateLoad(fieldTy, ptr);
-            b->CreateStore(val, b->getRawOutputPointer("output", b->getInt32(outIdx), absPos));
+            Value * const ptr = b.getRawInputPointer(name, b.getInt32(idx), absPos);
+            Value * const val = b.CreateLoad(fieldTy, ptr);
+            b.CreateStore(val, b.getRawOutputPointer("output", b.getInt32(outIdx), absPos));
             outIdx++;
         }
-        b->setProcessedItemCount(name, b->CreateAdd(b->getProcessedItemCount(name), b->getSize(1)));
+        b.setProcessedItemCount(name, b.CreateAdd(b.getProcessedItemCount(name), b.getSize(1)));
     }
-    b->setProducedItemCount("output", b->CreateAdd(b->getProducedItemCount("output"), b->getSize(1)));
-    Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
+    b.setProducedItemCount("output", b.CreateAdd(b.getProducedItemCount("output"), b.getSize(1)));
+    Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
     strideNo->addIncoming(nextStrideNo, block_Loop);
-    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), block_Loop, block_Exit);
+    b.CreateCondBr(b.CreateICmpNE(nextStrideNo, numOfStrides), block_Loop, block_Exit);
 
-    b->SetInsertPoint(block_Exit);
+    b.SetInsertPoint(block_Exit);
 }
 
 
@@ -320,15 +320,14 @@ mapOperationsToStreamNames(SelectOperationList const & operations) {
     return std::make_pair(mapped, namingMap);
 }
 
-using BuilderRef = const std::unique_ptr<KernelBuilder> &;
-std::vector<Value *> loadInputSelectionsBlock(BuilderRef b, SelectedInputList ops, Value * blockOffset) {
+std::vector<Value *> loadInputSelectionsBlock(KernelBuilder & b, SelectedInputList ops, Value * blockOffset) {
     std::vector<Value *> selectedSet;
     for (auto const & selop : ops) {
         if (selop.operation == __selops::__op::__select) {
             for (auto const & binding : selop.bindings) {
                 std::string const & iStreamSetName = binding.first;
                 for (auto const & index : binding.second) {
-                    Value * block = b->loadInputStreamBlock(iStreamSetName, b->getInt32(index), blockOffset);
+                    Value * block = b.loadInputStreamBlock(iStreamSetName, b.getInt32(index), blockOffset);
                     selectedSet.push_back(block);
                 }
             }
@@ -337,11 +336,11 @@ std::vector<Value *> loadInputSelectionsBlock(BuilderRef b, SelectedInputList op
             for (auto const & binding : selop.bindings) {
                 std::string const & iStreamSetName = binding.first;
                 for (auto const & index : binding.second) {
-                    Value * const block = b->loadInputStreamBlock(iStreamSetName, b->getInt32(index), blockOffset);
+                    Value * const block = b.loadInputStreamBlock(iStreamSetName, b.getInt32(index), blockOffset);
                     if (accumulator == nullptr) {
                         accumulator = block;
                     } else {
-                        accumulator = b->simd_or(accumulator, block);
+                        accumulator = b.simd_or(accumulator, block);
                     }
                 }
             }
@@ -351,11 +350,11 @@ std::vector<Value *> loadInputSelectionsBlock(BuilderRef b, SelectedInputList op
             for (auto const & binding : selop.bindings) {
                 std::string const & iStreamSetName = binding.first;
                 for (auto const & index : binding.second) {
-                    Value * const block = b->loadInputStreamBlock(iStreamSetName, b->getInt32(index), blockOffset);
+                    Value * const block = b.loadInputStreamBlock(iStreamSetName, b.getInt32(index), blockOffset);
                     if (accumulator == nullptr) {
                         accumulator = block;
                     } else {
-                        accumulator = b->simd_and(accumulator, block);
+                        accumulator = b.simd_and(accumulator, block);
                     }
                 }
             }

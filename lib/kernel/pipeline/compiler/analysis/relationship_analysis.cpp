@@ -267,7 +267,7 @@ void addTruncatedStreamSetContraints() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPopCountKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & vertex) {
+void addPopCountKernels(KernelBuilder & b, Kernels & kernels, KernelVertexVec & vertex) {
 
     struct Edge {
         CountingType    Type;
@@ -360,9 +360,9 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
         return;
     }
 
-    BaseDriver & driver = reinterpret_cast<BaseDriver &>(b->getDriver());
+    BaseDriver & driver = reinterpret_cast<BaseDriver &>(b.getDriver());
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     assert (n > numOfKernels);
 
@@ -372,7 +372,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
 
         size_t strideLength = 0;
         #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
-        strideLength = b->getBitBlockWidth();
+        strideLength = b.getBitBlockWidth();
         #endif
         CountingType type = CountingType::Unknown;
         for (const auto e : make_iterator_range(out_edges(i, H))) {
@@ -502,7 +502,7 @@ void addPopCountKernels(BuilderRef b, Kernels & kernels, KernelVertexVec & verte
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief combineDuplicateKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void combineDuplicateKernels(BuilderRef /* b */) {
+void combineDuplicateKernels(KernelBuilder & /* b */) {
 
     using StreamSetVector = std::vector<std::pair<unsigned, StreamSetPort>>;
     using ScalarVector = std::vector<unsigned>;
@@ -824,7 +824,7 @@ TruncatedStreamSetVec           TruncatedStreamSets;
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitialPipelineGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::generateInitialPipelineGraph(BuilderRef b) {
+void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
     RelationshipGraphBuilder B(Relationships, *this);
 

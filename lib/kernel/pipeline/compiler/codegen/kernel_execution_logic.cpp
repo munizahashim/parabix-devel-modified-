@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeKernelCall
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeKernelCall(BuilderRef b) {
+void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     // TODO: add MProtect to buffers and their handles.
 
@@ -20,17 +20,17 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     #endif
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::WRITE);
+        b.CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mUsesIllustrator)) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
         // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
-        Value * const intSegNoPtr = b->getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX).first;
-        mInternallySynchronizedSubsegmentNumber = b->CreateLoad(b->getSizeTy(), intSegNoPtr);
-        Value * const nextSegNo = b->CreateAdd(mInternallySynchronizedSubsegmentNumber, b->getSize(1));
-        b->CreateStore(nextSegNo, intSegNoPtr);
+        Value * const intSegNoPtr = b.getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX).first;
+        mInternallySynchronizedSubsegmentNumber = b.CreateLoad(b.getSizeTy(), intSegNoPtr);
+        Value * const nextSegNo = b.CreateAdd(mInternallySynchronizedSubsegmentNumber, b.getSize(1));
+        b.CreateStore(nextSegNo, intSegNoPtr);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "# " + prefix + " executing subsegment number %" PRIu64, mInternallySynchronizedSubsegmentNumber);
         #endif
@@ -54,7 +54,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         // output data that wouldn't be observed in a single-threaded run.
 
         mHasMoreInput = hasMoreInput(b);
-        Value * waitToRelease = b->CreateOr(mHasMoreInput, b->CreateIsNotNull(mIsFinalInvocation));
+        Value * waitToRelease = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
 
         const auto prefix = makeKernelName(mKernelId);
 
@@ -64,20 +64,20 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         #endif
 
         BasicBlock * const releaseSyncLock =
-            b->CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
+            b.CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
         BasicBlock * const resumeKernelExecution =
-            b->CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
-        b->CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
+            b.CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
+        b.CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
 
-        b->SetInsertPoint(releaseSyncLock);
+        b.SetInsertPoint(releaseSyncLock);
 
         if (mCurrentKernelIsStateFree) {
             writeInternalProcessedAndProducedItemCounts(b, false);
         }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
 
-        b->CreateBr(resumeKernelExecution);
-        b->SetInsertPoint(resumeKernelExecution);
+        b.CreateBr(resumeKernelExecution);
+        b.SetInsertPoint(resumeKernelExecution);
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -99,21 +99,21 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         const auto prefix = makeKernelName(mKernelId);
 
-        IntegerType * const sizeTy = b->getSizeTy();
+        IntegerType * const sizeTy = b.getSizeTy();
 
-        ConstantInt * const sz_ZERO = b->getSize(0);
-        ConstantInt * const sz_ONE = b->getSize(1);
+        ConstantInt * const sz_ZERO = b.getSize(0);
+        ConstantInt * const sz_ONE = b.getSize(1);
 
-        Value * const isFinal = b->CreateICmpEQ(mNumOfLinearStrides, sz_ZERO);
+        Value * const isFinal = b.CreateICmpEQ(mNumOfLinearStrides, sz_ZERO);
 
-        BasicBlock * const entry = b->GetInsertBlock();
-        individualStrideLoop = b->CreateBasicBlock(prefix + "_determineNextSingleStrideArgs", mKernelCompletionCheck);
-        BasicBlock * const individualStrideBody = b->CreateBasicBlock(prefix + "_individualStrideBody", mKernelCompletionCheck);
+        BasicBlock * const entry = b.GetInsertBlock();
+        individualStrideLoop = b.CreateBasicBlock(prefix + "_determineNextSingleStrideArgs", mKernelCompletionCheck);
+        BasicBlock * const individualStrideBody = b.CreateBasicBlock(prefix + "_individualStrideBody", mKernelCompletionCheck);
 
-        b->CreateUnlikelyCondBr(isFinal, individualStrideBody, individualStrideLoop);
+        b.CreateUnlikelyCondBr(isFinal, individualStrideBody, individualStrideLoop);
 
-        b->SetInsertPoint(individualStrideLoop);
-        currentIndividualStrideIndexPhi = b->CreatePHI(b->getSizeTy(), 2, prefix + "_currentStridePhi");
+        b.SetInsertPoint(individualStrideLoop);
+        currentIndividualStrideIndexPhi = b.CreatePHI(b.getSizeTy(), 2, prefix + "_currentStridePhi");
         currentIndividualStrideIndexPhi->addIncoming(sz_ZERO, entry);
 
         const auto indeg = in_degree(mKernelId, mBufferGraph);
@@ -123,12 +123,12 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
-            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi = b.CreatePHI(sizeTy, 2);
             phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
             outerProcessedPhis[br.Port.Number] = phi;
             mCurrentProcessedItemCountPhi[br.Port] = phi;
             if (LLVM_UNLIKELY(br.isDeferred())) {
-                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                PHINode * const phi = b.CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
                 outerProcessedDeferredPhis[br.Port.Number] = phi;
                 mCurrentProcessedDeferredItemCountPhi[br.Port] = phi;
@@ -141,12 +141,12 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
-            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi = b.CreatePHI(sizeTy, 2);
             phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
             outerProducedPhis[br.Port.Number] = phi;
             mCurrentProducedItemCountPhi[br.Port] = phi;
             if (LLVM_UNLIKELY(br.isDeferred())) {
-                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                PHINode * const phi = b.CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
                 outerProducedDeferredPhis[br.Port.Number] = phi;
                 mCurrentProducedDeferredItemCountPhi[br.Port] = phi;
@@ -166,15 +166,15 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             linearOutputItems[br.Port.Number] = calculateNumOfLinearItems(b, br, sz_ONE, "writeKernelCall");
         }
 
-        Value * const nextStrideIndex = b->CreateAdd(currentIndividualStrideIndexPhi, b->getSize(1));
-        BasicBlock * const oneStrideArgsExit = b->GetInsertBlock();
-        b->CreateBr(individualStrideBody);
+        Value * const nextStrideIndex = b.CreateAdd(currentIndividualStrideIndexPhi, b.getSize(1));
+        BasicBlock * const oneStrideArgsExit = b.GetInsertBlock();
+        b.CreateBr(individualStrideBody);
 
-        b->SetInsertPoint(individualStrideBody);
-        nextIndividualStrideIndexPhi = b->CreatePHI(sizeTy, 2, prefix + "_nextStridePhi");
+        b.SetInsertPoint(individualStrideBody);
+        nextIndividualStrideIndexPhi = b.CreatePHI(sizeTy, 2, prefix + "_nextStridePhi");
         nextIndividualStrideIndexPhi->addIncoming(sz_ZERO, entry);
         nextIndividualStrideIndexPhi->addIncoming(nextStrideIndex, oneStrideArgsExit);
-        PHINode * const numOfInvokedStrides = b->CreatePHI(sizeTy, 2, prefix + "_numOfInvokedStrides");
+        PHINode * const numOfInvokedStrides = b.CreatePHI(sizeTy, 2, prefix + "_numOfInvokedStrides");
         numOfInvokedStrides->addIncoming(sz_ZERO, entry);
         numOfInvokedStrides->addIncoming(sz_ONE, oneStrideArgsExit);
         mCurrentNumOfLinearStrides = numOfInvokedStrides;
@@ -182,25 +182,25 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
         if (mCurrentFixedRateFactor) {
             const auto stride = mKernel->getStride() * mFixedRateLCM;
             assert (stride.denominator() == 1);
-            PHINode * const phi = b->CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
+            PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_fixedRateFactorPhi");
             phi->addIncoming(mCurrentFixedRateFactor, entry);
-            phi->addIncoming(b->getSize(stride.numerator()), oneStrideArgsExit);
+            phi->addIncoming(b.getSize(stride.numerator()), oneStrideArgsExit);
             mCurrentFixedRateFactor = phi;
         }
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
-            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi = b.CreatePHI(sizeTy, 2);
             phi->addIncoming(mAlreadyProcessedPhi[br.Port], entry);
             phi->addIncoming(outerProcessedPhis[br.Port.Number], oneStrideArgsExit);
             mCurrentProcessedItemCountPhi[br.Port] = phi;
             if (LLVM_UNLIKELY(br.isDeferred())) {
-                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                PHINode * const phi = b.CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProcessedDeferredPhi[br.Port], entry);
                 phi->addIncoming(outerProcessedDeferredPhis[br.Port.Number], oneStrideArgsExit);
                 mCurrentProcessedDeferredItemCountPhi[br.Port] = phi;
             }
-            PHINode * const phi2 = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi2 = b.CreatePHI(sizeTy, 2);
             phi2->addIncoming(mCurrentLinearInputItems[br.Port], entry);
             phi2->addIncoming(linearInputItems[br.Port.Number], oneStrideArgsExit);
             mCurrentLinearInputItems[br.Port] = phi2;
@@ -208,17 +208,17 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
-            PHINode * const phi = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi = b.CreatePHI(sizeTy, 2);
             phi->addIncoming(mAlreadyProducedPhi[br.Port], entry);
             phi->addIncoming(outerProducedPhis[br.Port.Number], oneStrideArgsExit);
             mCurrentProducedItemCountPhi[br.Port] = phi;
             if (LLVM_UNLIKELY(br.isDeferred())) {
-                PHINode * const phi = b->CreatePHI(sizeTy, 2);
+                PHINode * const phi = b.CreatePHI(sizeTy, 2);
                 phi->addIncoming(mAlreadyProducedDeferredPhi[br.Port], entry);
                 phi->addIncoming(outerProducedDeferredPhis[br.Port.Number], oneStrideArgsExit);
                 mCurrentProducedDeferredItemCountPhi[br.Port] = phi;
             }
-            PHINode * const phi2 = b->CreatePHI(sizeTy, 2);
+            PHINode * const phi2 = b.CreatePHI(sizeTy, 2);
             phi2->addIncoming(mCurrentLinearOutputItems[br.Port], entry);
             phi2->addIncoming(linearOutputItems[br.Port.Number], oneStrideArgsExit);
             mCurrentLinearOutputItems[br.Port] = phi2;
@@ -237,15 +237,15 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
-        BasicBlock * const invokeOk = b->CreateBasicBlock(prefix + "_invokeOk", mKernelCompletionCheck);        
+        BasicBlock * const invokeOk = b.CreateBasicBlock(prefix + "_invokeOk", mKernelCompletionCheck);
         #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
-        doSegmentRetVal = b->CreateInvoke(doSegFuncType, doSegment, invokeOk, mRethrowException, args);
+        doSegmentRetVal = b.CreateInvoke(doSegFuncType, doSegment, invokeOk, mRethrowException, args);
         #else
-        doSegmentRetVal = b->CreateInvoke(doSegment, invokeOk, mRethrowException, args);
+        doSegmentRetVal = b.CreateInvoke(doSegment, invokeOk, mRethrowException, args);
         #endif
-        b->SetInsertPoint(invokeOk);
+        b.SetInsertPoint(invokeOk);
     } else {
-        doSegmentRetVal = b->CreateCall(doSegFuncType, doSegment, args);
+        doSegmentRetVal = b.CreateCall(doSegFuncType, doSegment, args);
     }
 
     updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
@@ -271,9 +271,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 
     if (LLVM_UNLIKELY(mExecuteStridesIndividually)) {
 
-        BasicBlock * const individualStrideBodyExit = b->GetInsertBlock();
+        BasicBlock * const individualStrideBodyExit = b.GetInsertBlock();
         const auto prefix = makeKernelName(mKernelId);
-        BasicBlock * const individualStrideLoopExit = b->CreateBasicBlock(prefix + "_individualStrideExit", mKernelCompletionCheck);
+        BasicBlock * const individualStrideLoopExit = b.CreateBasicBlock(prefix + "_individualStrideExit", mKernelCompletionCheck);
 
         currentIndividualStrideIndexPhi->addIncoming(nextIndividualStrideIndexPhi, individualStrideBodyExit);
 
@@ -311,9 +311,9 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
                     // Normally when a kernel terminates early, we just read the values in the termination block. Since we may need that
                     // value here, however, read it here.
                     if (mKernelCanTerminateEarly && isCountableType(mReturnedProducedItemCountPtr[br.Port], getOutputBinding(br.Port))) {
-                        Value * finalItemCount = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[br.Port]);
-                        Value * const isFinal = b->CreateICmpNE(mTerminatedExplicitly, b->getSize(0));
-                        produced = b->CreateSelect(isFinal, finalItemCount, produced);
+                        Value * finalItemCount = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[br.Port]);
+                        Value * const isFinal = b.CreateICmpNE(mTerminatedExplicitly, b.getSize(0));
+                        produced = b.CreateSelect(isFinal, finalItemCount, produced);
                     }
 
                     illustrateStreamSet(b, target(e, mBufferGraph), initial, produced);
@@ -321,17 +321,17 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
             }
         }
 
-        Value * done = b->CreateICmpEQ(nextIndividualStrideIndexPhi, mNumOfLinearStrides);
+        Value * done = b.CreateICmpEQ(nextIndividualStrideIndexPhi, mNumOfLinearStrides);
         if (mKernelCanTerminateEarly) {
-            done = b->CreateOr(done, b->CreateICmpNE(doSegmentRetVal, b->getSize(0)));
+            done = b.CreateOr(done, b.CreateICmpNE(doSegmentRetVal, b.getSize(0)));
         }
-        b->CreateCondBr(done, individualStrideLoopExit, individualStrideLoop);
+        b.CreateCondBr(done, individualStrideLoopExit, individualStrideLoop);
 
-        b->SetInsertPoint(individualStrideLoopExit);
+        b.SetInsertPoint(individualStrideLoopExit);
     }
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::NONE);
+        b.CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::NONE);
     }
 
 }
@@ -339,7 +339,7 @@ void PipelineCompiler::writeKernelCall(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief buildKernelCallArgumentList
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) {
+void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args) {
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration, Kernel::getDoSegmentFields,
     // Kernel::setDoSegmentProperties, Kernel::getDoSegmentProperties and PipelineKernel::addOrDeclareMainFunction
@@ -400,11 +400,11 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
         }
         if (forceAddressability || isAddressable(binding)) {
             if (LLVM_UNLIKELY(numOfAddressableItemCount == mAddressableItemCountPtr.size())) {
-                auto aic = b->CreateAllocaAtEntryPoint(b->getSizeTy());
+                auto aic = b.CreateAllocaAtEntryPoint(b.getSizeTy());
                 mAddressableItemCountPtr.push_back(aic);
             }
             ptr = mAddressableItemCountPtr[numOfAddressableItemCount++];
-            b->CreateStore(itemCount, ptr);
+            b.CreateStore(itemCount, ptr);
             addNextArg(ptr);
         } else if (isCountable(binding)) {
             addNextArg(itemCount);
@@ -420,13 +420,13 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
     assert (mKernelThreadLocalHandle == nullptr || !mKernelThreadLocalHandle->getType()->isEmptyTy());
     if (LLVM_UNLIKELY(mKernelThreadLocalHandle)) {
         if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
-            ConstantInt * i32_ZERO = b->getInt32(0);
+            ConstantInt * i32_ZERO = b.getInt32(0);
             FixedArray<Value *, 3> offset;
             offset[0] = i32_ZERO;
             offset[1] = i32_ZERO;
             offset[2] = i32_ZERO;
-            Value * const branchTypePtr = b->CreateGEP(mKernel->getThreadLocalStateType(), mKernelThreadLocalHandle, offset);
-            b->CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
+            Value * const branchTypePtr = b.CreateGEP(mKernel->getThreadLocalStateType(), mKernelThreadLocalHandle, offset);
+            b.CreateStore(mOptimizationBranchSelectedBranch, branchTypePtr);
         }
         addNextArg(mKernelThreadLocalHandle);
     }
@@ -438,7 +438,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
         addNextArg(mCurrentFixedRateFactor);
     }
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
 
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const StreamSetPort inputPort{PortType::Input, i};
@@ -458,7 +458,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
             #endif
-            addNextArg(b->CreatePointerCast(addr, voidPtrTy));
+            addNextArg(b.CreatePointerCast(addr, voidPtrTy));
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
                 Value * isExhausted = nullptr;
                 if (mExhaustedInputPortPhi[inputPort]) {
@@ -476,8 +476,8 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
                 Value * inputItems = mLinearInputItemsPhi[inputPort]; assert (inputItems);
                 if (rt.isDeferred()) {
                     const auto prefix = makeBufferName(mKernelId, inputPort);
-                    Value * diff = b->CreateSub(mCurrentProcessedItemCountPhi[inputPort], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
-                    inputItems = b->CreateAdd(inputItems, diff);
+                    Value * diff = b.CreateSub(mCurrentProcessedItemCountPhi[inputPort], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
+                    inputItems = b.CreateAdd(inputItems, diff);
                 }
                 addNextArg(inputItems);
             }
@@ -499,26 +499,26 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
         Value * produced = mCurrentProducedItemCountPhi[rt.Port];
 
         if (LLVM_UNLIKELY(rt.isShared())) {
-            addNextArg(b->CreatePointerCast(buffer->getHandle(), voidPtrTy));
+            addNextArg(b.CreatePointerCast(buffer->getHandle(), voidPtrTy));
         } else if (LLVM_UNLIKELY(rt.isManaged())) {
             if (LLVM_UNLIKELY(numOfVirtualBaseAddresses == mVirtualBaseAddressPtr.size())) {
-                auto vba = b->CreateAllocaAtEntryPoint(voidPtrTy);
+                auto vba = b.CreateAllocaAtEntryPoint(voidPtrTy);
                 mVirtualBaseAddressPtr.push_back(vba);
             }
             Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
-            ptr = b->CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
-            b->CreateStore(buffer->getBaseAddress(b.get()), ptr);
+            ptr = b.CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
+            b.CreateStore(buffer->getBaseAddress(b), ptr);
             #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b.get()));
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b));
             #endif
-            addNextArg(b->CreatePointerCast(ptr, voidPtrPtrTy));
+            addNextArg(b.CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
         } else {
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
             #endif
-            addNextArg(b->CreatePointerCast(vba, voidPtrTy));
+            addNextArg(b.CreatePointerCast(vba, voidPtrTy));
         }
 
         mReturnedProducedItemCountPtr[rt.Port] = addItemCountArg(rt, rt.isDeferred() || mKernelCanTerminateEarly, produced);
@@ -537,7 +537,7 @@ void PipelineCompiler::buildKernelCallArgumentList(BuilderRef b, ArgVec & args) 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
+void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -547,7 +547,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
     Value * rejectedTermSignal = nullptr;
     if (mustExplicitlyTerminate) {
         assert (mTerminatedExplicitly && !mCurrentKernelIsStateFree);
-        rejectedTermSignal = b->CreateAnd(b->CreateIsNull(mCurrentNumOfLinearStrides), b->CreateIsNull(mTerminatedExplicitly));
+        rejectedTermSignal = b.CreateAnd(b.CreateIsNull(mCurrentNumOfLinearStrides), b.CreateIsNull(mTerminatedExplicitly));
     }
 
     size_t principalProducerPartId = 0;
@@ -577,7 +577,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             if (LLVM_UNLIKELY(mustExplicitlyTerminate && port.TransitiveAdd > 0 && rate.isFixed())) {
                 inputItems = revertTransitiveAddCalculation(b, rate, inputItems, rejectedTermSignal);
             }
-            processed = b->CreateAdd(mCurrentProcessedItemCountPhi[inputPort], inputItems);
+            processed = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], inputItems);
 
             // If we have a principal input, that input may be longer than the other fixed rate
             // streamsets. We need to correct for this to ensure the processed item count is
@@ -590,39 +590,39 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                 const auto streamSet = source(inputEdge, mBufferGraph);
                 const auto partId = KernelPartitionId[parent(streamSet, mBufferGraph)];
                 if (partId != principalProducerPartId) {
-                    processed = b->CreateUMin(processed, mLocallyAvailableItems[streamSet]);
+                    processed = b.CreateUMin(processed, mLocallyAvailableItems[streamSet]);
                 }
             }
 
             assert (input.isDeferred() ^ (mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr));
             if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                 assert (mReturnedProcessedItemCountPtr[inputPort]);
-                mProcessedDeferredItemCount[inputPort] = b->CreateLoad(b->getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
+                mProcessedDeferredItemCount[inputPort] = b.CreateLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, inputPort);
                 debugPrint(b, prefix + "_processed_deferred' = %" PRIu64, mProcessedDeferredItemCount[inputPort]);
                 #endif
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     Value * const deferred = mProcessedDeferredItemCount[inputPort];
-                    Value * const isDeferred = b->CreateICmpULE(deferred, processed);
+                    Value * const isDeferred = b.CreateICmpULE(deferred, processed);
                     Value * const isFinal = mIsFinalInvocationPhi;
                     // TODO: workaround now for ScanMatch; if it ends with a match on a
                     // block-aligned boundary the start of the next match seems to be one
                     // after? Revise the logic to only perform a 0-item final block on
                     // kernels that may produce Add'ed data? Define the final/non-final
                     // contract first.
-                    Value * const isDeferredOrFinal = b->CreateOr(isDeferred, b->CreateIsNotNull(isFinal));
-                    b->CreateAssert(isDeferredOrFinal,
+                    Value * const isDeferredOrFinal = b.CreateOr(isDeferred, b.CreateIsNotNull(isFinal));
+                    b.CreateAssert(isDeferredOrFinal,
                                     "%s.%s: deferred processed item count (%" PRIu64 ") "
                                     "exceeds non-deferred (%" PRIu64 ")",
                                     mCurrentKernelName,
-                                    b->GetString(input.getName()),
+                                    b.GetString(input.getName()),
                                     deferred, processed);
                 }
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProcessedItemCountPtr[inputPort]);
-            processed = b->CreateLoad(b->getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
+            processed = b.CreateLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -644,36 +644,36 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
         const Binding & output = getOutputBinding(outputPort);
         const ProcessingRate & rate = output.getRate();
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
-            produced = b->CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
+            produced = b.CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
             assert (output.isDeferred() ^ (mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr));
             if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                 assert (mReturnedProducedItemCountPtr[outputPort]);
-                mProducedDeferredItemCount[outputPort] = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
+                mProducedDeferredItemCount[outputPort] = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, outputPort);
                 debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProcessedDeferredItemCount[outputPort]);
                 #endif
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     Value * const deferred = mProducedDeferredItemCount[outputPort];
-                    Value * const isDeferred = b->CreateICmpULE(deferred, produced);
+                    Value * const isDeferred = b.CreateICmpULE(deferred, produced);
                     Value * const isFinal = mIsFinalInvocationPhi;
                     // TODO: workaround now for ScanMatch; if it ends with a match on a
                     // block-aligned boundary the start of the next match seems to be one
                     // after? Revise the logic to only perform a 0-item final block on
                     // kernels that may produce Add'ed data? Define the final/non-final
                     // contract first.
-                    Value * const isDeferredOrFinal = b->CreateOr(isDeferred, b->CreateIsNotNull(isFinal));
-                    b->CreateAssert(isDeferredOrFinal,
+                    Value * const isDeferredOrFinal = b.CreateOr(isDeferred, b.CreateIsNotNull(isFinal));
+                    b.CreateAssert(isDeferredOrFinal,
                                     "%s.%s: deferred processed item count (%" PRIu64 ") "
                                     "exceeds non-deferred (%" PRIu64 ")",
                                     mCurrentKernelName,
-                                    b->GetString(output.getName()),
+                                    b.GetString(output.getName()),
                                     deferred, produced);
                 }
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProducedItemCountPtr[outputPort]);
-            produced = b->CreateLoad(b->getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
+            produced = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
         } else if (rate.isRelative()) {
             auto getRefPort = [&] () {
                 const auto refPort = getReference(outputPort);
@@ -685,9 +685,9 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
             };
             const BufferPort & ref = mBufferGraph[getRefPort()];
             if (mProducedDeferredItemCount[ref.Port]) {
-                mProducedDeferredItemCount[outputPort] = b->CreateMulRational(mProducedDeferredItemCount[ref.Port], rate.getRate());
+                mProducedDeferredItemCount[outputPort] = b.CreateMulRational(mProducedDeferredItemCount[ref.Port], rate.getRate());
             }
-            produced = b->CreateMulRational(mProducedItemCount[ref.Port], rate.getRate());
+            produced = b.CreateMulRational(mProducedItemCount[ref.Port], rate.getRate());
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -708,14 +708,14 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (LLVM_LIKELY(bn.isInternal() && bn.isOwned() && bn.isNonThreadLocal())) {
                     Value * const writable = getWritableOutputItems(b, mBufferGraph[port]);
-                    Value * const delta = b->CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
-                    Value * const withinCapacity = b->CreateICmpULE(delta, writable);
+                    Value * const delta = b.CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
+                    Value * const withinCapacity = b.CreateICmpULE(delta, writable);
                     const Binding & output = getOutputBinding(outputPort);
-                    b->CreateAssert(withinCapacity,
+                    b.CreateAssert(withinCapacity,
                                     "%s.%s: reported produced item count delta (%" PRIu64 ") "
                                     "exceeds writable items (%" PRIu64 ")",
                                     mCurrentKernelName,
-                                    b->GetString(output.getName()),
+                                    b.GetString(output.getName()),
                                     delta, writable);
                 }
             }
@@ -728,7 +728,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeInternalProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b, const bool atTermination) {
+void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -739,13 +739,13 @@ void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(BuilderRef b,
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const auto inputPort = StreamSetPort{PortType::Input, i};
         Value * const ic = atTermination ? mProcessedItemCountAtTerminationPhi[inputPort] : mProcessedItemCount[inputPort];
-        b->CreateStore(ic, mProcessedItemCountPtr[inputPort]);
+        b.CreateStore(ic, mProcessedItemCountPtr[inputPort]);
     }
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto outputPort = StreamSetPort{PortType::Output, i};
         Value * const ic = atTermination ? mProducedAtTermination[outputPort] : mProducedItemCount[outputPort];
-        b->CreateStore(ic, mProducedItemCountPtr[outputPort]);
+        b.CreateStore(ic, mProducedItemCountPtr[outputPort]);
     }
 
 }

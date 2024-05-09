@@ -45,14 +45,13 @@ class ParabixObjectCache final : public llvm::ObjectCache {
     using KnownSignatures = Map<std::string, llvm::Module *>;
     using ModuleCache = Map<std::string, std::unique_ptr<llvm::MemoryBuffer>>;
     using Instance = std::unique_ptr<ParabixObjectCache>;
-    using BuilderRef = kernel::Kernel::BuilderRef;
 public:
 
     friend class BaseDriver;
 
     using Path = llvm::SmallString<128>;
 
-    CacheObjectResult loadCachedObjectFile(BuilderRef b, kernel::Kernel * const kernel) noexcept;
+    CacheObjectResult loadCachedObjectFile(kernel::KernelBuilder & b, kernel::Kernel * const kernel) noexcept;
 
     void notifyObjectCompiled(const llvm::Module * M, llvm::MemoryBufferRef Obj) override;
 

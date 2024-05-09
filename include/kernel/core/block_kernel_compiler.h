@@ -9,21 +9,21 @@ public:
 
     BlockKernelCompiler(BlockOrientedKernel * const kernel) noexcept;
 
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks);
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfBlocks);
 
-    void generateDefaultFinalBlockMethod(BuilderRef b);
+    void generateDefaultFinalBlockMethod(KernelBuilder & b);
 
 protected:
 
-    llvm::Value * getRemainingItems(BuilderRef b);
+    llvm::Value * getRemainingItems(KernelBuilder & b);
 
-    void incrementCountableItemCounts(BuilderRef b);
+    void incrementCountableItemCounts(KernelBuilder & b);
 
-    llvm::Value * getPopCountRateItemCount(BuilderRef b, const ProcessingRate & rate);
+    llvm::Value * getPopCountRateItemCount(KernelBuilder & b, const ProcessingRate & rate);
 
-    void writeDoBlockMethod(BuilderRef b);
+    void writeDoBlockMethod(KernelBuilder & b);
 
-    void writeFinalBlockMethod(BuilderRef b, llvm::Value * remainingItems);
+    void writeFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingItems);
 
 private:
 

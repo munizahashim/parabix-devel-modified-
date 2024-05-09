@@ -55,8 +55,8 @@ typedef void(*XMLProcessFunctionType)(uint32_t fd);
 
 XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> xmlPabloSrc) {
     const size_t ERROR_STREAM_COUNT = 9;
-    auto & iBuilder = pxDriver.getBuilder();
-    Type * const i32Ty = iBuilder->getInt32Ty();
+    auto & b = pxDriver.getBuilder();
+    Type * const i32Ty = b.getInt32Ty();
     auto P = pxDriver.makePipeline({Binding{i32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 

@@ -23,7 +23,7 @@ namespace kernel {
 
 class BixHash final: public pablo::PabloKernel {
 public:
-    BixHash(BuilderRef b,
+    BixHash(KernelBuilder & b,
             StreamSet * basis, StreamSet * run, StreamSet * hashes, unsigned steps=4, unsigned seed = 179321)
     : PabloKernel(b, "BixHash" + std::to_string(hashes->getNumElements()) + "_" + std::to_string(steps) + "_" + std::to_string(seed),
                   {Binding{"basis", basis}, Binding{"run", run}},

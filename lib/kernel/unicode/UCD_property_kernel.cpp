@@ -23,15 +23,15 @@ using namespace cc;
 
 
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
-: UnicodePropertyKernelBuilder(iBuilder, property_value_name, Source, property, [&]() -> std::string {
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
+: UnicodePropertyKernelBuilder(b, property_value_name, Source, property, [&]() -> std::string {
     return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName();
 }()) {
 
 }
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(BuilderRef iBuilder, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
-: PabloKernel(iBuilder,
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
+: PabloKernel(b,
 "UCD:" + getStringHash(propValueName),
 {Binding{"source", Source}},
 {Binding{"property_stream", property}})

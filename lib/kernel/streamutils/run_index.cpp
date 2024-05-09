@@ -22,7 +22,7 @@ Bindings RunIndexOutputBindings(StreamSet * runIndex, StreamSet * overflow) {
 
 
 
-RunIndex::RunIndex(BuilderRef b,
+RunIndex::RunIndex(KernelBuilder & b,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, Kind kind, Numbering n)
     : PabloKernel(b, [&]() -> std::string {
                         std::string tmp;

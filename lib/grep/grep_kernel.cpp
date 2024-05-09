@@ -518,7 +518,7 @@ void UTF8_index::generatePabloMethod() {
     pb.createAssign(pb.createExtract(u8index, pb.getInteger(0)), u8final);
 }
 
-UTF8_index::UTF8_index(BuilderRef kb, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
+UTF8_index::UTF8_index(KernelBuilder & kb, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
 : PabloKernel(kb, [&]() -> std::string {
     std::stringstream s;
     s << "UTF8_index_";
@@ -638,7 +638,7 @@ std::string GrepKernelOptions::makeSignature() {
     return mSignature;
 }
 
-ICGrepKernel::ICGrepKernel(BuilderRef b, std::unique_ptr<GrepKernelOptions> && options)
+ICGrepKernel::ICGrepKernel(KernelBuilder & b, std::unique_ptr<GrepKernelOptions> && options)
 : PabloKernel(b, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
 options->streamSetInputBindings(),
 options->streamSetOutputBindings(),
@@ -714,8 +714,8 @@ void MatchedLinesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchedLines, pb.getInteger(0)), pb.createAnd(match_follow, lineBreaks, "matchedLines"));
 }
 
-MatchedLinesKernel::MatchedLinesKernel (BuilderRef iBuilder, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
-: PabloKernel(iBuilder, "MatchedLines" + std::to_string(Matches->getNumElements()),
+MatchedLinesKernel::MatchedLinesKernel (KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
+: PabloKernel(b, "MatchedLines" + std::to_string(Matches->getNumElements()),
 // inputs
 {Binding{"matchResults", Matches}
 ,Binding{"lineBreaks", LineBreakStream, FixedRate()}},
@@ -724,14 +724,14 @@ MatchedLinesKernel::MatchedLinesKernel (BuilderRef iBuilder, StreamSet * Matches
 
 }
 
-void InvertMatchesKernel::generateDoBlockMethod(BuilderRef iBuilder) {
-    Value * input = iBuilder->loadInputStreamBlock("matchedLines", iBuilder->getInt32(0));
-    Value * lbs = iBuilder->loadInputStreamBlock("lineBreaks", iBuilder->getInt32(0));
-    Value * inverted = iBuilder->CreateAnd(iBuilder->CreateNot(input), lbs, "inverted");
-    iBuilder->storeOutputStreamBlock("nonMatches", iBuilder->getInt32(0), inverted);
+void InvertMatchesKernel::generateDoBlockMethod(KernelBuilder & b) {
+    Value * input = b.loadInputStreamBlock("matchedLines", b.getInt32(0));
+    Value * lbs = b.loadInputStreamBlock("lineBreaks", b.getInt32(0));
+    Value * inverted = b.CreateAnd(b.CreateNot(input), lbs, "inverted");
+    b.storeOutputStreamBlock("nonMatches", b.getInt32(0), inverted);
 }
 
-InvertMatchesKernel::InvertMatchesKernel(BuilderRef b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
+InvertMatchesKernel::InvertMatchesKernel(KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
 : BlockOrientedKernel(b, "Invert" + std::to_string(Matches->getNumElements()),
 // Inputs
 {Binding{"matchedLines", Matches},
@@ -743,7 +743,7 @@ InvertMatchesKernel::InvertMatchesKernel(BuilderRef b, StreamSet * Matches, Stre
 
 }
 
-FixedMatchSpansKernel::FixedMatchSpansKernel(BuilderRef b, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
+FixedMatchSpansKernel::FixedMatchSpansKernel(KernelBuilder & b, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
 : PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
 {Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
 mMatchLength(length), mOffset(offset) {
@@ -772,7 +772,7 @@ void FixedMatchSpansKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
 }
 
-SpansToMarksKernel::SpansToMarksKernel(BuilderRef b, StreamSet * Spans, StreamSet * Marks)
+SpansToMarksKernel::SpansToMarksKernel(KernelBuilder & b, StreamSet * Spans, StreamSet * Marks)
 : PabloKernel(b, "SpansToMarksKernel",
 {Binding{"Spans", Spans}}, {Binding{"Marks", Marks}}) {}
 
@@ -786,7 +786,7 @@ void SpansToMarksKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchEndsVar, 1), follows);
 }
 
-U8Spans::U8Spans(BuilderRef b, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
+U8Spans::U8Spans(KernelBuilder & b, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
 : PabloKernel(b, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
     mBitMovement(m) {
         if (m == pablo::BitMovementMode::LookAhead) {
@@ -826,8 +826,8 @@ void PopcountKernel::generatePabloMethod() {
     pb->createAssign(countResult, newCount);
 }
 
-PopcountKernel::PopcountKernel (BuilderRef iBuilder, StreamSet * const toCount, Scalar * countResult)
-: PabloKernel(iBuilder, "Popcount",
+PopcountKernel::PopcountKernel (KernelBuilder & b, StreamSet * const toCount, Scalar * countResult)
+: PabloKernel(b, "Popcount",
 {Binding{"toCount", toCount}},
 {},
 {},
@@ -861,7 +861,7 @@ void FixedDistanceMatchesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "matches"));
 }
 
-FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (BuilderRef b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
+FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (KernelBuilder & b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
 : PabloKernel(b, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
 // inputs
 {Binding{"Basis", Basis}},
@@ -924,7 +924,7 @@ void CodePointMatchKernel::generatePabloMethod() {
     }
 }
 
-CodePointMatchKernel::CodePointMatchKernel (BuilderRef b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
+CodePointMatchKernel::CodePointMatchKernel (KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
 : PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"Basis", Basis}},
@@ -934,31 +934,31 @@ CodePointMatchKernel::CodePointMatchKernel (BuilderRef b, UCD::property_t prop, 
     mProperty(prop) {
 }
 
-void AbortOnNull::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    Module * const m = b->getModule();
+void AbortOnNull::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    Module * const m = b.getModule();
     DataLayout DL(m);
     IntegerType * const intPtrTy = DL.getIntPtrType(m->getContext());
-    Type * voidPtrTy = b->getVoidPtrTy();
-    Type * blockTy = b->getBitBlockType();
-    const auto blocksPerStride = getStride() / b->getBitBlockWidth();
-    Constant * const BLOCKS_PER_STRIDE = b->getSize(blocksPerStride);
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const strideLoop = b->CreateBasicBlock("strideLoop");
-    BasicBlock * const stridesDone = b->CreateBasicBlock("stridesDone");
-    BasicBlock * const nullByteDetection = b->CreateBasicBlock("nullByteDetection");
-    BasicBlock * const nullByteFound = b->CreateBasicBlock("nullByteFound");
-    BasicBlock * const finalStride = b->CreateBasicBlock("finalStride");
-    BasicBlock * const segmentDone = b->CreateBasicBlock("segmentDone");
+    Type * voidPtrTy = b.getVoidPtrTy();
+    Type * blockTy = b.getBitBlockType();
+    const auto blocksPerStride = getStride() / b.getBitBlockWidth();
+    Constant * const BLOCKS_PER_STRIDE = b.getSize(blocksPerStride);
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const strideLoop = b.CreateBasicBlock("strideLoop");
+    BasicBlock * const stridesDone = b.CreateBasicBlock("stridesDone");
+    BasicBlock * const nullByteDetection = b.CreateBasicBlock("nullByteDetection");
+    BasicBlock * const nullByteFound = b.CreateBasicBlock("nullByteFound");
+    BasicBlock * const finalStride = b.CreateBasicBlock("finalStride");
+    BasicBlock * const segmentDone = b.CreateBasicBlock("segmentDone");
 
-    Value * const numOfBlocks = b->CreateMul(numOfStrides, BLOCKS_PER_STRIDE);
-    Value * itemsToDo = b->getAccessibleItemCount("byteData");
+    Value * const numOfBlocks = b.CreateMul(numOfStrides, BLOCKS_PER_STRIDE);
+    Value * itemsToDo = b.getAccessibleItemCount("byteData");
     //
     // Fast loop to prove that there are no null bytes in a multiblock region.
     // We repeatedly combine byte packs using a SIMD unsigned min operation
     // (implemented as a Select/ICmpULT combination).
     //
-    Value * byteStreamBasePtr = b->getInputStreamBlockPtr("byteData", b->getSize(0), b->getSize(0));
-    Value * outputStreamBasePtr = b->getOutputStreamBlockPtr("untilNull", b->getSize(0), b->getSize(0));
+    Value * byteStreamBasePtr = b.getInputStreamBlockPtr("byteData", b.getSize(0), b.getSize(0));
+    Value * outputStreamBasePtr = b.getOutputStreamBlockPtr("untilNull", b.getSize(0), b.getSize(0));
 
     //
     // We set up a a set of eight accumulators to accumulate the minimum byte
@@ -966,76 +966,76 @@ void AbortOnNull::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrid
     // each position is 0xFF (all ones).
     Value * blockMin[8];
     for (unsigned i = 0; i < 8; i++) {
-        blockMin[i] = b->fwCast(8, b->allOnes());
+        blockMin[i] = b.fwCast(8, b.allOnes());
     }
     // If we're in the final block bypass the fast loop.
-    b->CreateCondBr(b->isFinal(), finalStride, strideLoop);
+    b.CreateCondBr(b.isFinal(), finalStride, strideLoop);
 
-    b->SetInsertPoint(strideLoop);
-    PHINode * const baseBlockIndex = b->CreatePHI(b->getSizeTy(), 2);
+    b.SetInsertPoint(strideLoop);
+    PHINode * const baseBlockIndex = b.CreatePHI(b.getSizeTy(), 2);
     baseBlockIndex->addIncoming(ConstantInt::get(baseBlockIndex->getType(), 0), entry);
-    PHINode * const blocksRemaining = b->CreatePHI(b->getSizeTy(), 2);
+    PHINode * const blocksRemaining = b.CreatePHI(b.getSizeTy(), 2);
     blocksRemaining->addIncoming(numOfBlocks, entry);
     FixedArray<Value *, 2> indices;
     indices[0] = baseBlockIndex;
     for (unsigned i = 0; i < 8; i++) {
-        indices[1] = b->getSize(i);
-        Value * next = b->CreateBlockAlignedLoad(blockTy, b->CreateGEP(blockTy, byteStreamBasePtr, indices));
-        b->CreateBlockAlignedStore(next, b->CreateGEP(blockTy, outputStreamBasePtr, indices));
-        next = b->fwCast(8, next);
-        blockMin[i] = b->CreateSelect(b->CreateICmpULT(next, blockMin[i]), next, blockMin[i]);
+        indices[1] = b.getSize(i);
+        Value * next = b.CreateBlockAlignedLoad(blockTy, b.CreateGEP(blockTy, byteStreamBasePtr, indices));
+        b.CreateBlockAlignedStore(next, b.CreateGEP(blockTy, outputStreamBasePtr, indices));
+        next = b.fwCast(8, next);
+        blockMin[i] = b.CreateSelect(b.CreateICmpULT(next, blockMin[i]), next, blockMin[i]);
     }
-    Value * nextBlockIndex = b->CreateAdd(baseBlockIndex, ConstantInt::get(baseBlockIndex->getType(), 1));
-    Value * nextRemaining = b->CreateSub(blocksRemaining, ConstantInt::get(blocksRemaining->getType(), 1));
+    Value * nextBlockIndex = b.CreateAdd(baseBlockIndex, ConstantInt::get(baseBlockIndex->getType(), 1));
+    Value * nextRemaining = b.CreateSub(blocksRemaining, ConstantInt::get(blocksRemaining->getType(), 1));
     baseBlockIndex->addIncoming(nextBlockIndex, strideLoop);
     blocksRemaining->addIncoming(nextRemaining, strideLoop);
-    b->CreateCondBr(b->CreateICmpUGT(nextRemaining, ConstantInt::getNullValue(blocksRemaining->getType())), strideLoop, stridesDone);
+    b.CreateCondBr(b.CreateICmpUGT(nextRemaining, ConstantInt::getNullValue(blocksRemaining->getType())), strideLoop, stridesDone);
 
-    b->SetInsertPoint(stridesDone);
+    b.SetInsertPoint(stridesDone);
     // Combine the 8 blockMin values.
     for (unsigned i = 0; i < 4; i++) {
-        blockMin[i] = b->CreateSelect(b->CreateICmpULT(blockMin[i], blockMin[i+4]), blockMin[i], blockMin[i+4]);
+        blockMin[i] = b.CreateSelect(b.CreateICmpULT(blockMin[i], blockMin[i+4]), blockMin[i], blockMin[i+4]);
     }
     for (unsigned i = 0; i < 2; i++) {
-        blockMin[i] = b->CreateSelect(b->CreateICmpULT(blockMin[i], blockMin[i+4]), blockMin[i], blockMin[i+2]);
+        blockMin[i] = b.CreateSelect(b.CreateICmpULT(blockMin[i], blockMin[i+4]), blockMin[i], blockMin[i+2]);
     }
-    blockMin[0] = b->CreateSelect(b->CreateICmpULT(blockMin[0], blockMin[1]), blockMin[0], blockMin[1]);
-    Value * anyNull = b->bitblock_any(b->simd_eq(8, blockMin[0], b->allZeroes()));
+    blockMin[0] = b.CreateSelect(b.CreateICmpULT(blockMin[0], blockMin[1]), blockMin[0], blockMin[1]);
+    Value * anyNull = b.bitblock_any(b.simd_eq(8, blockMin[0], b.allZeroes()));
 
-    b->CreateCondBr(anyNull, nullByteDetection, segmentDone);
+    b.CreateCondBr(anyNull, nullByteDetection, segmentDone);
 
 
-    b->SetInsertPoint(finalStride);
-    b->CreateMemCpy(b->CreatePointerCast(outputStreamBasePtr, voidPtrTy), b->CreatePointerCast(byteStreamBasePtr, voidPtrTy), itemsToDo, 1);
-    b->CreateBr(nullByteDetection);
+    b.SetInsertPoint(finalStride);
+    b.CreateMemCpy(b.CreatePointerCast(outputStreamBasePtr, voidPtrTy), b.CreatePointerCast(byteStreamBasePtr, voidPtrTy), itemsToDo, 1);
+    b.CreateBr(nullByteDetection);
 
-    b->SetInsertPoint(nullByteDetection);
+    b.SetInsertPoint(nullByteDetection);
     //  Find the exact location using memchr, which should be fast enough.
     //
-    Value * ptrToNull = b->CreateMemChr(b->CreatePointerCast(byteStreamBasePtr, voidPtrTy), b->getInt32(0), itemsToDo);
-    Value * ptrAddr = b->CreatePtrToInt(ptrToNull, intPtrTy);
-    b->CreateCondBr(b->CreateICmpEQ(ptrAddr, ConstantInt::getNullValue(intPtrTy)), segmentDone, nullByteFound);
+    Value * ptrToNull = b.CreateMemChr(b.CreatePointerCast(byteStreamBasePtr, voidPtrTy), b.getInt32(0), itemsToDo);
+    Value * ptrAddr = b.CreatePtrToInt(ptrToNull, intPtrTy);
+    b.CreateCondBr(b.CreateICmpEQ(ptrAddr, ConstantInt::getNullValue(intPtrTy)), segmentDone, nullByteFound);
 
     // A null byte has been located; set the termination code and call the signal handler.
-    b->SetInsertPoint(nullByteFound);
-    Value * nullPosn = b->CreateSub(b->CreatePtrToInt(ptrToNull, intPtrTy), b->CreatePtrToInt(byteStreamBasePtr, intPtrTy));
-    b->setFatalTerminationSignal();
+    b.SetInsertPoint(nullByteFound);
+    Value * nullPosn = b.CreateSub(b.CreatePtrToInt(ptrToNull, intPtrTy), b.CreatePtrToInt(byteStreamBasePtr, intPtrTy));
+    b.setFatalTerminationSignal();
     Function * const dispatcher = m->getFunction("signal_dispatcher"); assert (dispatcher);
-    Value * handler = b->getScalarField("handler_address");
-    b->CreateCall(dispatcher, {handler, ConstantInt::get(b->getInt32Ty(), static_cast<unsigned>(grep::GrepSignal::BinaryFile))});
-    b->CreateBr(segmentDone);
+    Value * handler = b.getScalarField("handler_address");
+    b.CreateCall(dispatcher, {handler, ConstantInt::get(b.getInt32Ty(), static_cast<unsigned>(grep::GrepSignal::BinaryFile))});
+    b.CreateBr(segmentDone);
 
-    b->SetInsertPoint(segmentDone);
-    PHINode * const produced = b->CreatePHI(b->getSizeTy(), 3);
+    b.SetInsertPoint(segmentDone);
+    PHINode * const produced = b.CreatePHI(b.getSizeTy(), 3);
     produced->addIncoming(nullPosn, nullByteFound);
     produced->addIncoming(itemsToDo, stridesDone);
     produced->addIncoming(itemsToDo, nullByteDetection);
-    Value * producedCount = b->getProducedItemCount("untilNull");
-    producedCount = b->CreateAdd(producedCount, produced);
-    b->setProducedItemCount("untilNull", producedCount);
+    Value * producedCount = b.getProducedItemCount("untilNull");
+    producedCount = b.CreateAdd(producedCount, produced);
+    b.setProducedItemCount("untilNull", producedCount);
 }
 
-AbortOnNull::AbortOnNull(BuilderRef b, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
+AbortOnNull::AbortOnNull(KernelBuilder & b, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
 : MultiBlockKernel(b, "AbortOnNull",
 // inputs
 {Binding{"byteData", InputStream, FixedRate(), Principal()}},
@@ -1048,7 +1048,7 @@ AbortOnNull::AbortOnNull(BuilderRef b, StreamSet * const InputStream, StreamSet 
     addAttribute(MayFatallyTerminate());
 }
 
-ContextSpan::ContextSpan(BuilderRef b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
+ContextSpan::ContextSpan(KernelBuilder & b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
 : PabloKernel(b, "ContextSpan-" + std::to_string(before) + "+" + std::to_string(after),
               // input
 {Binding{"markerStream", markerStream, FixedRate(1), LookAhead(before)}},
@@ -1109,7 +1109,7 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 
-LongestMatchMarks::LongestMatchMarks(BuilderRef b, StreamSet * start_ends, StreamSet * marks)
+LongestMatchMarks::LongestMatchMarks(KernelBuilder & b, StreamSet * start_ends, StreamSet * marks)
 : PabloKernel(b, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
               {Binding{"start_ends", start_ends, FixedRate(1), LookAhead(1)}},
               {Binding{"marks", marks}}) {}
@@ -1138,7 +1138,7 @@ unsigned spanLookAhead(unsigned offset1, unsigned offset2) {
     return round_up_to_blocksize(std::max(offset1, offset2));
 }
 
-InclusiveSpans::InclusiveSpans(BuilderRef b,
+InclusiveSpans::InclusiveSpans(KernelBuilder & b,
                                unsigned prefixOffset, unsigned suffixOffset,
                                StreamSet * marks, StreamSet * spans)
 : PabloKernel(b, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
@@ -1172,7 +1172,7 @@ std::string CC_string(std::vector<const CC *> transitionCCs, StreamSet * index) 
     return s.str();
 }
 
-MaskCC::MaskCC(BuilderRef b, const CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
+MaskCC::MaskCC(KernelBuilder & b, const CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
 : PabloKernel(b, "MaskCC" + basis->shapeString() + CC_string(std::vector<const CC *>{CC_to_mask}, index),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mCC_to_mask(CC_to_mask), mIndexStrm(nullptr) {
@@ -1200,7 +1200,7 @@ void MaskCC::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
 
-MaskSelfTransitions::MaskSelfTransitions(BuilderRef b, const std::vector<const CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
+MaskSelfTransitions::MaskSelfTransitions(KernelBuilder & b, const std::vector<const CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
 : PabloKernel(b, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mTransitionCCs(transitionCCs), mIndexStrm(nullptr) {

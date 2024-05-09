@@ -8,7 +8,7 @@ using namespace llvm;
 
 namespace kernel {
 
-FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(BuilderRef b,
+FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(KernelBuilder & b,
                                                        StreamSet * refStream,
                                                        StreamSet * outputStream)
 : SegmentOrientedKernel(b, "FakeStream",
@@ -20,7 +20,7 @@ FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(BuilderRef b,
 
 }
 
-FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(BuilderRef b,
+FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(KernelBuilder & b,
                                                        StreamSet * refStream,
                                                        const StreamSets & outputStreams)
 : SegmentOrientedKernel(b, "FakeStream",
@@ -34,7 +34,7 @@ FakeStreamGeneratingKernel::FakeStreamGeneratingKernel(BuilderRef b,
     }
 }
 
-void FakeStreamGeneratingKernel::generateDoSegmentMethod(BuilderRef) {
+void FakeStreamGeneratingKernel::generateDoSegmentMethod(KernelBuilder &) {
     // does nothing
 }
 

@@ -25,38 +25,38 @@ using namespace llvm;
 
 namespace kernel {
 
-void StdOutKernel::linkExternalMethods(BuilderRef b) {
-    b->LinkFunction("write", write);
+void StdOutKernel::linkExternalMethods(KernelBuilder & b) {
+    b.LinkFunction("write", write);
 }
 
-void StdOutKernel::generateDoSegmentMethod(BuilderRef b) {
+void StdOutKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
-    Module * const m = b->getModule();
+    Module * const m = b.getModule();
 
-    Value * bytesDone = b->getProcessedItemCount("codeUnitBuffer");
-    Value * codeUnitBuffer = b->getRawInputPointer("codeUnitBuffer", bytesDone);
-    codeUnitBuffer = b->CreatePointerCast(codeUnitBuffer, b->getInt8PtrTy());
+    Value * bytesDone = b.getProcessedItemCount("codeUnitBuffer");
+    Value * codeUnitBuffer = b.getRawInputPointer("codeUnitBuffer", bytesDone);
+    codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
 
-    Value * bytesToDo = b->getAccessibleItemCount("codeUnitBuffer");
+    Value * bytesToDo = b.getAccessibleItemCount("codeUnitBuffer");
     if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
-        bytesDone = b->CreateMul(bytesDone, b->getSize(mCodeUnitWidth / 8));
-        bytesToDo = b->CreateMul(bytesToDo, b->getSize(mCodeUnitWidth / 8));
+        bytesDone = b.CreateMul(bytesDone, b.getSize(mCodeUnitWidth / 8));
+        bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
     } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
-        bytesDone = b->CreateUDiv(bytesDone, b->getSize(8 / mCodeUnitWidth));
-        bytesToDo = b->CreateUDiv(bytesToDo, b->getSize(8 / mCodeUnitWidth));
+        bytesDone = b.CreateUDiv(bytesDone, b.getSize(8 / mCodeUnitWidth));
+        bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
     }
 
-    Constant * const stdOutFd = b->getInt32(STDOUT_FILENO);
+    Constant * const stdOutFd = b.getInt32(STDOUT_FILENO);
 
     FixedArray<Value *, 3> args3;
     args3[0] = stdOutFd;
     args3[1] = codeUnitBuffer;
     args3[2] = bytesToDo;
     Function * writeFunc = m->getFunction("write");
-    b->CreateCall(writeFunc, args3);
+    b.CreateCall(writeFunc, args3);
 }
 
-StdOutKernel::StdOutKernel(BuilderRef b, StreamSet *codeUnitBuffer)
+StdOutKernel::StdOutKernel(KernelBuilder & b, StreamSet *codeUnitBuffer)
 : SegmentOrientedKernel(b, "stdout" + std::to_string(codeUnitBuffer->getFieldWidth()),
 // input
 {Binding{"codeUnitBuffer", codeUnitBuffer}}
@@ -67,78 +67,78 @@ StdOutKernel::StdOutKernel(BuilderRef b, StreamSet *codeUnitBuffer)
     addAttribute(SideEffecting());
 }
 
-void FileSink::linkExternalMethods(BuilderRef b) {
-    b->LinkFunction("pwrite", PWRITE);
+void FileSink::linkExternalMethods(KernelBuilder & b) {
+    b.LinkFunction("pwrite", PWRITE);
 }
 
-void FileSink::generateInitializeMethod(BuilderRef b) {
-    BasicBlock * const nonNullFileName = b->CreateBasicBlock("nonNullFileName");
-    BasicBlock * const nonEmptyFileName = b->CreateBasicBlock("nonEmptyFileName");
-    BasicBlock * const setTerminationOnFailure = b->CreateBasicBlock("setTerminationOnFailure");
-    BasicBlock * const fileSinkInitExit = b->CreateBasicBlock("fileSinkInitExit");
-    Value * const fileName = b->getScalarField("fileName");
+void FileSink::generateInitializeMethod(KernelBuilder & b) {
+    BasicBlock * const nonNullFileName = b.CreateBasicBlock("nonNullFileName");
+    BasicBlock * const nonEmptyFileName = b.CreateBasicBlock("nonEmptyFileName");
+    BasicBlock * const setTerminationOnFailure = b.CreateBasicBlock("setTerminationOnFailure");
+    BasicBlock * const fileSinkInitExit = b.CreateBasicBlock("fileSinkInitExit");
+    Value * const fileName = b.getScalarField("fileName");
 
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    b->CreateLikelyCondBr(b->CreateIsNotNull(fileName), nonNullFileName, fileSinkInitExit);
+    BasicBlock * const entryBlock = b.GetInsertBlock();
+    b.CreateLikelyCondBr(b.CreateIsNotNull(fileName), nonNullFileName, fileSinkInitExit);
 
-    b->SetInsertPoint(nonNullFileName);
-    Value * const fileNameLength = b->CreateStrlenCall(fileName);
-    b->CreateLikelyCondBr(b->CreateIsNotNull(fileNameLength), nonEmptyFileName, fileSinkInitExit);
+    b.SetInsertPoint(nonNullFileName);
+    Value * const fileNameLength = b.CreateStrlenCall(fileName);
+    b.CreateLikelyCondBr(b.CreateIsNotNull(fileNameLength), nonEmptyFileName, fileSinkInitExit);
 
-    b->SetInsertPoint(nonEmptyFileName);
+    b.SetInsertPoint(nonEmptyFileName);
     // Make a temporary file name template with the characters "XXXXXX" appended as required by mkstemp.
-    Constant * suffixPlusNullLength = b->getSize(7);
-    Value * const temporaryFileName = b->CreatePointerCast(b->CreateMalloc(b->CreateAdd(fileNameLength, suffixPlusNullLength)), b->getInt8PtrTy());
-    b->CreateMemCpy(temporaryFileName, fileName, fileNameLength, 1);
+    Constant * suffixPlusNullLength = b.getSize(7);
+    Value * const temporaryFileName = b.CreatePointerCast(b.CreateMalloc(b.CreateAdd(fileNameLength, suffixPlusNullLength)), b.getInt8PtrTy());
+    b.CreateMemCpy(temporaryFileName, fileName, fileNameLength, 1);
     #ifdef BACKUP_OLDFILE
-    b->CreateMemCpy(b->CreateGEP0(tmpFileNamePtr, fileNameLength), b->GetString(".saved"), suffixPlusNullLength, 1);
-    b->CreateRenameCall(fileName, tmpFileNamePtr);
+    b.CreateMemCpy(b.CreateGEP0(tmpFileNamePtr, fileNameLength), b.GetString(".saved"), suffixPlusNullLength, 1);
+    b.CreateRenameCall(fileName, tmpFileNamePtr);
     #else
-    b->CreateUnlinkCall(fileName);
+    b.CreateUnlinkCall(fileName);
     #endif
-    b->CreateMemCpy(b->CreateGEP(b->getInt8Ty(), temporaryFileName, fileNameLength), b->GetString("XXXXXX"), suffixPlusNullLength, 1);
-    Value * const temporaryFd = b->CreateMkstempCall(temporaryFileName);
-    ConstantInt * const errorCodeFd = b->getInt32(-1);
-    Value * failure = b->CreateICmpEQ(temporaryFd, errorCodeFd);
-    b->CreateUnlikelyCondBr(failure, setTerminationOnFailure, fileSinkInitExit);
+    b.CreateMemCpy(b.CreateGEP(b.getInt8Ty(), temporaryFileName, fileNameLength), b.GetString("XXXXXX"), suffixPlusNullLength, 1);
+    Value * const temporaryFd = b.CreateMkstempCall(temporaryFileName);
+    ConstantInt * const errorCodeFd = b.getInt32(-1);
+    Value * failure = b.CreateICmpEQ(temporaryFd, errorCodeFd);
+    b.CreateUnlikelyCondBr(failure, setTerminationOnFailure, fileSinkInitExit);
 
-    b->SetInsertPoint(setTerminationOnFailure);
-    b->setTerminationSignal();
-    b->CreateBr(fileSinkInitExit);
+    b.SetInsertPoint(setTerminationOnFailure);
+    b.setTerminationSignal();
+    b.CreateBr(fileSinkInitExit);
 
-    b->SetInsertPoint(fileSinkInitExit);
+    b.SetInsertPoint(fileSinkInitExit);
 
-    Constant * const nullPointer = ConstantPointerNull::get(b->getInt8PtrTy());
-    PHINode * const temporaryFileNamePhi = b->CreatePHI(b->getInt8PtrTy(), 3);
+    Constant * const nullPointer = ConstantPointerNull::get(b.getInt8PtrTy());
+    PHINode * const temporaryFileNamePhi = b.CreatePHI(b.getInt8PtrTy(), 3);
     temporaryFileNamePhi->addIncoming(nullPointer, entryBlock);
     temporaryFileNamePhi->addIncoming(nullPointer, nonNullFileName);
     temporaryFileNamePhi->addIncoming(temporaryFileName, nonEmptyFileName);
     temporaryFileNamePhi->addIncoming(nullPointer, setTerminationOnFailure);
 
-    ConstantInt * const stdOutFd = b->getInt32(STDOUT_FILENO);
-    PHINode * const fileDescriptorPhi = b->CreatePHI(b->getInt32Ty(), 3);
+    ConstantInt * const stdOutFd = b.getInt32(STDOUT_FILENO);
+    PHINode * const fileDescriptorPhi = b.CreatePHI(b.getInt32Ty(), 3);
     fileDescriptorPhi->addIncoming(stdOutFd, entryBlock);
     fileDescriptorPhi->addIncoming(stdOutFd, nonNullFileName);
     fileDescriptorPhi->addIncoming(temporaryFd, nonEmptyFileName);
     fileDescriptorPhi->addIncoming(errorCodeFd, setTerminationOnFailure);
 
-    b->setScalarField("temporaryFileName", temporaryFileNamePhi);
-    b->setScalarField("fileDescriptor", fileDescriptorPhi);
+    b.setScalarField("temporaryFileName", temporaryFileNamePhi);
+    b.setScalarField("fileDescriptor", fileDescriptorPhi);
 }
 
-void FileSink::generateDoSegmentMethod(BuilderRef b) {
-    Value * bytesDone = b->getProcessedItemCount("codeUnitBuffer");
-    Value * codeUnitBuffer = b->getRawInputPointer("codeUnitBuffer", bytesDone);
-    codeUnitBuffer = b->CreatePointerCast(codeUnitBuffer, b->getInt8PtrTy());
-    Value * bytesToDo = b->getAccessibleItemCount("codeUnitBuffer");
+void FileSink::generateDoSegmentMethod(KernelBuilder & b) {
+    Value * bytesDone = b.getProcessedItemCount("codeUnitBuffer");
+    Value * codeUnitBuffer = b.getRawInputPointer("codeUnitBuffer", bytesDone);
+    codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
+    Value * bytesToDo = b.getAccessibleItemCount("codeUnitBuffer");
     if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
-        bytesDone = b->CreateMul(bytesDone, b->getSize(mCodeUnitWidth / 8));
-        bytesToDo = b->CreateMul(bytesToDo, b->getSize(mCodeUnitWidth / 8));
+        bytesDone = b.CreateMul(bytesDone, b.getSize(mCodeUnitWidth / 8));
+        bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
     } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
-        bytesDone = b->CreateUDiv(bytesDone, b->getSize(8 / mCodeUnitWidth));
-        bytesToDo = b->CreateUDiv(bytesToDo, b->getSize(8 / mCodeUnitWidth));
+        bytesDone = b.CreateUDiv(bytesDone, b.getSize(8 / mCodeUnitWidth));
+        bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
     }
-    Value * const fileDescriptor = b->getScalarField("fileDescriptor");
+    Value * const fileDescriptor = b.getScalarField("fileDescriptor");
 
     FixedArray<Value *, 4> args;
     args[0] = fileDescriptor;
@@ -146,30 +146,30 @@ void FileSink::generateDoSegmentMethod(BuilderRef b) {
     args[2] = bytesToDo;
     args[3] = bytesDone;
 
-    Function * pwriteFunc = b->getModule()->getFunction("pwrite");
-    b->CreateCall(pwriteFunc, args);
+    Function * pwriteFunc = b.getModule()->getFunction("pwrite");
+    b.CreateCall(pwriteFunc, args);
 
-    //b->CreateWriteCall(fileDescriptor, codeUnitBuffer, bytesToDo);
+    //b.CreateWriteCall(fileDescriptor, codeUnitBuffer, bytesToDo);
 }
 
-void FileSink::generateFinalizeMethod(BuilderRef b) {
-    BasicBlock * const hasTemporaryFile = b->CreateBasicBlock("hasTemporaryFile");
-    BasicBlock * const exit = b->CreateBasicBlock("exit");
-    Value * const fileDescriptor = b->getScalarField("fileDescriptor");
-    Value * const temporaryFileName = b->getScalarField("temporaryFileName");
-    b->CreateLikelyCondBr(b->CreateIsNotNull(temporaryFileName), hasTemporaryFile, exit);
+void FileSink::generateFinalizeMethod(KernelBuilder & b) {
+    BasicBlock * const hasTemporaryFile = b.CreateBasicBlock("hasTemporaryFile");
+    BasicBlock * const exit = b.CreateBasicBlock("exit");
+    Value * const fileDescriptor = b.getScalarField("fileDescriptor");
+    Value * const temporaryFileName = b.getScalarField("temporaryFileName");
+    b.CreateLikelyCondBr(b.CreateIsNotNull(temporaryFileName), hasTemporaryFile, exit);
 
-    b->SetInsertPoint(hasTemporaryFile);
-    b->CreateCloseCall(fileDescriptor);
-    Value * const fileName = b->getScalarField("fileName");
-    b->CreateRenameCall(temporaryFileName, fileName);
-    b->CreateFree(temporaryFileName);
-    b->CreateBr(exit);
+    b.SetInsertPoint(hasTemporaryFile);
+    b.CreateCloseCall(fileDescriptor);
+    Value * const fileName = b.getScalarField("fileName");
+    b.CreateRenameCall(temporaryFileName, fileName);
+    b.CreateFree(temporaryFileName);
+    b.CreateBr(exit);
 
-    b->SetInsertPoint(exit);
+    b.SetInsertPoint(exit);
 }
 
-FileSink::FileSink(BuilderRef b, Scalar * outputFileName, StreamSet * codeUnitBuffer)
+FileSink::FileSink(KernelBuilder & b, Scalar * outputFileName, StreamSet * codeUnitBuffer)
 : SegmentOrientedKernel(b, "filesink" + std::to_string(codeUnitBuffer->getFieldWidth()),
 // input
 {Binding{"codeUnitBuffer", codeUnitBuffer}},
@@ -180,8 +180,8 @@ FileSink::FileSink(BuilderRef b, Scalar * outputFileName, StreamSet * codeUnitBu
 // output scalars
 {},
 // internal scalars
-{InternalScalar{b->getInt8PtrTy(), "temporaryFileName"},
- InternalScalar{b->getInt32Ty(), "fileDescriptor"}})
+{InternalScalar{b.getInt8PtrTy(), "temporaryFileName"},
+ InternalScalar{b.getInt32Ty(), "fileDescriptor"}})
 , mCodeUnitWidth(codeUnitBuffer->getFieldWidth()) {
     setStride((8 * BUFSIZ) / mCodeUnitWidth);
     addAttribute(SideEffecting());

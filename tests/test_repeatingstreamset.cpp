@@ -42,12 +42,12 @@ static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
-    RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
+    RepeatingSourceKernel(KernelBuilder & b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
 protected:
     bool allocatesInternalStreamSets() const override { return true; }
-    void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) override;
-    void generateDoSegmentMethod(BuilderRef b) override;
-    void generateFinalizeMethod(BuilderRef b) override;
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 
     StringRef getSignature() const override { return Signature; }
     bool hasSignature() const override { return true; }
@@ -77,14 +77,14 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
     return tmp;
 }
 
-RepeatingSourceKernel::RepeatingSourceKernel(BuilderRef b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
+RepeatingSourceKernel::RepeatingSourceKernel(KernelBuilder & b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
 : SegmentOrientedKernel(b, getStringHash(makeSignature(pattern, output, fillSize)),
 // input streams
 {},
 // output stream
 {Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer(), Linear() }}},
 // input scalar
-{Binding{b->getSizeTy(), "repLength", repLength}},
+{Binding{b.getSizeTy(), "repLength", repLength}},
 {},
 // internal scalar
 {})
@@ -92,51 +92,51 @@ RepeatingSourceKernel::RepeatingSourceKernel(BuilderRef b, std::vector<std::vect
 , Pattern(std::move(pattern)) {
     addAttribute(MustExplicitlyTerminate());
     setStride(1);
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
     addInternalScalar(voidPtrTy, "buffer");
     addInternalScalar(voidPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
 }
 
 
 
-void RepeatingSourceKernel::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
-    const auto output = b->getOutputStreamSet("output");
+void RepeatingSourceKernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+    const auto output = b.getOutputStreamSet("output");
     const auto fw = output->getFieldWidth();
-    const Binding & binding = b->getOutputStreamSetBinding("output");
+    const Binding & binding = b.getOutputStreamSetBinding("output");
     const ProcessingRate & rate = binding.getRate();
     const auto itemsPerStrideTimesTwo = 2 * getStride() * rate.getUpperBound();
     const Rational bytesPerItem{fw * output->getNumElements(), 8};
-    Value * const initialCapacity = b->CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo);
-    Value * const bufferBytes = b->CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo * bytesPerItem);
-    Value * const buffer = b->CreatePageAlignedMalloc(bufferBytes);
-    PointerType * const ptrTy = b->getOutputStreamSetBuffer("output")->getPointerType();
-    b->setBaseAddress("output", b->CreatePointerCast(buffer, ptrTy));
-    b->setCapacity("output", initialCapacity);
-    b->setScalarField("buffer", buffer);
-    b->setScalarField("ancillaryBuffer", ConstantPointerNull::get(b->getVoidPtrTy()));
-    b->setScalarField("effectiveCapacity", initialCapacity);
+    Value * const initialCapacity = b.CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo);
+    Value * const bufferBytes = b.CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo * bytesPerItem);
+    Value * const buffer = b.CreatePageAlignedMalloc(bufferBytes);
+    PointerType * const ptrTy = b.getOutputStreamSetBuffer("output")->getPointerType();
+    b.setBaseAddress("output", b.CreatePointerCast(buffer, ptrTy));
+    b.setCapacity("output", initialCapacity);
+    b.setScalarField("buffer", buffer);
+    b.setScalarField("ancillaryBuffer", ConstantPointerNull::get(b.getVoidPtrTy()));
+    b.setScalarField("effectiveCapacity", initialCapacity);
 }
 
-void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
+void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
-    BasicBlock * const checkBuffer = b->CreateBasicBlock("checkBuffer");
-    BasicBlock * const moveData = b->CreateBasicBlock("moveData");
-    BasicBlock * const copyBack = b->CreateBasicBlock("CopyBack");
-    BasicBlock * const expandAndCopyBack = b->CreateBasicBlock("ExpandAndCopyBack");
-    BasicBlock * const prepareBuffer = b->CreateBasicBlock("PrepareBuffer");
-    BasicBlock * const generateData = b->CreateBasicBlock("generateData");
-    BasicBlock * const finishedDataLoop = b->CreateBasicBlock("finishedDataLoop");
-    BasicBlock * const zeroExtraneousBytes = b->CreateBasicBlock("zeroExtraneousBytes");
-    BasicBlock * const exit = b->CreateBasicBlock("exit");
+    BasicBlock * const checkBuffer = b.CreateBasicBlock("checkBuffer");
+    BasicBlock * const moveData = b.CreateBasicBlock("moveData");
+    BasicBlock * const copyBack = b.CreateBasicBlock("CopyBack");
+    BasicBlock * const expandAndCopyBack = b.CreateBasicBlock("ExpandAndCopyBack");
+    BasicBlock * const prepareBuffer = b.CreateBasicBlock("PrepareBuffer");
+    BasicBlock * const generateData = b.CreateBasicBlock("generateData");
+    BasicBlock * const finishedDataLoop = b.CreateBasicBlock("finishedDataLoop");
+    BasicBlock * const zeroExtraneousBytes = b.CreateBasicBlock("zeroExtraneousBytes");
+    BasicBlock * const exit = b.CreateBasicBlock("exit");
 
     // build our pattern array
-    const auto output = b->getOutputStreamSet("output");
+    const auto output = b.getOutputStreamSet("output");
     const auto fieldWidth = output->getFieldWidth();
     const auto numElements = output->getNumElements();
 
-    const auto blockWidth = b->getBitBlockWidth();
+    const auto blockWidth = b.getBitBlockWidth();
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
@@ -154,7 +154,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         }
         maxPatternSize = std::max(maxPatternSize, vec.size());
     }
-    const Binding & binding = b->getOutputStreamSetBinding("output");
+    const Binding & binding = b.getOutputStreamSetBinding("output");
     const ProcessingRate & rate = binding.getRate();
     const auto fs = getStride() * rate.getUpperBound();
     assert (fs.denominator() == 1);
@@ -171,14 +171,14 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
                            + " to ensure proper streamset construction");
     }
 
-    StreamSetBuffer * const outputBuffer = b->getOutputStreamSetBuffer("output");
+    StreamSetBuffer * const outputBuffer = b.getOutputStreamSetBuffer("output");
     PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
     Type * const outputStreamSetTy = outputBuffer->getType();
 
 
-    ConstantInt * const sz_ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b.getSize(0);
 
-    FixedVectorType * const vecTy = b->getBitBlockType();
+    FixedVectorType * const vecTy = b.getBitBlockType();
     IntegerType * const intTy = cast<IntegerType>(vecTy->getScalarType());
     const auto laneWidth = intTy->getIntegerBitWidth();
     const auto numLanes = blockWidth / laneWidth;
@@ -190,7 +190,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     SmallVector<GlobalVariable *, 16> streamVal(numElements);
     SmallVector<Type *, 16> streamValTy(numElements);
 
-    Module & mod = *b->getModule();
+    Module & mod = *b.getModule();
 
     for (unsigned p = 0; p < numElements; ++p) {
         const auto & vec = Pattern[p];
@@ -227,58 +227,58 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
         streamVal[p] = gv;
     }
 
-    ConstantInt * const sz_BlockWidth = b->getSize(blockWidth);
+    ConstantInt * const sz_BlockWidth = b.getSize(blockWidth);
 
-    ConstantInt * const sz_strideFillSize = b->getSize(maxFillSize);
+    ConstantInt * const sz_strideFillSize = b.getSize(maxFillSize);
 
-    Value * const produced = b->getProducedItemCount("output");
-    Value * const consumed = b->CreateRoundDown(b->getConsumedItemCount("output"), sz_BlockWidth);
+    Value * const produced = b.getProducedItemCount("output");
+    Value * const consumed = b.CreateRoundDown(b.getConsumedItemCount("output"), sz_BlockWidth);
     Value * const baseAddress = outputBuffer->getBaseAddress(b);
-    Value * const remaining = b->CreateSub(produced, consumed);
+    Value * const remaining = b.CreateSub(produced, consumed);
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        Value * const valid = b->CreateIsNull(b->CreateURem(remaining, sz_BlockWidth));
-        b->CreateAssert(valid, "remaining was not a multiple of block width");
+        Value * const valid = b.CreateIsNull(b.CreateURem(remaining, sz_BlockWidth));
+        b.CreateAssert(valid, "remaining was not a multiple of block width");
     }
 
-    Value * const fillSize = b->CreateMul(sz_strideFillSize, b->getNumOfStrides());
-    Value * const total = b->CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
-    Value * const totalStrides = b->CreateExactUDiv(total, sz_BlockWidth);
-    Value * const mustFill = b->CreateICmpULT(remaining, fillSize);
-    b->CreateLikelyCondBr(mustFill, checkBuffer, exit);
+    Value * const fillSize = b.CreateMul(sz_strideFillSize, b.getNumOfStrides());
+    Value * const total = b.CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
+    Value * const totalStrides = b.CreateExactUDiv(total, sz_BlockWidth);
+    Value * const mustFill = b.CreateICmpULT(remaining, fillSize);
+    b.CreateLikelyCondBr(mustFill, checkBuffer, exit);
 
-    b->SetInsertPoint(checkBuffer);
+    b.SetInsertPoint(checkBuffer);
     // Can we append to our existing buffer without impacting any subsequent kernel?
-    Value * const effectiveCapacity = b->getScalarField("effectiveCapacity");
-    Value * const permitted = b->CreateICmpULT(total, effectiveCapacity);
-    BasicBlock * const checkBufferExit = b->GetInsertBlock();
-    b->CreateLikelyCondBr(permitted, generateData, moveData);
+    Value * const effectiveCapacity = b.getScalarField("effectiveCapacity");
+    Value * const permitted = b.CreateICmpULT(total, effectiveCapacity);
+    BasicBlock * const checkBufferExit = b.GetInsertBlock();
+    b.CreateLikelyCondBr(permitted, generateData, moveData);
 
-    b->SetInsertPoint(moveData);
-    Value * const consumedIndex = b->CreateExactUDiv(consumed, sz_BlockWidth);
+    b.SetInsertPoint(moveData);
+    Value * const consumedIndex = b.CreateExactUDiv(consumed, sz_BlockWidth);
 
-    Value * const unreadData = outputBuffer->getStreamBlockPtr(b.get(), baseAddress, sz_ZERO, consumedIndex);
-    Value * const baseBuffer = b->CreatePointerCast(b->getScalarField("buffer"), outputStreamSetPtrTy);
+    Value * const unreadData = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, consumedIndex);
+    Value * const baseBuffer = b.CreatePointerCast(b.getScalarField("buffer"), outputStreamSetPtrTy);
 
     FixedArray<Value *, 2> baseIndex;
     baseIndex[0] = sz_ZERO;
     baseIndex[1] = totalStrides;
 
-    Value * const toWrite = b->CreateGEP(outputStreamSetTy, baseBuffer, baseIndex);
-    Value * const canCopy = b->CreateICmpULT(toWrite, unreadData);
-    Value * const capacity = b->getCapacity("output");
+    Value * const toWrite = b.CreateGEP(outputStreamSetTy, baseBuffer, baseIndex);
+    Value * const canCopy = b.CreateICmpULT(toWrite, unreadData);
+    Value * const capacity = b.getCapacity("output");
     // Have we consumed enough data that we can safely copy back the unconsumed data and still
     // leave enough space for one segment without needing a temporary buffer?
 
     const Rational bytesPerItem{fieldWidth * numElements, 8};
-   // Value * const remainingStrides = b->CreateExactUDiv(remaining, sz_BlockWidth);
-    Value * const remainingBytes = b->CreateMulRational(remaining, bytesPerItem);
+   // Value * const remainingStrides = b.CreateExactUDiv(remaining, sz_BlockWidth);
+    Value * const remainingBytes = b.CreateMulRational(remaining, bytesPerItem);
 
-    b->CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
+    b.CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
 
     // If so, just copy the data ...
-    b->SetInsertPoint(copyBack);
-    b->CreateMemCpy(baseBuffer, unreadData, remainingBytes, 1);
+    b.SetInsertPoint(copyBack);
+    b.CreateMemCpy(baseBuffer, unreadData, remainingBytes, 1);
 
     // Since our consumed count cannot exceed the effective capacity, in order for (consumed % capacity)
     // to be less than (effective capacity % capacity), we must have fully read all the data past the
@@ -287,170 +287,169 @@ void RepeatingSourceKernel::generateDoSegmentMethod(BuilderRef b) {
     // unconsumed data at the end of the buffer. Here, we can set the reclaimed capacity position to
     // (consumed % capacity).
 
-    Value * const consumedModCap = b->CreateURem(consumed, capacity);
-    Value * const effectiveCapacityModCap = b->CreateURem(effectiveCapacity, capacity);
-    Value * const reclaimCapacity = b->CreateICmpULT(consumedModCap, effectiveCapacityModCap);
-    Value * const reclaimedCapacity = b->CreateSelect(reclaimCapacity, capacity, consumedModCap);
+    Value * const consumedModCap = b.CreateURem(consumed, capacity);
+    Value * const effectiveCapacityModCap = b.CreateURem(effectiveCapacity, capacity);
+    Value * const reclaimCapacity = b.CreateICmpULT(consumedModCap, effectiveCapacityModCap);
+    Value * const reclaimedCapacity = b.CreateSelect(reclaimCapacity, capacity, consumedModCap);
 
-    Value * const updatedEffectiveCapacity = b->CreateAdd(consumed, reclaimedCapacity);
-    b->setScalarField("effectiveCapacity", updatedEffectiveCapacity);
-    BasicBlock * const copyBackExit = b->GetInsertBlock();
-    b->CreateBr(prepareBuffer);
+    Value * const updatedEffectiveCapacity = b.CreateAdd(consumed, reclaimedCapacity);
+    b.setScalarField("effectiveCapacity", updatedEffectiveCapacity);
+    BasicBlock * const copyBackExit = b.GetInsertBlock();
+    b.CreateBr(prepareBuffer);
 
     // Otherwise, allocate a buffer with twice the capacity and copy the unconsumed data back into it
-    b->SetInsertPoint(expandAndCopyBack);
-    Value * const expandedCapacity = b->CreateShl(capacity, 1);
-    Value * const expandedBytes = b->CreateMulRational(expandedCapacity, bytesPerItem);
+    b.SetInsertPoint(expandAndCopyBack);
+    Value * const expandedCapacity = b.CreateShl(capacity, 1);
+    Value * const expandedBytes = b.CreateMulRational(expandedCapacity, bytesPerItem);
 
-    Value * expandedBuffer = b->CreatePageAlignedMalloc(expandedBytes);
-    b->CreateMemCpy(expandedBuffer, unreadData, remainingBytes, 1);
+    Value * expandedBuffer = b.CreatePageAlignedMalloc(expandedBytes);
+    b.CreateMemCpy(expandedBuffer, unreadData, remainingBytes, 1);
     // Free the prior buffer if it exists
-    Value * const ancillaryBuffer = b->getScalarField("ancillaryBuffer");
-    b->setScalarField("ancillaryBuffer", b->CreatePointerCast(baseBuffer, b->getVoidPtrTy()));
-    b->CreateFree(ancillaryBuffer);
-    b->setScalarField("buffer", expandedBuffer);
-    b->setCapacity("output", expandedCapacity);
-    Value * const expandedEffectiveCapacity = b->CreateAdd(consumed, expandedCapacity);
-    b->setScalarField("effectiveCapacity", expandedEffectiveCapacity);
-    expandedBuffer = b->CreatePointerCast(expandedBuffer, outputStreamSetPtrTy);
-    BasicBlock * const expandAndCopyBackExit = b->GetInsertBlock();
-    b->CreateBr(prepareBuffer);
+    Value * const ancillaryBuffer = b.getScalarField("ancillaryBuffer");
+    b.setScalarField("ancillaryBuffer", b.CreatePointerCast(baseBuffer, b.getVoidPtrTy()));
+    b.CreateFree(ancillaryBuffer);
+    b.setScalarField("buffer", expandedBuffer);
+    b.setCapacity("output", expandedCapacity);
+    Value * const expandedEffectiveCapacity = b.CreateAdd(consumed, expandedCapacity);
+    b.setScalarField("effectiveCapacity", expandedEffectiveCapacity);
+    expandedBuffer = b.CreatePointerCast(expandedBuffer, outputStreamSetPtrTy);
+    BasicBlock * const expandAndCopyBackExit = b.GetInsertBlock();
+    b.CreateBr(prepareBuffer);
 
-    b->SetInsertPoint(prepareBuffer);
-    PHINode * const newBaseBuffer = b->CreatePHI(outputStreamSetPtrTy, 2);
+    b.SetInsertPoint(prepareBuffer);
+    PHINode * const newBaseBuffer = b.CreatePHI(outputStreamSetPtrTy, 2);
     newBaseBuffer->addIncoming(baseBuffer, copyBackExit);
     newBaseBuffer->addIncoming(expandedBuffer, expandAndCopyBackExit);
 
-    Value * const newBaseAddress = b->CreateGEP(outputStreamSetTy, newBaseBuffer, b->CreateNeg(consumedIndex));
+    Value * const newBaseAddress = b.CreateGEP(outputStreamSetTy, newBaseBuffer, b.CreateNeg(consumedIndex));
     assert (newBaseAddress->getType() == baseAddress->getType());
 
-    b->setBaseAddress("output", newBaseAddress);
-    BasicBlock * const prepareBufferExit = b->GetInsertBlock();
-    b->CreateBr(generateData);
+    b.setBaseAddress("output", newBaseAddress);
+    BasicBlock * const prepareBufferExit = b.GetInsertBlock();
+    b.CreateBr(generateData);
 
-    b->SetInsertPoint(generateData);
-    PHINode * const producedPhi = b->CreatePHI(b->getSizeTy(), 3);
+    b.SetInsertPoint(generateData);
+    PHINode * const producedPhi = b.CreatePHI(b.getSizeTy(), 3);
     producedPhi->addIncoming(produced, checkBufferExit);
     producedPhi->addIncoming(produced, prepareBufferExit);
-    PHINode * const ba = b->CreatePHI(baseAddress->getType(), 3);
+    PHINode * const ba = b.CreatePHI(baseAddress->getType(), 3);
     ba->addIncoming(baseAddress, checkBufferExit);
     ba->addIncoming(newBaseAddress, prepareBufferExit);
 
     FixedArray<Value *,2> offset;
     offset[0] = sz_ZERO;
 
-    Value * const currentIndex = b->CreateExactUDiv(producedPhi, sz_BlockWidth);
+    Value * const currentIndex = b.CreateExactUDiv(producedPhi, sz_BlockWidth);
     const auto length = (fieldWidth * blockWidth) / 8;
-    ConstantInt * const elementSize = b->getSize(length);
+    ConstantInt * const elementSize = b.getSize(length);
     for (unsigned i = 0; i < numElements; ++i) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
-        offset[1] = b->CreateURem(currentIndex, b->getSize(runLength));
-        Value * const src = b->CreateGEP(streamValTy[i], streamVal[i], offset);
-        Value * const dst = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), currentIndex);
-        b->CreateMemCpy(dst, src, elementSize, 1U);
+        offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
+        Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
+        Value * const dst = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), currentIndex);
+        b.CreateMemCpy(dst, src, elementSize, 1U);
     }
 
-    Value * const currentProduced = b->CreateAdd(producedPhi, sz_BlockWidth);
-    BasicBlock * const generateDataExit = b->GetInsertBlock();
+    Value * const currentProduced = b.CreateAdd(producedPhi, sz_BlockWidth);
+    BasicBlock * const generateDataExit = b.GetInsertBlock();
     producedPhi->addIncoming(currentProduced, generateDataExit);
     ba->addIncoming(ba, generateDataExit);
-    b->CreateCondBr(b->CreateICmpULT(currentProduced, total), generateData, finishedDataLoop);
+    b.CreateCondBr(b.CreateICmpULT(currentProduced, total), generateData, finishedDataLoop);
 
-    b->SetInsertPoint(finishedDataLoop);
-    b->setProducedItemCount("output", currentProduced);
-    Value * const MAX = b->getScalarField("repLength");
-    Value * const finishedGenerating = b->CreateICmpUGE(currentProduced, MAX);
-    b->CreateUnlikelyCondBr(finishedGenerating, zeroExtraneousBytes, exit);
+    b.SetInsertPoint(finishedDataLoop);
+    b.setProducedItemCount("output", currentProduced);
+    Value * const MAX = b.getScalarField("repLength");
+    Value * const finishedGenerating = b.CreateICmpUGE(currentProduced, MAX);
+    b.CreateUnlikelyCondBr(finishedGenerating, zeroExtraneousBytes, exit);
 
-    b->SetInsertPoint(zeroExtraneousBytes);
-    b->setProducedItemCount("output", MAX);
-    b->setTerminationSignal();
+    b.SetInsertPoint(zeroExtraneousBytes);
+    b.setProducedItemCount("output", MAX);
+    b.setTerminationSignal();
 
-    Value * const startIndex = b->CreateUDiv(MAX, sz_BlockWidth);
+    Value * const startIndex = b.CreateUDiv(MAX, sz_BlockWidth);
 
-    ConstantInt * const sz_BlockMask = b->getSize(blockWidth - 1U);
-    ConstantInt * const sz_FieldWidth = b->getSize(fieldWidth);
+    ConstantInt * const sz_BlockMask = b.getSize(blockWidth - 1U);
+    ConstantInt * const sz_FieldWidth = b.getSize(fieldWidth);
 
     Value * packIndex = nullptr;
-    Value * maskOffset = b->CreateAnd(MAX, sz_BlockMask);
+    Value * maskOffset = b.CreateAnd(MAX, sz_BlockMask);
     if (fieldWidth > 1) {
-        Value * const position = b->CreateMul(maskOffset, sz_FieldWidth);
-        packIndex = b->CreateUDiv(position, sz_BlockWidth);
-        maskOffset = b->CreateAnd(position, sz_BlockMask);
+        Value * const position = b.CreateMul(maskOffset, sz_FieldWidth);
+        packIndex = b.CreateUDiv(position, sz_BlockWidth);
+        maskOffset = b.CreateAnd(position, sz_BlockMask);
     }
 
-    Value * const mask = b->CreateNot(b->bitblock_mask_from(maskOffset));
+    Value * const mask = b.CreateNot(b.bitblock_mask_from(maskOffset));
     for (unsigned i = 0; i < numElements; ++i) {
         Value * ptr = nullptr;
         if (fieldWidth == 1) {
-            ptr = outputBuffer->getStreamBlockPtr(b.get(), ba, b->getInt32(i), startIndex);
+            ptr = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), startIndex);
         } else {
-            ptr = outputBuffer->getStreamPackPtr(b.get(), ba, b->getInt32(i), startIndex, packIndex);
+            ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndex);
         }
-        Value * const val = b->CreateBlockAlignedLoad(b->getBitBlockType(), ptr);
-        Value * const maskedVal = b->CreateAnd(val, mask);
-        b->CreateBlockAlignedStore(maskedVal, ptr);
+        Value * const val = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr);
+        Value * const maskedVal = b.CreateAnd(val, mask);
+        b.CreateBlockAlignedStore(maskedVal, ptr);
     }
 
-    ConstantInt * const sz_ONE = b->getSize(1);
+    ConstantInt * const sz_ONE = b.getSize(1);
 
     if (fieldWidth > 1) {
-        BasicBlock * const clearRemainingPacks = b->CreateBasicBlock("clearRemainingPacks", exit);
-        BasicBlock * const clearRemainingPacksExit = b->CreateBasicBlock("clearRemainingPacksExit", exit);
+        BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", exit);
+        BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", exit);
 
-        Constant * const vec_ZERO = ConstantVector::getNullValue(b->getBitBlockType());
+        Constant * const vec_ZERO = ConstantVector::getNullValue(b.getBitBlockType());
 
-        Value * const firstPackIndex = b->CreateAdd(packIndex, sz_ONE);
+        Value * const firstPackIndex = b.CreateAdd(packIndex, sz_ONE);
 
-        b->CreateCondBr(b->CreateICmpULT(firstPackIndex, sz_FieldWidth), clearRemainingPacks, clearRemainingPacksExit);
+        b.CreateCondBr(b.CreateICmpULT(firstPackIndex, sz_FieldWidth), clearRemainingPacks, clearRemainingPacksExit);
 
-        b->SetInsertPoint(clearRemainingPacks);
-        PHINode * const packIndexPhi = b->CreatePHI(b->getSizeTy(), 2);
+        b.SetInsertPoint(clearRemainingPacks);
+        PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
         packIndexPhi->addIncoming(firstPackIndex, zeroExtraneousBytes);
         for (unsigned i = 0; i < numElements; ++i) {
-            Value * ptr = outputBuffer->getStreamPackPtr(b.get(), ba, b->getInt32(i), startIndex, packIndexPhi);
-            b->CreateBlockAlignedStore(vec_ZERO, ptr);
+            Value * ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndexPhi);
+            b.CreateBlockAlignedStore(vec_ZERO, ptr);
         }
-        Value * const nextPackIndex = b->CreateAdd(packIndexPhi, sz_ONE);
+        Value * const nextPackIndex = b.CreateAdd(packIndexPhi, sz_ONE);
         packIndexPhi->addIncoming(nextPackIndex, clearRemainingPacks);
-        b->CreateCondBr(b->CreateICmpULT(nextPackIndex, sz_FieldWidth), clearRemainingPacks, clearRemainingPacksExit);
+        b.CreateCondBr(b.CreateICmpULT(nextPackIndex, sz_FieldWidth), clearRemainingPacks, clearRemainingPacksExit);
 
-        b->SetInsertPoint(clearRemainingPacksExit);
+        b.SetInsertPoint(clearRemainingPacksExit);
     }
 
-    Value * const nextIndex = b->CreateAdd(startIndex, sz_ONE);
-    Value * const endIndex = b->CreateAdd(b->CreateUDiv(total, sz_BlockWidth), sz_ONE);
-    Value * const startPtr = outputBuffer->getStreamBlockPtr(b.get(), ba, sz_ZERO, nextIndex);
-    Value * const endPtr = outputBuffer->getStreamBlockPtr(b.get(), ba, sz_ZERO, endIndex);
-    DataLayout DL(b->getModule());
+    Value * const nextIndex = b.CreateAdd(startIndex, sz_ONE);
+    Value * const endIndex = b.CreateAdd(b.CreateUDiv(total, sz_BlockWidth), sz_ONE);
+    Value * const startPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, nextIndex);
+    Value * const endPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, endIndex);
+    DataLayout DL(b.getModule());
     Type * const intPtrTy = DL.getIntPtrType(startPtr->getType());
-    Value * const startPtrInt = b->CreatePtrToInt(startPtr, intPtrTy);
-    Value * const endPtrInt = b->CreatePtrToInt(endPtr, intPtrTy);
-    Value * const numBytes = b->CreateSub(endPtrInt, startPtrInt);
-    b->CreateMemZero(startPtr, numBytes, blockWidth / 8);
+    Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
+    Value * const endPtrInt = b.CreatePtrToInt(endPtr, intPtrTy);
+    Value * const numBytes = b.CreateSub(endPtrInt, startPtrInt);
+    b.CreateMemZero(startPtr, numBytes, blockWidth / 8);
 
-    b->CreateBr(exit);
+    b.CreateBr(exit);
 
 
-    b->SetInsertPoint(exit);
+    b.SetInsertPoint(exit);
 
 }
 
-void RepeatingSourceKernel::generateFinalizeMethod(BuilderRef b) {
-    b->CreateFree(b->getScalarField("ancillaryBuffer"));
-    b->CreateFree(b->getScalarField("buffer"));
+void RepeatingSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
+    b.CreateFree(b.getScalarField("ancillaryBuffer"));
+    b.CreateFree(b.getScalarField("buffer"));
 }
 
 class StreamEq : public MultiBlockKernel {
-    using BuilderRef = BuilderRef;
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(BuilderRef b, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
-    void generateInitializeMethod(BuilderRef b) override;
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
-    void generateFinalizeMethod(BuilderRef b) override;
+    StreamEq(KernelBuilder & b, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
+    void generateInitializeMethod(KernelBuilder & b) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 private:
     inline Bindings makeInputBindings(StreamSet * lhs, const bool unalignedLHS, StreamSet * rhs, const bool unalignedRHS);
 private:
@@ -474,7 +473,7 @@ inline Bindings StreamEq::makeInputBindings(StreamSet * lhs, const bool unaligne
 }
 
 StreamEq::StreamEq(
-    BuilderRef b,
+    KernelBuilder & b,
     StreamSet * lhs,
     const bool unalignedLHS,
     StreamSet * rhs,
@@ -501,7 +500,7 @@ StreamEq::StreamEq(
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b->getInt1Ty(), "accum")})
+    {InternalScalar(b.getInt1Ty(), "accum")})
 , UnalignedLHS(unalignedLHS)
 , UnalignedRHS(unalignedRHS)
 {
@@ -510,112 +509,110 @@ StreamEq::StreamEq(
     addAttribute(SideEffecting());
 }
 
-void StreamEq::generateInitializeMethod(BuilderRef b) {
-    b->setScalarField("accum", b->getInt1(true));
+void StreamEq::generateInitializeMethod(KernelBuilder & b) {
+    b.setScalarField("accum", b.getInt1(true));
 }
 
-void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    auto istreamset = b->getInputStreamSet("lhs");
+void StreamEq::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    auto istreamset = b.getInputStreamSet("lhs");
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
 
-    Type * const bbTy = b->getBitBlockType();
+    Type * const bbTy = b.getBitBlockType();
 
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
-    BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
+    BasicBlock * const entryBlock = b.GetInsertBlock();
+    BasicBlock * const loopBlock = b.CreateBasicBlock("loop");
+    BasicBlock * const exitBlock = b.CreateBasicBlock("exit");
 
-    Value * const initialAccum = b->getScalarField("accum");
-    Constant * const sz_ZERO = b->getSize(0);
+    Value * const initialAccum = b.getScalarField("accum");
+    Constant * const sz_ZERO = b.getSize(0);
 
-    Value * const hasMoreItems = b->CreateICmpNE(numOfStrides, sz_ZERO);
+    Value * const hasMoreItems = b.CreateICmpNE(numOfStrides, sz_ZERO);
 
-    b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
+    b.CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
 
-    b->SetInsertPoint(loopBlock);
-    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    b.SetInsertPoint(loopBlock);
+    PHINode * const strideNo = b.CreatePHI(b.getSizeTy(), 2);
     strideNo->addIncoming(sz_ZERO, entryBlock);
-    PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
+    PHINode * const accumPhi = b.CreatePHI(b.getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
 
     for (uint32_t i = 0; i < COUNT; ++i) {
 
-        Constant * const I = b->getInt32(i);
+        Constant * const I = b.getInt32(i);
 
         for (unsigned j = 0; j < FW; ++j) {
 
             Value * lhs;
             Value * rhs;
             if (FW == 1) {
-                lhs = b->getInputStreamBlockPtr("lhs", I, strideNo);
-                rhs = b->getInputStreamBlockPtr("rhs", I, strideNo);
+                lhs = b.getInputStreamBlockPtr("lhs", I, strideNo);
+                rhs = b.getInputStreamBlockPtr("rhs", I, strideNo);
             } else {
-                Constant * const J = b->getInt32(j);
-                lhs = b->getInputStreamPackPtr("lhs", I, J, strideNo);
-                rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
+                Constant * const J = b.getInt32(j);
+                lhs = b.getInputStreamPackPtr("lhs", I, J, strideNo);
+                rhs = b.getInputStreamPackPtr("rhs", I, J, strideNo);
             }
             if (UnalignedLHS) {
-                lhs = b->CreateAlignedLoad(bbTy, lhs, 1);
+                lhs = b.CreateAlignedLoad(bbTy, lhs, 1);
             } else {
-                lhs = b->CreateBlockAlignedLoad(bbTy, lhs);
+                lhs = b.CreateBlockAlignedLoad(bbTy, lhs);
             }
             if (UnalignedRHS) {
-                rhs = b->CreateAlignedLoad(bbTy, rhs, 1);
+                rhs = b.CreateAlignedLoad(bbTy, rhs, 1);
             } else {
-                rhs = b->CreateBlockAlignedLoad(bbTy, rhs);
+                rhs = b.CreateBlockAlignedLoad(bbTy, rhs);
             }
 
             // Perform vector comparison lhs != rhs.
             // Result will be a vector of all zeros if lhs == rhs
-            Value * const vComp = b->CreateICmpNE(lhs, rhs);
-            Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
+            Value * const vComp = b.CreateICmpNE(lhs, rhs);
+            Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
             // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-            Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-        //    b->CallPrintInt("comp", comp);
+            Value * const comp = b.CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+        //    b.CallPrintInt("comp", comp);
             // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-            nextAccum = b->CreateAnd(nextAccum, comp);
+            nextAccum = b.CreateAnd(nextAccum, comp);
 
         }
 
     }
 
-    Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
+    Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
     strideNo->addIncoming(nextStrideNo, loopBlock);
     accumPhi->addIncoming(nextAccum, loopBlock);
-    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
+    b.CreateCondBr(b.CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
 
-    b->SetInsertPoint(exitBlock);
-    PHINode * const finalAccum = b->CreatePHI(b->getInt1Ty(), 2);
+    b.SetInsertPoint(exitBlock);
+    PHINode * const finalAccum = b.CreatePHI(b.getInt1Ty(), 2);
     finalAccum->addIncoming(initialAccum, entryBlock);
     finalAccum->addIncoming(nextAccum, loopBlock);
-    b->setScalarField("accum", finalAccum);
+    b.setScalarField("accum", finalAccum);
 }
 
-void StreamEq::generateFinalizeMethod(BuilderRef b) {
+void StreamEq::generateFinalizeMethod(KernelBuilder & b) {
     // a `result` value of `true` means the assertion passed
-    Value * result = b->getScalarField("accum");
+    Value * result = b.getScalarField("accum");
 
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * resultPtr = b->getScalarField("result_ptr");
-    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
-    Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
+    Value * resultPtr = b.getScalarField("result_ptr");
+    Value * const ptrVal = b.CreateLoad(b.getInt32Ty(), resultPtr);
+    Value * resultState  = b.CreateSelect(result, b.getInt32(0), b.getInt32(1));;
 
-    Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, resultPtr);
+    Value * const newVal = b.CreateSelect(b.CreateICmpEQ(ptrVal, b.getInt32(1)), b.getInt32(1), resultState);
+    b.CreateStore(newVal, resultPtr);
 }
 
 typedef void (*TestFunctionType)(uint32_t * output);
 
 using PatternVec = std::vector<std::vector<uint64_t>>;
 
-using BuilderRef = Kernel::BuilderRef;
-
 class NestedRepeatingStreamSetTest : public PipelineKernel {
 public:
-    NestedRepeatingStreamSetTest(BuilderRef b,
+    NestedRepeatingStreamSetTest(KernelBuilder & b,
                                 const PatternVec & pattern,
                                 const bool unaligned,
                                 StreamSet * const Output,
@@ -637,7 +634,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         , {Binding{b.getInt32Ty()->getPointerTo(), "invalid", invalid}}
                          // output scalars
                          , {}
                          // internally generated streamsets
@@ -682,7 +679,7 @@ const bool mAllowUnaligned;
 
 class MultiLevelNestingTest : public PipelineKernel {
 public:
-    MultiLevelNestingTest(BuilderRef b,
+    MultiLevelNestingTest(KernelBuilder & b,
                           const PatternVec & pattern,
                           const bool unaligned,
                           const bool familyCall,
@@ -714,7 +711,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{b->getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         , {Binding{b.getInt32Ty()->getPointerTo(), "invalid", invalid}}
                          // output scalars
                          , {}
                          // internally generated streamsets
@@ -756,7 +753,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     auto & b = pxDriver.getBuilder();
 
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty()->getPointerTo(), "output"}},{});
+    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty()->getPointerTo(), "output"}},{});
 
     unsigned fieldWidth = optFieldWidth;
     if (fieldWidth == 0) {
@@ -778,7 +775,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     size_t repetitionLength = optRepetitionLength;
     if (repetitionLength == 0) {
-        const auto bw = b->getBitBlockWidth();
+        const auto bw = b.getBitBlockWidth();
         const auto v = boost::lcm<unsigned>(patternLength, bw) * 3U;
         repetitionLength = std::max(v, 4567U);
     }
@@ -817,7 +814,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
 
-    Scalar *  const repLength = P->CreateConstant(b->getSize(repetitionLength));
+    Scalar *  const repLength = P->CreateConstant(b.getSize(repetitionLength));
 
     P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
 

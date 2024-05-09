@@ -13,13 +13,13 @@ namespace kernel {
 
 #define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)
 
-inline void PipelineCompiler::debugInit(BuilderRef b) {
-    Function * const pthreadSelfFn = b->getModule()->getFunction("pthread_self");
-    mThreadId = b->CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
+inline void PipelineCompiler::debugInit(KernelBuilder & b) {
+    Function * const pthreadSelfFn = b.getModule()->getFunction("pthread_self");
+    mThreadId = b.CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
 }
 
 template <typename ... Args>
-BOOST_NOINLINE void PipelineCompiler::debugPrint(BuilderRef b, Twine format, Args ...args) const {
+BOOST_NOINLINE void PipelineCompiler::debugPrint(KernelBuilder & b, Twine format, Args ...args) const {
     #ifdef PRINT_DEBUG_MESSAGES_FOR_NESTED_PIPELINE_ONLY
     if (!mIsNestedPipeline) return;
     #endif
@@ -44,8 +44,8 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(BuilderRef b, Twine format, Arg
     #endif
     out << format << "\n";
     SmallVector<Value *, 8> argVals(2);
-    argVals[0] = b->getInt32(STDERR_FILENO);
-    argVals[1] = b->GetString(out.str());
+    argVals[0] = b.getInt32(STDERR_FILENO);
+    argVals[1] = b.GetString(out.str());
     #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
     if (mThreadId) {
         argVals.push_back(mThreadId);
@@ -57,8 +57,8 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(BuilderRef b, Twine format, Arg
         assert ("null argument given to debugPrint" && arg);
     }
     #endif
-    Function * Dprintf = b->GetDprintf();
-    b->CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
+    Function * Dprintf = b.GetDprintf();
+    b.CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
 }
 
 #undef NEW_FILE

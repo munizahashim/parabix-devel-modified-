@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindAdditionalInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) {
+void PipelineCompiler::bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) {
     bindFamilyInitializationArguments(b, arg, arg_end);
     bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
     assert (arg == arg_end);
@@ -14,8 +14,8 @@ void PipelineCompiler::bindAdditionalInitializationArguments(BuilderRef b, ArgIt
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateImplicitKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
-    assert (b->getModule() == mTarget->getModule());
+void PipelineCompiler::generateImplicitKernels(KernelBuilder & b) {
+    assert (b.getModule() == mTarget->getModule());
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const_cast<Kernel *>(getKernel(i))->generateOrLoadKernel(b);
     }
@@ -24,7 +24,7 @@ void PipelineCompiler::generateImplicitKernels(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPipelineKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
+void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     // TODO: look into improving cache locality/false sharing of this struct
 
     // TODO: create a non-persistent / pass through input scalar type to allow the
@@ -32,12 +32,12 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // Non-family kernels can be contained within the shared state but family ones
     // must be allocated dynamically.
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
 
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
+        PointerType * const int8PtrTy = b.getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
         mTarget->addThreadLocalScalar(sizeTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, 0);
     }
@@ -45,7 +45,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
     // They get automatically set by reading in the appropriate params.
 
     if (HasZeroExtendedStream) {
-        PointerType * const voidPtrTy = b->getVoidPtrTy();
+        PointerType * const voidPtrTy = b.getVoidPtrTy();
         mTarget->addThreadLocalScalar(voidPtrTy, ZERO_EXTENDED_BUFFER);
         mTarget->addThreadLocalScalar(sizeTy, ZERO_EXTENDED_SPACE);
     }
@@ -78,7 +78,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
         #endif
     }
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        mTarget->addThreadLocalScalar(b->getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
+        mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
     addRepeatingStreamSetBufferProperties(b);
@@ -98,7 +98,7 @@ void PipelineCompiler::addPipelineKernelProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned kernelId, const bool isRoot) {
+void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot) {
 
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
@@ -119,7 +119,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     const auto allowDataParallelExecution = isStateless;
     #endif
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     const auto groupId = getCacheLineGroupId(kernelId);
 
@@ -172,7 +172,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Type * sharedStateTy = nullptr;
         if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
-            sharedStateTy = b->getVoidPtrTy();
+            sharedStateTy = b.getVoidPtrTy();
         } else {
             sharedStateTy = mKernel->getSharedStateType();
         }
@@ -183,7 +183,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
         // we cannot statically allocate a "family" thread local object.
         Type * localStateTy = nullptr;
         if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
-            localStateTy = b->getVoidPtrTy();
+            localStateTy = b.getVoidPtrTy();
         } else {
             localStateTy = mKernel->getThreadLocalStateType();
         }
@@ -205,7 +205,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
             if (bn.Buffer->isDynamic()) {
                 const BufferPort & rd = mBufferGraph[e];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
-                LLVMContext & C = b->getContext();
+                LLVMContext & C = b.getContext();
                 const auto numOfConsumers = std::max(out_degree(bufferVertex, mConsumerGraph), 1UL);
 
                 // segment num  0
@@ -224,7 +224,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
     }
 
     if (LLVM_UNLIKELY(isRoot && DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
-        LLVMContext & C = b->getContext();
+        LLVMContext & C = b.getContext();
 //        FixedArray<Type *, 2> recordStruct;
 //        recordStruct[0] = sizeTy; // segment num
 //        recordStruct[1] = sizeTy; // # of strides
@@ -245,7 +245,7 @@ void PipelineCompiler::addInternalKernelProperties(BuilderRef b, const unsigned 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
+void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 
     // TODO: if we detect a fatal error at init, we should not execute
     // the pipeline loop.
@@ -295,10 +295,10 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
             }
             #endif
             Value * const signal = callKernelInitializeFunction(b, args);
-            Value * const terminatedOnInit = b->CreateICmpNE(signal, unterminated);
+            Value * const terminatedOnInit = b.CreateICmpNE(signal, unterminated);
 
             if (terminated) {
-                terminated = b->CreateOr(terminated, terminatedOnInit);
+                terminated = b.CreateOr(terminated, terminatedOnInit);
             } else {
                 terminated = terminatedOnInit;
             }
@@ -316,7 +316,7 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
         // Is this the last kernel in a partition? If so, store the accumulated
         // termination signal.
         if (terminated && HasTerminationSignal[mKernelId]) {
-            Value * const signal = b->CreateSelect(terminated, aborted, unterminated);
+            Value * const signal = b.CreateSelect(terminated, aborted, unterminated);
             writeTerminationSignal(b, mKernelId, signal);
             terminated = nullptr;
         }
@@ -333,18 +333,18 @@ void PipelineCompiler::generateInitializeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
-    b->setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
+void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+    b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
 
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
 
     Value * allocScale = expectedNumOfStrides;
     if (LLVM_LIKELY(!mIsNestedPipeline)) {
-        Value * bsl = b->getScalarField(BUFFER_SEGMENT_LENGTH);
-        allocScale = b->CreateMul(allocScale, bsl);
-        Value * const threadCount = b->getScalarField(MAXIMUM_NUM_OF_THREADS);
-        allocScale = b->CreateMul(allocScale, threadCount);
+        Value * bsl = b.getScalarField(BUFFER_SEGMENT_LENGTH);
+        allocScale = b.CreateMul(allocScale, bsl);
+        Value * const threadCount = b.getScalarField(MAXIMUM_NUM_OF_THREADS);
+        allocScale = b.CreateMul(allocScale, threadCount);
     }
 
     bool hasAnyReturnedBuffer = false;
@@ -368,10 +368,10 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef
                 FixedArray<Value *, 1> args;
                 args[0] = mKernelSharedHandle;
                 Value * eosVal = callKernelExpectedSourceOutputSizeFunction(b, args);
-                expectedSourceOutputSize = b->CreateUMax(eosVal, expectedSourceOutputSize);
+                expectedSourceOutputSize = b.CreateUMax(eosVal, expectedSourceOutputSize);
             }
         }
-        expectedSourceOutputSize = b->CreateCeilUDiv(expectedSourceOutputSize, b->getSize(b->getBitBlockWidth()));
+        expectedSourceOutputSize = b.CreateCeilUDiv(expectedSourceOutputSize, b.getSize(b.getBitBlockWidth()));
     }
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
@@ -381,7 +381,7 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
+void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -396,24 +396,24 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
+void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
     assert (mTarget->hasThreadLocal());
     Value * allocScale = expectedNumOfStrides;
     if (LLVM_LIKELY(!mIsNestedPipeline)) {
-        Value * bsl = b->getScalarField(BUFFER_SEGMENT_LENGTH);
-        allocScale = b->CreateMul(allocScale, bsl);
+        Value * bsl = b.getScalarField(BUFFER_SEGMENT_LENGTH);
+        allocScale = b.CreateMul(allocScale, bsl);
     }
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         auto size = RequiredThreadLocalStreamSetMemory;
         #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
         size *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
         #endif
-        ConstantInt * const reqMemory = b->getSize(size);
-        Value * const memorySize = b->CreateMul(reqMemory, allocScale);
-        Value * const base = b->CreatePageAlignedMalloc(memorySize);
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
-        b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b->CreatePointerCast(base, int8PtrTy));
-        b->setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
+        ConstantInt * const reqMemory = b.getSize(size);
+        Value * const memorySize = b.CreateMul(reqMemory, allocScale);
+        Value * const base = b.CreatePageAlignedMalloc(memorySize);
+        PointerType * const int8PtrTy = b.getInt8PtrTy();
+        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b.CreatePointerCast(base, int8PtrTy));
+        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
     }
     allocateOwnedBuffers(b, expectedNumOfStrides, nullptr, false);
     resetInternalBufferHandles();
@@ -422,7 +422,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Build
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateKernelMethod(BuilderRef b) {
+void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
     initializeKernelAssertions(b);
     initializeScalarValues(b);
     if (mIsNestedPipeline) {
@@ -436,12 +436,12 @@ void PipelineCompiler::generateKernelMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
+void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         // get the last segment # used by any kernel in case any reports require it.
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
-        mSegNo = b->CreateLoad(b->getSizeTy(), ptr);
+        mSegNo = b.CreateLoad(b.getSizeTy(), ptr);
 
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
@@ -489,7 +489,7 @@ void PipelineCompiler::generateFinalizeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
+void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -505,7 +505,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
             args.push_back(mKernelThreadLocalHandle); assert (mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
             if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
-              //  b->CreateFree(mKernelThreadLocalHandle);
+              //  b.CreateFree(mKernelThreadLocalHandle);
             }
         }
     }
@@ -514,10 +514,10 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
-        b->CreateFree(b->getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY));
+        b.CreateFree(b.getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY));
     }
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
-        b->CreateFree(b->getScalarField(ZERO_EXTENDED_BUFFER));
+        b.CreateFree(b.getScalarField(ZERO_EXTENDED_BUFFER));
     }
     freePendingFreeableDynamicBuffers(b);
     freeZeroedInputBuffers(b);

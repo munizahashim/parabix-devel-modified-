@@ -18,8 +18,6 @@ class KernelCompiler {
 
 public:
 
-    using BuilderRef = const std::unique_ptr<KernelBuilder> &;
-
     using Rational = ProcessingRate::Rational;
 
     using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
@@ -64,7 +62,7 @@ public:
     // constructor
     KernelCompiler(not_null<Kernel *> kernel) noexcept;
 
-    void generateKernel(BuilderRef b);
+    void generateKernel(KernelBuilder & b);
 
     virtual ~KernelCompiler();
 
@@ -329,25 +327,25 @@ public:
 
     bool hasScalarField(const llvm::StringRef name) const;
 
-    ScalarRef getScalarFieldPtr(KernelBuilder * const b, const llvm::StringRef name) const;
+    ScalarRef getScalarFieldPtr(KernelBuilder & b, const llvm::StringRef name) const;
 
     LLVM_READNONE const BindingMapEntry & getBinding(const BindingType type, const llvm::StringRef name) const;
 
 protected:
 
-    virtual void constructStreamSetBuffers(BuilderRef b);
+    virtual void constructStreamSetBuffers(KernelBuilder & b);
 
-    virtual void addBaseInternalProperties(BuilderRef b);
+    virtual void addBaseInternalProperties(KernelBuilder & b);
 
-    ScalarRef getThreadLocalScalarFieldPtr(BuilderRef b, llvm::Value * handle, const llvm::StringRef name) const;
+    ScalarRef getThreadLocalScalarFieldPtr(KernelBuilder & b, llvm::Value * handle, const llvm::StringRef name) const;
 
 private:
 
-    void initializeScalarMap(BuilderRef b, const InitializeOptions options);
+    void initializeScalarMap(KernelBuilder & b, const InitializeOptions options);
 
     void initializeIOBindingMap();
 
-    void initializeOwnedBufferHandles(BuilderRef b, const InitializeOptions options);
+    void initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions options);
 
 protected:
 
@@ -355,41 +353,41 @@ protected:
 
 public:
 
-    void callGenerateInitializeMethod(BuilderRef b);
+    void callGenerateInitializeMethod(KernelBuilder & b);
 
-    virtual void callGenerateExpectedOutputSizeMethod(BuilderRef b);
+    virtual void callGenerateExpectedOutputSizeMethod(KernelBuilder & b);
 
-    virtual void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end);
+    virtual void bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end);
 
-    void callGenerateInitializeThreadLocalMethod(BuilderRef b);
+    void callGenerateInitializeThreadLocalMethod(KernelBuilder & b);
 
-    void callGenerateAllocateSharedInternalStreamSets(BuilderRef b);
+    void callGenerateAllocateSharedInternalStreamSets(KernelBuilder & b);
 
-    void callGenerateAllocateThreadLocalInternalStreamSets(BuilderRef b);
+    void callGenerateAllocateThreadLocalInternalStreamSets(KernelBuilder & b);
 
-    std::vector<llvm::Value *> getDoSegmentProperties(BuilderRef b) const;
+    std::vector<llvm::Value *> getDoSegmentProperties(KernelBuilder & b) const;
 
-    void setDoSegmentProperties(BuilderRef b, const llvm::ArrayRef<llvm::Value *> args);
+    void setDoSegmentProperties(KernelBuilder & b, const llvm::ArrayRef<llvm::Value *> args);
 
-    void callGenerateDoSegmentMethod(BuilderRef b);
+    void callGenerateDoSegmentMethod(KernelBuilder & b);
 
-    void callGenerateFinalizeThreadLocalMethod(BuilderRef b);
+    void callGenerateFinalizeThreadLocalMethod(KernelBuilder & b);
 
-    void callGenerateFinalizeMethod(BuilderRef b);
+    void callGenerateFinalizeMethod(KernelBuilder & b);
 
     static Rational getLCMOfFixedRateInputs(const Kernel * const target);
 
 protected:
 
-    void registerIllustrator(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1, const llvm::ArrayRef<size_t> loopIds) const;
+    void registerIllustrator(KernelBuilder & b, llvm::Constant * kernelName, llvm::Constant * streamName, const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1, const llvm::ArrayRef<size_t> loopIds) const;
 
-    void registerIllustrator(BuilderRef b, llvm::Value * illustratorObject, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1, const llvm::ArrayRef<size_t> loopIds) const;
+    void registerIllustrator(KernelBuilder & b, llvm::Value * illustratorObject, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering, IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1, const llvm::ArrayRef<size_t> loopIds) const;
 
-    void captureStreamData(BuilderRef b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
+    void captureStreamData(KernelBuilder & b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
 
 protected:
 
-    virtual std::vector<llvm::Value *> getFinalOutputScalars(BuilderRef b);
+    virtual std::vector<llvm::Value *> getFinalOutputScalars(KernelBuilder & b);
 
 private:
 

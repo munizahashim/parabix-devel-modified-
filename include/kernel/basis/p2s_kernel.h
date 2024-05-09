@@ -13,62 +13,62 @@ namespace kernel {
 
 class P2SKernel final : public BlockOrientedKernel {
 public:
-    P2SKernel(BuilderRef b,
+    P2SKernel(KernelBuilder & b,
               StreamSet * basisBits,
               StreamSet * byteStream);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 
 class P2SMultipleStreamsKernel final : public BlockOrientedKernel {
 public:
-    P2SMultipleStreamsKernel(BuilderRef b,
+    P2SMultipleStreamsKernel(KernelBuilder & b,
                              const StreamSets & inputStreams,
                              StreamSet * const outputStream);
 protected:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 private:
 };
 
 class P2SKernelWithCompressedOutput final : public BlockOrientedKernel {
 public:
-    P2SKernelWithCompressedOutput(BuilderRef b);
+    P2SKernelWithCompressedOutput(KernelBuilder & b);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 class P2S16Kernel final : public BlockOrientedKernel {
 public:
-    P2S16Kernel(BuilderRef b, StreamSet * u16bits, StreamSet * u16stream, cc::ByteNumbering endianness = cc::ByteNumbering::LittleEndian);
-    P2S16Kernel(BuilderRef b, StreamSets & inputSets, StreamSet * u16stream, cc::ByteNumbering endianness = cc::ByteNumbering::LittleEndian);
+    P2S16Kernel(KernelBuilder & b, StreamSet * u16bits, StreamSet * u16stream, cc::ByteNumbering endianness = cc::ByteNumbering::LittleEndian);
+    P2S16Kernel(KernelBuilder & b, StreamSets & inputSets, StreamSet * u16stream, cc::ByteNumbering endianness = cc::ByteNumbering::LittleEndian);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
     cc::ByteNumbering mByteNumbering;
 };
 
 class P2S16KernelWithCompressedOutput final : public BlockOrientedKernel {
 public:
-    P2S16KernelWithCompressedOutput(BuilderRef b,
+    P2S16KernelWithCompressedOutput(KernelBuilder & b,
                                     StreamSet * basisBits, StreamSet * fieldCounts, StreamSet * i16Stream, cc::ByteNumbering endianness = cc::ByteNumbering::LittleEndian);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
     cc::ByteNumbering mByteNumbering;
 };
 
 class P2S16KernelWithCompressedOutputOld final : public BlockOrientedKernel {
 public:
-    P2S16KernelWithCompressedOutputOld(BuilderRef b,
+    P2S16KernelWithCompressedOutputOld(KernelBuilder & b,
                                        StreamSet * basisBits, StreamSet * delCounts, StreamSet * byteStream);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 class P2S21Kernel final : public BlockOrientedKernel {
 public:
-    P2S21Kernel(BuilderRef b, StreamSet * u21bits, StreamSet * u32stream, cc::ByteNumbering = cc::ByteNumbering::LittleEndian);
+    P2S21Kernel(KernelBuilder & b, StreamSet * u21bits, StreamSet * u32stream, cc::ByteNumbering = cc::ByteNumbering::LittleEndian);
 private:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
     cc::ByteNumbering mByteNumbering;
 };
 

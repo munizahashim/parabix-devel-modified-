@@ -68,13 +68,13 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class WordMarkKernel : public pablo::PabloKernel {
 public:
-    WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks);
+    WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks);
 protected:
     void generatePabloMethod() override;
 };
 
-WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+WordMarkKernel::WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks)
+: PabloKernel(b, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -90,9 +90,9 @@ void WordMarkKernel::generatePabloMethod() {
 
 class ParseSymbols : public pablo::PabloKernel {
 public:
-    ParseSymbols(BuilderRef kb,
+    ParseSymbols(KernelBuilder & b,
                 StreamSet * basisBits, StreamSet * wordChar, StreamSet * symbolRuns)
-    : pablo::PabloKernel(kb, "ParseSymbols",
+    : pablo::PabloKernel(b, "ParseSymbols",
                          {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
                              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
                          {Binding{"symbolRuns", symbolRuns}}) { }
@@ -130,7 +130,7 @@ void ParseSymbols::generatePabloMethod() {
 
 class RunLengthSelector final: public pablo::PabloKernel {
 public:
-    RunLengthSelector(BuilderRef b,
+    RunLengthSelector(KernelBuilder & b,
                       unsigned lo,
                       unsigned hi,
                       StreamSet * symbolRun, StreamSet * const lengthBixNum,
@@ -142,7 +142,7 @@ protected:
     unsigned mHi;
 };
 
-RunLengthSelector::RunLengthSelector(BuilderRef b,
+RunLengthSelector::RunLengthSelector(KernelBuilder & b,
                            unsigned lo,
                            unsigned hi,
                            StreamSet * symbolRun,
@@ -228,7 +228,7 @@ extern "C" void callback(const char * L6end_ptr, uint8_t hashval) {
 HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
 
     auto & b = driver.getBuilder();
-    auto P = driver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
 
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 

@@ -5,7 +5,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerStreamSetIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t streamSet) const {
+void PipelineCompiler::registerStreamSetIllustrator(KernelBuilder & b, const size_t streamSet) const {
 
     for (const auto & bind : mIllustratedStreamSetBindings) {
         if (bind.StreamSet == streamSet) {
@@ -16,7 +16,7 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
 
             Value * handle = mKernelSharedHandle;
             if (LLVM_UNLIKELY(handle == nullptr)) {
-                handle = b->CreateIntToPtr(b->getInt64(mKernelId), b->getVoidPtrTy());
+                handle = b.CreateIntToPtr(b.getInt64(mKernelId), b.getVoidPtrTy());
             }
 
             assert (mKernel);
@@ -26,9 +26,9 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
             FixedArray<size_t, 0> emptyLoopVec;
 
             registerIllustrator(b,
-                                b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT),
-                                b->GetString(mKernel->getName()),
-                                b->GetString(bind.Name),
+                                b.getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT),
+                                b.GetString(mKernel->getName()),
+                                b.GetString(bind.Name),
                                 handle,
                                 ss->getNumElements(), 1, ss->getFieldWidth(), MemoryOrdering::RowMajor,
                                 bind.IllustratorType, bind.ReplacementCharacter[0], bind.ReplacementCharacter[1],
@@ -41,7 +41,7 @@ void PipelineCompiler::registerStreamSetIllustrator(BuilderRef b, const size_t s
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief illustrateStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const {
+void PipelineCompiler::illustrateStreamSet(KernelBuilder & b, const size_t streamSet, Value * const initial, Value * const current) const {
 
     assert (mInternallySynchronizedSubsegmentNumber);
     for (const auto & bind : mIllustratedStreamSetBindings) {
@@ -64,15 +64,15 @@ void PipelineCompiler::illustrateStreamSet(BuilderRef b, const size_t streamSet,
 
             Value * handle = mKernelSharedHandle;
             if (LLVM_UNLIKELY(handle == nullptr)) {
-                handle = b->CreateIntToPtr(b->getInt64(mKernelId), b->getVoidPtrTy());
+                handle = b.CreateIntToPtr(b.getInt64(mKernelId), b.getVoidPtrTy());
             }
 
             // TODO: should we pass the values of the min repetition vector to better group the output?
 
             // TODO: should buffers have row major streamsets?
             captureStreamData(b,
-                              b->GetString(mKernel->getName()),
-                              b->GetString(bind.Name),
+                              b.GetString(mKernel->getName()),
+                              b.GetString(bind.Name),
                               handle,
                               mInternallySynchronizedSubsegmentNumber,
                               buffer->getType(), MemoryOrdering::RowMajor,

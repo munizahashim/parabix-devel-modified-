@@ -100,9 +100,9 @@ typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
 WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> source) {
 
-    auto & iBuilder = pxDriver.getBuilder();
+    auto & b = pxDriver.getBuilder();
 
-    Type * const int32Ty = iBuilder->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
 
     auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
 
@@ -122,7 +122,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloP
         kernel::Bindings{Binding{"bb", BasisBits}},             // input stream bindings
         kernel::Bindings{},                                     // output stream bindings
         kernel::Bindings{},                                     // input scalar bindings
-        kernel::Bindings{Binding{iBuilder->getInt64Ty(), "lc"}} // output scalar bindings
+        kernel::Bindings{Binding{b.getInt64Ty(), "lc"}} // output scalar bindings
     );
 
     Kernel * const wck = P->CreateKernelCall<PabloSourceKernel>(
@@ -132,7 +132,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloP
         kernel::Bindings{Binding{"bb", BasisBits}},             // input stream bindings
         kernel::Bindings{},                                     // output stream bindings
         kernel::Bindings{},                                     // input scalar bindings
-        kernel::Bindings{Binding{iBuilder->getInt64Ty(), "wc"}} // output scalar bindings
+        kernel::Bindings{Binding{b.getInt64Ty(), "wc"}} // output scalar bindings
     );
 
     Kernel * const cck = P->CreateKernelCall<PabloSourceKernel>(
@@ -142,7 +142,7 @@ WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloP
         kernel::Bindings{Binding{"bb", BasisBits}},             // input stream bindings
         kernel::Bindings{},                                     // output stream bindings
         kernel::Bindings{},                                     // input scalar bindings
-        kernel::Bindings{Binding{iBuilder->getInt64Ty(), "cc"}} // output scalar bindings
+        kernel::Bindings{Binding{b.getInt64Ty(), "cc"}} // output scalar bindings
     );
 
     Scalar * const lineCount = lck->getOutputScalar("lc");

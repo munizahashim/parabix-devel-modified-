@@ -67,7 +67,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class AdjustU8bixnum : public pablo::PabloKernel {
 public:
-    AdjustU8bixnum(BuilderRef b,
+    AdjustU8bixnum(KernelBuilder & b,
                    StreamSet * Basis, StreamSet * InsertBixNum,
                    StreamSet * AdjustedBixNum);
 protected:
@@ -76,7 +76,7 @@ private:
     unsigned mBixBits;
 };
 
-AdjustU8bixnum::AdjustU8bixnum (BuilderRef b,
+AdjustU8bixnum::AdjustU8bixnum (KernelBuilder & b,
                                 StreamSet * Basis, StreamSet * InsertBixNum,
                                 StreamSet * AdjustedBixNum)
 : PabloKernel(b, "adjust_bixnum" + std::to_string(InsertBixNum->getNumElements()) + "x1",
@@ -125,7 +125,7 @@ void AdjustU8bixnum::generatePabloMethod() {
 
 class CreateU8delMask : public pablo::PabloKernel {
 public:
-    CreateU8delMask(BuilderRef b,
+    CreateU8delMask(KernelBuilder & b,
                     StreamSet * Basis, StreamSet * DeletionBixNum,
                     StreamSet * DelMask);
 protected:
@@ -134,7 +134,7 @@ private:
     unsigned mBixBits;
 };
 
-CreateU8delMask::CreateU8delMask (BuilderRef b,
+CreateU8delMask::CreateU8delMask (KernelBuilder & b,
                                 StreamSet * Basis, StreamSet * DeletionBixNum,
                                 StreamSet * DelMask)
 : PabloKernel(b, "u8_delmask" + std::to_string(DeletionBixNum->getNumElements()) + "x1",
@@ -183,12 +183,12 @@ void CreateU8delMask::generatePabloMethod() {
 
 class UTF8_BytePosition : public pablo::PabloKernel {
 public:
-    UTF8_BytePosition(BuilderRef b, StreamSet * Basis, StreamSet * Positions);
+    UTF8_BytePosition(KernelBuilder & b, StreamSet * Basis, StreamSet * Positions);
 protected:
     void generatePabloMethod() override;
 };
 
-UTF8_BytePosition::UTF8_BytePosition(BuilderRef b, StreamSet * Basis, StreamSet * Positions)
+UTF8_BytePosition::UTF8_BytePosition(KernelBuilder & b, StreamSet * Basis, StreamSet * Positions)
 : PabloKernel(b, "UTF8_BytePosition",
 {Binding{"basis", Basis, FixedRate(1), LookAhead(2)}},
 // output
@@ -223,7 +223,7 @@ void UTF8_BytePosition::generatePabloMethod() {
 class UTF8_Target_Class : public pablo::PabloKernel {
 public:
     UTF8_Target_Class
-        (BuilderRef b,
+        (KernelBuilder & b,
          StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * TargetClass);
 protected:
@@ -234,7 +234,7 @@ private:
 };
 
 UTF8_Target_Class::UTF8_Target_Class
-    (BuilderRef b,
+    (KernelBuilder & b,
      StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * TargetClass)
 : PabloKernel(b, "UTF8_Target_Class" +
@@ -304,7 +304,7 @@ void UTF8_Target_Class::generatePabloMethod() {
 class UTF8_CharacterTranslator : public pablo::PabloKernel {
 public:
     UTF8_CharacterTranslator
-        (BuilderRef b,
+        (KernelBuilder & b,
          StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * Output);
 protected:
@@ -316,7 +316,7 @@ private:
 };
 
 UTF8_CharacterTranslator::UTF8_CharacterTranslator
-    (BuilderRef b,
+    (KernelBuilder & b,
      StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * Output)
 : PabloKernel(b, "u8_transform_bits_" +
@@ -450,13 +450,13 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
-    ApplyTransform(BuilderRef b,
+    ApplyTransform(KernelBuilder & b,
                    StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 };
 
-ApplyTransform::ApplyTransform (BuilderRef b,
+ApplyTransform::ApplyTransform (KernelBuilder & b,
                                 StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
 : PabloKernel(b, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
 // inputs
@@ -491,9 +491,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"}});
-    //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-        //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap
@@ -548,9 +546,7 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
     StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b->getInt32Ty(), "inputFileDecriptor"}});
-    //auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-        //Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap

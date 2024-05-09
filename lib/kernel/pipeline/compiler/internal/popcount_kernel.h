@@ -13,11 +13,11 @@ public:
 
     enum PopCountType { POSITIVE, NEGATIVE, BOTH };
 
-    explicit PopCountKernel(BuilderRef b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output);
+    explicit PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output);
 
-    explicit PopCountKernel(BuilderRef b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * negative);
+    explicit PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * negative);
 
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 
 private:
 

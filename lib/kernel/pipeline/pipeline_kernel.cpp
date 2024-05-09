@@ -23,7 +23,7 @@ using IDISA::FixedVectorType;
 
 namespace kernel {
 
-#define COMPILER (static_cast<PipelineCompiler *>(b->getCompiler()))
+#define COMPILER (static_cast<PipelineCompiler *>(b.getCompiler()))
 
 #ifdef ENABLE_PAPI
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -107,31 +107,31 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
     return EventSet;
 }
 
-void terminatePAPI(BuilderRef b, Value * eventSet) {
-    Module * const m = b->getModule();
+void terminatePAPI(KernelBuilder & b, Value * eventSet) {
+    Module * const m = b.getModule();
     FixedArray<Value *, 1> args;
     args[0] = eventSet;
     Function * const PAPICleanupEventsetFn = m->getFunction("PAPI_cleanup_eventset");
-    b->CreateCall(PAPICleanupEventsetFn->getFunctionType(), PAPICleanupEventsetFn, args);
+    b.CreateCall(PAPICleanupEventsetFn->getFunctionType(), PAPICleanupEventsetFn, args);
     Function * const PAPIDestroyEventsetFn = m->getFunction("PAPI_destroy_eventset");
 
     FunctionType * fTy = PAPIDestroyEventsetFn->getFunctionType();
 
 //    fTy->getFunctionParamType(0)->isPointerTy()
-    Value * eventSetData = b->CreateAllocaAtEntryPoint(eventSet->getType());
-    b->CreateStore(eventSet, eventSetData);
+    Value * eventSetData = b.CreateAllocaAtEntryPoint(eventSet->getType());
+    b.CreateStore(eventSet, eventSetData);
     args[0] = eventSetData;
 
-    b->CreateCall(fTy, PAPIDestroyEventsetFn, args);
+    b.CreateCall(fTy, PAPIDestroyEventsetFn, args);
     Function * const PAPIShutdownFn = m->getFunction("PAPI_shutdown");
-    b->CreateCall(PAPIShutdownFn->getFunctionType(), PAPIShutdownFn, {});
+    b.CreateCall(PAPIShutdownFn->getFunctionType(), PAPIShutdownFn, {});
 }
 #endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::addInternalProperties(BuilderRef b) {
+void PipelineKernel::addInternalProperties(KernelBuilder & b) {
     COMPILER->generateImplicitKernels(b);
     COMPILER->addPipelineKernelProperties(b);
 }
@@ -139,42 +139,42 @@ void PipelineKernel::addInternalProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateInitializeMethod(BuilderRef b) {
+void PipelineKernel::generateInitializeMethod(KernelBuilder & b) {
     COMPILER->generateInitializeMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateInitializeThreadLocalMethod(BuilderRef b) {
+void PipelineKernel::generateInitializeThreadLocalMethod(KernelBuilder & b) {
     COMPILER->generateInitializeThreadLocalMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateKernelMethod(BuilderRef b) {
+void PipelineKernel::generateKernelMethod(KernelBuilder & b) {
     COMPILER->generateKernelMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateFinalizeMethod(BuilderRef b) {
+void PipelineKernel::generateFinalizeMethod(KernelBuilder & b) {
     COMPILER->generateFinalizeMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateFinalizeThreadLocalMethod(BuilderRef b) {
+void PipelineKernel::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     COMPILER->generateFinalizeThreadLocalMethod(b);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addKernelDeclarations
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::addKernelDeclarations(BuilderRef b) {
+void PipelineKernel::addKernelDeclarations(KernelBuilder & b) {
     for (const auto & k : mKernels) {
         k.Object->addKernelDeclarations(b);
     }
@@ -191,27 +191,27 @@ bool PipelineKernel::allocatesInternalStreamSets() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateSharedInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) {
+void PipelineKernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) {
     COMPILER->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides) {
+void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) {
     COMPILER->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkExternalMethods
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::linkExternalMethods(BuilderRef b) {
+void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
     PipelineCompiler::linkPThreadLibrary(b);
     for (const auto & k : mKernels) {
         k.Object->linkExternalMethods(b);
     }
     for (const CallBinding & call : mCallBindings) {
-        call.Callee = b->LinkFunction(call.Name, call.Type, call.FunctionPointer);
+        call.Callee = b.LinkFunction(call.Name, call.Type, call.FunctionPointer);
     }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
@@ -230,7 +230,7 @@ void PipelineKernel::linkExternalMethods(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAdditionalFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::addAdditionalFunctions(BuilderRef b) {
+void PipelineKernel::addAdditionalFunctions(KernelBuilder & b) {
     // TODO: to ensure that we can pass the correct num of threads, we cannot statically compile the
     // main method until we add the thread count as a parameter. Investigate whether we can make a
     // better "wrapper" method for that that allows easier access to the output scalars.
@@ -252,7 +252,7 @@ unsigned PipelineKernel::getNumOfNestedKernelFamilyCalls() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addFamilyInitializationArgTypes
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const {
+void PipelineKernel::addAdditionalInitializationArgTypes(KernelBuilder & b, InitArgTypes & argTypes) const {
     const auto n = getNumOfNestedKernelFamilyCalls();
     #ifndef NDEBUG
     unsigned m = 0;
@@ -264,11 +264,11 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
     }
     assert ("reported number of nested kernels does not match actual?" && (m == n));
     #endif
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
     if (LLVM_LIKELY(n > 0)) {
         argTypes.append(n * 7U, voidPtrTy);
     }
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     if (LLVM_UNLIKELY(hasInternallyGeneratedStreamSets())) {
         const auto m = getInternallyGeneratedStreamSets().size();
         argTypes.reserve(m * 2);
@@ -282,7 +282,7 @@ void PipelineKernel::addAdditionalInitializationArgTypes(BuilderRef b, InitArgTy
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
+void PipelineKernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
     for (const auto & k : mKernels) {
         const Kernel * const kernel = k.Object;
         if (LLVM_UNLIKELY(k.isFamilyCall())) {
@@ -296,13 +296,13 @@ void PipelineKernel::recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief createRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * ss, const size_t maxStrideLength) const {
+Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(KernelBuilder & b, const RepeatingStreamSet * ss, const size_t maxStrideLength) const {
 
     const auto fieldWidth = ss->getFieldWidth();
     const auto numElements = ss->getNumElements();
-    const auto blockWidth = b->getBitBlockWidth();
+    const auto blockWidth = b.getBitBlockWidth();
 
-    FixedVectorType * const vecTy = b->getBitBlockType();
+    FixedVectorType * const vecTy = b.getBitBlockType();
     IntegerType * const intTy = cast<IntegerType>(vecTy->getScalarType());
     const auto laneWidth = intTy->getIntegerBitWidth();
 
@@ -412,19 +412,19 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(BuilderRef 
 
     Constant * const patternVec = ConstantArray::get(arrTy, dataVectorArray);
 
-    Module & mod = *b->getModule();
+    Module & mod = *b.getModule();
     GlobalVariable * const patternData =
         new GlobalVariable(mod, arrTy, true, GlobalValue::ExternalLinkage, patternVec);
     const auto align = blockWidth / 8;
     patternData->setAlignment(MaybeAlign{align});
-    Value * const ptr = b->CreatePointerCast(patternData, b->getVoidPtrTy());
-    return ParamMap::PairEntry{ptr, b->getSize(patternLength)};
+    Value * const ptr = b.CreatePointerCast(patternData, b.getVoidPtrTy());
+    return ParamMap::PairEntry{ptr, b.getSize(patternLength)};
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::runOptimizationPasses(BuilderRef b) const {
+void PipelineKernel::runOptimizationPasses(KernelBuilder & b) const {
     COMPILER->runOptimizationPasses(b);
 }
 
@@ -473,7 +473,7 @@ void PipelineKernel::setOutputScalarAt(const unsigned i, Scalar * const value) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(BuilderRef b) const {
+std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(KernelBuilder & b) const {
     return std::make_unique<PipelineCompiler>(b, const_cast<PipelineKernel *>(this));
 }
 
@@ -536,7 +536,7 @@ void PipelineKernel::writeInternallyGeneratedStreamSetScaleVector(const Relation
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addOrDeclareMainFunction
  ** ------------------------------------------------------------------------------------------------------------- */
-Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const {
+Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const {
 
     unsigned suppliedArgs = 0;
     if (LLVM_LIKELY(isStateful())) {
@@ -546,7 +546,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         suppliedArgs += 1;
     }
 
-    Module * const m = b->getModule();
+    Module * const m = b.getModule();
     Function * const doSegment = getDoSegmentFunction(b, false); assert (doSegment);
     assert (doSegment->arg_size() >= suppliedArgs);
    //  const auto numOfDoSegArgs = doSegment->arg_size() - suppliedArgs;
@@ -561,14 +561,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     StructType * streamSetTy = nullptr;
     PointerType * streamSetPtrTy = nullptr;
-    PointerType * voidPtrTy = b->getVoidPtrTy();
-    IntegerType * int64Ty = b->getInt64Ty();
+    PointerType * voidPtrTy = b.getVoidPtrTy();
+    IntegerType * int64Ty = b.getInt64Ty();
     if (numOfStreamSets) {
         // must match streamsetptr.h
         FixedArray<Type *, 2> fields;
         fields[0] = voidPtrTy;
         fields[1] = int64Ty;
-        streamSetTy = StructType::get(b->getContext(), fields);
+        streamSetTy = StructType::get(b.getContext(), fields);
         streamSetPtrTy = streamSetTy->getPointerTo();
     }
 
@@ -589,20 +589,20 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     Function * displayCapturedData = nullptr;
     Function * destroyIllustrator = nullptr;
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        PointerType * voidPtrTy = b->getVoidPtrTy();
-        createIllustrator = b->LinkFunction("__createStreamDataIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
+        PointerType * voidPtrTy = b.getVoidPtrTy();
+        createIllustrator = b.LinkFunction("__createStreamDataIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
         BEGIN_SCOPED_REGION
         FixedArray<Type *, 2> args;
         args[0] = voidPtrTy;
-        args[1] = b->getSizeTy();
-        FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
-        displayCapturedData = b->LinkFunction("__displayCapturedData", funTy, (void*)&illustratorDisplayCapturedData);
+        args[1] = b.getSizeTy();
+        FunctionType * funTy = FunctionType::get(b.getVoidTy(), args, false);
+        displayCapturedData = b.LinkFunction("__displayCapturedData", funTy, (void*)&illustratorDisplayCapturedData);
         END_SCOPED_REGION
         BEGIN_SCOPED_REGION
         FixedArray<Type *, 1> args;
         args[0] = voidPtrTy;
-        FunctionType * funTy = FunctionType::get(b->getVoidTy(), args, false);
-        destroyIllustrator = b->LinkFunction("__destroyStreamDataIllustrator", funTy, (void*)&destroyStreamDataIllustrator);
+        FunctionType * funTy = FunctionType::get(b.getVoidTy(), args, false);
+        destroyIllustrator = b.LinkFunction("__destroyStreamDataIllustrator", funTy, (void*)&destroyStreamDataIllustrator);
         END_SCOPED_REGION
     }
 
@@ -628,7 +628,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     assert (main->empty());
 
-    b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", main));
+    b.SetInsertPoint(BasicBlock::Create(b.getContext(), "entry", main));
     auto arg = main->arg_begin();
     auto nextArg = [&]() -> Value * {
         assert (arg != main->arg_end());
@@ -642,10 +642,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
         auto argCount = suppliedArgs;
 
-        ConstantInt * const i32_ZERO = b->getInt32(0);
-        ConstantInt * const i32_ONE = b->getInt32(1);
+        ConstantInt * const i32_ZERO = b.getInt32(0);
+        ConstantInt * const i32_ONE = b.getInt32(1);
 
-        Value * const sz_ZERO = b->getSize(0);
+        Value * const sz_ZERO = b.getSize(0);
 
         FixedArray<Value *, 2> fields;
         fields[0] = i32_ZERO;
@@ -655,15 +655,15 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             assert (streamSetArg->getType() == streamSetPtrTy);
             // virtual base input address
             fields[1] = i32_ZERO;
-            Value * const vbaPtr = b->CreateGEP(streamSetTy, streamSetArg, fields);
-            segmentArgs[argCount++] = b->CreateLoad(voidPtrTy, vbaPtr);
+            Value * const vbaPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            segmentArgs[argCount++] = b.CreateLoad(voidPtrTy, vbaPtr);
             // processed input items
             fields[1] = i32_ONE;
-            Value * const processedPtr = b->CreateAllocaAtEntryPoint(b->getSizeTy());
-            b->CreateStore(sz_ZERO, processedPtr);
+            Value * const processedPtr = b.CreateAllocaAtEntryPoint(b.getSizeTy());
+            b.CreateStore(sz_ZERO, processedPtr);
             segmentArgs[argCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[argCount++] = b->CreateLoad(int64Ty, b->CreateGEP(streamSetTy, streamSetArg, fields));
+            segmentArgs[argCount++] = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
@@ -672,13 +672,13 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
-            segmentArgs[argCount++] = b->CreateGEP(streamSetTy, streamSetArg, fields);
+            segmentArgs[argCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
 
             // produced output items
             fields[1] = i32_ONE;
-            Value * const itemPtr = b->CreateGEP(streamSetTy, streamSetArg, fields);
+            Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
             segmentArgs[argCount++] = itemPtr;
-            segmentArgs[argCount++] = b->CreateLoad(int64Ty, itemPtr);
+            segmentArgs[argCount++] = b.CreateLoad(int64Ty, itemPtr);
         }
 
         assert (argCount == doSegment->arg_size());
@@ -706,10 +706,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
         SmallVector<int, 8> eventList;
-        Type * const intTy = TypeBuilder<int, false>::get(b->getContext());
+        Type * const intTy = TypeBuilder<int, false>::get(b.getContext());
         eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
         const auto n = eventList.size();
-        Constant * const initializer = ConstantDataArray::get(b->getContext(), ArrayRef<int>(eventList.data(), n));
+        Constant * const initializer = ConstantDataArray::get(b.getContext(), ArrayRef<int>(eventList.data(), n));
         eventListVal = new GlobalVariable(*m, initializer->getType(), true, GlobalVariable::ExternalLinkage, initializer);
         PipelineCompiler::linkPAPILibrary(b);
     }
@@ -724,27 +724,27 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             using C = CommandLineScalarType;
             switch (cast<CommandLineScalar>(scalar)->getCLType()) {
                 case C::MinThreadCount:
-                    value = b->getSize(2);
+                    value = b.getSize(2);
                     break;
                 case C::MaxThreadCount:
-                    value = b->getSize(codegen::SegmentThreads);
+                    value = b.getSize(codegen::SegmentThreads);
                     break;
                 case C::DynamicMultithreadingPeriod:
-                    value = b->getSize(codegen::DynamicMultithreadingPeriod);
+                    value = b.getSize(codegen::DynamicMultithreadingPeriod);
                     break;
                 case C::BufferSegmentLength:
-                    value = b->getSize(codegen::BufferSegments);
+                    value = b.getSize(codegen::BufferSegments);
                     break;
                 case C::DynamicMultithreadingAddSynchronizationThreshold:
-                    value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
+                    value = ConstantFP::get(b.getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
                     break;
                 case C::DynamicMultithreadingRemoveSynchronizationThreshold:
-                    value = ConstantFP::get(b->getFloatTy(), codegen::DynamicMultithreadingRemoveThreshold); // %
+                    value = ConstantFP::get(b.getFloatTy(), codegen::DynamicMultithreadingRemoveThreshold); // %
                     break;
                 case C::ParabixIllustratorObject:
                     assert (createIllustrator);
                     assert (illustratorObj == nullptr);
-                    illustratorObj = b->CreateCall(createIllustrator->getFunctionType(), createIllustrator);
+                    illustratorObj = b.CreateCall(createIllustrator->getFunctionType(), createIllustrator);
                     value = illustratorObj;
                     break;
                 #ifdef ENABLE_PAPI
@@ -794,7 +794,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
-        Constant * const sz_ONE = b->getSize(1);
+        Constant * const sz_ONE = b.getSize(1);
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
         SmallVector<Value *, 2> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
@@ -802,7 +802,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
         }
         // pass in the desired number of segments
         allocArgs.push_back(sz_ONE);
-        b->CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
+        b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
             SmallVector<Value *, 3> allocArgs;
@@ -811,54 +811,54 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
             }
             allocArgs.push_back(threadLocalHandle);
             allocArgs.push_back(sz_ONE);
-            b->CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
+            b.CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
 
     PHINode * successPhi = nullptr;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) ||
                       codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
-        BasicBlock * const handleCatch = b->CreateBasicBlock("");
-        BasicBlock * const handleDeallocation = b->CreateBasicBlock("");
+        BasicBlock * const handleCatch = b.CreateBasicBlock("");
+        BasicBlock * const handleDeallocation = b.CreateBasicBlock("");
 
-        IntegerType * const int32Ty = b->getInt32Ty();
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
-        LLVMContext & C = b->getContext();
+        IntegerType * const int32Ty = b.getInt32Ty();
+        PointerType * const int8PtrTy = b.getInt8PtrTy();
+        LLVMContext & C = b.getContext();
         StructType * const caughtResultType = StructType::get(C, { int8PtrTy, int32Ty });
-        Function * const personalityFn = b->getDefaultPersonalityFunction();
+        Function * const personalityFn = b.getDefaultPersonalityFunction();
         main->setPersonalityFn(personalityFn);
 
-        BasicBlock * const beforeInvoke = b->GetInsertBlock();
-        b->CreateInvoke(doSegment, handleDeallocation, handleCatch, segmentArgs);
+        BasicBlock * const beforeInvoke = b.GetInsertBlock();
+        b.CreateInvoke(doSegment, handleDeallocation, handleCatch, segmentArgs);
 
-        b->SetInsertPoint(handleCatch);
-        LandingPadInst * const caughtResult = b->CreateLandingPad(caughtResultType, 0);
+        b.SetInsertPoint(handleCatch);
+        LandingPadInst * const caughtResult = b.CreateLandingPad(caughtResultType, 0);
         caughtResult->addClause(ConstantPointerNull::get(int8PtrTy));
-        Function * catchFn = b->getBeginCatch();
-        Function * catchEndFn = b->getEndCatch();
-        b->CreateCall(catchFn->getFunctionType(), catchFn, {b->CreateExtractValue(caughtResult, 0)});
-        b->CreateCall(catchEndFn->getFunctionType(), catchEndFn, {});
-        BasicBlock * const afterCatch = b->GetInsertBlock();
-        b->CreateBr(handleDeallocation);
+        Function * catchFn = b.getBeginCatch();
+        Function * catchEndFn = b.getEndCatch();
+        b.CreateCall(catchFn->getFunctionType(), catchFn, {b.CreateExtractValue(caughtResult, 0)});
+        b.CreateCall(catchEndFn->getFunctionType(), catchEndFn, {});
+        BasicBlock * const afterCatch = b.GetInsertBlock();
+        b.CreateBr(handleDeallocation);
 
-        b->SetInsertPoint(handleDeallocation);
-        successPhi = b->CreatePHI(b->getInt1Ty(), 2);
-        successPhi->addIncoming(b->getTrue(), beforeInvoke);
-        successPhi->addIncoming(b->getFalse(), afterCatch);
+        b.SetInsertPoint(handleDeallocation);
+        successPhi = b.CreatePHI(b.getInt1Ty(), 2);
+        successPhi->addIncoming(b.getTrue(), beforeInvoke);
+        successPhi->addIncoming(b.getFalse(), afterCatch);
     } else {
-        b->CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
+        b.CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         BEGIN_SCOPED_REGION
         FixedArray<Value *, 2> args;
         args[0] = illustratorObj;
-        args[1] = b->getSize(b->getBitBlockWidth());
-        b->CreateCall(displayCapturedData->getFunctionType(), displayCapturedData, args);
+        args[1] = b.getSize(b.getBitBlockWidth());
+        b.CreateCall(displayCapturedData->getFunctionType(), displayCapturedData, args);
         END_SCOPED_REGION
         BEGIN_SCOPED_REGION
         FixedArray<Value *, 1> args;
         args[0] = illustratorObj;
-        b->CreateCall(destroyIllustrator->getFunctionType(), destroyIllustrator, args);
+        b.CreateCall(destroyIllustrator->getFunctionType(), destroyIllustrator, args);
         END_SCOPED_REGION
     }
     SmallVector<Value *, 3> finalizeArgs;
@@ -873,14 +873,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
     }
     Value * const result = finalizeInstance(b, finalizeArgs);
     for (Value * stateObj : toFree) {
-        b->CreateFree(stateObj);
+        b.CreateFree(stateObj);
     }
     #ifdef ENABLE_PAPI
     if (LLVM_UNLIKELY(eventSet != nullptr)) {
         terminatePAPI(b, eventSet);
     }
     #endif
-    b->CreateRet(result);
+    b.CreateRet(result);
     return main;
 }
 
@@ -974,7 +974,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(BuilderRef b, const MainMeth
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(BuilderRef b,
+PipelineKernel::PipelineKernel(KernelBuilder & b,
                                std::string && signature,
                                const unsigned numOfKernelFamilyCalls,
                                Kernels && kernels, CallBindings && callBindings,
@@ -999,7 +999,7 @@ PipelineKernel::PipelineKernel(BuilderRef b,
 
 }
 
-PipelineKernel::PipelineKernel(Internal, BuilderRef b,
+PipelineKernel::PipelineKernel(Internal, KernelBuilder & b,
                std::string && signature,
                const unsigned numOfKernelFamilyCalls,
                Kernels && kernels, CallBindings && callBindings,
@@ -1024,7 +1024,7 @@ PipelineKernel::PipelineKernel(Internal, BuilderRef b,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(BuilderRef b,
+PipelineKernel::PipelineKernel(KernelBuilder & b,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs)
 : Kernel(b, TypeId::Pipeline,

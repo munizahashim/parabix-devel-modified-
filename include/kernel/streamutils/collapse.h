@@ -17,9 +17,9 @@ namespace kernel {
  */
 class CollapseStreamSet : public BlockOrientedKernel {
 public:
-    CollapseStreamSet(BuilderRef iBuilder, StreamSet * input, StreamSet * output);
+    CollapseStreamSet(KernelBuilder & b, StreamSet * input, StreamSet * output);
 protected:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 namespace streamutils {

@@ -66,8 +66,8 @@ typedef void (*CSVFunctionType)(uint32_t fd);
 
 class Invert : public PabloKernel {
 public:
-    Invert(BuilderRef kb, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(kb, "Invert",
+    Invert(KernelBuilder & b, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(b, "Invert",
                       {Binding{"mask", mask}},
                       {Binding{"inverted", inverted}}) {}
 protected:
@@ -84,8 +84,8 @@ void Invert::generatePabloMethod() {
 
 class BasisCombine : public PabloKernel {
 public:
-    BasisCombine(BuilderRef kb, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(kb, "BasisCombine",
+    BasisCombine(KernelBuilder & b, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
+        : PabloKernel(b, "BasisCombine",
                       {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
                       {Binding{"combined", combined}}) {}
 protected:
@@ -122,7 +122,7 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::st
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap

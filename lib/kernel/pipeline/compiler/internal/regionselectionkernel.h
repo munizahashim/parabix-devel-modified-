@@ -20,21 +20,21 @@ public:
     STREAMSET_WITH_INDEX(Selectors);
     #undef STREAMSET_WITH_INDEX
 
-    explicit RegionSelectionKernel(BuilderRef b, Starts starts, Ends ends, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, StreamSet * const regionSpans);
 
-    explicit RegionSelectionKernel(BuilderRef b, Demarcators, Selectors selectors, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(KernelBuilder & b, Demarcators, Selectors selectors, StreamSet * const regionSpans);
 
-    explicit RegionSelectionKernel(BuilderRef b, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans);
 
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 
 protected:
 
-    llvm::Value * getRegionStarts(BuilderRef b, llvm::Value * const offset) const;
-    llvm::Value * getNumOfRegionStarts(BuilderRef b) const;
-    llvm::Value * getRegionEnds(BuilderRef b, llvm::Value * const offset) const;
-    llvm::Value * getNumOfRegionEnds(BuilderRef b) const;
-    llvm::Value * getSelectorStream(BuilderRef b, llvm::Value * const offset) const;
+    llvm::Value * getRegionStarts(KernelBuilder & b, llvm::Value * const offset) const;
+    llvm::Value * getNumOfRegionStarts(KernelBuilder & b) const;
+    llvm::Value * getRegionEnds(KernelBuilder & b, llvm::Value * const offset) const;
+    llvm::Value * getNumOfRegionEnds(KernelBuilder & b) const;
+    llvm::Value * getSelectorStream(KernelBuilder & b, llvm::Value * const offset) const;
     LLVM_READNONE bool hasIndependentStartEndStreams() const;
     LLVM_READNONE bool hasSelectorStream() const;
 

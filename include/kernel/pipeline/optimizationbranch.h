@@ -36,11 +36,11 @@ public:
         return mCondition;
     }
 
-    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const final;
+    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(KernelBuilder & b) const final;
 
 protected:
 
-    OptimizationBranch(BuilderRef b,
+    OptimizationBranch(KernelBuilder & b,
                        std::string && signature,
                        not_null<Relationship *> condition,
                        Kernel * const nonZeroKernel,
@@ -50,25 +50,25 @@ protected:
                        Bindings && scalar_inputs,
                        Bindings && scalar_outputs);
 
-    void addKernelDeclarations(BuilderRef b) override;
+    void addKernelDeclarations(KernelBuilder & b) override;
 
-    void addInternalProperties(BuilderRef b) override;
+    void addInternalProperties(KernelBuilder & b) override;
 
     LLVM_READNONE bool allocatesInternalStreamSets() const final;
 
-    void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides) override;
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) override;
 
-    void generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides) override;
+    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) override;
 
-    void generateInitializeMethod(BuilderRef b) override;
+    void generateInitializeMethod(KernelBuilder & b) override;
 
-    void generateInitializeThreadLocalMethod(BuilderRef b) override;
+    void generateInitializeThreadLocalMethod(KernelBuilder & b) override;
 
-    void generateKernelMethod(BuilderRef b) override;
+    void generateKernelMethod(KernelBuilder & b) override;
 
-    void generateFinalizeThreadLocalMethod(BuilderRef b) override;
+    void generateFinalizeThreadLocalMethod(KernelBuilder & b) override;
 
-    void generateFinalizeMethod(BuilderRef b) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 
 private:
 

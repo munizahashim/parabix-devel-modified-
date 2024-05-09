@@ -152,7 +152,7 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
     }
 
     if (LLVM_LIKELY(mObjectCache.get())) {
-        switch (mObjectCache->loadCachedObjectFile(mBuilder, kernel)) {
+        switch (mObjectCache->loadCachedObjectFile(getBuilder(), kernel)) {
             case CacheObjectResult::CACHED:
                 mCachedKernel.emplace_back(kernel.get());
                 break;
@@ -165,7 +165,7 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         }
         assert ("kernel does not contain a module?" && kernel->getModule());
     } else {
-        kernel->makeModule(mBuilder);
+        kernel->makeModule(getBuilder());
         mUncachedKernel.emplace_back(kernel.get());
     }
 
