@@ -334,22 +334,20 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     PHINode * const producedSoFar = b.CreatePHI(produced->getType(), 3);
     producedSoFar->addIncoming(produced, entryBB);
     producedSoFar->addIncoming(produced, prepareBuffer);
-    Value * const sourceBuffer = b.getRawOutputPointer("sourceBuffer", producedSoFar);
-
-
+    Value * const sourceBuffer = b.CreatePointerCast(b.getRawOutputPointer("sourceBuffer", producedSoFar), b.getInt8PtrTy());
 
     #ifdef PREAD
     Function *  const preadFunc = b.getModule()->getFunction("pread64");
     FixedArray<Value *, 4> args;
     args[0] = fd;
-    args[1] = b.CreatePointerCast(sourceBuffer, cast<PointerType>(preadFunc->getArg(1)->getType()));
+    args[1] = sourceBuffer;
     args[2] = bytesToRead;
-    args[3] = producedSoFar;
+    args[3] = b.CreateMul(producedSoFar, codeUnitBytes);
     #else
     Function *  const preadFunc = b.getModule()->getFunction("read");
     FixedArray<Value *, 3> args;
     args[0] = fd;
-    args[1] = b.CreatePointerCast(sourceBuffer, cast<PointerType>(preadFunc->getArg(1)->getType()));
+    args[1] = sourceBuffer;
     args[2] = bytesToRead;
     #endif
     Value * const bytesRead = b.CreateCall(preadFunc, args);
