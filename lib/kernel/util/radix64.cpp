@@ -38,20 +38,20 @@ namespace kernel {
 // relying on the MultiBlockKernel builder to only copy the correct number
 // of bytes to the actual output stream.
 
-void expand3_4Kernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+void expand3_4Kernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
 
-    BasicBlock * expand2_3entry = b->GetInsertBlock();
-    BasicBlock * expand_3_4_loop = b->CreateBasicBlock("expand_3_4_loop");
-    BasicBlock * expand3_4_exit = b->CreateBasicBlock("expand3_4_exit");
+    BasicBlock * expand2_3entry = b.GetInsertBlock();
+    BasicBlock * expand_3_4_loop = b.CreateBasicBlock("expand_3_4_loop");
+    BasicBlock * expand3_4_exit = b.CreateBasicBlock("expand3_4_exit");
 
     // Determine the require shufflevector constants.
-    const unsigned PACK_SIZE = b->getBitBlockWidth()/8;
+    const unsigned PACK_SIZE = b.getBitBlockWidth()/8;
 
-    ConstantInt * const ZERO = b->getSize(0);
-    ConstantInt * const ONE = b->getSize(1);
-    ConstantInt * const THREE = b->getSize(3);
-    ConstantInt * const FOUR = b->getSize(4);
-    ConstantInt * const SEVEN = b->getSize(7);
+    ConstantInt * const ZERO = b.getSize(0);
+    ConstantInt * const ONE = b.getSize(1);
+    ConstantInt * const THREE = b.getSize(3);
+    ConstantInt * const FOUR = b.getSize(4);
+    ConstantInt * const SEVEN = b.getSize(7);
 
     // Construct a list of indexes in  the form
     // 0, 1, 2, 2, 3, 4, 5, 5, 6, 7, 8, 8, ...
@@ -66,48 +66,48 @@ void expand3_4Kernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
     for (unsigned j = 0; j < 4; j++) {
         std::vector<Constant *> Idxs;
         for (unsigned i = 0; i < PACK_SIZE; i++) {
-            Idxs.push_back(ConstantInt::get(b->getInt32Ty(), expand3_4_offset[j] + expand3_4_index[i]));
+            Idxs.push_back(ConstantInt::get(b.getInt32Ty(), expand3_4_offset[j] + expand3_4_index[i]));
         }
         expand_3_4_shuffle[j] = ConstantVector::get(Idxs);
     }
 
-    UndefValue * undefPack = UndefValue::get(b->fwVectorType(8));
-    Value * const numOfBlocks = b->CreateMul(numOfStrides, b->getSize(8));
+    UndefValue * undefPack = UndefValue::get(b.fwVectorType(8));
+    Value * const numOfBlocks = b.CreateMul(numOfStrides, b.getSize(8));
     // The main loop processes 3 packs of data at a time.
-    b->CreateBr(expand_3_4_loop);
+    b.CreateBr(expand_3_4_loop);
 
-    b->SetInsertPoint(expand_3_4_loop);
-    PHINode * strideOffset = b->CreatePHI(b->getSizeTy(), 2);
+    b.SetInsertPoint(expand_3_4_loop);
+    PHINode * strideOffset = b.CreatePHI(b.getSizeTy(), 2);
     strideOffset->addIncoming(ZERO, expand2_3entry);
 
-    Value * const baseInputOffset = b->CreateMul(strideOffset, THREE);
-    Value * const baseOutputOffset = b->CreateMul(strideOffset, FOUR);
+    Value * const baseInputOffset = b.CreateMul(strideOffset, THREE);
+    Value * const baseOutputOffset = b.CreateMul(strideOffset, FOUR);
     Value * carryOver = undefPack;
     for (unsigned i = 0; i < 3; ++i) {
-        ConstantInt * const index = b->getSize(i);
-        Value * const inputOffset = b->CreateAdd(baseInputOffset, index);
-        Value * const inputPackIndex = b->CreateAnd(inputOffset, SEVEN);
-        Value * const inputBlockOffset = b->CreateLShr(inputOffset, THREE);
-        Value * const input = b->fwCast(8, b->loadInputStreamPack("sourceStream", ZERO, inputPackIndex, inputBlockOffset));
-        Value * const expanded = b->CreateShuffleVector(carryOver, input, expand_3_4_shuffle[i]);
-        Value * const outputOffset = b->CreateAdd(baseOutputOffset, index);
-        Value * const outputPackIndex = b->CreateAnd(outputOffset, SEVEN);
-        Value * const outputBlockOffset = b->CreateLShr(outputOffset, THREE);
-        b->storeOutputStreamPack("expand34Stream", ZERO, outputPackIndex, outputBlockOffset, b->bitCast(expanded));
+        ConstantInt * const index = b.getSize(i);
+        Value * const inputOffset = b.CreateAdd(baseInputOffset, index);
+        Value * const inputPackIndex = b.CreateAnd(inputOffset, SEVEN);
+        Value * const inputBlockOffset = b.CreateLShr(inputOffset, THREE);
+        Value * const input = b.fwCast(8, b.loadInputStreamPack("sourceStream", ZERO, inputPackIndex, inputBlockOffset));
+        Value * const expanded = b.CreateShuffleVector(carryOver, input, expand_3_4_shuffle[i]);
+        Value * const outputOffset = b.CreateAdd(baseOutputOffset, index);
+        Value * const outputPackIndex = b.CreateAnd(outputOffset, SEVEN);
+        Value * const outputBlockOffset = b.CreateLShr(outputOffset, THREE);
+        b.storeOutputStreamPack("expand34Stream", ZERO, outputPackIndex, outputBlockOffset, b.bitCast(expanded));
         carryOver = input;
     }
-    Value * expanded = b->CreateShuffleVector(carryOver, undefPack, expand_3_4_shuffle[3]);
-    Value * outputOffset = b->CreateAdd(baseOutputOffset, THREE);
-    Value * const outputPackIndex = b->CreateAnd(outputOffset, SEVEN);
-    Value * const outputBlockOffset = b->CreateLShr(outputOffset, THREE);
-    b->storeOutputStreamPack("expand34Stream", ZERO, outputPackIndex, outputBlockOffset, b->bitCast(expanded));
+    Value * expanded = b.CreateShuffleVector(carryOver, undefPack, expand_3_4_shuffle[3]);
+    Value * outputOffset = b.CreateAdd(baseOutputOffset, THREE);
+    Value * const outputPackIndex = b.CreateAnd(outputOffset, SEVEN);
+    Value * const outputBlockOffset = b.CreateLShr(outputOffset, THREE);
+    b.storeOutputStreamPack("expand34Stream", ZERO, outputPackIndex, outputBlockOffset, b.bitCast(expanded));
 
-    Value * const nextStrideOffset = b->CreateAdd(strideOffset, ONE);
+    Value * const nextStrideOffset = b.CreateAdd(strideOffset, ONE);
     strideOffset->addIncoming(nextStrideOffset, expand_3_4_loop);
-    Value * continueLoop = b->CreateICmpULT(nextStrideOffset, numOfBlocks);
-    b->CreateCondBr(continueLoop, expand_3_4_loop, expand3_4_exit);
+    Value * continueLoop = b.CreateICmpULT(nextStrideOffset, numOfBlocks);
+    b.CreateCondBr(continueLoop, expand_3_4_loop, expand3_4_exit);
 
-    b->SetInsertPoint(expand3_4_exit);
+    b.SetInsertPoint(expand3_4_exit);
 }
 
 
@@ -121,158 +121,158 @@ void expand3_4Kernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfS
 //                             hqfedc      bits to move 2 positions right
 //                                   ba    bits to move 12 positions left
 //    xwvuts|  nlkjzy|  barqpm|  hgfedc    Target
-inline Value * radix64Kernel::processPackData(BuilderRef b, llvm::Value * bytepack) const {
+inline Value * radix64Kernel::processPackData(KernelBuilder & b, llvm::Value * bytepack) const {
 
-    Value * step_right_6 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x00C00000));
-    Value * right_6_result = b->simd_srli(32, b->simd_and(bytepack, step_right_6), 6);
+    Value * step_right_6 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x00C00000));
+    Value * right_6_result = b.simd_srli(32, b.simd_and(bytepack, step_right_6), 6);
 
-    Value * step_left_8 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x003F0000));
-    Value * left_8_result = b->simd_slli(32, b->simd_and(bytepack, step_left_8), 8);
-    Value * mid = b->simd_or(right_6_result, left_8_result);
+    Value * step_left_8 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x003F0000));
+    Value * left_8_result = b.simd_slli(32, b.simd_and(bytepack, step_left_8), 8);
+    Value * mid = b.simd_or(right_6_result, left_8_result);
 
-    Value * step_right_4 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x0000F000));
-    Value * right_4_result = b->simd_srli(32, b->simd_and(bytepack, step_right_4), 4);
-    mid = b->simd_or(mid, right_4_result);
+    Value * step_right_4 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x0000F000));
+    Value * right_4_result = b.simd_srli(32, b.simd_and(bytepack, step_right_4), 4);
+    mid = b.simd_or(mid, right_4_result);
 
-    Value * step_left_10 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x00000F00));
-    Value * left_10_result = b->simd_slli(32, b->simd_and(bytepack, step_left_10), 10);
-    mid = b->simd_or(mid, left_10_result);
+    Value * step_left_10 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x00000F00));
+    Value * left_10_result = b.simd_slli(32, b.simd_and(bytepack, step_left_10), 10);
+    mid = b.simd_or(mid, left_10_result);
 
-    Value * step_right_2 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x000000FC));
-    Value * right_2_result = b->simd_srli(32, b->simd_and(bytepack, step_right_2), 2);
-    mid = b->simd_or(mid, right_2_result);
+    Value * step_right_2 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x000000FC));
+    Value * right_2_result = b.simd_srli(32, b.simd_and(bytepack, step_right_2), 2);
+    mid = b.simd_or(mid, right_2_result);
 
-    Value * step_left_12 = b->simd_fill(32, ConstantInt::get(b->getInt32Ty(), 0x00000003));
-    Value * left_12_result = b->simd_slli(32, b->simd_and(bytepack, step_left_12), 12);
-    mid = b->simd_or(mid, left_12_result);
+    Value * step_left_12 = b.simd_fill(32, ConstantInt::get(b.getInt32Ty(), 0x00000003));
+    Value * left_12_result = b.simd_slli(32, b.simd_and(bytepack, step_left_12), 12);
+    mid = b.simd_or(mid, left_12_result);
 
-    return b->bitCast(mid);
+    return b.bitCast(mid);
 }
 
-void radix64Kernel::generateDoBlockMethod(BuilderRef b) {
+void radix64Kernel::generateDoBlockMethod(KernelBuilder & b) {
     for (unsigned i = 0; i < 8; i++) {
-        Value * bytepack = b->loadInputStreamPack("expandedStream", b->getInt32(0), b->getInt32(i));
+        Value * bytepack = b.loadInputStreamPack("expandedStream", b.getInt32(0), b.getInt32(i));
         Value * radix64pack = processPackData(b, bytepack);
-        b->storeOutputStreamPack("radix64stream", b->getInt32(0), b->getInt32(i), radix64pack);
+        b.storeOutputStreamPack("radix64stream", b.getInt32(0), b.getInt32(i), radix64pack);
     }
 }
 
-void radix64Kernel::generateFinalBlockMethod(BuilderRef b, Value * remainingBytes) {
+void radix64Kernel::generateFinalBlockMethod(KernelBuilder & b, Value * remainingBytes) {
 
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * radix64_loop = b->CreateBasicBlock("radix64_loop");
-    BasicBlock * fbExit = b->CreateBasicBlock("fbExit");
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * radix64_loop = b.CreateBasicBlock("radix64_loop");
+    BasicBlock * fbExit = b.CreateBasicBlock("fbExit");
 
     const unsigned PACK_SIZE = getStride() / 8;
-    Constant * packSize = b->getSize(PACK_SIZE);
+    Constant * packSize = b.getSize(PACK_SIZE);
 
     // Enter the loop only if there is at least one byte remaining to process.
-    b->CreateCondBr(b->CreateICmpEQ(remainingBytes, b->getSize(0)), fbExit, radix64_loop);
+    b.CreateCondBr(b.CreateICmpEQ(remainingBytes, b.getSize(0)), fbExit, radix64_loop);
 
-    b->SetInsertPoint(radix64_loop);
-    PHINode * idx = b->CreatePHI(b->getInt32Ty(), 2);
-    PHINode * loopRemain = b->CreatePHI(b->getSizeTy(), 2);
-    idx->addIncoming(ConstantInt::getNullValue(b->getInt32Ty()), entry);
+    b.SetInsertPoint(radix64_loop);
+    PHINode * idx = b.CreatePHI(b.getInt32Ty(), 2);
+    PHINode * loopRemain = b.CreatePHI(b.getSizeTy(), 2);
+    idx->addIncoming(ConstantInt::getNullValue(b.getInt32Ty()), entry);
     loopRemain->addIncoming(remainingBytes, entry);
 
-    Value * bytepack = b->loadInputStreamPack("expandedStream", b->getInt32(0), idx);
+    Value * bytepack = b.loadInputStreamPack("expandedStream", b.getInt32(0), idx);
     Value * radix64pack = processPackData(b, bytepack);
-    b->storeOutputStreamPack("radix64stream", b->getInt32(0), idx, radix64pack);
+    b.storeOutputStreamPack("radix64stream", b.getInt32(0), idx, radix64pack);
 
-    Value* nextIdx = b->CreateAdd(idx, ConstantInt::get(b->getInt32Ty(), 1));
+    Value* nextIdx = b.CreateAdd(idx, ConstantInt::get(b.getInt32Ty(), 1));
     idx->addIncoming(nextIdx, radix64_loop);
-    Value* remainAfterLoop = b->CreateSub(loopRemain, packSize);
+    Value* remainAfterLoop = b.CreateSub(loopRemain, packSize);
     loopRemain->addIncoming(remainAfterLoop, radix64_loop);
 
-    Value* continueLoop = b->CreateICmpSGT(remainAfterLoop, b->getSize(0));
+    Value* continueLoop = b.CreateICmpSGT(remainAfterLoop, b.getSize(0));
 
-    b->CreateCondBr(continueLoop, radix64_loop, fbExit);
+    b.CreateCondBr(continueLoop, radix64_loop, fbExit);
 
-    b->SetInsertPoint(fbExit);
+    b.SetInsertPoint(fbExit);
 }
 
-inline llvm::Value* base64Kernel::processPackData(BuilderRef b, llvm::Value* bytepack) const {
-    Value * mask_gt_25 = b->simd_ugt(8, bytepack, b->simd_fill(8, b->getInt8(25)));
-    Value * mask_gt_51 = b->simd_ugt(8, bytepack, b->simd_fill(8, b->getInt8(51)));
-    Value * mask_eq_62 = b->simd_eq(8, bytepack, b->simd_fill(8, b->getInt8(62)));
-    Value * mask_eq_63 = b->simd_eq(8, bytepack, b->simd_fill(8, b->getInt8(63)));
+inline llvm::Value* base64Kernel::processPackData(KernelBuilder & b, llvm::Value* bytepack) const {
+    Value * mask_gt_25 = b.simd_ugt(8, bytepack, b.simd_fill(8, b.getInt8(25)));
+    Value * mask_gt_51 = b.simd_ugt(8, bytepack, b.simd_fill(8, b.getInt8(51)));
+    Value * mask_eq_62 = b.simd_eq(8, bytepack, b.simd_fill(8, b.getInt8(62)));
+    Value * mask_eq_63 = b.simd_eq(8, bytepack, b.simd_fill(8, b.getInt8(63)));
     // Strategy:
     // 1. add ord('A') = 65 to all radix64 values, this sets the correct values for entries 0 to 25.
     // 2. add ord('a') - ord('A') - (26 - 0) = 6 to all values >25, this sets the correct values for entries 0 to 51
     // 3. subtract ord('a') - ord('0') + (52 - 26) = 75 to all values > 51, this sets the correct values for entries 0 to 61
     // 4. subtract ord('0') - ord('+') + (62 - 52) = 15 for all values = 62
     // 4. add ord('/') - ord('0') - (63 - 52) = 3 for all values = 63
-    Value * t0_25 = b->simd_add(8, bytepack, b->simd_fill(8, b->getInt8('A')));
-    Value * t0_51 = b->simd_add(8, t0_25, b->simd_and(mask_gt_25, b->simd_fill(8, b->getInt8(6))));
-    Value * t0_61 = b->simd_sub(8, t0_51, b->simd_and(mask_gt_51, b->simd_fill(8, b->getInt8(75))));
-    Value * t0_62 = b->simd_sub(8, t0_61, b->simd_and(mask_eq_62, b->simd_fill(8, b->getInt8(15))));
-    return b->bitCast(b->simd_sub(8, t0_62, b->simd_and(mask_eq_63, b->simd_fill(8, b->getInt8(12)))));
+    Value * t0_25 = b.simd_add(8, bytepack, b.simd_fill(8, b.getInt8('A')));
+    Value * t0_51 = b.simd_add(8, t0_25, b.simd_and(mask_gt_25, b.simd_fill(8, b.getInt8(6))));
+    Value * t0_61 = b.simd_sub(8, t0_51, b.simd_and(mask_gt_51, b.simd_fill(8, b.getInt8(75))));
+    Value * t0_62 = b.simd_sub(8, t0_61, b.simd_and(mask_eq_62, b.simd_fill(8, b.getInt8(15))));
+    return b.bitCast(b.simd_sub(8, t0_62, b.simd_and(mask_eq_63, b.simd_fill(8, b.getInt8(12)))));
 }
 
-void base64Kernel::generateDoBlockMethod(BuilderRef b) {
+void base64Kernel::generateDoBlockMethod(KernelBuilder & b) {
     for (unsigned i = 0; i < 8; i++) {
-        Value * bytepack = b->loadInputStreamPack("radix64stream", b->getInt32(0), b->getInt32(i));
+        Value * bytepack = b.loadInputStreamPack("radix64stream", b.getInt32(0), b.getInt32(i));
         Value * base64pack = processPackData(b, bytepack);
-        b->storeOutputStreamPack("base64stream", b->getInt32(0), b->getInt32(i), base64pack);
+        b.storeOutputStreamPack("base64stream", b.getInt32(0), b.getInt32(i), base64pack);
     }
 }
 
 // Special processing for the base 64 format.   The output must always contain a multiple
 // of 4 bytes.   When the number of radix 64 values is not a multiple of 4
 // number of radix 64 values
-void base64Kernel::generateFinalBlockMethod(BuilderRef b, Value * remainingBytes) {
+void base64Kernel::generateFinalBlockMethod(KernelBuilder & b, Value * remainingBytes) {
 
-    BasicBlock * entry = b->GetInsertBlock();
-    BasicBlock * base64_loop = b->CreateBasicBlock("base64_loop");
-    BasicBlock * loopExit = b->CreateBasicBlock("loopExit");
-    BasicBlock * doPadding = b->CreateBasicBlock("doPadding");
-    BasicBlock * doPadding2 = b->CreateBasicBlock("doPadding2");
-    BasicBlock * fbExit = b->CreateBasicBlock("fbExit");
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * base64_loop = b.CreateBasicBlock("base64_loop");
+    BasicBlock * loopExit = b.CreateBasicBlock("loopExit");
+    BasicBlock * doPadding = b.CreateBasicBlock("doPadding");
+    BasicBlock * doPadding2 = b.CreateBasicBlock("doPadding2");
+    BasicBlock * fbExit = b.CreateBasicBlock("fbExit");
 
-    Constant * const ZERO = b->getSize(0);
-    Constant * const ONE = b->getSize(1);
-    Constant * const THREE = b->getSize(3);
-    Constant * const PADDING = b->getInt8('=');
+    Constant * const ZERO = b.getSize(0);
+    Constant * const ONE = b.getSize(1);
+    Constant * const THREE = b.getSize(3);
+    Constant * const PADDING = b.getInt8('=');
 
-    Value * remainMod4 = b->CreateAnd(remainingBytes, THREE);
-    Value * padBytes = b->CreateAnd(b->CreateSub(b->getSize(4), remainMod4), THREE);
+    Value * remainMod4 = b.CreateAnd(remainingBytes, THREE);
+    Value * padBytes = b.CreateAnd(b.CreateSub(b.getSize(4), remainMod4), THREE);
 
-    Constant * const PACK_SIZE = b->getSize(getStride() / 8);
+    Constant * const PACK_SIZE = b.getSize(getStride() / 8);
 
     // Enter the loop only if there is at least one byte remaining to process.
-    b->CreateCondBr(b->CreateICmpEQ(remainingBytes, ZERO), fbExit, base64_loop);
+    b.CreateCondBr(b.CreateICmpEQ(remainingBytes, ZERO), fbExit, base64_loop);
 
-    b->SetInsertPoint(base64_loop);
-    PHINode * idx = b->CreatePHI(b->getSizeTy(), 2);
-    PHINode * loopRemain = b->CreatePHI(b->getSizeTy(), 2);
+    b.SetInsertPoint(base64_loop);
+    PHINode * idx = b.CreatePHI(b.getSizeTy(), 2);
+    PHINode * loopRemain = b.CreatePHI(b.getSizeTy(), 2);
     idx->addIncoming(ZERO, entry);
     loopRemain->addIncoming(remainingBytes, entry);
-    Value * bytepack = b->loadInputStreamPack("radix64stream", ZERO, idx);
+    Value * bytepack = b.loadInputStreamPack("radix64stream", ZERO, idx);
     Value * base64pack = processPackData(b, bytepack);
-    b->storeOutputStreamPack("base64stream", ZERO, idx, base64pack);
-    idx->addIncoming(b->CreateAdd(idx, ONE), base64_loop);
-    Value * remainAfterLoop = b->CreateSub(loopRemain, PACK_SIZE);
+    b.storeOutputStreamPack("base64stream", ZERO, idx, base64pack);
+    idx->addIncoming(b.CreateAdd(idx, ONE), base64_loop);
+    Value * remainAfterLoop = b.CreateSub(loopRemain, PACK_SIZE);
     loopRemain->addIncoming(remainAfterLoop, base64_loop);
-    Value * continueLoop = b->CreateICmpUGT(loopRemain, PACK_SIZE);
-    b->CreateCondBr(continueLoop, base64_loop, loopExit);
+    Value * continueLoop = b.CreateICmpUGT(loopRemain, PACK_SIZE);
+    b.CreateCondBr(continueLoop, base64_loop, loopExit);
 
-    b->SetInsertPoint(loopExit);
-    b->CreateCondBr(b->CreateICmpEQ(padBytes, ZERO), fbExit, doPadding);
+    b.SetInsertPoint(loopExit);
+    b.CreateCondBr(b.CreateICmpEQ(padBytes, ZERO), fbExit, doPadding);
 
-    b->SetInsertPoint(doPadding);
-    Value * i8output_ptr = b->getOutputStreamBlockPtr("base64stream", ZERO);
-    i8output_ptr = b->CreatePointerCast(i8output_ptr, b->getInt8PtrTy());
-    b->CreateStore(PADDING, b->CreateGEP(b->getInt8Ty(), i8output_ptr, remainingBytes));
-    b->CreateCondBr(b->CreateICmpEQ(remainMod4, THREE), fbExit, doPadding2);
+    b.SetInsertPoint(doPadding);
+    Value * i8output_ptr = b.getOutputStreamBlockPtr("base64stream", ZERO);
+    i8output_ptr = b.CreatePointerCast(i8output_ptr, b.getInt8PtrTy());
+    b.CreateStore(PADDING, b.CreateGEP(b.getInt8Ty(), i8output_ptr, remainingBytes));
+    b.CreateCondBr(b.CreateICmpEQ(remainMod4, THREE), fbExit, doPadding2);
 
-    b->SetInsertPoint(doPadding2);
-    Value * finalPadPos = b->CreateAdd(remainingBytes, ONE);
-    b->CreateStore(PADDING, b->CreateGEP(b->getInt8Ty(), i8output_ptr, finalPadPos));
-    b->CreateBr(fbExit);
-    b->SetInsertPoint(fbExit);
+    b.SetInsertPoint(doPadding2);
+    Value * finalPadPos = b.CreateAdd(remainingBytes, ONE);
+    b.CreateStore(PADDING, b.CreateGEP(b.getInt8Ty(), i8output_ptr, finalPadPos));
+    b.CreateBr(fbExit);
+    b.SetInsertPoint(fbExit);
 }
 
-expand3_4Kernel::expand3_4Kernel(BuilderRef b, StreamSet *input, StreamSet *expandedOutput)
+expand3_4Kernel::expand3_4Kernel(KernelBuilder & b, StreamSet *input, StreamSet *expandedOutput)
 : MultiBlockKernel(b, "expand3_4",
 {Binding{"sourceStream", input, FixedRate(3)}},
 {Binding{"expand34Stream", expandedOutput, FixedRate(4)}},
@@ -280,14 +280,14 @@ expand3_4Kernel::expand3_4Kernel(BuilderRef b, StreamSet *input, StreamSet *expa
 
 }
 
-radix64Kernel::radix64Kernel(BuilderRef b, StreamSet * input, StreamSet * output)
+radix64Kernel::radix64Kernel(KernelBuilder & b, StreamSet * input, StreamSet * output)
 : BlockOrientedKernel(b, "radix64",
             {Binding{"expandedStream", input}},
             {Binding{"radix64stream", output}},
             {}, {}, {}) {
 }
 
-base64Kernel::base64Kernel(BuilderRef b, StreamSet * input, StreamSet * output)
+base64Kernel::base64Kernel(KernelBuilder & b, StreamSet * input, StreamSet * output)
 : BlockOrientedKernel(b, "base64",
 {Binding{"radix64stream", input}},
 {Binding{"base64stream", output, FixedRate(1), RoundUpTo(4)}},

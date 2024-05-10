@@ -50,11 +50,11 @@ namespace kernel {
 class SwizzleGenerator : public BlockOrientedKernel {
 public:
 
-    SwizzleGenerator(BuilderRef, const std::vector<StreamSet *> & inputs, const std::vector<StreamSet *> & outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
+    SwizzleGenerator(KernelBuilder &, const std::vector<StreamSet *> & inputs, const std::vector<StreamSet *> & outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
 
 protected:
 
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 
 private:
     const unsigned mBitStreamCount;
@@ -64,10 +64,10 @@ private:
 
 class SwizzleByGather : public BlockOrientedKernel {
 public:
-    SwizzleByGather(BuilderRef b);
+    SwizzleByGather(KernelBuilder & b);
 
 protected:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 private:
 };
 

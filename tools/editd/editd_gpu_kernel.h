@@ -15,12 +15,12 @@ namespace kernel {
 class editdGPUKernel : public BlockOrientedKernel {
 public:
 
-    editdGPUKernel(BuilderRef b, unsigned dist, unsigned pattLen, unsigned groupSize);
+    editdGPUKernel(KernelBuilder & b, unsigned dist, unsigned pattLen, unsigned groupSize);
 
 
 private:
-    void generateDoBlockMethod(BuilderRef idb) override;
-    void generateFinalBlockMethod(BuilderRef idb, llvm::Value * remainingBytes) override;
+    void generateDoBlockMethod(KernelBuilder & idb) override;
+    void generateFinalBlockMethod(KernelBuilder & idb, llvm::Value * remainingBytes) override;
     unsigned mEditDistance;
     unsigned mPatternLen;
     unsigned mGroupSize;

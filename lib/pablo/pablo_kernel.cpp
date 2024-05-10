@@ -34,7 +34,7 @@ namespace pablo {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief instantiateKernelCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<KernelCompiler> PabloKernel::instantiateKernelCompiler(BuilderRef /* b */) const {
+std::unique_ptr<KernelCompiler> PabloKernel::instantiateKernelCompiler(KernelBuilder & /* b */) const {
     return std::make_unique<PabloCompiler>(const_cast<PabloKernel *>(this));
 }
 
@@ -145,13 +145,13 @@ Ones * PabloKernel::getAllOnesValue(Type * type) {
     return value;
 }
 
-void PabloKernel::addInternalProperties(BuilderRef b) {
-    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
-    mSizeTy = b->getSizeTy();
-    mStreamTy = b->getStreamTy();
-    mSymbolTable.reset(new SymbolGenerator(b->getContext(), mAllocator));
+void PabloKernel::addInternalProperties(KernelBuilder & b) {
+    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b.getCompiler());
+    mSizeTy = b.getSizeTy();
+    mStreamTy = b.getStreamTy();
+    mSymbolTable.reset(new SymbolGenerator(b.getContext(), mAllocator));
     mEntryScope = new (mAllocator) PabloBlock(this, mAllocator);
-    mContext = &b->getContext();
+    mContext = &b.getContext();
     for (const Binding & ss : mInputStreamSets) {
         Var * param = new (mAllocator) Var(ss.getType(), makeName(ss.getName()), mAllocator, Var::KernelInputStream);
         param->addUser(this);
@@ -183,57 +183,57 @@ bool PabloKernel::isCachable() const {
     return !codegen::EnableIllustrator;
 }
 
-void PabloKernel::linkExternalMethods(BuilderRef b) {
+void PabloKernel::linkExternalMethods(KernelBuilder & b) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         assert (mSharedStateType);
         BEGIN_SCOPED_REGION
         FixedArray<Type *, 2> params;
-        params[0] = b->getVoidPtrTy();
-        params[1] = b->getVoidPtrTy();
-        FunctionType * funTy = FunctionType::get(b->getVoidTy(), params, false);
-        b->LinkFunction(KERNEL_ILLUSTRATOR_ENTER_KERNEL, funTy, (void*)&illustratorEnterKernel);
-        b->LinkFunction(KERNEL_ILLUSTRATOR_ENTER_LOOP, funTy, (void*)&illustratorEnterLoop);
-        b->LinkFunction(KERNEL_ILLUSTRATOR_ITERATE_LOOP, funTy, (void*)&illustratorIterateLoop);
-        b->LinkFunction(KERNEL_ILLUSTRATOR_EXIT_LOOP, funTy, (void*)&illustratorExitLoop);
-        b->LinkFunction(KERNEL_ILLUSTRATOR_EXIT_KERNEL, funTy, (void*)&illustratorExitKernel);
+        params[0] = b.getVoidPtrTy();
+        params[1] = b.getVoidPtrTy();
+        FunctionType * funTy = FunctionType::get(b.getVoidTy(), params, false);
+        b.LinkFunction(KERNEL_ILLUSTRATOR_ENTER_KERNEL, funTy, (void*)&illustratorEnterKernel);
+        b.LinkFunction(KERNEL_ILLUSTRATOR_ENTER_LOOP, funTy, (void*)&illustratorEnterLoop);
+        b.LinkFunction(KERNEL_ILLUSTRATOR_ITERATE_LOOP, funTy, (void*)&illustratorIterateLoop);
+        b.LinkFunction(KERNEL_ILLUSTRATOR_EXIT_LOOP, funTy, (void*)&illustratorExitLoop);
+        b.LinkFunction(KERNEL_ILLUSTRATOR_EXIT_KERNEL, funTy, (void*)&illustratorExitKernel);
         END_SCOPED_REGION
     }
     Kernel::linkExternalMethods(b);
 }
 
-void PabloKernel::generateInitializeMethod(BuilderRef b) {
+void PabloKernel::generateInitializeMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
+        mPabloCompiler = reinterpret_cast<PabloCompiler *>(b.getCompiler());
         mPabloCompiler->initializeIllustrator(b);
         mPabloCompiler = nullptr;
     }
 }
 
-void PabloKernel::generateDoBlockMethod(BuilderRef b) {
-    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
-    mSizeTy = b->getSizeTy();
-    mStreamTy = b->getStreamTy();
+void PabloKernel::generateDoBlockMethod(KernelBuilder & b) {
+    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b.getCompiler());
+    mSizeTy = b.getSizeTy();
+    mStreamTy = b.getStreamTy();
     mPabloCompiler->compile(b);
     mPabloCompiler = nullptr;
     mSizeTy = nullptr;
     mStreamTy = nullptr;
 }
 
-void PabloKernel::generateFinalBlockMethod(BuilderRef b, Value * const remainingBytes) {
+void PabloKernel::generateFinalBlockMethod(KernelBuilder & b, Value * const remainingBytes) {
     // Standard Pablo convention for final block processing: set a bit marking
     // the position just past EOF, as well as a mask marking all positions past EOF.
     assert (remainingBytes);
     assert (remainingBytes->getType()->isIntegerTy());
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        b->setScalarField("EOFUnnecessaryData", b->CreateSub(b->getSize(b->getBitBlockWidth()), remainingBytes));
+        b.setScalarField("EOFUnnecessaryData", b.CreateSub(b.getSize(b.getBitBlockWidth()), remainingBytes));
     }
-    b->setScalarField("EOFbit", b->bitblock_set_bit(remainingBytes));
-    b->setScalarField("EOFmask", b->bitblock_mask_from(remainingBytes));
+    b.setScalarField("EOFbit", b.bitblock_set_bit(remainingBytes));
+    b.setScalarField("EOFmask", b.bitblock_mask_from(remainingBytes));
     RepeatDoBlockLogic(b);
 }
 
-void PabloKernel::generateFinalizeMethod(BuilderRef b) {
-    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b->getCompiler());
+void PabloKernel::generateFinalizeMethod(KernelBuilder & b) {
+    mPabloCompiler = reinterpret_cast<PabloCompiler *>(b.getCompiler());
     mPabloCompiler->releaseKernelData(b);
     if (CompileOptionIsSet(PabloCompilationFlags::EnableProfiling)) {
 
@@ -241,15 +241,15 @@ void PabloKernel::generateFinalizeMethod(BuilderRef b) {
         raw_svector_ostream out(tmp);
         out << "./" << getName() << ".profile";
 
-        Value * const fd = b->CreateOpenCall(b->GetString(out.str()),
-                                             b->getInt32(O_WRONLY | O_CREAT | O_TRUNC),
-                                             b->getInt32(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH));
+        Value * const fd = b.CreateOpenCall(b.GetString(out.str()),
+                                             b.getInt32(O_WRONLY | O_CREAT | O_TRUNC),
+                                             b.getInt32(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH));
 
-        Function * dprintf = b->GetDprintf();
+        Function * dprintf = b.GetDprintf();
 
         Value * profile; Type * profileTy;
 
-        std::tie(profile, profileTy) = b->getScalarFieldPtr("profile");
+        std::tie(profile, profileTy) = b.getScalarFieldPtr("profile");
 
 
         unsigned branchCount = 0;
@@ -262,12 +262,12 @@ void PabloKernel::generateFinalizeMethod(BuilderRef b) {
             str << bb->getName();
             str << "\n";
 
-            Value * taken = b->CreateLoad(profileTy, b->CreateGEP(profileTy, profile, {b->getInt32(0), b->getInt32(branchCount++)}));
-            b->CreateCall(dprintf, {fd, b->GetString(str.str()), taken});
+            Value * taken = b.CreateLoad(profileTy, b.CreateGEP(profileTy, profile, {b.getInt32(0), b.getInt32(branchCount++)}));
+            b.CreateCall(dprintf, {fd, b.GetString(str.str()), taken});
 
         }
 
-        b->CreateCloseCall(fd);
+        b.CreateCloseCall(fd);
     }
     mPabloCompiler = nullptr;
 }
@@ -330,7 +330,7 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     return std::move(name);
 }
 
-PabloKernel::PabloKernel(BuilderRef b,
+PabloKernel::PabloKernel(KernelBuilder & b,
                          std::string && kernelName,
                          std::vector<Binding> stream_inputs,
                          std::vector<Binding> stream_outputs,
@@ -346,11 +346,11 @@ PabloKernel::PabloKernel(BuilderRef b,
 , mSizeTy(nullptr)
 , mStreamTy(nullptr)
 , mContext(nullptr) {
-    addNonPersistentScalar(b->getBitBlockType(), "EOFbit");
-    addNonPersistentScalar(b->getBitBlockType(), "EOFmask");
+    addNonPersistentScalar(b.getBitBlockType(), "EOFbit");
+    addNonPersistentScalar(b.getBitBlockType(), "EOFmask");
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        addNonPersistentScalar(b->getSizeTy(), "EOFUnnecessaryData");
-        addInternalScalar(b->getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
+        addNonPersistentScalar(b.getSizeTy(), "EOFUnnecessaryData");
+        addInternalScalar(b.getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
     }
 }
 

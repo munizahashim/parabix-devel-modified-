@@ -2,7 +2,7 @@
 #include <kernel/pipeline/optimizationbranch.h>
 #include <kernel/core/kernel_builder.h>
 #include <boost/container/flat_map.hpp>
-#include <boost/function_output_iterator.hpp>
+#include <boost/iterator/function_output_iterator.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/topological_sort.hpp>
 #include <llvm/Support/raw_ostream.h>

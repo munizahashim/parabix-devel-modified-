@@ -7,7 +7,6 @@
 
 #include <llvm/IR/Type.h>  // for Type
 #include <llvm/IR/DerivedTypes.h>  // for Type
-#include <kernel/core/ptrwrapper.hpp>
 
 namespace IDISA { class IDISA_Builder; }
 namespace llvm { class Value; }
@@ -29,8 +28,6 @@ public:
         , DynamicBuffer
         , MMapedBuffer
     };
-
-    using BuilderPtr = PtrWrapper<kernel::KernelBuilder>;
 
     using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
 
@@ -85,68 +82,68 @@ public:
         assert (handle.second == mHandleType);
     }
 
-    virtual void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) = 0;
+    virtual void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) = 0;
 
-    virtual void releaseBuffer(BuilderPtr b) const = 0;
+    virtual void releaseBuffer(kernel::KernelBuilder & b) const = 0;
 
-    virtual void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
+    virtual void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
 
     // The number of items that cam be linearly accessed from a given logical stream position.
-    virtual llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
+    virtual llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
 
-    virtual llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const = 0;
+    virtual llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const = 0;
 
-    virtual llvm::StructType * getHandleType(BuilderPtr b) const = 0;
+    virtual llvm::StructType * getHandleType(kernel::KernelBuilder & b) const = 0;
 
-    llvm::PointerType * getHandlePointerType(BuilderPtr b) const {
+    llvm::PointerType * getHandlePointerType(kernel::KernelBuilder & b) const {
         return getHandleType(b)->getPointerTo(getAddressSpace());
     }
 
-    virtual llvm::Value * getStreamBlockPtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex) const;
+    virtual llvm::Value * getStreamBlockPtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex) const;
 
-    virtual llvm::Value * getStreamPackPtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const;
+    virtual llvm::Value * getStreamPackPtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const;
 
-    virtual llvm::Value * loadStreamBlock(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, const bool unaligned) const;
+    virtual llvm::Value * loadStreamBlock(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, const bool unaligned) const;
 
-    virtual llvm::Value * loadStreamPack(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex, const bool unaligned) const;
+    virtual llvm::Value * loadStreamPack(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex, const bool unaligned) const;
 
-    virtual llvm::Value * getStreamSetCount(BuilderPtr b) const;
+    virtual llvm::Value * getStreamSetCount(kernel::KernelBuilder & b) const;
 
-    virtual llvm::Value * getBaseAddress(BuilderPtr b) const = 0;
+    virtual llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const = 0;
 
-    virtual llvm::Value * getMallocAddress(BuilderPtr b) const = 0;
+    virtual llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const = 0;
 
-    virtual void setBaseAddress(BuilderPtr b, llvm::Value * addr) const = 0;
+    virtual void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const = 0;
 
-    virtual void setCapacity(BuilderPtr b, llvm::Value * size) const = 0;
+    virtual void setCapacity(kernel::KernelBuilder & b, llvm::Value * size) const = 0;
 
-    virtual llvm::Value * getCapacity(BuilderPtr b) const = 0;
+    virtual llvm::Value * getCapacity(kernel::KernelBuilder & b) const = 0;
 
-    virtual llvm::Value * getInternalCapacity(BuilderPtr b) const = 0;
+    virtual llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const = 0;
 
-    virtual llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const = 0;
+    virtual llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const = 0;
 
-    virtual llvm::Value * getRawItemPointer(BuilderPtr b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const;
+    virtual llvm::Value * getRawItemPointer(kernel::KernelBuilder & b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const;
 
-    virtual llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
+    virtual llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
 
-    virtual llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
+    virtual llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
-    virtual void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
+    virtual void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
-    virtual llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
+    virtual llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
-    static llvm::Type * resolveType(BuilderPtr b, llvm::Type * const streamSetType);
+    static llvm::Type * resolveType(kernel::KernelBuilder & b, llvm::Type * const streamSetType);
 
-    static void linkFunctions(BuilderPtr b); // temporary function
+    static void linkFunctions(kernel::KernelBuilder & b); // temporary function
 
 protected:
 
-    StreamSetBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType, const bool linear, const unsigned AddressSpace);
+    StreamSetBuffer(const unsigned id, const BufferKind k, kernel::KernelBuilder & b, llvm::Type * baseType, const bool linear, const unsigned AddressSpace);
 
 private:
 
-    void assertValidStreamIndex(BuilderPtr b, llvm::Value * streamIndex) const;
+    void assertValidStreamIndex(kernel::KernelBuilder & b, llvm::Value * streamIndex) const;
 
 protected:
 
@@ -170,45 +167,45 @@ public:
 
     enum Field { BaseAddress, EffectiveCapacity };
 
-    ExternalBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type, const bool linear, const unsigned AddressSpace);
+    ExternalBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const bool linear, const unsigned AddressSpace);
 
-    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
 
-    void releaseBuffer(BuilderPtr b) const override;
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
 
-    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
-    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
+    llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * totalItems) const override;
+    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const override;
 
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
+    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
 
-    llvm::StructType * getHandleType(BuilderPtr b) const override;
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
-    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
-    llvm::Value * getCapacity(BuilderPtr b) const override;
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const override;
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
 
-    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
 private:
 
-    void assertValidBlockIndex(BuilderPtr b, llvm::Value * blockIndex) const;
+    void assertValidBlockIndex(kernel::KernelBuilder & b, llvm::Value * blockIndex) const;
 
 };
 
@@ -219,19 +216,19 @@ public:
         return b->getBufferKind() != BufferKind::ExternalBuffer;
     }
 
-    llvm::Value * getStreamBlockPtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex) const final;
+    llvm::Value * getStreamBlockPtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex) const final;
 
-    llvm::Value * getStreamPackPtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const final;
+    llvm::Value * getStreamPackPtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const final;
 
-    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
+    llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * const totalItems) const override;
+    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * const totalItems) const override;
 
-    llvm::Value * getLinearlyWritableItems(BuilderPtr b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
+    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
 
 protected:
 
-    InternalBuffer(const unsigned id, const BufferKind k, BuilderPtr b, llvm::Type * baseType,
+    InternalBuffer(const unsigned id, const BufferKind k, kernel::KernelBuilder & b, llvm::Type * baseType,
                    const bool linear, const unsigned AddressSpace);
 
 
@@ -243,39 +240,39 @@ public:
         return b->getBufferKind() == BufferKind::StaticBuffer;
     }
 
-    StaticBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type,
+    StaticBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type,
                  const size_t capacity,
                  const bool linear, const unsigned AddressSpace);
 
     enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, PriorAddress };
 
-    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
 
-    void releaseBuffer(BuilderPtr b) const override;
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
 
-    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
-    llvm::StructType * getHandleType(BuilderPtr b) const override;
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
-    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
-    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
-    llvm::Value * getCapacity(BuilderPtr b) const override;
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const override;
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
 
-    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     size_t getCapacity() const {
         return mCapacity;
@@ -308,41 +305,41 @@ public:
         return b->getBufferKind() == BufferKind::DynamicBuffer;
     }
 
-    DynamicBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
+    DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * type, const size_t initialCapacity,
                   const bool hasUnderflow,
                   const bool linear, const unsigned AddressSpace);
 
-    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
 
-    void releaseBuffer(BuilderPtr b) const override;
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
 
-    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
-    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getCapacity(BuilderPtr b) const override;
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
-    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const final;
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const final;
 
-    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     size_t getInitialCapacity() const {
         return mInitialCapacity;
     }
 
-    llvm::StructType * getHandleType(BuilderPtr b) const override;
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 
-    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
 private:
 
@@ -360,41 +357,41 @@ public:
         return b->getBufferKind() == BufferKind::MMapedBuffer;
     }
 
-    MMapedBuffer(const unsigned id, BuilderPtr b, llvm::Type * type, const size_t initialCapacity,
+    MMapedBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * type, const size_t initialCapacity,
                   const size_t overflowSize, const size_t underflowSize,
                   const bool linear, const unsigned AddressSpace);
 
-    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
 
-    void releaseBuffer(BuilderPtr b) const override;
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
 
-    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
-    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getCapacity(BuilderPtr b) const override;
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
-    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const final;
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const final;
 
-    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     size_t getInitialCapacity() const {
         return mInitialCapacity;
     }
 
-    llvm::StructType * getHandleType(BuilderPtr b) const override;
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 
-    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
 private:
 
@@ -410,37 +407,37 @@ public:
 
     enum Field { BaseAddress };
 
-    RepeatingBuffer(const unsigned id, BuilderPtr b, llvm::Type * const type, const bool unaligned);
+    RepeatingBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const bool unaligned);
 
-    llvm::Value * modByCapacity(BuilderPtr b, llvm::Value * const offset) const override;
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
 
-    llvm::Value * getVirtualBasePtr(BuilderPtr b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
+    llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    void allocateBuffer(BuilderPtr b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
 
-    void releaseBuffer(BuilderPtr b) const override;
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
 
-    void destroyBuffer(BuilderPtr b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
+    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
-    llvm::StructType * getHandleType(BuilderPtr b) const override;
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getBaseAddress(BuilderPtr b) const override;
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getMallocAddress(BuilderPtr b) const override;
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
-    void setBaseAddress(BuilderPtr b, llvm::Value * addr) const override;
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
-    void setCapacity(BuilderPtr b, llvm::Value * capacity) const override;
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
-    llvm::Value * getCapacity(BuilderPtr b) const override;
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * getInternalCapacity(BuilderPtr b) const override;
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * requiresExpansion(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    void linearCopyBack(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(BuilderPtr b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     void setModulus(llvm::Value * const modulus) {
         mModulus = modulus;

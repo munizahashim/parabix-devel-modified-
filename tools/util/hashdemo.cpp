@@ -37,7 +37,6 @@
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/util/bixhash.h>
-#include <kernel/util/debug_display.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/bixnum/bixnum.h>
@@ -53,9 +52,9 @@
 #include <iomanip>
 #include <kernel/pipeline/pipeline_builder.h>
 
-#define SHOW_STREAM(name) if (illustratorAddr) illustrator.captureBitstream(P, #name, name)
-#define SHOW_BIXNUM(name) if (illustratorAddr) illustrator.captureBixNum(P, #name, name)
-#define SHOW_BYTES(name) if (illustratorAddr) illustrator.captureByteData(P, #name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
 using namespace pablo;
 using namespace parse;
@@ -69,13 +68,13 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class WordMarkKernel : public pablo::PabloKernel {
 public:
-    WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks);
+    WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks);
 protected:
     void generatePabloMethod() override;
 };
 
-WordMarkKernel::WordMarkKernel(BuilderRef kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+WordMarkKernel::WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks)
+: PabloKernel(b, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -91,9 +90,9 @@ void WordMarkKernel::generatePabloMethod() {
 
 class ParseSymbols : public pablo::PabloKernel {
 public:
-    ParseSymbols(BuilderRef kb,
+    ParseSymbols(KernelBuilder & b,
                 StreamSet * basisBits, StreamSet * wordChar, StreamSet * symbolRuns)
-    : pablo::PabloKernel(kb, "ParseSymbols",
+    : pablo::PabloKernel(b, "ParseSymbols",
                          {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
                              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
                          {Binding{"symbolRuns", symbolRuns}}) { }
@@ -131,7 +130,7 @@ void ParseSymbols::generatePabloMethod() {
 
 class RunLengthSelector final: public pablo::PabloKernel {
 public:
-    RunLengthSelector(BuilderRef b,
+    RunLengthSelector(KernelBuilder & b,
                       unsigned lo,
                       unsigned hi,
                       StreamSet * symbolRun, StreamSet * const lengthBixNum,
@@ -143,7 +142,7 @@ protected:
     unsigned mHi;
 };
 
-RunLengthSelector::RunLengthSelector(BuilderRef b,
+RunLengthSelector::RunLengthSelector(KernelBuilder & b,
                            unsigned lo,
                            unsigned hi,
                            StreamSet * symbolRun,
@@ -217,7 +216,7 @@ private:
 
 HashTable6 T6;
 
-typedef void (*HashDemoFunctionType)(uint32_t fd, ParabixIllustrator * illustrator);
+typedef void (*HashDemoFunctionType)(uint32_t fd);
 
 
 extern "C" void callback(const char * L6end_ptr, uint8_t hashval) {
@@ -226,18 +225,12 @@ extern "C" void callback(const char * L6end_ptr, uint8_t hashval) {
     T6.insert(hashval, L6_start_ptr);
 }
 
-HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illustrator) {
+HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
 
     auto & b = driver.getBuilder();
-    auto P = driver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"},
-                                    Binding{b->getIntAddrTy(), "illustratorAddr"}}, {});
+    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
 
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    Scalar * illustratorAddr = nullptr;
-    if (codegen::IllustratorDisplay > 0) {
-        illustratorAddr = P->getInputScalar("illustratorAddr");
-        illustrator.registerIllustrator(illustratorAddr);
-    }
 
     // Source data
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
@@ -289,20 +282,15 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver, ParabixIllustrator & illu
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&HashDemoOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
-
-    ParabixIllustrator illustrator(codegen::IllustratorDisplay);
     CPUDriver pxDriver("hashdemo");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         HashDemoFunctionType func = nullptr;
-        func = hashdemo_gen(pxDriver, illustrator);
-        func(fd, &illustrator);
+        func = hashdemo_gen(pxDriver);
+        func(fd);
         close(fd);
-        if (codegen::IllustratorDisplay > 0) {
-            illustrator.displayAllCapturedData();
-        }
     }
     T6.print();
     return 0;

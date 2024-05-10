@@ -31,45 +31,45 @@ public:
 
     using TranslationMap = std::unordered_map<const PabloAST *, llvm::Value *>;
 
-    using BuilderRef = kernel::Kernel::BuilderRef;
+    using KernelBuilder = kernel::KernelBuilder;
 
     PabloCompiler(PabloKernel * kernel);
 
 protected:
 
-    void initializeKernelData(BuilderRef b);
+    void initializeKernelData(KernelBuilder & b);
 
-    void initializeIllustrator(BuilderRef b);
+    void initializeIllustrator(KernelBuilder & b);
 
-    void compile(BuilderRef b);
+    void compile(KernelBuilder & b);
 
-    void releaseKernelData(BuilderRef b);
+    void releaseKernelData(KernelBuilder & b);
 
-    void clearCarryData(BuilderRef b);
+    void clearCarryData(KernelBuilder & b);
 
 private:
 
-    bool identifyIllustratedValues(BuilderRef b, const PabloBlock * const block, llvm::SmallVector<size_t, 8> & loopIds, size_t & currentLoopId);
+    bool identifyIllustratedValues(KernelBuilder & b, const PabloBlock * const block, llvm::SmallVector<size_t, 8> & loopIds, size_t & currentLoopId);
 
-    void examineBlock(BuilderRef b, const PabloBlock * const block);
+    void examineBlock(KernelBuilder & b, const PabloBlock * const block);
 
-    void compileBlock(BuilderRef b, const PabloBlock * const block);
+    void compileBlock(KernelBuilder & b, const PabloBlock * const block);
 
-    void compileStatement(BuilderRef b, const Statement * stmt);
+    void compileStatement(KernelBuilder & b, const Statement * stmt);
 
-    void compileIf(BuilderRef b, const If * ifStmt);
+    void compileIf(KernelBuilder & b, const If * ifStmt);
 
-    void compileWhile(BuilderRef b, const While * whileStmt);
+    void compileWhile(KernelBuilder & b, const While * whileStmt);
 
-    void addBranchCounter(BuilderRef b);
+    void addBranchCounter(KernelBuilder & b);
 
     const Var * findInputParam(const Statement * const stmt, const Var * const param) const;
 
-    llvm::Value * getPointerToVar(BuilderRef b, const Var * var, llvm::Value * index1, llvm::Value * index2 = nullptr);
+    llvm::Value * getPointerToVar(KernelBuilder & b, const Var * var, llvm::Value * index1, llvm::Value * index2 = nullptr);
 
-    llvm::Value * compileExpression(BuilderRef b, const PabloAST * expr, const bool ensureLoaded = true);
+    llvm::Value * compileExpression(KernelBuilder & b, const PabloAST * expr, const bool ensureLoaded = true);
 
-    static void dumpValueToConsole(BuilderRef b, const PabloAST * expr, llvm::Value * value);
+    static void dumpValueToConsole(KernelBuilder & b, const PabloAST * expr, llvm::Value * value);
 
 private:
 

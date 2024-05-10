@@ -56,7 +56,7 @@ Bindings makeOutputBreakBindings(UnterminatedLineAtEOF eofMode, StreamSet * lb) 
     return {Binding{"LB", lb}};
 }
 
-UnixLinesKernelBuilder::UnixLinesKernelBuilder(BuilderRef b,
+UnixLinesKernelBuilder::UnixLinesKernelBuilder(KernelBuilder & b,
                                                StreamSet * Basis,
                                                StreamSet * LineEnds,
                                                UnterminatedLineAtEOF eofMode,
@@ -103,14 +103,14 @@ void UnixLinesKernelBuilder::generatePabloMethod() {
 
 class LineFeedKernelBuilder final : public pablo::PabloKernel {
 public:
-    LineFeedKernelBuilder(BuilderRef b, StreamSet * Basis, StreamSet * LineFeedStream);
+    LineFeedKernelBuilder(KernelBuilder & b, StreamSet * Basis, StreamSet * LineFeedStream);
 protected:
     void generatePabloMethod() override;
     const unsigned mNumOfStreams;
     const unsigned mStreamFieldWidth;
 };
 
-LineFeedKernelBuilder::LineFeedKernelBuilder(BuilderRef b, StreamSet * Basis, StreamSet * LineFeedStream)
+LineFeedKernelBuilder::LineFeedKernelBuilder(KernelBuilder & b, StreamSet * Basis, StreamSet * LineFeedStream)
 : PabloKernel(b, "lf" + sourceShape(Basis),
               // input
 {Binding{"basis", Basis}},
@@ -137,7 +137,7 @@ void LineFeedKernelBuilder::generatePabloMethod() {
 
 class UnicodeLinesKernelBuilder final : public pablo::PabloKernel {
 public:
-    UnicodeLinesKernelBuilder(BuilderRef b,
+    UnicodeLinesKernelBuilder(KernelBuilder & b,
                               StreamSet * Basis,
                               StreamSet * LF,
                               StreamSet * UnicodeLB,
@@ -151,7 +151,7 @@ protected:
     const NullCharMode mNullMode;
 };
 
-UnicodeLinesKernelBuilder::UnicodeLinesKernelBuilder(BuilderRef b,
+UnicodeLinesKernelBuilder::UnicodeLinesKernelBuilder(KernelBuilder & b,
                                                      StreamSet * Basis,
                                                      StreamSet * LF,
                                                      StreamSet * LineEnds,
@@ -303,7 +303,7 @@ void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
     }
 }
 
-NullDelimiterKernel::NullDelimiterKernel(BuilderRef b,
+NullDelimiterKernel::NullDelimiterKernel(KernelBuilder & b,
                                          StreamSet * Source,
                                          StreamSet * Terminators,
                                          UnterminatedLineAtEOF eofMode)
@@ -329,7 +329,7 @@ void NullDelimiterKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutput(0), 0), NUL);
 }
 
-LineStartsKernel::LineStartsKernel(BuilderRef b, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
+LineStartsKernel::LineStartsKernel(KernelBuilder & b, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
     : PabloKernel(b, [&]() -> std::string {
                     std::string nm = "LineStarts";
                     if (index) nm += "@index";
@@ -354,7 +354,7 @@ void LineStartsKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("LineStarts"), 0), lineStarts);
 }
 
-LineSpansKernel::LineSpansKernel(BuilderRef b, StreamSet * LineStarts, StreamSet * LineEnds, StreamSet * LineSpans)
+LineSpansKernel::LineSpansKernel(KernelBuilder & b, StreamSet * LineStarts, StreamSet * LineEnds, StreamSet * LineSpans)
 : PabloKernel(b, "LineSpans",
               {Binding{"LineStarts", LineStarts}, Binding{"LineEnds", LineEnds, FixedRate(), Principal()}},
               {Binding{"LineSpans", LineSpans}}) {}

@@ -7,7 +7,6 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/stream_shift.h>
-#include <kernel/util/debug_display.h>
 
 using namespace kernel;
 using namespace testing;

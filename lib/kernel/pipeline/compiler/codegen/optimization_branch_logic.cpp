@@ -40,7 +40,7 @@ inline bool isConstantOne(const Value * const value) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief checkOptimizationBranchSpanLength
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value * const numOfLinearStrides) {
+Value * PipelineCompiler::checkOptimizationBranchSpanLength(KernelBuilder & b, Value * const numOfLinearStrides) {
 #if 0
     const OptimizationBranch * const optBr = cast<OptimizationBranch>(mKernel);
     Relationship * const cond = optBr->getCondition();
@@ -81,7 +81,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
         report_fatal_error("Optimization branch condition must be a fixed-rate single-stream StreamSet");
     }
 
-    const auto bw = b->getBitBlockWidth();
+    const auto bw = b.getBitBlockWidth();
 
     const auto strideRate = condRate.getRate()
         * (mKernel->getStride() * cast<StreamSet>(cond)->getFieldWidth())
@@ -91,117 +91,117 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(BuilderRef b, Value 
 
     const auto blocksPerStride = strideRate.numerator();
 
-    Constant * const BLOCKS_PER_STRIDE = b->getSize(blocksPerStride);
+    Constant * const BLOCKS_PER_STRIDE = b.getSize(blocksPerStride);
 
-    IntegerType * const sizeTy = b->getSizeTy();
-    Constant * const sz_ZERO = b->getSize(0);
-    Constant * const sz_ONE = b->getSize(1);
-    Constant * const sz_MIN_LENGTH = b->getSize(MINIMUM_SPAN_LENGTH_OF_OPTIMIZATION_BRANCH);
-    Constant * const BIT_BLOCK_WIDTH = b->getSize(bw);
+    IntegerType * const sizeTy = b.getSizeTy();
+    Constant * const sz_ZERO = b.getSize(0);
+    Constant * const sz_ONE = b.getSize(1);
+    Constant * const sz_MIN_LENGTH = b.getSize(MINIMUM_SPAN_LENGTH_OF_OPTIMIZATION_BRANCH);
+    Constant * const BIT_BLOCK_WIDTH = b.getSize(bw);
 
-    VectorType * const bitBlockTy = b->getBitBlockType();
+    VectorType * const bitBlockTy = b.getBitBlockType();
 
     Value * const baseAddress = buffer->getBaseAddress(b);
 
     const auto prefix = makeKernelName(mKernelId);
 
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const scanLengthEndOfRegularSpan = b->CreateBasicBlock(prefix + "_scanLengthEndOfRegularSpan", mKernelLoopCall);
-    BasicBlock * const scanLengthFindEndOfOptSpan = b->CreateBasicBlock(prefix + "_scanLengthFindEndOfOptSpan", mKernelLoopCall);
-    BasicBlock * const scanLengthCheck = b->CreateBasicBlock(prefix + "_scanLengthCheck", mKernelLoopCall);
-    BasicBlock * const scanLengthExit = b->CreateBasicBlock(prefix + "_scanLengthExit", mKernelLoopCall);
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const scanLengthEndOfRegularSpan = b.CreateBasicBlock(prefix + "_scanLengthEndOfRegularSpan", mKernelLoopCall);
+    BasicBlock * const scanLengthFindEndOfOptSpan = b.CreateBasicBlock(prefix + "_scanLengthFindEndOfOptSpan", mKernelLoopCall);
+    BasicBlock * const scanLengthCheck = b.CreateBasicBlock(prefix + "_scanLengthCheck", mKernelLoopCall);
+    BasicBlock * const scanLengthExit = b.CreateBasicBlock(prefix + "_scanLengthExit", mKernelLoopCall);
 
     Value * const totalExecutedNumOfStrides =
-        b->CreateExactUDiv(mCurrentProcessedItemCountPhi[condInput], BIT_BLOCK_WIDTH);
-    Value * const limit = b->CreateAdd(totalExecutedNumOfStrides, numOfLinearStrides);
+        b.CreateExactUDiv(mCurrentProcessedItemCountPhi[condInput], BIT_BLOCK_WIDTH);
+    Value * const limit = b.CreateAdd(totalExecutedNumOfStrides, numOfLinearStrides);
 
     // Prior scan state is always initially 0
-    b->CreateUnlikelyCondBr(mOptimizationBranchPriorScanStatePhi, scanLengthFindEndOfOptSpan, scanLengthEndOfRegularSpan);
+    b.CreateUnlikelyCondBr(mOptimizationBranchPriorScanStatePhi, scanLengthFindEndOfOptSpan, scanLengthEndOfRegularSpan);
 
     // Assume that we just left a regular branch. For us to get back to this loop, we must have
     // located an optimization span of sufficient length. Keep scanning ahead and determine
     // the first
-    b->SetInsertPoint(scanLengthFindEndOfOptSpan);
-    PHINode * const optNumOfStridesPhi = b->CreatePHI(sizeTy, 3, prefix + "_optNumOfStridesPhi");
+    b.SetInsertPoint(scanLengthFindEndOfOptSpan);
+    PHINode * const optNumOfStridesPhi = b.CreatePHI(sizeTy, 3, prefix + "_optNumOfStridesPhi");
     // on the final partial stride, we'd have 0-3 strides here.
     optNumOfStridesPhi->addIncoming(totalExecutedNumOfStrides, entry);
-    Value * const optIdx = b->CreateMul(optNumOfStridesPhi, BLOCKS_PER_STRIDE);
+    Value * const optIdx = b.CreateMul(optNumOfStridesPhi, BLOCKS_PER_STRIDE);
     Value * optAddr = buffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, optIdx);
-    optAddr = b->CreatePointerCast(optAddr, bitBlockTy->getPointerTo());
-    Value * optCondVal = b->CreateLoad(bitBlockTy, optAddr);
+    optAddr = b.CreatePointerCast(optAddr, bitBlockTy->getPointerTo());
+    Value * optCondVal = b.CreateLoad(bitBlockTy, optAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(bitBlockTy, b->CreateGEP(bitBlockTy, optAddr, b->getInt32(i)));
-        optCondVal = b->CreateOr(optCondVal, val);
+        Value * const val = b.CreateLoad(bitBlockTy, b.CreateGEP(bitBlockTy, optAddr, b.getInt32(i)));
+        optCondVal = b.CreateOr(optCondVal, val);
     }
-    Value * const foundNonOpt = b->bitblock_any(optCondVal);
-    Value * const optNextNumOfStrides = b->CreateAdd(optNumOfStridesPhi, sz_ONE);
-    Value * const optAtLimit = b->CreateICmpUGE(optNextNumOfStrides, limit);
-    Value * const optDone = b->CreateOr(foundNonOpt, optAtLimit);
+    Value * const foundNonOpt = b.bitblock_any(optCondVal);
+    Value * const optNextNumOfStrides = b.CreateAdd(optNumOfStridesPhi, sz_ONE);
+    Value * const optAtLimit = b.CreateICmpUGE(optNextNumOfStrides, limit);
+    Value * const optDone = b.CreateOr(foundNonOpt, optAtLimit);
     optNumOfStridesPhi->addIncoming(optNextNumOfStrides, scanLengthFindEndOfOptSpan);
-    b->CreateCondBr(optDone, scanLengthExit, scanLengthFindEndOfOptSpan);
+    b.CreateCondBr(optDone, scanLengthExit, scanLengthFindEndOfOptSpan);
 
     // Assume that we're starting in a regular branch span and locate the end of it, which can
     // happen when we locate an optimization span of sufficient length or the end of the input.
-    b->SetInsertPoint(scanLengthEndOfRegularSpan);
-    PHINode * const regNumOfStridesPhi = b->CreatePHI(sizeTy, 2, prefix + "_regNumOfStridesPhi");
+    b.SetInsertPoint(scanLengthEndOfRegularSpan);
+    PHINode * const regNumOfStridesPhi = b.CreatePHI(sizeTy, 2, prefix + "_regNumOfStridesPhi");
     regNumOfStridesPhi->addIncoming(totalExecutedNumOfStrides, entry);
-    PHINode * const regOptimizedSpanLengthPhi = b->CreatePHI(sizeTy, 2, prefix + "_regSpanLengthPhi");
+    PHINode * const regOptimizedSpanLengthPhi = b.CreatePHI(sizeTy, 2, prefix + "_regSpanLengthPhi");
     regOptimizedSpanLengthPhi->addIncoming(sz_ZERO, entry);
 
-    Value * const regIdx = b->CreateMul(regNumOfStridesPhi, BLOCKS_PER_STRIDE);
+    Value * const regIdx = b.CreateMul(regNumOfStridesPhi, BLOCKS_PER_STRIDE);
     Value * regAddr = buffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, regIdx);
-    regAddr = b->CreatePointerCast(regAddr, bitBlockTy->getPointerTo());
-    Value * regCondVal = b->CreateLoad(bitBlockTy, regAddr);
+    regAddr = b.CreatePointerCast(regAddr, bitBlockTy->getPointerTo());
+    Value * regCondVal = b.CreateLoad(bitBlockTy, regAddr);
     for (unsigned i = 1; i < blocksPerStride; ++i) {
-        Value * const val = b->CreateLoad(bitBlockTy, b->CreateGEP(bitBlockTy, regAddr, b->getInt32(i)));
-        regCondVal = b->CreateOr(regCondVal, val);
+        Value * const val = b.CreateLoad(bitBlockTy, b.CreateGEP(bitBlockTy, regAddr, b.getInt32(i)));
+        regCondVal = b.CreateOr(regCondVal, val);
     }
-    regCondVal = b->bitblock_any(regCondVal);
+    regCondVal = b.bitblock_any(regCondVal);
 
-    Value * const regIncOptimizedSpanLength = b->CreateAdd(regOptimizedSpanLengthPhi, sz_ONE);
-    Value * const regNextOptimizedSpanLength = b->CreateSelect(regCondVal, sz_ZERO, regIncOptimizedSpanLength);
-    Value * const regSpanLargeEnough = b->CreateICmpEQ(regNextOptimizedSpanLength, sz_MIN_LENGTH);
-    Value * const regNextNumOfStrides = b->CreateAdd(regNumOfStridesPhi, sz_ONE);
-    Value * const regAtLimit = b->CreateICmpUGE(regNextNumOfStrides, limit);
-    Value * const regDone = b->CreateOr(regSpanLargeEnough, regAtLimit);
+    Value * const regIncOptimizedSpanLength = b.CreateAdd(regOptimizedSpanLengthPhi, sz_ONE);
+    Value * const regNextOptimizedSpanLength = b.CreateSelect(regCondVal, sz_ZERO, regIncOptimizedSpanLength);
+    Value * const regSpanLargeEnough = b.CreateICmpEQ(regNextOptimizedSpanLength, sz_MIN_LENGTH);
+    Value * const regNextNumOfStrides = b.CreateAdd(regNumOfStridesPhi, sz_ONE);
+    Value * const regAtLimit = b.CreateICmpUGE(regNextNumOfStrides, limit);
+    Value * const regDone = b.CreateOr(regSpanLargeEnough, regAtLimit);
 
     regOptimizedSpanLengthPhi->addIncoming(regNextOptimizedSpanLength, scanLengthEndOfRegularSpan);
     regNumOfStridesPhi->addIncoming(regNextNumOfStrides, scanLengthEndOfRegularSpan);
-    b->CreateCondBr(regDone, scanLengthCheck, scanLengthEndOfRegularSpan);
+    b.CreateCondBr(regDone, scanLengthCheck, scanLengthEndOfRegularSpan);
 
-    b->SetInsertPoint(scanLengthCheck);
-    Value * const anyRegularStrides = b->CreateICmpNE(regNextNumOfStrides, regNextOptimizedSpanLength);
-    Value * const finishedScanning = b->CreateOr(anyRegularStrides, regAtLimit);
-    Value * const regNumOfStrides = b->CreateSelect(regSpanLargeEnough, regNextNumOfStrides, limit);
+    b.SetInsertPoint(scanLengthCheck);
+    Value * const anyRegularStrides = b.CreateICmpNE(regNextNumOfStrides, regNextOptimizedSpanLength);
+    Value * const finishedScanning = b.CreateOr(anyRegularStrides, regAtLimit);
+    Value * const regNumOfStrides = b.CreateSelect(regSpanLargeEnough, regNextNumOfStrides, limit);
     optNumOfStridesPhi->addIncoming(regNextNumOfStrides, scanLengthCheck);
-    b->CreateCondBr(finishedScanning, scanLengthExit, scanLengthFindEndOfOptSpan);
+    b.CreateCondBr(finishedScanning, scanLengthExit, scanLengthFindEndOfOptSpan);
 
-    b->SetInsertPoint(scanLengthExit);
-    PHINode * const finalNumOfStridesPhi = b->CreatePHI(sizeTy, 3, prefix + "_scanLengthNumOfStridesPhi");
+    b.SetInsertPoint(scanLengthExit);
+    PHINode * const finalNumOfStridesPhi = b.CreatePHI(sizeTy, 3, prefix + "_scanLengthNumOfStridesPhi");
     finalNumOfStridesPhi->addIncoming(optNextNumOfStrides, scanLengthFindEndOfOptSpan);
     finalNumOfStridesPhi->addIncoming(regNumOfStrides, scanLengthCheck);
     #ifdef OPTIMIZATION_BRANCH_ALWAYS_TAKES_REGULAR_BRANCH
-    mOptimizationBranchSelectedBranch = b->getTrue();
+    mOptimizationBranchSelectedBranch = b.getTrue();
     #else
-    PHINode * const chosenBranchPhi = b->CreatePHI(b->getInt1Ty(), 2);
-    chosenBranchPhi->addIncoming(b->getFalse(), scanLengthFindEndOfOptSpan);
+    PHINode * const chosenBranchPhi = b.CreatePHI(b.getInt1Ty(), 2);
+    chosenBranchPhi->addIncoming(b.getFalse(), scanLengthFindEndOfOptSpan);
     chosenBranchPhi->addIncoming(anyRegularStrides, scanLengthCheck);
     mOptimizationBranchSelectedBranch = chosenBranchPhi;
     #endif
 
-    Value * const finalNumOfStrides = b->CreateSub(finalNumOfStridesPhi, totalExecutedNumOfStrides);
-    Value * const isFinal = b->CreateICmpEQ(numOfLinearStrides, sz_ZERO);
-    Value * const selectedNumOfStrides = b->CreateSelect(isFinal, sz_ZERO, finalNumOfStrides);
+    Value * const finalNumOfStrides = b.CreateSub(finalNumOfStridesPhi, totalExecutedNumOfStrides);
+    Value * const isFinal = b.CreateICmpEQ(numOfLinearStrides, sz_ZERO);
+    Value * const selectedNumOfStrides = b.CreateSelect(isFinal, sz_ZERO, finalNumOfStrides);
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
-        Value * const valid = b->CreateICmpULE(selectedNumOfStrides, numOfLinearStrides);
-        b->CreateAssert(valid, "%s: optimization branch span length (%" PRIu64 ") "
+        Value * const valid = b.CreateICmpULE(selectedNumOfStrides, numOfLinearStrides);
+        b.CreateAssert(valid, "%s: optimization branch span length (%" PRIu64 ") "
                                "exceeds maximum num of strides (%" PRIu64 ")",
-                        b->GetString(prefix), selectedNumOfStrides, numOfLinearStrides);
-        Value * const valid2 = b->CreateOr(b->CreateICmpNE(selectedNumOfStrides, sz_ZERO), isFinal);
-        b->CreateAssert(valid2, "%s: optimization branch span length "
+                        b.GetString(prefix), selectedNumOfStrides, numOfLinearStrides);
+        Value * const valid2 = b.CreateOr(b.CreateICmpNE(selectedNumOfStrides, sz_ZERO), isFinal);
+        b.CreateAssert(valid2, "%s: optimization branch span length "
                                 "cannot be zero unless parsing final stride)",
-                        b->GetString(prefix));
+                        b.GetString(prefix));
     }
 
     return selectedNumOfStrides;

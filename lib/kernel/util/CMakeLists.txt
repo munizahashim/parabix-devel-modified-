@@ -9,7 +9,6 @@ NAME
 SRC
     bixhash.cpp
     error_monitor_kernel.cpp
-    debug_display.cpp
     hex_convert.cpp
     linebreak_kernel.cpp
     nesting.cpp

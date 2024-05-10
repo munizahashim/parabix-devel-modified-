@@ -13,7 +13,7 @@ public:
 
     using RedundantStreamSetMap = flat_map<const StreamSet *, StreamSet *>;
 
-    static PipelineAnalysis analyze(BuilderRef b, PipelineKernel * const pipelineKernel) {
+    static PipelineAnalysis analyze(KernelBuilder & b, PipelineKernel * const pipelineKernel) {
 
         PipelineAnalysis P(pipelineKernel);
 
@@ -112,7 +112,7 @@ public:
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
-            assert (b->getModule() == pipelineKernel->getModule());
+            assert (b.getModule() == pipelineKernel->getModule());
             P.printBufferGraph(b, errs());
         }
 
@@ -137,7 +137,7 @@ private:
 
     // pipeline analysis functions
 
-    void generateInitialPipelineGraph(BuilderRef b);
+    void generateInitialPipelineGraph(KernelBuilder & b);
 
     void identifyPipelineInputs();
 
@@ -194,10 +194,10 @@ private:
 
     // buffer management analysis functions
 
-    void addStreamSetsToBufferGraph(BuilderRef b);
+    void addStreamSetsToBufferGraph(KernelBuilder & b);
     void generateInitialBufferGraph();
 
-    void determineBufferSize(BuilderRef b);
+    void determineBufferSize(KernelBuilder & b);
 
     void identifyOwnedBuffers();
 
@@ -213,7 +213,7 @@ private:
 
     // thread local analysis
 
-    void determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng);
+    void determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng);
 
     void updateInterPartitionThreadLocalBuffers();
 
@@ -229,7 +229,7 @@ private:
 
     void identifyInterPartitionSymbolicRates();
 
-    void calculatePartialSumStepFactors(BuilderRef b);
+    void calculatePartialSumStepFactors(KernelBuilder & b);
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
@@ -265,7 +265,7 @@ private:
 public:
 
     // Debug functions
-    void printBufferGraph(BuilderRef b, raw_ostream & out) const;
+    void printBufferGraph(KernelBuilder & b, raw_ostream & out) const;
     static void printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name = "G");
 
 public:

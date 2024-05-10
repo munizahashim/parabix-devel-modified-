@@ -12,9 +12,9 @@ namespace kernel {
 
 class EvenOddKernel final : public BlockOrientedKernel {
 public:
-    EvenOddKernel(BuilderRef b);
+    EvenOddKernel(KernelBuilder & b);
 private:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
+    void generateDoBlockMethod(KernelBuilder & iBuilder) override;
 };
 
 }

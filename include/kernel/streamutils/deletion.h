@@ -47,10 +47,10 @@ void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
 //
 class DeletionKernel final : public BlockOrientedKernel {
 public:
-    DeletionKernel(BuilderRef b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts);
+    DeletionKernel(KernelBuilder & b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts);
 protected:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
-    void generateFinalBlockMethod(BuilderRef iBuilder, llvm::Value * remainingBytes) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
 private:
     const unsigned mDeletionFieldWidth;
     const unsigned mStreamCount;
@@ -59,11 +59,11 @@ private:
 // Compress within fields of size fieldWidth.
 class FieldCompressKernel final : public MultiBlockKernel {
 public:
-    FieldCompressKernel(BuilderRef b,
+    FieldCompressKernel(KernelBuilder & b,
                         SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
                         unsigned fieldWidth = 64);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
     const unsigned mFW;
     SelectedInput mMaskOp;
@@ -73,9 +73,9 @@ private:
 
 class PEXTFieldCompressKernel final : public MultiBlockKernel {
 public:
-    PEXTFieldCompressKernel(BuilderRef b, unsigned fw, unsigned streamCount);
+    PEXTFieldCompressKernel(KernelBuilder & b, unsigned fw, unsigned streamCount);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
     const unsigned mPEXTWidth;
     const unsigned mStreamCount;
@@ -86,13 +86,13 @@ private:
 //  compressed streams.
 class StreamCompressKernel final : public MultiBlockKernel {
 public:
-    StreamCompressKernel(BuilderRef b
+    StreamCompressKernel(KernelBuilder & b
                          , StreamSet * extractionMask
                          , StreamSet * source
                          , StreamSet * compressedOutput
                          , const unsigned FieldWidth = sizeof(size_t) * 8);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfBlocks) override;
 private:
     const unsigned mFW;
     const unsigned mStreamCount;
@@ -105,14 +105,14 @@ Output: swizzles containing the input bitstreams with the specified bits deleted
 class SwizzledDeleteByPEXTkernel final : public MultiBlockKernel {
 public:
     using SwizzleSets = std::vector<std::vector<llvm::Value *>>;
-    SwizzledDeleteByPEXTkernel(BuilderRef b
+    SwizzledDeleteByPEXTkernel(KernelBuilder & b
                                , StreamSet * selectors, StreamSet * inputStreamSet
                                , const std::vector<StreamSet *> & outputs
                                , unsigned PEXTWidth = sizeof(size_t) * 8);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfBlocks) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfBlocks) override;
 private:
-    SwizzleSets makeSwizzleSets(BuilderRef b, llvm::Value * selectors, llvm::Value * const strideIndex);
+    SwizzleSets makeSwizzleSets(KernelBuilder & b, llvm::Value * selectors, llvm::Value * const strideIndex);
 private:
     const unsigned mStreamCount;
     const unsigned mSwizzleFactor;
@@ -122,11 +122,11 @@ private:
 
 class DeleteByPEXTkernel final : public BlockOrientedKernel {
 public:
-    DeleteByPEXTkernel(BuilderRef b, unsigned fw, unsigned streamCount, unsigned PEXT_width = sizeof(size_t) * 8);
+    DeleteByPEXTkernel(KernelBuilder & b, unsigned fw, unsigned streamCount, unsigned PEXT_width = sizeof(size_t) * 8);
 protected:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
-    void generateFinalBlockMethod(BuilderRef iBuilder, llvm::Value * remainingBytes) override;
-    void generateProcessingLoop(BuilderRef iBuilder, llvm::Value * delMask);
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
+    void generateProcessingLoop(KernelBuilder & b, llvm::Value * delMask);
 private:
     const unsigned mDelCountFieldWidth;
     const unsigned mStreamCount;
@@ -136,10 +136,10 @@ private:
 
 class SwizzledBitstreamCompressByCount final : public BlockOrientedKernel {
 public:
-    SwizzledBitstreamCompressByCount(BuilderRef b, unsigned bitStreamCount, unsigned fieldWidth = sizeof(size_t) * 8);
+    SwizzledBitstreamCompressByCount(KernelBuilder & b, unsigned bitStreamCount, unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
-    void generateFinalBlockMethod(BuilderRef iBuilder, llvm::Value * remainingBytes) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
 private:
     const unsigned mBitStreamCount;
     const unsigned mFieldWidth;
@@ -150,12 +150,12 @@ private:
 // Compress within fields of size fieldWidth.
 class FilterByMaskKernel final : public MultiBlockKernel {
 public:
-    FilterByMaskKernel(BuilderRef b,
+    FilterByMaskKernel(KernelBuilder & b,
                         SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
                         unsigned fieldWidth = 64,
                         ProcessingRateProbabilityDistribution insertionProbabilityDistribution = MaximumDistribution());
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
     const unsigned mFW;
     SelectedInput mMaskOp;

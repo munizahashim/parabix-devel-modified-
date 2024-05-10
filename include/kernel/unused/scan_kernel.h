@@ -12,8 +12,6 @@ namespace kernel {
 class ScanKernelBase {
 public:
 
-    using BuilderRef = BuilderRef;
-
     enum class OptimizeMode { Sparse, Dense };
 
 protected:
@@ -37,24 +35,24 @@ protected:
         llvm::Constant * const WORDS_PER_BLOCK;
         llvm::Constant * const WORDS_PER_STRIDE;
 
-        ScanWordContext(BuilderRef b, unsigned strideWidth);
+        ScanWordContext(KernelBuilder & b, unsigned strideWidth);
     };
 
-    ScanKernelBase(BuilderRef b, unsigned strideWidth, llvm::StringRef scanStreamSetName, OptimizeMode optimizeMode);
+    ScanKernelBase(KernelBuilder & b, unsigned strideWidth, llvm::StringRef scanStreamSetName, OptimizeMode optimizeMode);
 
-    void initializeBase(BuilderRef b);
+    void initializeBase(KernelBuilder & b);
 
-    llvm::Value * computeStridePosition(BuilderRef b, llvm::Value * strideNumber) const;
+    llvm::Value * computeStridePosition(KernelBuilder & b, llvm::Value * strideNumber) const;
 
-    llvm::Value * computeStrideBlockOffset(BuilderRef b, llvm::Value * strideNo) const;
+    llvm::Value * computeStrideBlockOffset(KernelBuilder & b, llvm::Value * strideNo) const;
 
-    llvm::Value * loadScanStreamBitBlock(BuilderRef b ,llvm::Value * strideNo, llvm::Value * blockNo, llvm::Value * streamIndex = nullptr);
+    llvm::Value * loadScanStreamBitBlock(KernelBuilder & b ,llvm::Value * strideNo, llvm::Value * blockNo, llvm::Value * streamIndex = nullptr);
 
-    llvm::Value * orBlockIntoMask(BuilderRef b, ScanWordContext const & sw, llvm::Value * maskAccum, llvm::Value * block, llvm::Value * blockNo);
+    llvm::Value * orBlockIntoMask(KernelBuilder & b, ScanWordContext const & sw, llvm::Value * maskAccum, llvm::Value * block, llvm::Value * blockNo);
 
-    llvm::Value * loadScanWord(BuilderRef b, ScanWordContext const & sw, llvm::Value * wordOffset, llvm::Value * strideNo, llvm::Value * streamIndex = nullptr);
+    llvm::Value * loadScanWord(KernelBuilder & b, ScanWordContext const & sw, llvm::Value * wordOffset, llvm::Value * strideNo, llvm::Value * streamIndex = nullptr);
 
-    void createOptimizedContinueProcessingBr(BuilderRef b, llvm::Value * value, llvm::BasicBlock * trueBlock, llvm::BasicBlock * falseBlock);
+    void createOptimizedContinueProcessingBr(KernelBuilder & b, llvm::Value * value, llvm::BasicBlock * trueBlock, llvm::BasicBlock * falseBlock);
 
 protected:
     unsigned        mStrideWidth;
@@ -77,10 +75,10 @@ protected:
 class ScanKernel : protected ScanKernelBase, public MultiBlockKernel {
 public:
 
-    ScanKernel(BuilderRef b, StreamSet * scanStream, StreamSet * sourceStream, llvm::StringRef callbackName, OptimizeMode optimizeModes = OptimizeMode::Sparse);
+    ScanKernel(KernelBuilder & b, StreamSet * scanStream, StreamSet * sourceStream, llvm::StringRef callbackName, OptimizeMode optimizeModes = OptimizeMode::Sparse);
 
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     llvm::StringRef mCallbackName;
 };
@@ -117,11 +115,11 @@ protected:
 class MultiStreamScanKernel : protected ScanKernelBase, public MultiBlockKernel {
 public:
 
-    MultiStreamScanKernel(BuilderRef b, StreamSet * scanStream, StreamSet * sourceStream, llvm::StringRef callbackName, OptimizeMode optimizeMode = OptimizeMode::Sparse);
+    MultiStreamScanKernel(KernelBuilder & b, StreamSet * scanStream, StreamSet * sourceStream, llvm::StringRef callbackName, OptimizeMode optimizeMode = OptimizeMode::Sparse);
 
 protected:
     
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     llvm::StringRef mCallbackName;
 };

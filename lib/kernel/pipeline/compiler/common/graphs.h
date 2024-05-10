@@ -46,7 +46,6 @@ using CallBindings = PipelineKernel::CallBindings;
 using CallRef = RefWrapper<CallBinding>;
 using LengthAssertion = PipelineKernel::LengthAssertion;
 using LengthAssertions = PipelineKernel::LengthAssertions;
-using BuilderRef = KernelCompiler::BuilderRef;
 using ArgIterator = KernelCompiler::ArgIterator;
 using InitArgTypes = KernelCompiler::InitArgTypes;
 

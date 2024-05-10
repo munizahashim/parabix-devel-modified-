@@ -26,18 +26,18 @@ namespace kernel {
  */
 class LineNumberGenerator : public SingleStreamScanKernelTemplate {
 public:
-    LineNumberGenerator(BuilderRef b, StreamSet * scan, StreamSet * linebreaks, StreamSet * output);
+    LineNumberGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * linebreaks, StreamSet * output);
 protected:
-    void initialize(BuilderRef b) override;
-    void willProcessStride(BuilderRef b, llvm::Value * const strideNo) override;
-    void maskBuildingIterationHead(BuilderRef b) override;
-    void maskBuildingIterationBody(BuilderRef b, llvm::Value * const blockIndex) override;
+    void initialize(KernelBuilder & b) override;
+    void willProcessStride(KernelBuilder & b, llvm::Value * const strideNo) override;
+    void maskBuildingIterationHead(KernelBuilder & b) override;
+    void maskBuildingIterationBody(KernelBuilder & b, llvm::Value * const blockIndex) override;
     void generateProcessingLogic(
-        BuilderRef b, 
+        KernelBuilder & b, 
         llvm::Value * const absoluteIndex, 
         llvm::Value * const blockIndex, 
         llvm::Value * const bitOffset) override;
-    void didProcessStride(BuilderRef b, llvm::Value * const strideNo) override;
+    void didProcessStride(KernelBuilder & b, llvm::Value * const strideNo) override;
 private:
     llvm::Value *   mLineCountArrayBlockPtr = nullptr;
     llvm::Value *   mInitialLineNum = nullptr;

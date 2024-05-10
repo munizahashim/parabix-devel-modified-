@@ -10,15 +10,13 @@ using namespace llvm;
 
 namespace kernel {
 
-using BuilderRef = Kernel::BuilderRef;
-
-void bitblock_advance_ci_co(BuilderRef b, Value * val, unsigned shift, Value * strideCarryArr, unsigned carryIdx, std::vector<std::vector<Value *>> & adv, std::vector<std::vector<int>> & calculated, int i, int j){
+void bitblock_advance_ci_co(KernelBuilder & b, Value * val, unsigned shift, Value * strideCarryArr, unsigned carryIdx, std::vector<std::vector<Value *>> & adv, std::vector<std::vector<int>> & calculated, int i, int j){
     if (!calculated[i][j]) {
-        Type * bbTy = b->getBitBlockType();
-        Value * ptr = b->CreateGEP(bbTy, strideCarryArr, {b->getInt32(0), b->getInt32(carryIdx)});
-        Value * ci = b->CreateLoad(bbTy, ptr);
-        std::pair<Value *, Value *> rslt = b->bitblock_advance(val, ci, shift);
-        b->CreateStore(std::get<0>(rslt), ptr);
+        Type * bbTy = b.getBitBlockType();
+        Value * ptr = b.CreateGEP(bbTy, strideCarryArr, {b.getInt32(0), b.getInt32(carryIdx)});
+        Value * ci = b.CreateLoad(bbTy, ptr);
+        std::pair<Value *, Value *> rslt = b.bitblock_advance(val, ci, shift);
+        b.CreateStore(std::get<0>(rslt), ptr);
         adv[i][j] = std::get<1>(rslt);
         calculated[i][j] = 1;
     }
@@ -30,14 +28,14 @@ void reset_to_zero(std::vector<std::vector<int>> & calculated){
     }
 }
 
-void editdGPUKernel::generateDoBlockMethod(BuilderRef b) {
+void editdGPUKernel::generateDoBlockMethod(KernelBuilder & b) {
 
-    IntegerType * const int32ty = b->getInt32Ty();
-    IntegerType * const int8ty = b->getInt8Ty();
-    Value * groupLen = b->getInt32((mPatternLen + 1) * mGroupSize);
-    Value * pattPos = b->getInt32(0);
-    Value * pattBuf = b->getScalarField("pattStream");
-    Value * strideCarryArr = b->getScalarField("strideCarry");
+    IntegerType * const int32ty = b.getInt32Ty();
+    IntegerType * const int8ty = b.getInt8Ty();
+    Value * groupLen = b.getInt32((mPatternLen + 1) * mGroupSize);
+    Value * pattPos = b.getInt32(0);
+    Value * pattBuf = b.getScalarField("pattStream");
+    Value * strideCarryArr = b.getScalarField("strideCarry");
 
     unsigned carryIdx = 0;
 
@@ -45,71 +43,71 @@ void editdGPUKernel::generateDoBlockMethod(BuilderRef b) {
     std::vector<std::vector<Value *>> adv(mPatternLen, std::vector<Value *>(mEditDistance + 1));
     std::vector<std::vector<int>> calculated(mPatternLen, std::vector<int>(mEditDistance + 1, 0));
 
-    Type * bbTy = b->getBitBlockType();
+    Type * bbTy = b.getBitBlockType();
 
-    Module * m = b->getModule();
+    Module * m = b.getModule();
     FunctionType * bidTy = FunctionType::get(int32ty, false);
     Function * const bidFunc = Function::Create(bidTy, Function::ExternalLinkage, "llvm.nvvm.read.ptx.sreg.ctaid.x", m);
-    Value * bid = b->CreateCall(bidTy, bidFunc, {});
-    Value * pattStartPtr = b->CreateGEP(bbTy, pattBuf, b->CreateMul(groupLen, bid));
+    Value * bid = b.CreateCall(bidTy, bidFunc, {});
+    Value * pattStartPtr = b.CreateGEP(bbTy, pattBuf, b.CreateMul(groupLen, bid));
 
     for(unsigned j = 0; j <= mEditDistance; j++){
-        e[mPatternLen][j] = b->allZeroes();
+        e[mPatternLen][j] = b.allZeroes();
     }
 
     for(unsigned j = 1; j <= mEditDistance; j++){
-        e[0][j] = b->allOnes();
+        e[0][j] = b.allOnes();
     }
 
     for(unsigned g = 0; g < mGroupSize; g++){
-        Value * pattCh = b->CreateLoad(bbTy, b->CreateGEP(bbTy, pattStartPtr, pattPos));
-        Value * pattIdx = b->CreateAnd(b->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
-        Value * pattStream = b->loadInputStreamBlock("CCStream", b->CreateZExt(pattIdx, int32ty));
-        pattPos = b->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
+        Value * pattCh = b.CreateLoad(bbTy, b.CreateGEP(bbTy, pattStartPtr, pattPos));
+        Value * pattIdx = b.CreateAnd(b.CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
+        Value * pattStream = b.loadInputStreamBlock("CCStream", b.CreateZExt(pattIdx, int32ty));
+        pattPos = b.CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
         e[0][0] = pattStream;
         for(unsigned i = 1; i < mPatternLen; i++){
-            Value * pattCh = b->CreateLoad(bbTy, b->CreateGEP(bbTy, pattStartPtr, pattPos));
-            pattIdx = b->CreateAnd(b->CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
-            pattStream = b->loadInputStreamBlock("CCStream", b->CreateZExt(pattIdx, int32ty));
-            pattPos = b->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
+            Value * pattCh = b.CreateLoad(bbTy, b.CreateGEP(bbTy, pattStartPtr, pattPos));
+            pattIdx = b.CreateAnd(b.CreateLShr(pattCh, 1), ConstantInt::get(int8ty, 3));
+            pattStream = b.loadInputStreamBlock("CCStream", b.CreateZExt(pattIdx, int32ty));
+            pattPos = b.CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
             bitblock_advance_ci_co(b, e[i-1][0], 1, strideCarryArr, carryIdx++, adv, calculated, i-1, 0);
-            e[i][0] = b->CreateAnd(adv[i-1][0], pattStream);
+            e[i][0] = b.CreateAnd(adv[i-1][0], pattStream);
             for(unsigned j = 1; j<= mEditDistance; j++){
                 bitblock_advance_ci_co(b, e[i-1][j], 1, strideCarryArr, carryIdx++, adv, calculated, i-1, j);
                 bitblock_advance_ci_co(b, e[i-1][j-1], 1, strideCarryArr, carryIdx++, adv, calculated, i-1, j-1);
                 bitblock_advance_ci_co(b, e[i][j-1], 1, strideCarryArr, carryIdx++, adv, calculated, i, j-1);
-                Value * tmp1 = b->CreateAnd(adv[i-1][j], pattStream);
-                Value * tmp2 = b->CreateAnd(adv[i-1][j-1], b->CreateNot(pattStream));
-                Value * tmp3 = b->CreateOr(adv[i][j-1], e[i-1][j-1]);
-                e[i][j] = b->CreateOr(b->CreateOr(tmp1, tmp2), tmp3);
+                Value * tmp1 = b.CreateAnd(adv[i-1][j], pattStream);
+                Value * tmp2 = b.CreateAnd(adv[i-1][j-1], b.CreateNot(pattStream));
+                Value * tmp3 = b.CreateOr(adv[i][j-1], e[i-1][j-1]);
+                e[i][j] = b.CreateOr(b.CreateOr(tmp1, tmp2), tmp3);
             }
         }
-        e[mPatternLen][0] = b->CreateOr(e[mPatternLen][0], e[mPatternLen-1][0]);
+        e[mPatternLen][0] = b.CreateOr(e[mPatternLen][0], e[mPatternLen-1][0]);
         for(unsigned j = 1; j<= mEditDistance; j++){
-            e[mPatternLen][j] = b->CreateOr(e[mPatternLen][j], b->CreateAnd(e[mPatternLen - 1][j], b->CreateNot(e[mPatternLen - 1][j - 1])));
+            e[mPatternLen][j] = b.CreateOr(e[mPatternLen][j], b.CreateAnd(e[mPatternLen - 1][j], b.CreateNot(e[mPatternLen - 1][j - 1])));
         }
-        pattPos = b->CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
+        pattPos = b.CreateAdd(pattPos, ConstantInt::get(int32ty, 1));
         reset_to_zero(calculated);
     }
 
     for(unsigned j = 0; j<= mEditDistance; j++){
-        b->storeOutputStreamBlock("ResultStream", b->getInt32(j), e[mPatternLen][j]);
+        b.storeOutputStreamBlock("ResultStream", b.getInt32(j), e[mPatternLen][j]);
     }
 }
 
-void editdGPUKernel::generateFinalBlockMethod(BuilderRef idb, Value * remainingBytes) {
-    idb->setScalarField("EOFmask", idb->bitblock_mask_from(remainingBytes));
-    RepeatDoBlockLogic(idb);
+void editdGPUKernel::generateFinalBlockMethod(KernelBuilder & b, Value * remainingBytes) {
+    b.setScalarField("EOFmask", b.bitblock_mask_from(remainingBytes));
+    RepeatDoBlockLogic(b);
 }
 
-editdGPUKernel::editdGPUKernel(BuilderRef b, unsigned dist, unsigned pattLen, unsigned groupSize) :
+editdGPUKernel::editdGPUKernel(KernelBuilder & b, unsigned dist, unsigned pattLen, unsigned groupSize) :
 BlockOrientedKernel(b, "editd_gpu",
-{Binding{b->getStreamSetTy(4), "CCStream"}},
-{Binding{b->getStreamSetTy(dist + 1), "ResultStream"}},
-{Binding{PointerType::get(b->getInt8Ty(), 1), "pattStream"},
-Binding{PointerType::get(ArrayType::get(b->getBitBlockType(), pattLen * (dist + 1) * 4 * groupSize), 0), "strideCarry"}},
+{Binding{b.getStreamSetTy(4), "CCStream"}},
+{Binding{b.getStreamSetTy(dist + 1), "ResultStream"}},
+{Binding{PointerType::get(b.getInt8Ty(), 1), "pattStream"},
+Binding{PointerType::get(ArrayType::get(b.getBitBlockType(), pattLen * (dist + 1) * 4 * groupSize), 0), "strideCarry"}},
 {},
-{InternalScalar{ScalarType::NonPersistent, b->getBitBlockType(), "EOFmask"}})
+{InternalScalar{ScalarType::NonPersistent, b.getBitBlockType(), "EOFmask"}})
 , mEditDistance(dist)
 , mPatternLen(pattLen)
 , mGroupSize(groupSize) {

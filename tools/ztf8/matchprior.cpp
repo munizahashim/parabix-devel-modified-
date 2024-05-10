@@ -45,12 +45,12 @@ using namespace kernel;
 
 class MatchPriorKernel final: public pablo::PabloKernel {
 public:
-    MatchPriorKernel(BuilderRef b, StreamSet * const countable, Scalar * countResult);
+    MatchPriorKernel(KernelBuilder & b, StreamSet * const countable, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
-MatchPriorKernel::MatchPriorKernel (BuilderRef b, StreamSet * const countable, Scalar * countResult)
+MatchPriorKernel::MatchPriorKernel (KernelBuilder & b, StreamSet * const countable, Scalar * countResult)
     : pablo::PabloKernel(b, "matchprior_" + std::to_string(priorDistance),
     {Binding{"countable", countable}},
     {},
@@ -77,9 +77,9 @@ typedef uint64_t (*MatchPriorFunctionType)(uint32_t fd);
 
 MatchPriorFunctionType mpPipelineGen(CPUDriver & pxDriver) {
     auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}},
-                                   {Binding{b->getInt64Ty(), "countResult"}});
+                                   {Binding{b.getInt64Ty(), "countResult"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);

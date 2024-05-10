@@ -58,7 +58,7 @@ class Kernel : public AttributeSet {
     friend class BaseDriver;
 public:
 
-    using BuilderRef = const std::unique_ptr<KernelBuilder> &;
+   // using KernelBuilder & = const std::unique_ptr<KernelBuilder> &;
 
     using Relationships = std::vector<const Relationship *>;
 
@@ -413,15 +413,15 @@ public:
         return mModule != nullptr;
     }
 
-    std::string makeCacheName(BuilderRef b);
+    std::string makeCacheName(KernelBuilder & b);
 
-    void makeModule(BuilderRef b);
+    void makeModule(KernelBuilder & b);
 
     void ensureLoaded();
 
-    void generateKernel(BuilderRef b);
+    void generateKernel(KernelBuilder & b);
 
-    void loadCachedKernel(BuilderRef b);
+    void loadCachedKernel(KernelBuilder & b);
 
     template <typename ExternalFunctionType>
     void link(std::string name, ExternalFunctionType & functionPtr);
@@ -430,9 +430,9 @@ public:
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 
-    virtual void addKernelDeclarations(BuilderRef b);
+    virtual void addKernelDeclarations(KernelBuilder & b);
 
-    virtual std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const;
+    virtual std::unique_ptr<KernelCompiler> instantiateKernelCompiler(KernelBuilder & b) const;
 
     virtual ~Kernel();
 
@@ -442,41 +442,41 @@ public:
 
 protected:
 
-    llvm::Function * getInitializeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getInitializeFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addInitializeDeclaration(BuilderRef b) const;
+    llvm::Function * addInitializeDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * getExpectedOutputSizeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getExpectedOutputSizeFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addExpectedOutputSizeDeclaration(BuilderRef b) const;
+    llvm::Function * addExpectedOutputSizeDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * getAllocateSharedInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getAllocateSharedInternalStreamSetsFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addAllocateSharedInternalStreamSetsDeclaration(BuilderRef b) const;
+    llvm::Function * addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * getInitializeThreadLocalFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getInitializeThreadLocalFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addInitializeThreadLocalDeclaration(BuilderRef b) const;
+    llvm::Function * addInitializeThreadLocalDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * getAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getAllocateThreadLocalInternalStreamSetsFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addAllocateThreadLocalInternalStreamSetsDeclaration(BuilderRef b) const;
+    llvm::Function * addAllocateThreadLocalInternalStreamSetsDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * addDoSegmentDeclaration(BuilderRef b) const;
+    llvm::Function * addDoSegmentDeclaration(KernelBuilder & b) const;
 
-    std::vector<llvm::Type *> getDoSegmentFields(BuilderRef b) const;
+    std::vector<llvm::Type *> getDoSegmentFields(KernelBuilder & b) const;
 
-    llvm::Function * getDoSegmentFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getDoSegmentFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * getFinalizeThreadLocalFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getFinalizeThreadLocalFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addFinalizeThreadLocalDeclaration(BuilderRef b) const;
+    llvm::Function * addFinalizeThreadLocalDeclaration(KernelBuilder & b) const;
 
-    llvm::Function * getFinalizeFunction(BuilderRef b, const bool alwayReturnDeclaration = true) const;
+    llvm::Function * getFinalizeFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
 
-    llvm::Function * addFinalizeDeclaration(BuilderRef b) const;
+    llvm::Function * addFinalizeDeclaration(KernelBuilder & b) const;
 
-    virtual void runOptimizationPasses(BuilderRef b) const;
+    virtual void runOptimizationPasses(KernelBuilder & b) const;
 
 protected:
 
@@ -494,25 +494,25 @@ protected:
 
 public:
 
-    virtual llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const;
+    virtual llvm::Function * addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const;
 
 protected:
 
-    llvm::Value * constructFamilyKernels(BuilderRef b, InitArgs & hostArgs, ParamMap & params, NestedStateObjs & toFree) const;
+    llvm::Value * constructFamilyKernels(KernelBuilder & b, InitArgs & hostArgs, ParamMap & params, NestedStateObjs & toFree) const;
 
-    virtual void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const;
+    virtual void addAdditionalInitializationArgTypes(KernelBuilder & b, InitArgTypes & argTypes) const;
 
-    virtual void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
+    virtual void recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
 
 protected:
 
-    llvm::Value * createInstance(BuilderRef b) const;
+    llvm::Value * createInstance(KernelBuilder & b) const;
 
-    llvm::Value * finalizeInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
+    llvm::Value * finalizeInstance(KernelBuilder & b, llvm::ArrayRef<llvm::Value *> args) const;
 
-    llvm::Value * initializeThreadLocalInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
+    llvm::Value * initializeThreadLocalInstance(KernelBuilder & b, llvm::ArrayRef<llvm::Value *> args) const;
 
-    void finalizeThreadLocalInstance(BuilderRef b, llvm::ArrayRef<llvm::Value *> args) const;
+    void finalizeThreadLocalInstance(KernelBuilder & b, llvm::ArrayRef<llvm::Value *> args) const;
 
 protected:
 
@@ -520,43 +520,43 @@ protected:
 
     LLVM_READNONE bool hasFixedRateIO() const;
 
-    virtual void addInternalProperties(BuilderRef) { }
+    virtual void addInternalProperties(KernelBuilder &) { }
 
-    virtual void addAdditionalFunctions(BuilderRef) { }
+    virtual void addAdditionalFunctions(KernelBuilder &) { }
 
-    virtual void linkExternalMethods(BuilderRef b);
+    virtual void linkExternalMethods(KernelBuilder & b);
 
-    void constructStateTypes(BuilderRef b);
+    void constructStateTypes(KernelBuilder & b);
 
-    void generateOrLoadKernel(BuilderRef b);
+    void generateOrLoadKernel(KernelBuilder & b);
 
-    virtual void generateInitializeMethod(BuilderRef) { }
+    virtual void generateInitializeMethod(KernelBuilder &) { }
 
-    virtual llvm::Value * generateExpectedOutputSizeMethod(BuilderRef);
+    virtual llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder &);
 
-    virtual void generateInitializeThreadLocalMethod(BuilderRef) { }
+    virtual void generateInitializeThreadLocalMethod(KernelBuilder &) { }
 
-    virtual void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides);
+    virtual void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides);
 
-    virtual void generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides);
+    virtual void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides);
 
-    virtual void generateKernelMethod(BuilderRef) = 0;
+    virtual void generateKernelMethod(KernelBuilder &) = 0;
 
-    virtual void generateFinalizeThreadLocalMethod(BuilderRef) { }
+    virtual void generateFinalizeThreadLocalMethod(KernelBuilder &) { }
 
-    virtual void generateFinalizeMethod(BuilderRef) { }
+    virtual void generateFinalizeMethod(KernelBuilder &) { }
 
 protected:
 
     // Constructor
-    Kernel(BuilderRef b,
+    Kernel(KernelBuilder & b,
            const TypeId typeId, std::string && kernelName,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
     // Constructor used by pipeline
-    Kernel(BuilderRef b,
+    Kernel(KernelBuilder & b,
            const TypeId typeId,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
@@ -600,7 +600,7 @@ public:
 
 protected:
 
-    SegmentOrientedKernel(BuilderRef b,
+    SegmentOrientedKernel(KernelBuilder & b,
                           std::string && kernelName,
                           Bindings &&stream_inputs,
                           Bindings &&stream_outputs,
@@ -609,11 +609,11 @@ protected:
                           InternalScalars && internal_scalars);
 public:
 
-    virtual void generateDoSegmentMethod(BuilderRef b) = 0;
+    virtual void generateDoSegmentMethod(KernelBuilder & b) = 0;
 
 protected:
 
-    void generateKernelMethod(BuilderRef b) final;
+    void generateKernelMethod(KernelBuilder & b) final;
 
 };
 
@@ -628,7 +628,7 @@ public:
 
 protected:
 
-    MultiBlockKernel(BuilderRef b,
+    MultiBlockKernel(KernelBuilder & b,
                      std::string && kernelName,
                      Bindings && stream_inputs,
                      Bindings && stream_outputs,
@@ -636,7 +636,7 @@ protected:
                      Bindings && scalar_outputs,
                      InternalScalars && internal_scalars);
 
-    MultiBlockKernel(BuilderRef b,
+    MultiBlockKernel(KernelBuilder & b,
                      const TypeId kernelTypId,
                      std::string && kernelName,
                      Bindings && stream_inputs,
@@ -645,11 +645,11 @@ protected:
                      Bindings && scalar_outputs,
                      InternalScalars && internal_scalars);
 
-    virtual void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) = 0;
+    virtual void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) = 0;
 
 private:
 
-    void generateKernelMethod(BuilderRef b) final;
+    void generateKernelMethod(KernelBuilder & b) final;
 
 };
 
@@ -664,13 +664,13 @@ public:
 
     static bool classof(const void *) { return false; }
 
-    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const;
+    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(KernelBuilder & b) const;
 
 protected:
 
     // Each BlockOrientedKernel must provide its own logic for generating
     // doBlock calls.
-    virtual void generateDoBlockMethod(BuilderRef b) = 0;
+    virtual void generateDoBlockMethod(KernelBuilder & b) = 0;
 
     // Each BlockOrientedKernel must also specify the logic for processing the
     // final block of stream data, if there is any special processing required
@@ -679,11 +679,11 @@ protected:
     // without additional preparation, the default generateFinalBlockMethod need
     // not be overridden.
 
-    void RepeatDoBlockLogic(BuilderRef b);
+    void RepeatDoBlockLogic(KernelBuilder & b);
 
-    virtual void generateFinalBlockMethod(BuilderRef b, llvm::Value * remainingItems);
+    virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingItems);
 
-    BlockOrientedKernel(BuilderRef b,
+    BlockOrientedKernel(KernelBuilder & b,
                         std::string && kernelName,
                         Bindings && stream_inputs,
                         Bindings && stream_outputs,
@@ -693,7 +693,7 @@ protected:
 
 private:
 
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 
 };
 

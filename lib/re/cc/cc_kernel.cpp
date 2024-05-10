@@ -45,7 +45,7 @@ StringRef CharacterClassKernelBuilder::getSignature() const {
 }
 
 CharacterClassKernelBuilder::CharacterClassKernelBuilder(
-        BuilderRef b, std::vector<re::CC *> charClasses, StreamSet * sourceStream, StreamSet * ccStream, Scalar * signalNullObject)
+        KernelBuilder & b, std::vector<re::CC *> charClasses, StreamSet * sourceStream, StreamSet * ccStream, Scalar * signalNullObject)
 : CharacterClassesSignature(charClasses, sourceStream, signalNullObject),
   PabloKernel(b, "ccK" + getStringHash(mSignature),
 // input

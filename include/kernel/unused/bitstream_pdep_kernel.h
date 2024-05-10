@@ -12,9 +12,9 @@ namespace kernel {
 
 class BitStreamPDEPKernel final : public MultiBlockKernel {
 public:
-    BitStreamPDEPKernel(BuilderRef b, const unsigned numberOfStream = 8, std::string name = "BitStreamPDEPKernel");
+    BitStreamPDEPKernel(KernelBuilder & b, const unsigned numberOfStream = 8, std::string name = "BitStreamPDEPKernel");
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) final;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:
     const unsigned mNumberOfStream;
 };

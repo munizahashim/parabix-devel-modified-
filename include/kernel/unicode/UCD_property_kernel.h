@@ -12,13 +12,13 @@ namespace kernel {
 
 class UnicodePropertyKernelBuilder : public pablo::PabloKernel {
 public:
-    UnicodePropertyKernelBuilder(BuilderRef kb, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property);
+    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property);
 protected:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
     void generatePabloMethod() override;
 private:
-    UnicodePropertyKernelBuilder(BuilderRef kb, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, std::string && propValueName);
+    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, std::string && propValueName);
 private:
     std::string mPropNameValue;
     re::Name * mName;

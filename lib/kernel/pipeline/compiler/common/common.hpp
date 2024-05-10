@@ -7,8 +7,6 @@
 #include <random>
 #include <kernel/core/kernel_compiler.h>
 
-using BuilderRef = kernel::KernelCompiler::BuilderRef;
-
 using boost::intrusive::detail::floor_log2;
 using boost::intrusive::detail::ceil_log2;
 using boost::intrusive::detail::ceil_pow2;

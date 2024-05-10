@@ -25,8 +25,8 @@ unsigned PipelineCompiler::getTruncatedStreamSetSourceId(const unsigned streamSe
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addConsumerKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned kernelId) {
-    IntegerType * const sizeTy = b->getSizeTy();
+void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsigned kernelId) {
+    IntegerType * const sizeTy = b.getSizeTy();
 
 //    const auto addInternallySynchronizedInternalCounters = mIsInternallySynchronized.test(kernelId) && !mIsStatelessKernel.test(kernelId) ;
 
@@ -63,7 +63,7 @@ void PipelineCompiler::addConsumerKernelProperties(BuilderRef b, const unsigned 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
+void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mConsumerGraph))) {
         const auto streamSet = target(e, mConsumerGraph);
         Value * consumed = readConsumedItemCount(b, streamSet);
@@ -76,16 +76,16 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
         #endif
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
-            Value * valid = b->CreateICmpULE(consumed, produced);
+            Value * valid = b.CreateICmpULE(consumed, produced);
             if (mInitiallyTerminated) {
-                valid = b->CreateOr(valid, mInitiallyTerminated);
+                valid = b.CreateOr(valid, mInitiallyTerminated);
             }
             constexpr auto msg =
                 "Consumed item count (%" PRId64 ") of %s.%s exceeds its produced item count (%" PRId64 ").";
             const ConsumerEdge & c = mConsumerGraph[e];
             const StreamSetPort port{PortType::Output, c.Port};
-            Constant * const bindingName = b->GetString(getBinding(mKernelId, port).getName());
-            b->CreateAssert(valid, msg,
+            Constant * const bindingName = b.GetString(getBinding(mKernelId, port).getName());
+            b.CreateAssert(valid, msg,
                 consumed, mCurrentKernelName, bindingName, produced);
         }
     }
@@ -95,7 +95,7 @@ void PipelineCompiler::readConsumedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readExternalConsumerItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
+void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -114,9 +114,9 @@ void PipelineCompiler::readExternalConsumerItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t streamSet) {
+Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
 #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
-    return b->getSize(0);
+    return b.getSize(0);
 #else
 
     Value * itemCount = nullptr;
@@ -126,7 +126,7 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
         const auto & bn = mBufferGraph[streamSet];
         // A returned buffer never releases data.
         if (bn.isReturned()) {
-            return b->getSize(0);
+            return b.getSize(0);
         }
 
         // This stream either has no consumers or we've proven that
@@ -139,9 +139,9 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
             const auto producer = source(e, mBufferGraph);
             const auto prefix = makeBufferName(producer, port.Port);
             if (LLVM_UNLIKELY(port.isDeferred())) {
-                produced = b->getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
             } else {
-                produced = b->getScalarField(prefix + ITEM_COUNT_SUFFIX);
+                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
             }
         }
         auto delayOrLookBehind = std::max(port.Delay, port.LookBehind);
@@ -151,18 +151,18 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
             delayOrLookBehind = std::max(delayOrLookBehind, d);
         }
         if (delayOrLookBehind) {
-            produced = b->CreateSaturatingSub(produced, b->getSize(delayOrLookBehind));
+            produced = b.CreateSaturatingSub(produced, b.getSize(delayOrLookBehind));
         }
         itemCount = produced;
     } else {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
-        auto consumedRef = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+        auto consumedRef = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
         Value * ptr = consumedRef.first;
         if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-            Constant * const ZERO = b->getInt32(0);
-            ptr = b->CreateInBoundsGEP(consumedRef.second, ptr, { ZERO, ZERO } );
+            Constant * const ZERO = b.getInt32(0);
+            ptr = b.CreateInBoundsGEP(consumedRef.second, ptr, { ZERO, ZERO } );
         }
-        itemCount = b->CreateLoad(b->getSizeTy(), ptr, true);
+        itemCount = b.CreateLoad(b.getSizeTy(), ptr, true);
     }
     assert (itemCount);
     return itemCount;
@@ -172,17 +172,17 @@ Value * PipelineCompiler::readConsumedItemCount(BuilderRef b, const size_t strea
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeTransitoryConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced) {
+void PipelineCompiler::writeTransitoryConsumedItemCount(KernelBuilder & b, const unsigned streamSet, Value * const produced) {
     const auto id = getTruncatedStreamSetSourceId(streamSet);
     if (out_degree(id, mConsumerGraph) != 0) {
-        b->setScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id), produced);
+        b.setScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id), produced);
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeMinimumConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
+void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
         if (c.Flags & ConsumerEdge::UpdateConsumedCount) {
@@ -195,8 +195,8 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
             const auto input = getInput(mKernelId, port);
             const BufferPort & br = mBufferGraph[input];
             if (LLVM_UNLIKELY(br.LookBehind != 0)) {
-                ConstantInt * const amount = b->getSize(br.LookBehind);
-                processed = b->CreateSaturatingSub(processed, amount);
+                ConstantInt * const amount = b.getSize(br.LookBehind);
+                processed = b.CreateSaturatingSub(processed, amount);
             }
             const auto streamSet = source(e, mConsumerGraph);
             assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
@@ -207,13 +207,13 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
 
             const auto id = getTruncatedStreamSetSourceId(streamSet);
             if (out_degree(id, mConsumerGraph) > 0) {
-                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id)).first;
-                Value * const prior = b->CreateLoad(b->getSizeTy(), transConsumedPtr);
+                Value * const transConsumedPtr = getScalarFieldPtr(b, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id)).first;
+                Value * const prior = b.CreateLoad(b.getSizeTy(), transConsumedPtr);
                 const auto output = in_edge(streamSet, mBufferGraph);
                 const auto producer = source(output, mBufferGraph);
                 const auto prodPrefix = makeBufferName(producer, mBufferGraph[output].Port);
-                Value * const minConsumed = b->CreateUMin(prior, processed, prodPrefix + "_minConsumed");
-                b->CreateStore(minConsumed, transConsumedPtr);
+                Value * const minConsumed = b.CreateUMin(prior, processed, prodPrefix + "_minConsumed");
+                b.CreateStore(minConsumed, transConsumedPtr);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto consPrefix = makeBufferName(mKernelId, port);
                 debugPrint(b, consPrefix + "_consumed = %" PRIu64 " -> " + prodPrefix + "_consumed' = %" PRIu64, prior, minConsumed);
@@ -226,14 +226,14 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeFinalConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
+void PipelineCompiler::writeConsumedItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mConsumerGraph))) {
         const ConsumerEdge & c = mConsumerGraph[e];
         const auto streamSet = source(e, mConsumerGraph);
         // check to see if we've fully finished processing any stream
         if (c.Flags & ConsumerEdge::WriteConsumedCount) {
             const auto id = getTruncatedStreamSetSourceId(streamSet);
-            Value * const consumed = b->getScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+            Value * const consumed = b.getScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
             #ifdef PRINT_DEBUG_MESSAGES
             const auto output = in_edge(streamSet, mBufferGraph);
             const BufferPort & br = mBufferGraph[output];
@@ -249,7 +249,7 @@ void PipelineCompiler::writeConsumedItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet, Value * consumed, const unsigned slot) const {
+void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t streamSet, Value * consumed, const unsigned slot) const {
     const auto pe = in_edge(streamSet, mBufferGraph);
     const auto producer = source(pe, mBufferGraph);
     const BufferPort & outputPort = mBufferGraph[pe];
@@ -260,19 +260,19 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
 
 
-    auto consumedRef = b->getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+    auto consumedRef = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
     Value * ptr = consumedRef.first;
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-        ptr = b->CreateInBoundsGEP(consumedRef.second, ptr, { b->getInt32(0), b->getInt32(slot) });
+        ptr = b.CreateInBoundsGEP(consumedRef.second, ptr, { b.getInt32(0), b.getInt32(slot) });
     }
 
     // if we skipped over a partition, we don't want to update the
     // current consumed value; rather than load the old consumed
     // value at the point of production and incur a potential cache
     // miss penalty, just load it here.
-    Value * const prior = b->CreateLoad(b->getSizeTy(), ptr);
-    Value * const skipped = b->CreateIsNull(consumed);
-    consumed = b->CreateSelect(skipped, prior, consumed);
+    Value * const prior = b.CreateLoad(b.getSizeTy(), ptr);
+    Value * const skipped = b.CreateIsNull(consumed);
+    consumed = b.CreateSelect(skipped, prior, consumed);
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & output = outputPort.Binding;
@@ -280,34 +280,34 @@ void PipelineCompiler::setConsumedItemCount(BuilderRef b, const size_t streamSet
 
         assert (mCurrentKernelName);
 
-        b->CreateAssert(b->CreateICmpULE(prior, consumed),
+        b.CreateAssert(b.CreateICmpULE(prior, consumed),
                         "%s.%s: consumed item count is not monotonically nondecreasing "
                         "(prior %" PRIu64 " > current %" PRIu64 " updated by %s)",
-                        mKernelName[producer], b->GetString(output.getName()),
+                        mKernelName[producer], b.GetString(output.getName()),
                         prior, consumed, mCurrentKernelName);
 
     }
 
-    b->CreateStore(consumed, ptr);
+    b.CreateStore(consumed, ptr);
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateExternalConsumedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateExternalConsumedItemCounts(BuilderRef b) {
+void PipelineCompiler::updateExternalConsumedItemCounts(KernelBuilder & b) {
     for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
         const auto streamSet = target(input, mBufferGraph);
         Value * const consumed = readConsumedItemCount(b, streamSet);
         const BufferPort & inputPort = mBufferGraph[input];
-        b->CreateStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number));
+        b.CreateStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number));
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroAnySkippedTransitoryConsumedItemCountsUntil
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId) {
+void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBuilder & b, const unsigned targetKernelId) {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
@@ -315,8 +315,8 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRe
             const auto consumer = target(e, mConsumerGraph);
             if (consumer >= mKernelId) { // && consumer <= targetKernelId
                 const auto name = TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
-                Value * const transConsumedPtr = getScalarFieldPtr(b.get(), name).first;
-                b->CreateStore(b->getSize(0), transConsumedPtr);
+                Value * const transConsumedPtr = getScalarFieldPtr(b, name).first;
+                b.CreateStore(b.getSize(0), transConsumedPtr);
                 break;
             }
         }

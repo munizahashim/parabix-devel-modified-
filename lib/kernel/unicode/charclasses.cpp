@@ -42,12 +42,12 @@ std::string makeSignature(const StreamSet * const basis, const std::vector<re::C
     return tmp;
 }
 
-CharClassesKernel::CharClassesKernel(BuilderRef b, std::vector<CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::vector<CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
 : CharClassesKernel(b, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
 
 }
 
-CharClassesKernel::CharClassesKernel(BuilderRef b, std::string signature, std::vector<CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
 : PabloKernel(b, "cc_" + getStringHash(signature)
 , {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
@@ -80,7 +80,7 @@ void CharClassesKernel::generatePabloMethod() {
     }
 }
 
-ByteClassesKernel::ByteClassesKernel(BuilderRef b,
+ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
                                      std::vector<re::CC *> ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
@@ -88,7 +88,7 @@ ByteClassesKernel::ByteClassesKernel(BuilderRef b,
 
 }
 
-ByteClassesKernel::ByteClassesKernel(BuilderRef b,
+ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
                                      std::string signature,
                                      std::vector<re::CC *> && ccs,
                                      StreamSet * inputStream,

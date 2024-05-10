@@ -51,12 +51,12 @@ constexpr static auto TERMINATION_SIGNAL = "__termination_signal";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::generateKernel(BuilderRef b) {
+void KernelCompiler::generateKernel(KernelBuilder & b) {
     // NOTE: make sure to keep and reset the original compiler here. A kernel could generate new kernels and
     // reuse the same KernelBuilder to do so; this could result in unexpected behaviour if the this function
     // exits without restoring the original compiler state.
-    auto const oc = b->getCompiler();
-    b->setCompiler(this);
+    auto const oc = b.getCompiler();
+    b.setCompiler(this);
     constructStreamSetBuffers(b);
     #ifndef NDEBUG
     for (const auto & buffer : mStreamSetInputBuffers) {
@@ -91,16 +91,16 @@ void KernelCompiler::generateKernel(BuilderRef b) {
     // What is the cost of generating a pass manager instance for each compiled kernel vs.
     // the complexity of using a factory?
 
-    runInternalOptimizationPasses(b->getModule());
+    runInternalOptimizationPasses(b.getModule());
     mTarget->runOptimizationPasses(b);
-    b->setCompiler(oc);
+    b.setCompiler(oc);
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructStreamSetBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::constructStreamSetBuffers(BuilderRef b) {
+void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
     mStreamSetInputBuffers.clear();
     const auto numOfInputStreams = mInputStreamSets.size();
     mStreamSetInputBuffers.resize(numOfInputStreams);
@@ -120,7 +120,7 @@ void KernelCompiler::constructStreamSetBuffers(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addBaseInternalProperties
   ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::addBaseInternalProperties(BuilderRef b) {
+void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
      // If an output is a managed buffer, store its handle.
     const auto n = mOutputStreamSets.size();
     for (unsigned i = 0; i < n; ++i) {
@@ -136,7 +136,7 @@ void KernelCompiler::addBaseInternalProperties(BuilderRef b) {
             mTarget->addNonPersistentScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
         }
     }
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
 
         // In multi-threaded mode, given a small file, the pipeline could finish before all of the
@@ -166,10 +166,10 @@ inline void reset(Vec & vec, const size_t n) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
+inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
     mCurrentMethod = mTarget->getInitializeFunction(b);
-    mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-    b->SetInsertPoint(mEntryPoint);
+    mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+    b.SetInsertPoint(mEntryPoint);
     auto arg = mCurrentMethod->arg_begin();
     const auto arg_end = mCurrentMethod->arg_end();
     auto nextArg = [&]() {
@@ -182,12 +182,12 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-            b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+            b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
         }
     }
     initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     for (const auto & binding : mInputScalars) {
-        b->setScalarField(binding.getName(), nextArg());
+        b.setScalarField(binding.getName(), nextArg());
     }
     bindAdditionalInitializationArguments(b, arg, arg_end);
     assert (arg == arg_end);    
@@ -197,24 +197,24 @@ inline void KernelCompiler::callGenerateInitializeMethod(BuilderRef b) {
     initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     // any kernel can set termination on initialization
     Type * termSignalTy;
-    std::tie(mTerminationSignalPtr, termSignalTy) = getScalarFieldPtr(b.get(), TERMINATION_SIGNAL);
-    b->CreateStore(b->getSize(KernelBuilder::TerminationCode::None), mTerminationSignalPtr);
+    std::tie(mTerminationSignalPtr, termSignalTy) = getScalarFieldPtr(b, TERMINATION_SIGNAL);
+    b.CreateStore(b.getSize(KernelBuilder::TerminationCode::None), mTerminationSignalPtr);
     mTarget->generateInitializeMethod(b);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
-        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
     }
-    b->CreateRet(b->CreateLoad(termSignalTy, mTerminationSignalPtr));
+    b.CreateRet(b.CreateLoad(termSignalTy, mTerminationSignalPtr));
     clearInternalStateAfterCodeGen();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::callGenerateExpectedOutputSizeMethod(BuilderRef b) {
+void KernelCompiler::callGenerateExpectedOutputSizeMethod(KernelBuilder & b) {
     assert (mTarget->getNumOfStreamInputs() == 0);
     mCurrentMethod = mTarget->getExpectedOutputSizeFunction(b);
-    mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-    b->SetInsertPoint(mEntryPoint);
+    mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+    b.SetInsertPoint(mEntryPoint);
     auto arg = mCurrentMethod->arg_begin();
     #ifndef NDEBUG
     const auto arg_end = mCurrentMethod->arg_end();
@@ -228,35 +228,35 @@ void KernelCompiler::callGenerateExpectedOutputSizeMethod(BuilderRef b) {
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-            b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+            b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
         }
     }
     initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     Value * const retVal = mTarget->generateExpectedOutputSizeMethod(b);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
-        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
     }
     assert (retVal);
-    b->CreateRet(retVal);
+    b.CreateRet(retVal);
     clearInternalStateAfterCodeGen();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief bindFamilyInitializationArguments
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::bindAdditionalInitializationArguments(BuilderRef /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) {
+void KernelCompiler::bindAdditionalInitializationArguments(KernelBuilder & /* b */, ArgIterator & /* arg */, const ArgIterator & /* arg_end */) {
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b) {
+inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilder & b) {
     if (mTarget->hasThreadLocal()) {
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getInitializeThreadLocalFunction(b);
-        mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-        b->SetInsertPoint(mEntryPoint);
+        mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+        b.SetInsertPoint(mEntryPoint);
         auto arg = mCurrentMethod->arg_begin();
         auto nextArg = [&]() {
             assert (arg != mCurrentMethod->arg_end());
@@ -269,24 +269,24 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
         }
 
         StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
-        Value * const providedState = b->CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
-        BasicBlock * const allocThreadLocal = BasicBlock::Create(b->getContext(), "allocThreadLocalState", mCurrentMethod);
-        BasicBlock * const initThreadLocal = BasicBlock::Create(b->getContext(), "initThreadLocalState", mCurrentMethod);
-        b->CreateCondBr(b->CreateIsNull(providedState), allocThreadLocal, initThreadLocal);
+        Value * const providedState = b.CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
+        BasicBlock * const allocThreadLocal = BasicBlock::Create(b.getContext(), "allocThreadLocalState", mCurrentMethod);
+        BasicBlock * const initThreadLocal = BasicBlock::Create(b.getContext(), "initThreadLocalState", mCurrentMethod);
+        b.CreateCondBr(b.CreateIsNull(providedState), allocThreadLocal, initThreadLocal);
 
-        b->SetInsertPoint(allocThreadLocal);
-        Value * const allocedState = b->CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
+        b.SetInsertPoint(allocThreadLocal);
+        Value * const allocedState = b.CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
         assert (providedState->getType() == allocedState->getType());
-        b->CreateBr(initThreadLocal);
+        b.CreateBr(initThreadLocal);
 
-        b->SetInsertPoint(initThreadLocal);
-        PHINode * const threadLocal = b->CreatePHI(providedState->getType(), 2);
+        b.SetInsertPoint(initThreadLocal);
+        PHINode * const threadLocal = b.CreatePHI(providedState->getType(), 2);
         threadLocal->addIncoming(providedState, mEntryPoint);
         threadLocal->addIncoming(allocedState, allocThreadLocal);
         mThreadLocalHandle = threadLocal;
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateInitializeThreadLocalMethod(b);
-        b->CreateRet(threadLocal);
+        b.CreateRet(threadLocal);
         clearInternalStateAfterCodeGen();
     }
 }
@@ -294,12 +294,12 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(BuilderRef b
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callAllocateSharedInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(BuilderRef b) {
+inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets())) {
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateSharedInternalStreamSetsFunction(b);
-        mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-        b->SetInsertPoint(mEntryPoint);
+        mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+        b.SetInsertPoint(mEntryPoint);
         auto arg = mCurrentMethod->arg_begin();
         auto nextArg = [&]() {
             assert (arg != mCurrentMethod->arg_end());
@@ -314,7 +314,7 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(Builder
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
-        b->CreateRetVoid();
+        b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
     }
 }
@@ -322,12 +322,12 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(Builder
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callAllocateThreadLocalInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(BuilderRef b) {
+inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets() && mTarget->hasThreadLocal())) {
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateThreadLocalInternalStreamSetsFunction(b);
-        mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-        b->SetInsertPoint(mEntryPoint);
+        mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+        b.SetInsertPoint(mEntryPoint);
         auto arg = mCurrentMethod->arg_begin();
         auto nextArg = [&]() {
             assert (arg != mCurrentMethod->arg_end());
@@ -343,7 +343,7 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Bu
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
-        b->CreateRetVoid();
+        b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
     }
 }
@@ -371,7 +371,7 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Bu
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setDoSegmentProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *> args) {
+void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Value *> args) {
 
     // WARNING: any change to this must be reflected in Kernel::addDoSegmentDeclaration,
     // Kernel::getDoSegmentFields, KernelCompiler::getDoSegmentProperties,
@@ -392,13 +392,13 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
         if (LLVM_UNLIKELY(enableAsserts)) {
-            b->CreateAssert(getHandle(), "%s: shared handle cannot be null", b->GetString(getName()));
+            b.CreateAssert(getHandle(), "%s: shared handle cannot be null", b.GetString(getName()));
         }
     }
     if (LLVM_UNLIKELY(mTarget->hasThreadLocal())) {
         setThreadLocalHandle(nextArg());
         if (LLVM_UNLIKELY(enableAsserts)) {
-            b->CreateAssert(getThreadLocalHandle(), "%s: thread local handle cannot be null", b->GetString(getName()));
+            b.CreateAssert(getThreadLocalHandle(), "%s: thread local handle cannot be null", b.GetString(getName()));
         }
     }    
     const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
@@ -414,7 +414,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     mFixedRateFactor = nullptr;
 
     if (LLVM_UNLIKELY(isMainPipeline)) {
-        mIsFinal = b->getTrue();
+        mIsFinal = b.getTrue();
         mRawNumOfStrides = nullptr;
         mNumOfStrides = nullptr;
     } else {
@@ -426,8 +426,8 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
             mIsFinal = nullptr;
             mNumOfStrides = mRawNumOfStrides;
         } else {
-            mIsFinal = b->CreateIsNull(mRawNumOfStrides);
-            mNumOfStrides = b->CreateSelect(mIsFinal, b->getSize(1), mRawNumOfStrides);
+            mIsFinal = b.CreateIsNull(mRawNumOfStrides);
+            mNumOfStrides = b.CreateSelect(mIsFinal, b.getSize(1), mRawNumOfStrides);
         }
         if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
@@ -448,29 +448,29 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         raw_svector_ostream out(tmp);
         out << "StreamSet " << getName() << ":" << binding.getName();
 
-        DataLayout DL(b->getModule());
-        Type * const intPtrTy = DL.getIntPtrType(b->getInt8PtrTy());
+        DataLayout DL(b.getModule());
+        Type * const intPtrTy = DL.getIntPtrType(b.getInt8PtrTy());
 
-        ConstantInt * const ZERO = b->getSize(0);
-        ConstantInt * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
+        ConstantInt * const ZERO = b.getSize(0);
+        ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
 
-        Value * const fromIndex = b->CreateUDiv(startItemCount, BLOCK_WIDTH);
+        Value * const fromIndex = b.CreateUDiv(startItemCount, BLOCK_WIDTH);
         Value * const baseAddress = buffer->getBaseAddress(b);
         Value * const startPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, fromIndex);
-        Value * const start = b->CreatePtrToInt(startPtr, intPtrTy);
+        Value * const start = b.CreatePtrToInt(startPtr, intPtrTy);
 
-        Value * const endPos = b->CreateAdd(startItemCount, buffer->getCapacity(b));
-        Value * const toIndex = b->CreateCeilUDiv(endPos, BLOCK_WIDTH);
+        Value * const endPos = b.CreateAdd(startItemCount, buffer->getCapacity(b));
+        Value * const toIndex = b.CreateCeilUDiv(endPos, BLOCK_WIDTH);
         Value * const endPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, toIndex);
-        Value * const end = b->CreatePtrToInt(endPtr, intPtrTy);
+        Value * const end = b.CreatePtrToInt(endPtr, intPtrTy);
 
-        Value * const length = b->CreateSub(end, start);
+        Value * const length = b.CreateSub(end, start);
 
-        b->CreateAssert(b->CreateICmpULE(start, end),
+        b.CreateAssert(b.CreateICmpULE(start, end),
                         "%s: illegal kernel I/O address range [0x%" PRIx64 ", 0x%" PRIx64 ")",
-                        b->GetString(out.str()), start, end);
+                        b.GetString(out.str()), start, end);
 
-        b->CheckAddress(startPtr, length, out.str());
+        b.CheckAddress(startPtr, length, out.str());
 
 
     };
@@ -478,7 +478,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
 
     const auto numOfInputs = getNumOfStreamInputs();
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     for (unsigned i = 0; i < numOfInputs; i++) {
 
         /// ----------------------------------------------------
@@ -487,14 +487,14 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         StreamSetBuffer * const buffer = mStreamSetInputBuffers[i].get();
 
         const Binding & input = mInputStreamSets[i];
-        Value * const virtualBaseAddress = b->CreatePointerCast(nextArg(), buffer->getPointerType());
-        Value * const localHandle = b->CreateAllocaAtEntryPoint(buffer->getHandleType(b));
+        Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
+        Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
         buffer->setHandle(localHandle);
         buffer->setBaseAddress(b, virtualBaseAddress);
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
             mInputIsClosed[i] = nextArg();
-            assert (mInputIsClosed[i]->getType() == b->getInt1Ty());
+            assert (mInputIsClosed[i]->getType() == b.getInt1Ty());
         } else {
             mInputIsClosed[i] = mIsFinal;
         }
@@ -507,7 +507,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         Value * processed = nullptr;
         if (isMainPipeline || isAddressable(input)) {
             mProcessedInputItemPtr[i] = nextArg();
-            processed = b->CreateLoad(sizeTy, mProcessedInputItemPtr[i]);
+            processed = b.CreateLoad(sizeTy, mProcessedInputItemPtr[i]);
         } else {
             if (LLVM_LIKELY(isCountable(input))) {
                 processed = nextArg();
@@ -515,14 +515,14 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
                 const auto port = getStreamPort(rate.getReference());
                 assert (port.Type == PortType::Input && port.Number < i);
                 assert (mProcessedInputItemPtr[port.Number]);
-                Value * const ref = b->CreateLoad(sizeTy, mProcessedInputItemPtr[port.Number]);
-                processed = b->CreateMulRational(ref, rate.getRate());
+                Value * const ref = b.CreateLoad(sizeTy, mProcessedInputItemPtr[port.Number]);
+                processed = b.CreateMulRational(ref, rate.getRate());
             }
             // NOTE: we create a redundant alloca to store the input param so that
             // Mem2Reg can convert it into a PHINode if the item count is updated in
             // a loop; otherwise, it will be discarded in favor of the param itself.
-            AllocaInst * const processedItems = b->CreateAllocaAtEntryPoint(sizeTy);
-            b->CreateStore(processed, processedItems);
+            AllocaInst * const processedItems = b.CreateAllocaAtEntryPoint(sizeTy);
+            b.CreateStore(processed, processedItems);
             mProcessedInputItemPtr[i] = processedItems;
         }
         /// ----------------------------------------------------
@@ -532,16 +532,16 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         if (LLVM_UNLIKELY(isMainPipeline || requiresItemCount(input))) {
             accessible = nextArg();
         } else {
-            accessible = b->CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
+            accessible = b.CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
         }
         assert (accessible);
         assert (accessible->getType() == sizeTy);
         mAccessibleInputItems[i] = accessible;
 
-        Value * avail = b->CreateAdd(processed, accessible);
+        Value * avail = b.CreateAdd(processed, accessible);
         mAvailableInputItems[i] = avail;
         if (input.hasLookahead()) {
-            avail = b->CreateAdd(avail, b->getSize(input.getLookahead()));
+            avail = b.CreateAdd(avail, b.getSize(input.getLookahead()));
         }
         buffer->setCapacity(b, avail);
         #ifdef CHECK_IO_ADDRESS_RANGE
@@ -572,16 +572,16 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         if (LLVM_UNLIKELY(isShared)) {
             Value * const handle = nextArg();
             assert (isa<DynamicBuffer>(buffer));
-            buffer->setHandle(b->CreatePointerCast(handle, buffer->getHandlePointerType(b)));
+            buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
         } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             mUpdatableOutputBaseVirtualAddressPtr[i] = nextArg();
-            Value * handle = getScalarFieldPtr(b.get(), output.getName() + BUFFER_HANDLE_SUFFIX).first;
+            Value * handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX).first;
             buffer->setHandle(handle);
         } else {
-            Value * const virtualBaseAddress = b->CreatePointerCast(nextArg(), buffer->getPointerType());
-            Value * const localHandle = b->CreateAllocaAtEntryPoint(buffer->getHandleType(b));
+            Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
+            Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
             assert (isa<ExternalBuffer>(buffer));
@@ -594,7 +594,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
         Value * produced = nullptr;
         if (LLVM_LIKELY(canTerminate || isMainPipeline || isAddressable(output))) {
             mProducedOutputItemPtr[i] = nextArg();
-            produced = b->CreateLoad(sizeTy, mProducedOutputItemPtr[i]);
+            produced = b.CreateLoad(sizeTy, mProducedOutputItemPtr[i]);
         } else {
             if (LLVM_LIKELY(isCountable(output))) {
                 produced = nextArg();
@@ -605,11 +605,11 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
                 const auto port = getStreamPort(rate.getReference());
                 assert (port.Type == PortType::Input || (port.Type == PortType::Output && port.Number < i));
                 const auto & items = (port.Type == PortType::Input) ? mProcessedInputItemPtr : mProducedOutputItemPtr;
-                Value * const ref = b->CreateLoad(sizeTy, items[port.Number]);
-                produced = b->CreateMulRational(ref, rate.getRate());
+                Value * const ref = b.CreateLoad(sizeTy, items[port.Number]);
+                produced = b.CreateMulRational(ref, rate.getRate());
             }
-            AllocaInst * const producedItems = b->CreateAllocaAtEntryPoint(sizeTy);
-            b->CreateStore(produced, producedItems);
+            AllocaInst * const producedItems = b.CreateAllocaAtEntryPoint(sizeTy);
+            b.CreateStore(produced, producedItems);
             mProducedOutputItemPtr[i] = producedItems;
         }
         assert (produced);
@@ -631,12 +631,12 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
                 writable = nextArg();
                 assert (writable && writable->getType() == sizeTy);
             } else if (mFixedRateFactor) {
-                writable = b->CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
+                writable = b.CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
                 assert (writable && writable->getType() == sizeTy);
             }
             Value * capacity = nullptr;
             if (writable) {
-                capacity = b->CreateAdd(produced, writable);
+                capacity = b.CreateAdd(produced, writable);
                 buffer->setCapacity(b, capacity);
                 #ifdef CHECK_IO_ADDRESS_RANGE
                 if (LLVM_UNLIKELY(enableAsserts)) {
@@ -644,7 +644,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
                 }
                 #endif
             } else {
-                capacity = ConstantExpr::getNeg(b->getSize(1));
+                capacity = ConstantExpr::getNeg(b.getSize(1));
                 buffer->setCapacity(b, capacity);
             }
         }
@@ -656,11 +656,11 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
     // initialize the termination signal if this kernel can set it
     mTerminationSignalPtr = nullptr;
     if (canTerminate) {
-        mTerminationSignalPtr = getScalarFieldPtr(b.get(), TERMINATION_SIGNAL).first;
+        mTerminationSignalPtr = getScalarFieldPtr(b, TERMINATION_SIGNAL).first;
         if (LLVM_UNLIKELY(enableAsserts)) {
             Value * const unterminated =
-                b->CreateICmpEQ(b->CreateLoad(sizeTy, mTerminationSignalPtr), b->getSize(KernelBuilder::TerminationCode::None));
-            b->CreateAssert(unterminated, getName() + ".doSegment was called after termination?");
+                b.CreateICmpEQ(b.CreateLoad(sizeTy, mTerminationSignalPtr), b.getSize(KernelBuilder::TerminationCode::None));
+            b.CreateAssert(unterminated, getName() + ".doSegment was called after termination?");
         }
     }
 }
@@ -671,7 +671,7 @@ void KernelCompiler::setDoSegmentProperties(BuilderRef b, const ArrayRef<Value *
  * Reverse of the setDoSegmentProperties operation; used by the PipelineKernel when constructing internal threads
  * to simplify passing of the state data.
  ** ------------------------------------------------------------------------------------------------------------- */
-std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const {
+std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) const {
 
     // WARNING: any change to this must be reflected in addDoSegmentDeclaration, getDoSegmentFields,
     // setDoSegmentProperties, and PipelineCompiler::writeKernelCall
@@ -697,15 +697,15 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         }
     }
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
-    IntegerType * const sizeTy = b->getSizeTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     const auto numOfInputs = getNumOfStreamInputs();
     for (unsigned i = 0; i < numOfInputs; i++) {
         /// ----------------------------------------------------
         /// logical buffer base address
         /// ----------------------------------------------------
         const auto & buffer = mStreamSetInputBuffers[i];
-        props.push_back(b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
+        props.push_back(b.CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
         /// ----------------------------------------------------
         /// is closed
         /// ----------------------------------------------------
@@ -719,7 +719,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         if (isMainPipeline || isAddressable(input)) {
             props.push_back(mProcessedInputItemPtr[i]);
         } else if (LLVM_LIKELY(isCountable(input))) {
-            props.push_back(b->CreateLoad(sizeTy, mProcessedInputItemPtr[i]));
+            props.push_back(b.CreateLoad(sizeTy, mProcessedInputItemPtr[i]));
         }
         /// ----------------------------------------------------
         /// accessible item count
@@ -747,14 +747,14 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
 
         Value * handle = nullptr;
         if (LLVM_UNLIKELY(isShared)) {            
-            handle = b->CreatePointerCast(buffer->getHandle(), voidPtrTy);
+            handle = b.CreatePointerCast(buffer->getHandle(), voidPtrTy);
         } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
-            handle = b->CreatePointerCast(mUpdatableOutputBaseVirtualAddressPtr[i], voidPtrPtrTy);
+            handle = b.CreatePointerCast(mUpdatableOutputBaseVirtualAddressPtr[i], voidPtrPtrTy);
         } else {
-            handle = b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy);
+            handle = b.CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy);
         }
         props.push_back(handle);
 
@@ -764,7 +764,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
         if (LLVM_LIKELY(canTerminate || isMainPipeline ||isAddressable(output))) {
             props.push_back(mProducedOutputItemPtr[i]);
         } else if (LLVM_LIKELY(isCountable(output))) {
-            props.push_back(b->CreateLoad(sizeTy, mProducedOutputItemPtr[i]));
+            props.push_back(b.CreateLoad(sizeTy, mProducedOutputItemPtr[i]));
         }
         /// ----------------------------------------------------
         /// writable / consumed item count
@@ -782,14 +782,14 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(BuilderRef b) const 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateDoSegmentMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
+inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
 
     assert (mInputStreamSets.size() == mStreamSetInputBuffers.size());
     assert (mOutputStreamSets.size() == mStreamSetOutputBuffers.size());
 
     mCurrentMethod = mTarget->getDoSegmentFunction(b);
-    mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-    b->SetInsertPoint(mEntryPoint);
+    mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+    b.SetInsertPoint(mEntryPoint);
 
     BEGIN_SCOPED_REGION
     Vec<Value *, 64> args;
@@ -801,18 +801,18 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
     END_SCOPED_REGION
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
     }
 
     mTarget->generateKernelMethod(b);
 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
     }
 
     const auto numOfOutputs = getNumOfStreamOutputs();
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     for (unsigned i = 0; i < numOfOutputs; i++) {
         // Write the virtual base address out to inform the pipeline of any changes
@@ -825,7 +825,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
                 const Binding & output = mOutputStreamSets[i];
                 out << getName() << ":%s is returning a virtual base address "
                                     "computed from a null base address.";
-                b->CreateAssert(baseAddress, out.str(), b->GetString(output.getName()));
+                b.CreateAssert(baseAddress, out.str(), b.GetString(output.getName()));
             }
             Value * produced = mInitiallyProducedOutputItems[i];
             assert (isFromCurrentFunction(b, produced, false));
@@ -833,25 +833,25 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
             // If not, re-loading it here may reduce register pressure / compilation time.
             if (mProducedOutputItemPtr[i]) {
                 assert (isFromCurrentFunction(b, mProducedOutputItemPtr[i], false));
-                produced = b->CreateLoad(sizeTy, mProducedOutputItemPtr[i]);
+                produced = b.CreateLoad(sizeTy, mProducedOutputItemPtr[i]);
             }
             assert (isFromCurrentFunction(b, produced, true));
-            Value * vba = buffer->getVirtualBasePtr(b.get(), baseAddress, produced);
-            vba = b->CreatePointerCast(vba, b->getVoidPtrTy());
+            Value * vba = buffer->getVirtualBasePtr(b, baseAddress, produced);
+            vba = b.CreatePointerCast(vba, b.getVoidPtrTy());
 
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));
 
-            b->CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
+            b.CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
         }
     }
 
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {
         assert (isFromCurrentFunction(b, mTerminationSignalPtr, true));
-        b->CreateRet(b->CreateLoad(sizeTy, mTerminationSignalPtr));
+        b.CreateRet(b.CreateLoad(sizeTy, mTerminationSignalPtr));
         mTerminationSignalPtr = nullptr;
     } else {
-        b->CreateRetVoid();
+        b.CreateRetVoid();
     }
     clearInternalStateAfterCodeGen();
 }
@@ -859,11 +859,11 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) {
+inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder & b) {
     if (mTarget->hasThreadLocal()) {
         mCurrentMethod = mTarget->getFinalizeThreadLocalFunction(b);
-        mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-        b->SetInsertPoint(mEntryPoint);
+        mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+        b.SetInsertPoint(mEntryPoint);
         auto arg = mCurrentMethod->arg_begin();
         auto nextArg = [&]() {
             assert (arg != mCurrentMethod->arg_end());
@@ -878,7 +878,7 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) 
         mThreadLocalHandle = nextArg();
         initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars);
         mTarget->generateFinalizeThreadLocalMethod(b);
-        b->CreateRetVoid();
+        b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
     }
 }
@@ -886,10 +886,10 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(BuilderRef b) 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callGenerateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
+inline void KernelCompiler::callGenerateFinalizeMethod(KernelBuilder & b) {
     mCurrentMethod = mTarget->getFinalizeFunction(b);
-    mEntryPoint = BasicBlock::Create(b->getContext(), "entry", mCurrentMethod);
-    b->SetInsertPoint(mEntryPoint);
+    mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
+    b.SetInsertPoint(mEntryPoint);
     auto args = mCurrentMethod->arg_begin();
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(&*(args++));
@@ -900,19 +900,19 @@ inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
     assert (args == mCurrentMethod->arg_end());
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-        b->CreateMProtect(mTarget->getSharedStateType(), mSharedHandle,CBuilder::Protect::WRITE);
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle,CBuilder::Protect::WRITE);
     }
     initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     mTarget->generateFinalizeMethod(b); // may be overridden by the Kernel subtype
     const auto outputs = getFinalOutputScalars(b);
     if (outputs.empty()) {
-        b->CreateRetVoid();
+        b.CreateRetVoid();
     } else {
         const auto n = outputs.size();
         if (n == 1) {
-            b->CreateRet(outputs[0]);
+            b.CreateRet(outputs[0]);
         } else {
-            b->CreateAggregateRet(outputs.data(), n);
+            b.CreateAggregateRet(outputs.data(), n);
         }
     }
     clearInternalStateAfterCodeGen();
@@ -921,12 +921,12 @@ inline void KernelCompiler::callGenerateFinalizeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getFinalOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
+std::vector<Value *> KernelCompiler::getFinalOutputScalars(KernelBuilder & b) {
     const auto n = mOutputScalars.size();
     std::vector<Value *> outputs(n);
     for (unsigned i = 0; i < n; ++i) {
-        auto ref = getScalarFieldPtr(b.get(), mOutputScalars[i].getName());
-        outputs[i] = b->CreateLoad(ref.second, ref.first);
+        auto ref = getScalarFieldPtr(b, mOutputScalars[i].getName());
+        outputs[i] = b.CreateLoad(ref.second, ref.first);
     }
     return outputs;
 }
@@ -934,10 +934,10 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions options) {
+void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOptions options) {
 
     FixedArray<Value *, 3> indices;
-    indices[0] = b->getInt32(0);
+    indices[0] = b.getInt32(0);
 
     StructType * const sharedTy = mTarget->getSharedStateType();
 
@@ -1021,11 +1021,11 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
     BasicBlock * combineToMainThreadLocal = nullptr;
 
     if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
-        combineToMainThreadLocal = b->CreateBasicBlock("combineToMainThreadLocal");
+        combineToMainThreadLocal = b.CreateBasicBlock("combineToMainThreadLocal");
     }
 
     auto enumerate = [&](const Bindings & bindings, const unsigned groupId) {
-        indices[1] = b->getInt32(groupId * 2);
+        indices[1] = b.getInt32(groupId * 2);
         auto & k = sharedIndex[groupId];
         for (const auto & binding : bindings) {
             assert (sharedTy);
@@ -1033,8 +1033,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
             assert (k < sharedTy->getStructElementType(groupId * 2)->getStructNumElements());
             assert (sharedTy->getStructElementType(groupId * 2)->getStructElementType(k) == binding.getType());
             Type * actualType = sharedTy->getStructElementType(groupId * 2)->getStructElementType(k);
-            indices[2] = b->getInt32(k++);
-            Value * const scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
+            indices[2] = b.getInt32(k++);
+            Value * const scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType(), actualType);
         }
     };
@@ -1057,14 +1057,14 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 assert (mSharedHandle);
                 BEGIN_SCOPED_REGION
                 const auto j = getGroupIndex(sharedGroups) + 1;
-                indices[1] = b->getInt32(j * 2);
+                indices[1] = b.getInt32(j * 2);
                 auto & k = sharedIndex[j];
                 assert ((j * 2) < sharedTy->getStructNumElements());
                 assert (k < sharedTy->getStructElementType(j * 2)->getStructNumElements());
                 scalarType = sharedTy->getStructElementType(j * 2)->getStructElementType(k);
                 assert (scalarType == binding.getValueType());
-                indices[2] = b->getInt32(k++);
-                scalar = b->CreateGEP(sharedTy, mSharedHandle, indices);
+                indices[2] = b.getInt32(k++);
+                scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
                 END_SCOPED_REGION
                 break;
             case ScalarType::ThreadLocal:
@@ -1072,25 +1072,25 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 assert (mThreadLocalHandle);
                 BEGIN_SCOPED_REGION
                 const auto j = getGroupIndex(threadLocalGroups);
-                indices[1] = b->getInt32(j * 2);
+                indices[1] = b.getInt32(j * 2);
                 auto & k = threadLocalIndex[j];
                 assert ((j * 2) < threadLocalTy->getStructNumElements());
                 assert (k < threadLocalTy->getStructElementType(j * 2)->getStructNumElements());
                 scalarType = threadLocalTy->getStructElementType(j * 2)->getStructElementType(k);
                 assert (scalarType == binding.getValueType());
-                indices[2] = b->getInt32(k++);
-                scalar = b->CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                indices[2] = b.getInt32(k++);
+                scalar = b.CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
 
                 if (LLVM_UNLIKELY(options == InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars)) {
 
-                    Value * const mainScalar = b->CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
+                    Value * const mainScalar = b.CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
 
                     using AccumRule = Kernel::ThreadLocalScalarAccumulationRule;
 
                     if (binding.getAccumulationRule() != AccumRule::DoNothing) {
 
-                        const auto ip = b->saveIP();
-                        b->SetInsertPoint(combineExit);
+                        const auto ip = b.saveIP();
+                        b.SetInsertPoint(combineExit);
 
                         if (isa<ArrayType>(scalarType)) {
                             ArrayType * const arrayTy = cast<ArrayType>(scalarType);
@@ -1109,8 +1109,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
 
                             const auto size = depth;
 
-                            ConstantInt * const i32_ZERO = b->getInt32(0);
-                            ConstantInt * const i32_ONE = b->getInt32(1);
+                            ConstantInt * const i32_ZERO = b.getInt32(0);
+                            ConstantInt * const i32_ONE = b.getInt32(1);
 
                             SmallVector<Value *, 4> indices(size);
                             indices[0] = i32_ZERO;
@@ -1120,30 +1120,30 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                                 assert (idx <= size);
                                 assert (indices.size() == size);
 
-                                BasicBlock * const entry = b->GetInsertBlock();
+                                BasicBlock * const entry = b.GetInsertBlock();
 
                                 if (idx == size) {
-                                    Value * const scalarVal = b->CreateLoad(elemTy, b->CreateGEP(scalarType, scalar, indices));
+                                    Value * const scalarVal = b.CreateLoad(elemTy, b.CreateGEP(scalarType, scalar, indices));
                                     assert (scalarVal->getType()->isIntOrIntVectorTy());
-                                    Value * const mainScalarPtr = b->CreateGEP(scalarType, mainScalar, indices);
-                                    Value * mainScalarVal = b->CreateLoad(elemTy, mainScalarPtr);
+                                    Value * const mainScalarPtr = b.CreateGEP(scalarType, mainScalar, indices);
+                                    Value * mainScalarVal = b.CreateLoad(elemTy, mainScalarPtr);
 
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {
                                         case AccumRule::Sum:
-                                            mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal, "sum");
+                                            mainScalarVal = b.CreateAdd(scalarVal, mainScalarVal, "sum");
                                             break;
                                         default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
                                     }
-                                    b->CreateStore(mainScalarVal, mainScalarPtr);
+                                    b.CreateStore(mainScalarVal, mainScalarPtr);
                                     return entry;
                                 } else {
 
-                                    BasicBlock * const loop = b->CreateBasicBlock();
-                                    b->CreateBr(loop);
+                                    BasicBlock * const loop = b.CreateBasicBlock();
+                                    b.CreateBr(loop);
 
-                                    b->SetInsertPoint(loop);
-                                    PHINode * const idxPhi = b->CreatePHI(b->getInt32Ty(), 2);
+                                    b.SetInsertPoint(loop);
+                                    PHINode * const idxPhi = b.CreatePHI(b.getInt32Ty(), 2);
                                     idxPhi->addIncoming(i32_ZERO, entry);
                                     assert (idx < indices.size());
                                     indices[idx] = idxPhi;
@@ -1151,8 +1151,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                                     BasicBlock * const loopExit =
                                         recursiveAccum(idx + 1U, cast<ArrayType>(elemTy)->getArrayElementType());
 
-                                    BasicBlock * const exit = b->CreateBasicBlock();
-                                    Value * const nextIdx = b->CreateAdd(idxPhi, i32_ONE);
+                                    BasicBlock * const exit = b.CreateBasicBlock();
+                                    Value * const nextIdx = b.CreateAdd(idxPhi, i32_ONE);
                                     idxPhi->addIncoming(nextIdx, loopExit);
 
                                     const auto m = cast<ArrayType>(elemTy)->getNumElements();
@@ -1160,26 +1160,26 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                                         report_fatal_error(Twine(getName()) + ": cannot automatically accumulate a 0-element scalar");
                                     }
 
-                                    b->CreateCondBr(b->CreateICmpNE(nextIdx, b->getInt32(m)), loop, exit);
+                                    b.CreateCondBr(b.CreateICmpNE(nextIdx, b.getInt32(m)), loop, exit);
 
-                                    b->SetInsertPoint(exit);
+                                    b.SetInsertPoint(exit);
                                     return exit;
                                 }
                             };
 
                             combineExit = recursiveAccum(1, arrayTy);
                         } else {
-                            Value * const scalarVal = b->CreateLoad(scalarType, scalar);
-                            Value * mainScalarVal = b->CreateLoad(scalarType, mainScalar);
+                            Value * const scalarVal = b.CreateLoad(scalarType, scalar);
+                            Value * mainScalarVal = b.CreateLoad(scalarType, mainScalar);
                             switch (binding.getAccumulationRule()) {
                                 case Kernel::ThreadLocalScalarAccumulationRule::Sum:
-                                    mainScalarVal = b->CreateAdd(scalarVal, mainScalarVal);
+                                    mainScalarVal = b.CreateAdd(scalarVal, mainScalarVal);
                                     break;
                                 default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
                             }
-                            b->CreateStore(mainScalarVal, mainScalar);
+                            b.CreateStore(mainScalarVal, mainScalar);
                         }
-                        b->restoreIP(ip);
+                        b.restoreIP(ip);
                     }
 
 
@@ -1189,8 +1189,8 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
                 break;
             case ScalarType::NonPersistent:
                 scalarType = binding.getValueType(); assert (scalarType);
-                scalar = b->CreateAllocaAtEntryPoint(scalarType);
-                b->CreateStore(Constant::getNullValue(scalarType), scalar);
+                scalar = b.CreateAllocaAtEntryPoint(scalarType);
+                b.CreateStore(Constant::getNullValue(scalarType), scalar);
                 break;
             default: llvm_unreachable("I/O scalars cannot be internal");
         }
@@ -1209,12 +1209,12 @@ void KernelCompiler::initializeScalarMap(BuilderRef b, const InitializeOptions o
     }
 
     if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
-        BasicBlock * const exit = b->CreateBasicBlock("afterThreadLocalAccumulation");
-        Value * const cond = b->CreateICmpEQ(mThreadLocalHandle, mCommonThreadLocalHandle);
-        b->CreateCondBr(cond, exit, combineToMainThreadLocal);
-        b->SetInsertPoint(combineExit);
-        b->CreateBr(exit);
-        b->SetInsertPoint(exit);
+        BasicBlock * const exit = b.CreateBasicBlock("afterThreadLocalAccumulation");
+        Value * const cond = b.CreateICmpEQ(mThreadLocalHandle, mCommonThreadLocalHandle);
+        b.CreateCondBr(cond, exit, combineToMainThreadLocal);
+        b.SetInsertPoint(combineExit);
+        b.CreateBr(exit);
+        b.SetInsertPoint(exit);
     }
 }
 
@@ -1248,7 +1248,7 @@ void KernelCompiler::initializeIOBindingMap() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeOwnedBufferHandles
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::initializeOwnedBufferHandles(BuilderRef b, const InitializeOptions /* options */) {
+void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions /* options */) {
     const auto numOfOutputs = getNumOfStreamOutputs();
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const Binding & output = mOutputStreamSets[i];
@@ -1256,7 +1256,7 @@ void KernelCompiler::initializeOwnedBufferHandles(BuilderRef b, const Initialize
         bool isManaged = false;
         bool isReturned = false;
         if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
-            auto handle = getScalarFieldPtr(b.get(), output.getName() + BUFFER_HANDLE_SUFFIX);
+            auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
         }
@@ -1358,7 +1358,7 @@ StreamSetPort KernelCompiler::getStreamPort(const StringRef name) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
-KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder * const b, const StringRef name) const {
+KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, const StringRef name) const {
     assert (this);
     if (LLVM_UNLIKELY(mScalarFieldMap.empty())) {
         SmallVector<char, 256> tmp;
@@ -1398,7 +1398,7 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder * cons
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadLocalScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
-KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(BuilderRef b, Value * handle, const StringRef name) const {
+KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBuilder & b, Value * handle, const StringRef name) const {
 
     const auto count = mInternalScalars.size();
 
@@ -1437,11 +1437,11 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(BuilderRe
     const auto groupPos = std::distance(threadLocalGroups.begin(), f);
 
     FixedArray<Value *, 3> indices;
-    indices[0] = b->getInt32(0);
-    indices[1] = b->getInt32(groupPos * 2);
-    indices[2] = b->getInt32(scalarIndex);
+    indices[0] = b.getInt32(0);
+    indices[1] = b.getInt32(groupPos * 2);
+    indices[2] = b.getInt32(scalarIndex);
 
-    Value * ptr = b->CreateGEP(threadLocalTy, handle, indices); assert (ptr);
+    Value * ptr = b.CreateGEP(threadLocalTy, handle, indices); assert (ptr);
     Type * ty = threadLocalTy->getStructElementType(groupPos * 2)->getStructElementType(scalarIndex);
     return ScalarRef{ptr, ty};
 
@@ -1579,7 +1579,7 @@ void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::registerIllustrator(BuilderRef b,
+void KernelCompiler::registerIllustrator(KernelBuilder & b,
                                          llvm::Constant * kernelName, llvm::Constant * streamName,
                                          const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
                                          IllustratorTypeId illustratorTypeId, const char replacement0, const char replacement1,
@@ -1615,20 +1615,20 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
     }
     assert (illustratorObject && "no illustrator object found?");
 
-    auto ip = b->saveIP();
+    auto ip = b.saveIP();
 
-    b->SetInsertPoint(ret->getPrevNode());
+    b.SetInsertPoint(ret->getPrevNode());
 
     registerIllustrator(b, illustratorObject, kernelName, streamName, handle, rows, cols, itemWidth, ordering, illustratorTypeId, replacement0, replacement1, loopIds);
 
-    b->restoreIP(ip);
+    b.restoreIP(ip);
 }
 
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::registerIllustrator(BuilderRef b,
+void KernelCompiler::registerIllustrator(KernelBuilder & b,
                                          Value * illustratorObject,
                                          Constant * kernelName, Constant * streamName, Value * handle,
                                          const size_t rows, const size_t cols, const size_t itemWidth, const MemoryOrdering ordering,
@@ -1639,21 +1639,21 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
     assert (isFromCurrentFunction(b, illustratorObject, false));
     assert (isFromCurrentFunction(b, handle, false));
 
-    Function * regFunc = b->getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
+    Function * regFunc = b.getModule()->getFunction(KERNEL_REGISTER_ILLUSTRATOR_CALLBACK); assert (regFunc);
     FixedArray<Value *, 12> args;
-    args[0] = b->CreatePointerCast(illustratorObject, b->getVoidPtrTy());
+    args[0] = b.CreatePointerCast(illustratorObject, b.getVoidPtrTy());
     args[1] = kernelName;
     args[2] = streamName;
-    args[3] = b->CreatePointerCast(handle, b->getVoidPtrTy());
-    args[4] = b->getSize(rows);
-    args[5] = b->getSize(cols);
-    args[6] = b->getSize(itemWidth);
-    args[7] = b->getInt8((unsigned)ordering);
-    args[8] = b->getInt8((unsigned)illustratorTypeId);
-    args[9] = b->getInt8(replacement0);
-    args[10] = b->getInt8(replacement1);
+    args[3] = b.CreatePointerCast(handle, b.getVoidPtrTy());
+    args[4] = b.getSize(rows);
+    args[5] = b.getSize(cols);
+    args[6] = b.getSize(itemWidth);
+    args[7] = b.getInt8((unsigned)ordering);
+    args[8] = b.getInt8((unsigned)illustratorTypeId);
+    args[9] = b.getInt8(replacement0);
+    args[10] = b.getInt8(replacement1);
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
     PointerType * const sizePtrTy = sizeTy->getPointerTo();
     Constant * loopIdConstant = nullptr;
     if (loopIds.empty()) {
@@ -1663,39 +1663,39 @@ void KernelCompiler::registerIllustrator(BuilderRef b,
         SmallVector<Constant *, 8> ids(n + 1);
         for (size_t i = 0; i < n; ++i) {
             assert (loopIds[i] != 0);
-            ids[i] = b->getSize(loopIds[i]);
+            ids[i] = b.getSize(loopIds[i]);
         }
-        ids[n] = b->getSize(0);
+        ids[n] = b.getSize(0);
         ArrayType * arTy = ArrayType::get(sizeTy, n + 1);
         Constant * ar = ConstantArray::get(arTy, ids);
-        GlobalVariable * const gv = new GlobalVariable(*b->getModule(), arTy, true, GlobalValue::ExternalLinkage, ar);
+        GlobalVariable * const gv = new GlobalVariable(*b.getModule(), arTy, true, GlobalValue::ExternalLinkage, ar);
         loopIdConstant = ConstantExpr::getPointerCast(gv, sizePtrTy);
     }
     args[11] = loopIdConstant;
-    b->CreateCall(regFunc->getFunctionType(), regFunc, args);
+    b.CreateCall(regFunc->getFunctionType(), regFunc, args);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief captureStreamData
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::captureStreamData(BuilderRef b, Constant * kernelName, Constant * streamName, Value * handle,
+void KernelCompiler::captureStreamData(KernelBuilder & b, Constant * kernelName, Constant * streamName, Value * handle,
                                        Value * strideNum,
                                        Type * type, const MemoryOrdering ordering,
                                        Value * streamData, Value * from, Value * to)  const {
 
     FixedArray<Value *, 9> args;
-    args[0] = b->CreatePointerCast(b->getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b->getVoidPtrTy());
+    args[0] = b.CreatePointerCast(b.getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b.getVoidPtrTy());
     args[1] = kernelName;
     args[2] = streamName;
-    args[3] = b->CreatePointerCast(handle, b->getVoidPtrTy());
+    args[3] = b.CreatePointerCast(handle, b.getVoidPtrTy());
     args[4] = strideNum;
-    args[5] = b->CreatePointerCast(streamData, b->getVoidPtrTy());
+    args[5] = b.CreatePointerCast(streamData, b.getVoidPtrTy());
     args[6] = from;
     args[7] = to;
-    args[8] = b->getSize(b->getBitBlockWidth());
+    args[8] = b.getSize(b.getBitBlockWidth());
 
-    Function * func = b->getModule()->getFunction(KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK); assert (func);
-    b->CreateCall(func->getFunctionType(), func, args);
+    Function * func = b.getModule()->getFunction(KERNEL_ILLUSTRATOR_CAPTURE_CALLBACK); assert (func);
+    b.CreateCall(func->getFunctionType(), func, args);
 
 }
 

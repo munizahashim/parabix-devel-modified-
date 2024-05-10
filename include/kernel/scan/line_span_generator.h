@@ -29,9 +29,9 @@ namespace kernel {
  */
 class LineSpanGenerator : public SingleStreamScanKernelTemplate {
 public:
-    LineSpanGenerator(BuilderRef b, StreamSet * linebreaks, StreamSet * output);
+    LineSpanGenerator(KernelBuilder & b, StreamSet * linebreaks, StreamSet * output);
 protected:
-    void generateProcessingLogic(BuilderRef b, llvm::Value * absoluteIndex) override;
+    void generateProcessingLogic(KernelBuilder & b, llvm::Value * absoluteIndex) override;
 private:
 };
 
@@ -55,11 +55,10 @@ private:
  * 
  */
 class LineSpanFilterKernel : public MultiBlockKernel {
-    using BuilderRef = BuilderRef;
 public:
-    LineSpanFilterKernel(BuilderRef b, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
+    LineSpanFilterKernel(KernelBuilder & b, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 namespace scan {

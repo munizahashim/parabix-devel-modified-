@@ -244,7 +244,7 @@ void CPUDriver::generateUncachedKernels() {
         NamedRegionTimer T(kernel->getName(), "Kernel Generation",
                            codegen::TimeKernelsIsEnabled);
         #endif
-        kernel->generateKernel(mBuilder);
+        kernel->generateKernel(getBuilder());
         Module * const module = kernel->getModule(); assert (module);
         module->setTargetTriple(mMainModule->getTargetTriple());
         module->setDataLayout(mMainModule->getDataLayout());
@@ -309,7 +309,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     mainModule->setTargetTriple(mMainModule->getTargetTriple());
     mainModule->setDataLayout(mMainModule->getDataLayout());
     mBuilder->setModule(mainModule.get());
-    pk->addKernelDeclarations(mBuilder);
+    pk->addKernelDeclarations(getBuilder());
 
     // TODO: to ensure that we can pass the correct num of threads, we cannot statically compile the
     // main method until we add the thread count as a parameter. Investigate whether we can make a
@@ -317,7 +317,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     const auto e = true; // pk->containsKernelFamilyCalls() || pk->generatesDynamicRepeatingStreamSets();
     const auto method = e ? Kernel::AddInternal : Kernel::DeclareExternal;
-    Function * const main = pk->addOrDeclareMainFunction(mBuilder, method);
+    Function * const main = pk->addOrDeclareMainFunction(getBuilder(), method);
     mBuilder->setModule(mMainModule);
 
     // NOTE: the pipeline kernel is destructed after calling clear unless this driver preserves kernels!
@@ -371,20 +371,20 @@ CPUDriver::~CPUDriver() {
 class TracePass : public ModulePass {
 public:
     static char ID;
-    TracePass(kernel::KernelBuilder * kb, StringRef to_trace) : ModulePass(ID), iBuilder(kb), mToTrace(to_trace) { }
+    TracePass(kernel::KernelBuilder * kb, StringRef to_trace) : ModulePass(ID), b(*kb), mToTrace(to_trace) { }
 
     bool addTraceStmt(BasicBlock * BB, BasicBlock::iterator to_trace, BasicBlock::iterator insert_pt) {
         bool modified = false;
         Type * t = (*to_trace).getType();
         //t->dump();
-        if (t == iBuilder->getBitBlockType()) {
-            iBuilder->SetInsertPoint(BB, insert_pt);
-            iBuilder->CallPrintRegister((*to_trace).getName(), &*to_trace);
+        if (t == b.getBitBlockType()) {
+            b.SetInsertPoint(BB, insert_pt);
+            b.CallPrintRegister((*to_trace).getName(), &*to_trace);
             modified = true;
         }
-        else if (t == iBuilder->getInt64Ty()) {
-            iBuilder->SetInsertPoint(BB, insert_pt);
-            iBuilder->CallPrintInt((*to_trace).getName(), &*to_trace);
+        else if (t == b.getInt64Ty()) {
+            b.SetInsertPoint(BB, insert_pt);
+            b.CallPrintInt((*to_trace).getName(), &*to_trace);
             modified = true;
         }
         return modified;
@@ -392,15 +392,15 @@ public:
 
     virtual bool runOnModule(Module &M) override;
 private:
-    kernel::KernelBuilder * iBuilder;
+    kernel::KernelBuilder & b;
     StringRef mToTrace;
 };
 
 char TracePass::ID = 0;
 
 bool TracePass::runOnModule(Module & M) {
-    Module * saveModule = iBuilder->getModule();
-    iBuilder->setModule(&M);
+    Module * saveModule = b.getModule();
+    b.setModule(&M);
     bool modified = false;
     for (auto & F : M) {
         for (auto & B : F) {
@@ -425,7 +425,7 @@ bool TracePass::runOnModule(Module & M) {
         }
     }
     //if (modified) M.dump();
-    iBuilder->setModule(saveModule);
+    b.setModule(saveModule);
     return modified;
 }
 

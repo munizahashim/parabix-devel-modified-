@@ -307,11 +307,7 @@ public:
 };
 
 #ifndef NDEBUG
-bool isFromCurrentFunction(const KernelBuilder * const b, const llvm::Value * const value, const bool allowNull = true);
-
-inline bool isFromCurrentFunction(const std::unique_ptr<KernelBuilder> & b, const llvm::Value * const value, const bool allowNull = true) {
-    return isFromCurrentFunction(b.get(), value, allowNull);
-}
+bool isFromCurrentFunction(const KernelBuilder & b, const llvm::Value * const value, const bool allowNull = true);
 #endif
 
 }

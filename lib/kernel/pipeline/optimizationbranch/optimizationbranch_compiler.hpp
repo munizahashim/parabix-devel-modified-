@@ -20,8 +20,6 @@ namespace kernel {
 
 using BindingRef = RefWrapper<Binding>;
 
-using BuilderRef = Kernel::BuilderRef;
-
 using StreamSetGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 
 struct RelationshipRef {
@@ -50,7 +48,7 @@ using RelationshipCache = flat_map<RelationshipGraph::vertex_descriptor, Value *
 
 using PortType = Kernel::PortType;
 using StreamSetPort = Kernel::StreamSetPort;
-using BuilderRef = BuilderRef;
+
 using AttrId = Attribute::KindId;
 
 enum : unsigned {
@@ -80,29 +78,29 @@ class OptimizationBranchCompiler final : public KernelCompiler {
 
 public:
 
-    OptimizationBranchCompiler(BuilderRef b, OptimizationBranch * const branch) noexcept;
+    OptimizationBranchCompiler(KernelBuilder & b, OptimizationBranch * const branch) noexcept;
 
-    void addBranchProperties(BuilderRef b);
-    void constructStreamSetBuffers(BuilderRef b) override;
-    void generateInitializeMethod(BuilderRef b);
-    void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides);
-    void generateInitializeThreadLocalMethod(BuilderRef b);
-    void generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides);
-    void generateKernelMethod(BuilderRef b);
-    void generateFinalizeThreadLocalMethod(BuilderRef b);
-    void generateFinalizeMethod(BuilderRef b);
+    void addBranchProperties(KernelBuilder & b);
+    void constructStreamSetBuffers(KernelBuilder & b) override;
+    void generateInitializeMethod(KernelBuilder & b);
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides);
+    void generateInitializeThreadLocalMethod(KernelBuilder & b);
+    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides);
+    void generateKernelMethod(KernelBuilder & b);
+    void generateFinalizeThreadLocalMethod(KernelBuilder & b);
+    void generateFinalizeMethod(KernelBuilder & b);
 
-    std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
+    std::vector<Value *> getFinalOutputScalars(KernelBuilder & b) override;
 
 private:
 
-    Value * loadSharedHandle(BuilderRef b, const unsigned branchType) const;
+    Value * loadSharedHandle(KernelBuilder & b, const unsigned branchType) const;
 
-    Value * loadThreadLocalHandle(BuilderRef b, const unsigned branchType) const;
+    Value * loadThreadLocalHandle(KernelBuilder & b, const unsigned branchType) const;
 
-    void allocateOwnedBranchBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal);
+    void allocateOwnedBranchBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, const bool nonLocal);
 
-    Value * getInputScalar(BuilderRef b, const unsigned scalar);
+    Value * getInputScalar(KernelBuilder & b, const unsigned scalar);
 
     inline unsigned getNumOfInputBindings(const Kernel * const kernel, const RelationshipType type) const;
 
@@ -112,21 +110,21 @@ private:
 
     const Binding & getOutputBinding(const Kernel * const kernel, const RelationshipType type, const unsigned i) const;
 
-    void executeBranch(BuilderRef b, const unsigned branchType);
+    void executeBranch(KernelBuilder & b, const unsigned branchType);
 
-    Value * enterBranch(BuilderRef b, const unsigned branchType) const;
+    Value * enterBranch(KernelBuilder & b, const unsigned branchType) const;
 
-    void exitBranch(BuilderRef b, const unsigned branchType) const;
+    void exitBranch(KernelBuilder & b, const unsigned branchType) const;
 
-    Value * calculateAccessibleOrWritableItems(BuilderRef b, const Kernel * const kernel, const Binding & binding, Value * const first, Value * const last, Value * const defaultValue) const;
+    Value * calculateAccessibleOrWritableItems(KernelBuilder & b, const Kernel * const kernel, const Binding & binding, Value * const first, Value * const last, Value * const defaultValue) const;
 
-    Value * calculateFinalOutputItemCounts(BuilderRef b, Value * const isFinal, const unsigned branchType);
+    Value * calculateFinalOutputItemCounts(KernelBuilder & b, Value * const isFinal, const unsigned branchType);
 
     RelationshipGraph makeRelationshipGraph(const RelationshipType type) const;
 
     #ifdef PRINT_DEBUG_MESSAGES
     template <typename ... Args>
-    void debugPrint(BuilderRef b, Twine format, Args ...args) const;
+    void debugPrint(KernelBuilder & b, Twine format, Args ...args) const;
     #endif
 
 private:
@@ -301,12 +299,12 @@ RelationshipGraph OptimizationBranchCompiler::makeRelationshipGraph(const Relati
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
+void OptimizationBranchCompiler::addBranchProperties(KernelBuilder & b) {
 
     // 0 or 1 value to allow the pipeline to tell this kernel what branch to take
-    mTarget->addThreadLocalScalar(b->getInt1Ty(), CONTROL_CODE);
+    mTarget->addThreadLocalScalar(b.getInt1Ty(), CONTROL_CODE);
 
-    IntegerType * const sizeTy = b->getSizeTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     mTarget->addInternalScalar(sizeTy, EXTERNAL_SEGMENT_NUMBER, 0);
 
@@ -322,7 +320,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
         if (LLVM_LIKELY(kernel->isStateful())) {
             Type * handlePtrType = nullptr;
             if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls())) {
-                handlePtrType = b->getVoidPtrTy();
+                handlePtrType = b.getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getSharedStateType()->getPointerTo();
             }
@@ -332,7 +330,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
         if (kernel->hasThreadLocal()) {
             Type * handlePtrType = nullptr;
             if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls())) {
-                handlePtrType = b->getVoidPtrTy();
+                handlePtrType = b.getVoidPtrTy();
             } else {
                 handlePtrType = kernel->getThreadLocalStateType()->getPointerTo();
             }
@@ -344,7 +342,7 @@ void OptimizationBranchCompiler::addBranchProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructStreamSetBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::constructStreamSetBuffers(BuilderRef b) {
+void OptimizationBranchCompiler::constructStreamSetBuffers(KernelBuilder & b) {
 
     mStreamSetInputBuffers.clear();
     const auto numOfInputStreams = mInputStreamSets.size();
@@ -380,12 +378,12 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
+void OptimizationBranchCompiler::generateInitializeMethod(KernelBuilder & b) {
     using TC = KernelBuilder::TerminationCode;
     mScalarCache.clear();
     std::vector<Value *> args;
-    ConstantInt * const ZERO = b->getSize(0);
-    Value * terminated = b->getFalse();
+    ConstantInt * const ZERO = b.getSize(0);
+    Value * terminated = b.getFalse();
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i];
         if (LLVM_UNLIKELY(kernel == nullptr)) continue;
@@ -395,10 +393,10 @@ void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
         if (LLVM_LIKELY(hasSharedState)) {
             Value * handle = nullptr;
             if (kernel->getNumOfNestedKernelFamilyCalls()) {
-                handle = b->getScalarField(SHARED_PREFIX + std::to_string(i));
+                handle = b.getScalarField(SHARED_PREFIX + std::to_string(i));
             } else {
                 handle = kernel->createInstance(b);
-                b->setScalarField(SHARED_PREFIX + std::to_string(i), handle);
+                b.setScalarField(SHARED_PREFIX + std::to_string(i), handle);
             }
             args[0] = handle;
         }
@@ -410,19 +408,19 @@ void OptimizationBranchCompiler::generateInitializeMethod(BuilderRef b) {
         Function * initFn = kernel->getInitializeFunction(b);
         FunctionType * fTy = initFn->getFunctionType();
         assert (fTy->getNumParams() == args.size());
-        Value * const terminatedOnInit = b->CreateCall(fTy, initFn, args);
-        Value * const term = b->CreateICmpNE(terminatedOnInit, ZERO);
-        terminated = b->CreateOr(terminated, term);
+        Value * const terminatedOnInit = b.CreateCall(fTy, initFn, args);
+        Value * const term = b.CreateICmpNE(terminatedOnInit, ZERO);
+        terminated = b.CreateOr(terminated, term);
     }
 
-    Value * const termSignal = b->CreateSelect(terminated, b->getSize(TC::Fatal), b->getSize(TC::None));
-    b->CreateStore(termSignal, getTerminationSignalPtr());
+    Value * const termSignal = b.CreateSelect(terminated, b.getSize(TC::Fatal), b.getSize(TC::None));
+    b.CreateStore(termSignal, getTerminationSignalPtr());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
+void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
     allocateOwnedBranchBuffers(b, expectedNumOfStrides, true);
     // allocate any owned output buffers
     const auto n = mTarget->getNumOfStreamOutputs();
@@ -442,7 +440,7 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(BuilderRef b) {
+void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i]; assert (kernel);
         if (kernel->hasThreadLocal()) {
@@ -455,7 +453,7 @@ void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(BuilderRef 
             args.push_back(ConstantPointerNull::get(kernel->getThreadLocalStateType()->getPointerTo()));
 
             Value * const handle = kernel->initializeThreadLocalInstance(b, args);
-            b->setScalarField(THREAD_LOCAL_PREFIX + std::to_string(i), handle);
+            b.setScalarField(THREAD_LOCAL_PREFIX + std::to_string(i), handle);
         }
     }
 }
@@ -463,20 +461,20 @@ void OptimizationBranchCompiler::generateInitializeThreadLocalMethod(BuilderRef 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides) {
+void OptimizationBranchCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
     allocateOwnedBranchBuffers(b, expectedNumOfStrides, false);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadSharedHandle
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * OptimizationBranchCompiler::loadSharedHandle(BuilderRef b, const unsigned branchType) const {
+Value * OptimizationBranchCompiler::loadSharedHandle(KernelBuilder & b, const unsigned branchType) const {
     const Kernel * const kernel = mBranches[branchType]; assert (kernel);
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->isStateful())) {
-        handle = b->getScalarField(SHARED_PREFIX + std::to_string(branchType));
+        handle = b.getScalarField(SHARED_PREFIX + std::to_string(branchType));
         if (kernel->getNumOfNestedKernelFamilyCalls()) {
-            handle = b->CreatePointerCast(handle, kernel->getSharedStateType()->getPointerTo());
+            handle = b.CreatePointerCast(handle, kernel->getSharedStateType()->getPointerTo());
         }
     }
     return handle;
@@ -485,13 +483,13 @@ Value * OptimizationBranchCompiler::loadSharedHandle(BuilderRef b, const unsigne
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadThreadLocalHandle
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const unsigned branchType) const {
+Value * OptimizationBranchCompiler::loadThreadLocalHandle(KernelBuilder & b, const unsigned branchType) const {
     const Kernel * const kernel = mBranches[branchType]; assert (kernel);
     Value * handle = nullptr;
     if (LLVM_LIKELY(kernel->hasThreadLocal())) {
-        handle = b->getScalarField(THREAD_LOCAL_PREFIX + std::to_string(branchType));
+        handle = b.getScalarField(THREAD_LOCAL_PREFIX + std::to_string(branchType));
         if (kernel->getNumOfNestedKernelFamilyCalls()) {
-            handle = b->CreatePointerCast(handle, kernel->getThreadLocalStateType()->getPointerTo());
+            handle = b.CreatePointerCast(handle, kernel->getThreadLocalStateType()->getPointerTo());
         }
     }
     return handle;
@@ -501,33 +499,33 @@ Value * OptimizationBranchCompiler::loadThreadLocalHandle(BuilderRef b, const un
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateKernelMethod(BuilderRef b) {
+void OptimizationBranchCompiler::generateKernelMethod(KernelBuilder & b) {
 
-    Value * const selectedBranch = b->getScalarField(CONTROL_CODE);
+    Value * const selectedBranch = b.getScalarField(CONTROL_CODE);
 
-    BasicBlock * const optimizationBranch = b->CreateBasicBlock("optimizationBranch");
-    BasicBlock * const normalBranch = b->CreateBasicBlock("normalBranchInvoke");
-    BasicBlock * const exitLoop = b->CreateBasicBlock("exitLoop");
-    b->CreateCondBr(selectedBranch, normalBranch, optimizationBranch);
+    BasicBlock * const optimizationBranch = b.CreateBasicBlock("optimizationBranch");
+    BasicBlock * const normalBranch = b.CreateBasicBlock("normalBranchInvoke");
+    BasicBlock * const exitLoop = b.CreateBasicBlock("exitLoop");
+    b.CreateCondBr(selectedBranch, normalBranch, optimizationBranch);
 
-    b->SetInsertPoint(exitLoop);
+    b.SetInsertPoint(exitLoop);
     if (canSetTerminateSignal()) {
-        mTerminatedPhi = b->CreatePHI(b->getInt1Ty(), 2);
+        mTerminatedPhi = b.CreatePHI(b.getInt1Ty(), 2);
     } else {
         mTerminatedPhi = nullptr;
     }
 
-    b->SetInsertPoint(optimizationBranch);
+    b.SetInsertPoint(optimizationBranch);
     executeBranch(b, ALL_ZERO_BRANCH);
-    b->CreateBr(exitLoop);
+    b.CreateBr(exitLoop);
 
-    b->SetInsertPoint(normalBranch);
+    b.SetInsertPoint(normalBranch);
     executeBranch(b, NON_ZERO_BRANCH);
-    b->CreateBr(exitLoop);
+    b.CreateBr(exitLoop);
 
-    b->SetInsertPoint(exitLoop);
+    b.SetInsertPoint(exitLoop);
     if (mTerminatedPhi) {
-        b->CreateStore(mTerminatedPhi, getTerminationSignalPtr());
+        b.CreateStore(mTerminatedPhi, getTerminationSignalPtr());
     }
 
 }
@@ -542,7 +540,7 @@ inline const RelationshipRef & getConditionRef(const RelationshipGraph & G) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief callKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned branchType) {
+void OptimizationBranchCompiler::executeBranch(KernelBuilder & b, const unsigned branchType) {
 #if 0
     const Kernel * const kernel = mBranches[branchType];
 
@@ -580,19 +578,19 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         addNextArg(mFixedRateFactor);
     }
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
 
     for (const auto e : make_iterator_range(in_edges(branchType, mStreamSetGraph))) {
         const RelationshipRef & host = mStreamSetGraph[e];
         const RelationshipRef & path = mStreamSetGraph[parent(e, mStreamSetGraph)];
         const auto & buffer = mStreamSetInputBuffers[host.Index];
-        addNextArg(b->CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
+        addNextArg(b.CreatePointerCast(buffer->getBaseAddress(b), voidPtrTy));
         const Binding & input = kernel->getInputStreamSetBinding(path.Index);
         Value * processed = mProcessedInputItemPtr[host.Index];
         if (isAddressable(input)) {
             addNextArg(processed);
         } else if (isCountable(input)) {
-            addNextArg(b->CreateLoad(processed));
+            addNextArg(b.CreateLoad(processed));
         }
         if (LLVM_UNLIKELY(requiresItemCount(input))) {
             addNextArg(getAccessibleInputItems(host.Index));
@@ -614,12 +612,12 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isShared)) {
             Value * const handle = buffer->getHandle();
-            addNextArg(b->CreatePointerCast(handle, buffer->getHandlePointerType(b)));
+            addNextArg(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
         } else if (LLVM_UNLIKELY(isLocal)) {
             addNextArg(mUpdatableOutputBaseVirtualAddressPtr[path.Index]);
         } else {
             Value * const vba = buffer->getBaseAddress(b);
-            addNextArg(b->CreatePointerCast(vba, voidPtrTy));
+            addNextArg(b.CreatePointerCast(vba, voidPtrTy));
         }
 
         /// ----------------------------------------------------
@@ -629,7 +627,7 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         if (LLVM_LIKELY(canTerminate || isAddressable(output))) {
             addNextArg(produced);
         } else if (LLVM_LIKELY(isCountable(output))) {
-            addNextArg(b->CreateLoad(produced));
+            addNextArg(b.CreateLoad(produced));
         }
 
         /// ----------------------------------------------------
@@ -642,13 +640,13 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
         }
     }
 
-    Value * const terminated = b->CreateCall(doSegment->getFunctionType(), doSegment, args);
+    Value * const terminated = b.CreateCall(doSegment->getFunctionType(), doSegment, args);
 
     exitBranch(b, branchType);
 
     if (mTerminatedPhi) {
-        Value * const termSignal = canTerminate ? terminated : b->getFalse();
-        mTerminatedPhi->addIncoming(termSignal, b->GetInsertBlock());
+        Value * const termSignal = canTerminate ? terminated : b.getFalse();
+        mTerminatedPhi->addIncoming(termSignal, b.GetInsertBlock());
     }
 #endif
 }
@@ -656,71 +654,71 @@ void OptimizationBranchCompiler::executeBranch(BuilderRef b, const unsigned bran
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief enterBranch
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned branchType) const {
+Value * OptimizationBranchCompiler::enterBranch(KernelBuilder & b, const unsigned branchType) const {
 #if 0
     const Kernel * const kernel = mBranches[branchType];
     const auto prefix = kernel->getName();
 
     SmallVector<char, 256> tmp;
-    BasicBlock * const acquire = b->CreateBasicBlock(concat(prefix, "_acquire", tmp));
-    BasicBlock * const acquired = b->CreateBasicBlock(concat(prefix, "_acquired", tmp));
+    BasicBlock * const acquire = b.CreateBasicBlock(concat(prefix, "_acquire", tmp));
+    BasicBlock * const acquired = b.CreateBasicBlock(concat(prefix, "_acquired", tmp));
 
-    Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
-    b->CreateBr(acquire);
+    Value * const externalSegNoPtr = b.getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
+    b.CreateBr(acquire);
 
-    b->SetInsertPoint(acquire);
-    Value * const currentSegNo = b->CreateAtomicLoadAcquire(externalSegNoPtr);
-    Value * const ready = b->CreateICmpEQ(getExternalSegNo(), currentSegNo);
-    b->CreateLikelyCondBr(ready, acquired, acquire);
+    b.SetInsertPoint(acquire);
+    Value * const currentSegNo = b.CreateAtomicLoadAcquire(externalSegNoPtr);
+    Value * const ready = b.CreateICmpEQ(getExternalSegNo(), currentSegNo);
+    b.CreateLikelyCondBr(ready, acquired, acquire);
 
-    b->SetInsertPoint(acquired);
+    b.SetInsertPoint(acquired);
     // While the branched kernels may be internally synchronized, they do not share
     // any synchronization betwee them. To avoid complications, we can only permit
     // one branch type to execute at a given moment.
     Value * otherBranchCountPtr = nullptr;
     if (branchType == ALL_ZERO_BRANCH) {
-        otherBranchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+        otherBranchCountPtr = b.getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
     } else {
-        otherBranchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+        otherBranchCountPtr = b.getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
-    BasicBlock * const checkAlternateBranch = b->CreateBasicBlock(concat(prefix, "_checkAlternateBranch", tmp));
-    BasicBlock * const executeKernel = b->CreateBasicBlock(concat(prefix, "_executeKernel", tmp));
+    BasicBlock * const checkAlternateBranch = b.CreateBasicBlock(concat(prefix, "_checkAlternateBranch", tmp));
+    BasicBlock * const executeKernel = b.CreateBasicBlock(concat(prefix, "_executeKernel", tmp));
 
-    b->CreateBr(checkAlternateBranch);
+    b.CreateBr(checkAlternateBranch);
 
-    b->SetInsertPoint(checkAlternateBranch);
-    Value * const currentCount = b->CreateAtomicLoadAcquire(otherBranchCountPtr);
+    b.SetInsertPoint(checkAlternateBranch);
+    Value * const currentCount = b.CreateAtomicLoadAcquire(otherBranchCountPtr);
     if (codegen::DebugOptionIsSet(codegen::EnableAsserts)) {
-        b->CreateAssert(b->CreateICmpULE(currentCount, b->getSize(4)), "other branch bad");
+        b.CreateAssert(b.CreateICmpULE(currentCount, b.getSize(4)), "other branch bad");
     }
-    Value * const safe = b->CreateICmpEQ(currentCount, b->getSize(0));
-    b->CreateCondBr(safe, executeKernel, checkAlternateBranch);
+    Value * const safe = b.CreateICmpEQ(currentCount, b.getSize(0));
+    b.CreateCondBr(safe, executeKernel, checkAlternateBranch);
 
-    b->SetInsertPoint(executeKernel);
+    b.SetInsertPoint(executeKernel);
     // We're still protected by the outer sync lock so an atomic add is not required here.
 
-    Value * const sz_ONE = b->getSize(1);
+    Value * const sz_ONE = b.getSize(1);
 
     Value * branchCountPtr = nullptr;
     if (branchType == ALL_ZERO_BRANCH) {
-        branchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+        branchCountPtr = b.getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
     } else {
-        branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+        branchCountPtr = b.getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
-    Value * const nextCount = b->CreateAdd(b->CreateLoad(branchCountPtr), sz_ONE);
-    b->CreateStore(nextCount, branchCountPtr);
+    Value * const nextCount = b.CreateAdd(b.CreateLoad(branchCountPtr), sz_ONE);
+    b.CreateStore(nextCount, branchCountPtr);
 
-    Value * const intSegNoPtr = b->getScalarFieldPtr(ALL_ZERO_PATH_TAKEN_COUNT);
-    Value * intSegNo = b->CreateLoad(intSegNoPtr);
+    Value * const intSegNoPtr = b.getScalarFieldPtr(ALL_ZERO_PATH_TAKEN_COUNT);
+    Value * intSegNo = b.CreateLoad(intSegNoPtr);
     if (branchType == ALL_ZERO_BRANCH) {
-        b->CreateStore(b->CreateAdd(intSegNo, sz_ONE), intSegNoPtr);
+        b.CreateStore(b.CreateAdd(intSegNo, sz_ONE), intSegNoPtr);
     } else {
-        intSegNo = b->CreateSub(getExternalSegNo(), intSegNo);
+        intSegNo = b.CreateSub(getExternalSegNo(), intSegNo);
     }
 
     if (LLVM_LIKELY(kernel->hasAttribute(AttrId::InternallySynchronized))) {
-        Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
-        b->CreateAtomicStoreRelease(released, externalSegNoPtr);
+        Value * const released = b.CreateAdd(getExternalSegNo(), sz_ONE);
+        b.CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
     return intSegNo;
 #endif
@@ -730,28 +728,28 @@ Value * OptimizationBranchCompiler::enterBranch(BuilderRef b, const unsigned bra
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief exitBranch
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchType) const {
+void OptimizationBranchCompiler::exitBranch(KernelBuilder & b, const unsigned branchType) const {
 #if 0
     // decrement the number of active threads count for this branch
-    Constant * const sz_ONE = b->getSize(1);
+    Constant * const sz_ONE = b.getSize(1);
 
     Value * branchCountPtr = nullptr;
     if (branchType == ALL_ZERO_BRANCH) {
-        branchCountPtr = b->getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
+        branchCountPtr = b.getScalarFieldPtr(ALL_ZERO_INTERNAL_INFLIGHT_COUNT);
     } else {
-        branchCountPtr = b->getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
+        branchCountPtr = b.getScalarFieldPtr(NON_ZERO_INTERNAL_INFLIGHT_COUNT);
     }
     if (LLVM_LIKELY(mBranches[branchType]->hasAttribute(AttrId::InternallySynchronized))) {
-        b->CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
+        b.CreateAtomicFetchAndSub(sz_ONE, branchCountPtr);
         if (codegen::DebugOptionIsSet(codegen::EnableAsserts)) {
-            Value * const c = b->CreateAtomicLoadAcquire(branchCountPtr);
-            b->CreateAssert(b->CreateICmpULE(c, b->getSize(4)), "released branch bad");
+            Value * const c = b.CreateAtomicLoadAcquire(branchCountPtr);
+            b.CreateAssert(b.CreateICmpULE(c, b.getSize(4)), "released branch bad");
         }
     } else {
-        b->CreateStore(b->CreateSub(b->CreateLoad(branchCountPtr), sz_ONE), branchCountPtr);
-        Value * const externalSegNoPtr = b->getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
-        Value * const released = b->CreateAdd(getExternalSegNo(), sz_ONE);
-        b->CreateAtomicStoreRelease(released, externalSegNoPtr);
+        b.CreateStore(b.CreateSub(b.CreateLoad(branchCountPtr), sz_ONE), branchCountPtr);
+        Value * const externalSegNoPtr = b.getScalarFieldPtr(EXTERNAL_SEGMENT_NUMBER);
+        Value * const released = b.CreateAdd(getExternalSegNo(), sz_ONE);
+        b.CreateAtomicStoreRelease(released, externalSegNoPtr);
     }
 #endif
 }
@@ -759,14 +757,14 @@ void OptimizationBranchCompiler::exitBranch(BuilderRef b, const unsigned branchT
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalar
  ** ------------------------------------------------------------------------------------------------------------- */
-inline Value * OptimizationBranchCompiler::getInputScalar(BuilderRef b, const unsigned scalar) {
+inline Value * OptimizationBranchCompiler::getInputScalar(KernelBuilder & b, const unsigned scalar) {
     const auto f = mScalarCache.find(scalar);
     if (LLVM_UNLIKELY(f != mScalarCache.end())) {
         return f->second;
     }
     const auto e = in_edge(scalar, mScalarGraph);
     const RelationshipRef & ref = mScalarGraph[e];
-    Value * const value = b->getScalarField(ref.Name);
+    Value * const value = b.getScalarField(ref.Name);
     mScalarCache.emplace(scalar, value);
     return value;
 }
@@ -774,7 +772,7 @@ inline Value * OptimizationBranchCompiler::getInputScalar(BuilderRef b, const un
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateFinalizeThreadLocalMethod(BuilderRef b) {
+void OptimizationBranchCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i];
         if (kernel->hasThreadLocal()) {
@@ -791,7 +789,7 @@ void OptimizationBranchCompiler::generateFinalizeThreadLocalMethod(BuilderRef b)
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::generateFinalizeMethod(BuilderRef b) {
+void OptimizationBranchCompiler::generateFinalizeMethod(KernelBuilder & b) {
     for (unsigned i = ALL_ZERO_BRANCH; i <= NON_ZERO_BRANCH; ++i) {
         const Kernel * const kernel = mBranches[i];
         SmallVector<Value *, 2> args;
@@ -821,7 +819,7 @@ void OptimizationBranchCompiler::generateFinalizeMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getFinalOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-std::vector<Value *> OptimizationBranchCompiler::getFinalOutputScalars(BuilderRef b) {
+std::vector<Value *> OptimizationBranchCompiler::getFinalOutputScalars(KernelBuilder & b) {
     // TODO: IMPLEMENT THIS!
     return std::vector<Value *>{};
 }
@@ -829,7 +827,7 @@ std::vector<Value *> OptimizationBranchCompiler::getFinalOutputScalars(BuilderRe
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief allocateOwnedBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void OptimizationBranchCompiler::allocateOwnedBranchBuffers(BuilderRef b, Value * const expectedNumOfStrides, const bool nonLocal) {
+void OptimizationBranchCompiler::allocateOwnedBranchBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, const bool nonLocal) {
     assert (expectedNumOfStrides);
     // recursively allocate any internal buffers for the nested kernels, giving them the correct
     // num of strides it should expect to perform
@@ -851,7 +849,7 @@ void OptimizationBranchCompiler::allocateOwnedBranchBuffers(BuilderRef b, Value 
                 }
                 params.push_back(expectedNumOfStrides);
                 FunctionType * fTy = func->getFunctionType();
-                b->CreateCall(fTy, func, params);
+                b.CreateCall(fTy, func, params);
             }
         }
     }
@@ -885,7 +883,7 @@ inline std::array<const Kernel *, 4> makeBranches(const OptimizationBranch * con
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-OptimizationBranchCompiler::OptimizationBranchCompiler(BuilderRef b, OptimizationBranch * const branch) noexcept
+OptimizationBranchCompiler::OptimizationBranchCompiler(KernelBuilder & b, OptimizationBranch * const branch) noexcept
 : KernelCompiler(branch)
 , mCondition(branch->getCondition())
 , mBranches(makeBranches(branch))

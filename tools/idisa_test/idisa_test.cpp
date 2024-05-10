@@ -43,43 +43,43 @@ static cl::opt<int> Immediate("i", cl::desc("Immediate value for mvmd_dslli"), c
 
 class ShiftMaskKernel : public BlockOrientedKernel {
 public:
-    ShiftMaskKernel(BuilderRef b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
+    ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
 protected:
-    void generateDoBlockMethod(BuilderRef kb) override;
+    void generateDoBlockMethod(KernelBuilder & kb) override;
 private:
     const unsigned mTestFw;
     const unsigned mShiftMask;
 };
 
-ShiftMaskKernel::ShiftMaskKernel(BuilderRef b, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
+ShiftMaskKernel::ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
 : BlockOrientedKernel(b, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
                               {Binding{"shiftOperand", input}},
                               {Binding{"limitedShift", output}},
                               {}, {}, {}),
 mTestFw(fw), mShiftMask(mask) {}
 
-void ShiftMaskKernel::generateDoBlockMethod(BuilderRef kb) {
-    Type * fwTy = kb->getIntNTy(mTestFw);
-    Constant * const ZeroConst = kb->getSize(0);
-    Value * shiftOperand = kb->loadInputStreamBlock("shiftOperand", ZeroConst);
-    unsigned fieldCount = kb->getBitBlockWidth()/mTestFw;
-    Value * masked = kb->simd_and(shiftOperand, kb->getSplat(fieldCount, ConstantInt::get(fwTy, mShiftMask)));
-    kb->storeOutputStreamBlock("limitedShift", ZeroConst, masked);
+void ShiftMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
+    Type * fwTy = b.getIntNTy(mTestFw);
+    Constant * const ZeroConst = b.getSize(0);
+    Value * shiftOperand = b.loadInputStreamBlock("shiftOperand", ZeroConst);
+    unsigned fieldCount = b.getBitBlockWidth()/mTestFw;
+    Value * masked = b.simd_and(shiftOperand, b.getSplat(fieldCount, ConstantInt::get(fwTy, mShiftMask)));
+    b.storeOutputStreamBlock("limitedShift", ZeroConst, masked);
 }
 
 class IdisaBinaryOpTestKernel : public MultiBlockKernel {
 public:
-    IdisaBinaryOpTestKernel(BuilderRef b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
                             StreamSet * Operand1, StreamSet * Operand2, StreamSet * result);
 protected:
-    void generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
     const std::string mIdisaOperation;
     const unsigned mTestFw;
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(BuilderRef b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
                                                  StreamSet *Operand1, StreamSet *Operand2, StreamSet *result)
 : MultiBlockKernel(b, idisa_op + std::to_string(fw) + "_test",
      {Binding{"operand1", Operand1}, Binding{"operand2", Operand2}},
@@ -87,107 +87,107 @@ IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(BuilderRef b, std::string idisa
      {}, {}, {}),
 mIdisaOperation(std::move(idisa_op)), mTestFw(fw), mImmediateShift(imm) {}
 
-void IdisaBinaryOpTestKernel::generateMultiBlockLogic(BuilderRef kb, llvm::Value * const numOfBlocks) {
-    BasicBlock * entry = kb->GetInsertBlock();
-    BasicBlock * processBlock = kb->CreateBasicBlock("processBlock");
-    BasicBlock * done = kb->CreateBasicBlock("done");
-    Constant * const ZeroConst = kb->getSize(0);
-    kb->CreateBr(processBlock);
-    kb->SetInsertPoint(processBlock);
-    PHINode * blockOffsetPhi = kb->CreatePHI(kb->getSizeTy(), 2);
+void IdisaBinaryOpTestKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfBlocks) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * processBlock = b.CreateBasicBlock("processBlock");
+    BasicBlock * done = b.CreateBasicBlock("done");
+    Constant * const ZeroConst = b.getSize(0);
+    b.CreateBr(processBlock);
+    b.SetInsertPoint(processBlock);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZeroConst, entry);
-    Value * operand1 = kb->loadInputStreamBlock("operand1", ZeroConst, blockOffsetPhi);
-    Value * operand2 = kb->loadInputStreamBlock("operand2", ZeroConst, blockOffsetPhi);
+    Value * operand1 = b.loadInputStreamBlock("operand1", ZeroConst, blockOffsetPhi);
+    Value * operand2 = b.loadInputStreamBlock("operand2", ZeroConst, blockOffsetPhi);
     Value * result = nullptr;
     if (mIdisaOperation == "simd_add") {
-        result = kb->simd_add(mTestFw, operand1, operand2);
+        result = b.simd_add(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_sub") {
-        result = kb->simd_sub(mTestFw, operand1, operand2);
+        result = b.simd_sub(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_mult") {
-        result = kb->simd_mult(mTestFw, operand1, operand2);
+        result = b.simd_mult(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_eq") {
-        result = kb->simd_eq(mTestFw, operand1, operand2);
+        result = b.simd_eq(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_ne") {
-        result = kb->simd_ne(mTestFw, operand1, operand2);
+        result = b.simd_ne(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_gt") {
-        result = kb->simd_gt(mTestFw, operand1, operand2);
+        result = b.simd_gt(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_ugt") {
-        result = kb->simd_ugt(mTestFw, operand1, operand2);
+        result = b.simd_ugt(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_ge") {
-        result = kb->simd_ge(mTestFw, operand1, operand2);
+        result = b.simd_ge(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_uge") {
-        result = kb->simd_uge(mTestFw, operand1, operand2);
+        result = b.simd_uge(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_lt") {
-        result = kb->simd_lt(mTestFw, operand1, operand2);
+        result = b.simd_lt(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_le") {
-        result = kb->simd_le(mTestFw, operand1, operand2);
+        result = b.simd_le(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_ult") {
-        result = kb->simd_ult(mTestFw, operand1, operand2);
+        result = b.simd_ult(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_ule") {
-        result = kb->simd_ule(mTestFw, operand1, operand2);
+        result = b.simd_ule(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_max") {
-        result = kb->simd_max(mTestFw, operand1, operand2);
+        result = b.simd_max(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_min") {
-        result = kb->simd_min(mTestFw, operand1, operand2);
+        result = b.simd_min(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_umax") {
-        result = kb->simd_umax(mTestFw, operand1, operand2);
+        result = b.simd_umax(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_umin") {
-        result = kb->simd_umin(mTestFw, operand1, operand2);
+        result = b.simd_umin(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_sllv") {
-        result = kb->simd_sllv(mTestFw, operand1, operand2);
+        result = b.simd_sllv(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_srlv") {
-        result = kb->simd_srlv(mTestFw, operand1, operand2);
+        result = b.simd_srlv(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_rotl") {
-        result = kb->simd_rotl(mTestFw, operand1, operand2);
+        result = b.simd_rotl(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_rotr") {
-        result = kb->simd_rotr(mTestFw, operand1, operand2);
+        result = b.simd_rotr(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_pext") {
-        result = kb->simd_pext(mTestFw, operand1, operand2);
+        result = b.simd_pext(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "simd_pdep") {
-        result = kb->simd_pdep(mTestFw, operand1, operand2);
+        result = b.simd_pdep(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "hsimd_packh") {
-        result = kb->hsimd_packh(mTestFw, operand1, operand2);
+        result = b.hsimd_packh(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "hsimd_packl") {
-        result = kb->hsimd_packl(mTestFw, operand1, operand2);
+        result = b.hsimd_packl(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "hsimd_packus") {
-        result = kb->hsimd_packus(mTestFw, operand1, operand2);
+        result = b.hsimd_packus(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "hsimd_packss") {
-        result = kb->hsimd_packss(mTestFw, operand1, operand2);
+        result = b.hsimd_packss(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "esimd_mergeh") {
-        result = kb->esimd_mergeh(mTestFw, operand1, operand2);
+        result = b.esimd_mergeh(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "esimd_mergel") {
-        result = kb->esimd_mergel(mTestFw, operand1, operand2);
+        result = b.esimd_mergel(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "mvmd_shuffle") {
-        result = kb->mvmd_shuffle(mTestFw, operand1, operand2);
+        result = b.mvmd_shuffle(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "mvmd_compress") {
-        result = kb->mvmd_compress(mTestFw, operand1, operand2);
+        result = b.mvmd_compress(mTestFw, operand1, operand2);
     } else if (mIdisaOperation == "mvmd_dslli") {
-        result = kb->mvmd_dslli(mTestFw, operand1, operand2, mImmediateShift);
+        result = b.mvmd_dslli(mTestFw, operand1, operand2, mImmediateShift);
     } else {
         llvm::report_fatal_error(llvm::StringRef("Binary operation ") + mIdisaOperation + " is unknown to the IdisaBinaryOpTestKernel kernel.");
     }
-    kb->storeOutputStreamBlock("result", ZeroConst, blockOffsetPhi, kb->bitCast(result));
-    Value * nextBlk = kb->CreateAdd(blockOffsetPhi, kb->getSize(1));
+    b.storeOutputStreamBlock("result", ZeroConst, blockOffsetPhi, b.bitCast(result));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, processBlock);
-    Value * moreToDo = kb->CreateICmpNE(nextBlk, numOfBlocks);
-    kb->CreateCondBr(moreToDo, processBlock, done);
-    kb->SetInsertPoint(done);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
+    b.CreateCondBr(moreToDo, processBlock, done);
+    b.SetInsertPoint(done);
 }
 
 class IdisaBinaryOpCheckKernel : public BlockOrientedKernel {
 public:
-    IdisaBinaryOpCheckKernel(BuilderRef b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
                              StreamSet * Operand1, StreamSet * Operand2, StreamSet * result,
                              StreamSet * expected, Scalar * failures);
 protected:
-    void generateDoBlockMethod(BuilderRef kb) override;
+    void generateDoBlockMethod(KernelBuilder & kb) override;
 private:
     const std::string mIdisaOperation;
     const unsigned mTestFw;
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(BuilderRef b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
                                                    StreamSet *Operand1, StreamSet *Operand2, StreamSet *result,
                                                    StreamSet *expected, Scalar *failures)
 : BlockOrientedKernel(b, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
@@ -198,73 +198,73 @@ IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(BuilderRef b, std::string idi
                            {}, {Binding{"totalFailures", failures}}, {}),
 mIdisaOperation(idisa_op), mTestFw(fw), mImmediateShift(imm) {}
 
-void IdisaBinaryOpCheckKernel::generateDoBlockMethod(BuilderRef kb) {
-    Type * fwTy = kb->getIntNTy(mTestFw);
-    BasicBlock * reportFailure = kb->CreateBasicBlock("reportFailure");
-    BasicBlock * continueTest = kb->CreateBasicBlock("continueTest");
-    Constant * const ZeroConst = kb->getSize(0);
-    Value * operand1Block = kb->loadInputStreamBlock("operand1", ZeroConst);
-    Value * operand2Block = kb->loadInputStreamBlock("operand2", ZeroConst);
-    Value * resultBlock = kb->loadInputStreamBlock("test_result", ZeroConst);
-    unsigned fieldCount = kb->getBitBlockWidth()/mTestFw;
-    Value * expectedBlock = kb->allZeroes();
+void IdisaBinaryOpCheckKernel::generateDoBlockMethod(KernelBuilder & b) {
+    Type * fwTy = b.getIntNTy(mTestFw);
+    BasicBlock * reportFailure = b.CreateBasicBlock("reportFailure");
+    BasicBlock * continueTest = b.CreateBasicBlock("continueTest");
+    Constant * const ZeroConst = b.getSize(0);
+    Value * operand1Block = b.loadInputStreamBlock("operand1", ZeroConst);
+    Value * operand2Block = b.loadInputStreamBlock("operand2", ZeroConst);
+    Value * resultBlock = b.loadInputStreamBlock("test_result", ZeroConst);
+    unsigned fieldCount = b.getBitBlockWidth()/mTestFw;
+    Value * expectedBlock = b.allZeroes();
     if (mIdisaOperation == "mvmd_shuffle") {
         for (unsigned i = 0; i < fieldCount; i++) {
-            Value * idx = kb->CreateURem(kb->mvmd_extract(mTestFw, operand2Block, i), ConstantInt::get(fwTy, fieldCount));
-            Value * elt = kb->CreateExtractElement(kb->fwCast(mTestFw, operand1Block), kb->CreateZExtOrTrunc(idx, kb->getInt32Ty()));
-            expectedBlock = kb->mvmd_insert(mTestFw, expectedBlock, elt, i);
+            Value * idx = b.CreateURem(b.mvmd_extract(mTestFw, operand2Block, i), ConstantInt::get(fwTy, fieldCount));
+            Value * elt = b.CreateExtractElement(b.fwCast(mTestFw, operand1Block), b.CreateZExtOrTrunc(idx, b.getInt32Ty()));
+            expectedBlock = b.mvmd_insert(mTestFw, expectedBlock, elt, i);
         }
     } else if (mIdisaOperation == "mvmd_dslli") {
         for (unsigned i = 0; i < fieldCount; i++) {
             Value * elt = nullptr;
-            if (i < mImmediateShift) elt = kb->mvmd_extract(mTestFw, operand2Block, fieldCount - mImmediateShift + i);
-            else elt = kb->mvmd_extract(mTestFw, operand1Block, i - mImmediateShift);
-            expectedBlock = kb->mvmd_insert(mTestFw, expectedBlock, elt, i);
+            if (i < mImmediateShift) elt = b.mvmd_extract(mTestFw, operand2Block, fieldCount - mImmediateShift + i);
+            else elt = b.mvmd_extract(mTestFw, operand1Block, i - mImmediateShift);
+            expectedBlock = b.mvmd_insert(mTestFw, expectedBlock, elt, i);
         }
     } else {
         for (unsigned i = 0; i < fieldCount; i++) {
-            Value * operand1 = kb->mvmd_extract(mTestFw, operand1Block, i);
-            Value * operand2 = kb->mvmd_extract(mTestFw, operand2Block, i);
+            Value * operand1 = b.mvmd_extract(mTestFw, operand1Block, i);
+            Value * operand2 = b.mvmd_extract(mTestFw, operand2Block, i);
             Value * expected = nullptr;
             if (mIdisaOperation.substr(0,5) == "simd_") {
                 if (mIdisaOperation == "simd_add") {
-                    expected = kb->CreateAdd(operand1, operand2);
+                    expected = b.CreateAdd(operand1, operand2);
                 } else if (mIdisaOperation == "simd_sub") {
-                    expected = kb->CreateSub(operand1, operand2);
+                    expected = b.CreateSub(operand1, operand2);
                 } else if (mIdisaOperation == "simd_mult") {
-                    expected = kb->CreateMul(operand1, operand2);
+                    expected = b.CreateMul(operand1, operand2);
                 } else if (mIdisaOperation == "simd_eq") {
-                    expected = kb->CreateSExt(kb->CreateICmpEQ(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpEQ(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_ne") {
-                    expected = kb->CreateSExt(kb->CreateICmpNE(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpNE(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_gt") {
-                    expected = kb->CreateSExt(kb->CreateICmpSGT(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpSGT(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_ge") {
-                    expected = kb->CreateSExt(kb->CreateICmpSGE(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpSGE(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_ugt") {
-                    expected = kb->CreateSExt(kb->CreateICmpUGT(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpUGT(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_uge") {
-                    expected = kb->CreateSExt(kb->CreateICmpUGE(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpUGE(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_lt") {
-                    expected = kb->CreateSExt(kb->CreateICmpSLT(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpSLT(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_le") {
-                    expected = kb->CreateSExt(kb->CreateICmpSLE(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpSLE(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_ult") {
-                    expected = kb->CreateSExt(kb->CreateICmpULT(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpULT(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_ule") {
-                    expected = kb->CreateSExt(kb->CreateICmpULE(operand1, operand2), fwTy);
+                    expected = b.CreateSExt(b.CreateICmpULE(operand1, operand2), fwTy);
                 } else if (mIdisaOperation == "simd_max") {
-                    expected = kb->CreateSelect(kb->CreateICmpSGT(operand1, operand2), operand1, operand2);
+                    expected = b.CreateSelect(b.CreateICmpSGT(operand1, operand2), operand1, operand2);
                 } else if (mIdisaOperation == "simd_min") {
-                    expected = kb->CreateSelect(kb->CreateICmpSLT(operand1, operand2), operand1, operand2);
+                    expected = b.CreateSelect(b.CreateICmpSLT(operand1, operand2), operand1, operand2);
                 } else if (mIdisaOperation == "simd_umax") {
-                    expected = kb->CreateSelect(kb->CreateICmpUGT(operand1, operand2), operand1, operand2);
+                    expected = b.CreateSelect(b.CreateICmpUGT(operand1, operand2), operand1, operand2);
                 } else if (mIdisaOperation == "simd_umin") {
-                    expected = kb->CreateSelect(kb->CreateICmpULT(operand1, operand2), operand1, operand2);
+                    expected = b.CreateSelect(b.CreateICmpULT(operand1, operand2), operand1, operand2);
                 } else if (mIdisaOperation == "simd_sllv") {
-                    expected = kb->CreateShl(operand1, operand2);
+                    expected = b.CreateShl(operand1, operand2);
                 } else if (mIdisaOperation == "simd_srlv") {
-                    expected = kb->CreateLShr(operand1, operand2);
+                    expected = b.CreateLShr(operand1, operand2);
                 } else if (mIdisaOperation == "simd_pext") {
                     Constant * zeroConst = ConstantInt::getNullValue(fwTy);
                     Constant * oneConst = ConstantInt::get(fwTy, 1);
@@ -272,23 +272,23 @@ void IdisaBinaryOpCheckKernel::generateDoBlockMethod(BuilderRef kb) {
                     Value * out_bit = oneConst;
                     for (unsigned i = 0; i < mTestFw; i++) {
                         Value * i_bit = Constant::getIntegerValue(fwTy, APInt::getOneBitSet(mTestFw, i));
-                        Value * operand_i_isSet = kb->CreateICmpEQ(kb->CreateAnd(operand1, i_bit), i_bit);
-                        Value * mask_i_isSet = kb->CreateICmpEQ(kb->CreateAnd(operand2, i_bit), i_bit);
-                        expected = kb->CreateSelect(kb->CreateAnd(operand_i_isSet, mask_i_isSet), kb->CreateOr(expected, out_bit), expected);
-                        out_bit = kb->CreateSelect(mask_i_isSet, kb->CreateAdd(out_bit, out_bit), out_bit);
+                        Value * operand_i_isSet = b.CreateICmpEQ(b.CreateAnd(operand1, i_bit), i_bit);
+                        Value * mask_i_isSet = b.CreateICmpEQ(b.CreateAnd(operand2, i_bit), i_bit);
+                        expected = b.CreateSelect(b.CreateAnd(operand_i_isSet, mask_i_isSet), b.CreateOr(expected, out_bit), expected);
+                        out_bit = b.CreateSelect(mask_i_isSet, b.CreateAdd(out_bit, out_bit), out_bit);
                     }
                 } else if (mIdisaOperation == "simd_rotl") {
                     Constant * fwConst = ConstantInt::get(fwTy, mTestFw);
                     Constant * fwMaskConst = ConstantInt::get(fwTy, mTestFw - 1);
-                    Value * shl = kb->CreateShl(operand1, kb->CreateAnd(operand2, fwMaskConst));
-                    Value * shr = kb->CreateLShr(operand1, kb->CreateAnd(kb->CreateSub(fwConst, operand2), fwMaskConst));
-                    expected = kb->CreateOr(shl, shr);
+                    Value * shl = b.CreateShl(operand1, b.CreateAnd(operand2, fwMaskConst));
+                    Value * shr = b.CreateLShr(operand1, b.CreateAnd(b.CreateSub(fwConst, operand2), fwMaskConst));
+                    expected = b.CreateOr(shl, shr);
                 } else if (mIdisaOperation == "simd_rotr") {
                     Constant * fwConst = ConstantInt::get(fwTy, mTestFw);
                     Constant * fwMaskConst = ConstantInt::get(fwTy, mTestFw - 1);
-                    Value * shl = kb->CreateShl(operand1, kb->CreateAnd(kb->CreateSub(fwConst, operand2), fwMaskConst));
-                    Value * shr = kb->CreateLShr(operand1, kb->CreateAnd(operand2, fwMaskConst));
-                    expected = kb->CreateOr(shl, shr);
+                    Value * shl = b.CreateShl(operand1, b.CreateAnd(b.CreateSub(fwConst, operand2), fwMaskConst));
+                    Value * shr = b.CreateLShr(operand1, b.CreateAnd(operand2, fwMaskConst));
+                    expected = b.CreateOr(shl, shr);
                 } else if (mIdisaOperation == "simd_pdep") {
                     Constant * zeroConst = ConstantInt::getNullValue(fwTy);
                     Constant * oneConst = ConstantInt::get(fwTy, 1);
@@ -296,71 +296,71 @@ void IdisaBinaryOpCheckKernel::generateDoBlockMethod(BuilderRef kb) {
                     Value * shft = zeroConst;
                     Value * select_bit = oneConst;
                     for (unsigned i = 0; i < mTestFw; i++) {
-                        expected = kb->CreateOr(kb->CreateAnd(operand2, kb->CreateShl(kb->CreateAnd(operand1, select_bit), shft)), expected);
+                        expected = b.CreateOr(b.CreateAnd(operand2, b.CreateShl(b.CreateAnd(operand1, select_bit), shft)), expected);
                         Value * i_bit = Constant::getIntegerValue(fwTy, APInt::getOneBitSet(mTestFw, i));
-                        Value * mask_i_isSet = kb->CreateICmpEQ(kb->CreateAnd(operand2, i_bit), i_bit);
-                        select_bit = kb->CreateSelect(mask_i_isSet, kb->CreateAdd(select_bit, select_bit), select_bit);
-                        shft = kb->CreateSelect(mask_i_isSet, shft, kb->CreateAdd(shft, oneConst));
+                        Value * mask_i_isSet = b.CreateICmpEQ(b.CreateAnd(operand2, i_bit), i_bit);
+                        select_bit = b.CreateSelect(mask_i_isSet, b.CreateAdd(select_bit, select_bit), select_bit);
+                        shft = b.CreateSelect(mask_i_isSet, shft, b.CreateAdd(shft, oneConst));
                     }
                 } else {
                     llvm::report_fatal_error(llvm::StringRef("Unknown SIMD vertical operation: ") + mIdisaOperation);
                 }
-                expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw, expectedBlock, expected, i));
+                expectedBlock = b.bitCast(b.mvmd_insert(mTestFw, expectedBlock, expected, i));
             } else if (mIdisaOperation == "hsimd_packh") {
-                operand1 = kb->CreateTrunc(kb->CreateLShr(operand1, mTestFw/2), kb->getIntNTy(mTestFw/2));
-                operand2 = kb->CreateTrunc(kb->CreateLShr(operand2, mTestFw/2), kb->getIntNTy(mTestFw/2));
-                expectedBlock = kb->mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
-                expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
+                operand1 = b.CreateTrunc(b.CreateLShr(operand1, mTestFw/2), b.getIntNTy(mTestFw/2));
+                operand2 = b.CreateTrunc(b.CreateLShr(operand2, mTestFw/2), b.getIntNTy(mTestFw/2));
+                expectedBlock = b.mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
+                expectedBlock = b.bitCast(b.mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
             } else if (mIdisaOperation == "hsimd_packl") {
-                operand1 = kb->CreateTrunc(operand1, kb->getIntNTy(mTestFw/2));
-                operand2 = kb->CreateTrunc(operand2, kb->getIntNTy(mTestFw/2));
-                expectedBlock = kb->mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
-                expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
+                operand1 = b.CreateTrunc(operand1, b.getIntNTy(mTestFw/2));
+                operand2 = b.CreateTrunc(operand2, b.getIntNTy(mTestFw/2));
+                expectedBlock = b.mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
+                expectedBlock = b.bitCast(b.mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
             } else if (mIdisaOperation == "hsimd_packus") {
                 Value * zeroes = ConstantInt::getNullValue(operand1->getType());
-                operand1 = kb->CreateSelect(kb->CreateICmpSLT(operand1, zeroes), zeroes, operand1);
-                operand2 = kb->CreateSelect(kb->CreateICmpSLT(operand2, zeroes), zeroes, operand2);
-                Value * testVal = ConstantInt::get(kb->getContext(), APInt::getLowBitsSet(mTestFw, mTestFw/2));
-                operand1 = kb->CreateSelect(kb->CreateICmpSGT(operand1, testVal), testVal, operand1);
-                operand2 = kb->CreateSelect(kb->CreateICmpSGT(operand2, testVal), testVal, operand2);
-                expectedBlock = kb->mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
-                expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
+                operand1 = b.CreateSelect(b.CreateICmpSLT(operand1, zeroes), zeroes, operand1);
+                operand2 = b.CreateSelect(b.CreateICmpSLT(operand2, zeroes), zeroes, operand2);
+                Value * testVal = ConstantInt::get(b.getContext(), APInt::getLowBitsSet(mTestFw, mTestFw/2));
+                operand1 = b.CreateSelect(b.CreateICmpSGT(operand1, testVal), testVal, operand1);
+                operand2 = b.CreateSelect(b.CreateICmpSGT(operand2, testVal), testVal, operand2);
+                expectedBlock = b.mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
+                expectedBlock = b.bitCast(b.mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
             } else if (mIdisaOperation == "hsimd_packss") {
-                Value * testVal = ConstantInt::get(kb->getIntNTy(mTestFw), (1 << (mTestFw/2 - 1)) - 1);
-                operand1 = kb->CreateSelect(kb->CreateICmpSGT(operand1, testVal), testVal, operand1);
-                operand2 = kb->CreateSelect(kb->CreateICmpSGT(operand2, testVal), testVal, operand2);
-                testVal = kb->CreateNot(testVal);
-                operand1 = kb->CreateSelect(kb->CreateICmpSLT(operand1, testVal), testVal, operand1);
-                operand2 = kb->CreateSelect(kb->CreateICmpSLT(operand2, testVal), testVal, operand2);
-                expectedBlock = kb->mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
-                expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
+                Value * testVal = ConstantInt::get(b.getIntNTy(mTestFw), (1 << (mTestFw/2 - 1)) - 1);
+                operand1 = b.CreateSelect(b.CreateICmpSGT(operand1, testVal), testVal, operand1);
+                operand2 = b.CreateSelect(b.CreateICmpSGT(operand2, testVal), testVal, operand2);
+                testVal = b.CreateNot(testVal);
+                operand1 = b.CreateSelect(b.CreateICmpSLT(operand1, testVal), testVal, operand1);
+                operand2 = b.CreateSelect(b.CreateICmpSLT(operand2, testVal), testVal, operand2);
+                expectedBlock = b.mvmd_insert(mTestFw/2, expectedBlock, operand1, i);
+                expectedBlock = b.bitCast(b.mvmd_insert(mTestFw/2, expectedBlock, operand2, fieldCount + i));
             } else if (mIdisaOperation == "esimd_mergeh") {
                 if (i >= fieldCount/2) {
-                    expectedBlock = kb->mvmd_insert(mTestFw, expectedBlock, operand1, 2*(i - fieldCount/2));
-                    expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw, expectedBlock, operand2, 2*(i - fieldCount/2) + 1));
+                    expectedBlock = b.mvmd_insert(mTestFw, expectedBlock, operand1, 2*(i - fieldCount/2));
+                    expectedBlock = b.bitCast(b.mvmd_insert(mTestFw, expectedBlock, operand2, 2*(i - fieldCount/2) + 1));
                 }
             } else if (mIdisaOperation == "esimd_mergel") {
                 if (i < fieldCount/2) {
-                    expectedBlock = kb->mvmd_insert(mTestFw, expectedBlock, operand1, 2*i);
-                    expectedBlock = kb->bitCast(kb->mvmd_insert(mTestFw, expectedBlock, operand2, 2*i + 1));
+                    expectedBlock = b.mvmd_insert(mTestFw, expectedBlock, operand1, 2*i);
+                    expectedBlock = b.bitCast(b.mvmd_insert(mTestFw, expectedBlock, operand2, 2*i + 1));
                 }
             }
         }
     }
-    kb->storeOutputStreamBlock("expected_result", ZeroConst, expectedBlock);
-    Value * failures = kb->simd_ugt(mTestFw, kb->simd_xor(resultBlock, expectedBlock), kb->allZeroes());
-    Value * anyFailure = kb->bitblock_any(failures);
-    Value * failure_count = kb->CreateUDiv(kb->bitblock_popcount(failures), kb->getSize(mTestFw));
-    kb->setScalarField("totalFailures", kb->CreateAdd(kb->getScalarField("totalFailures"), failure_count));
+    b.storeOutputStreamBlock("expected_result", ZeroConst, expectedBlock);
+    Value * failures = b.simd_ugt(mTestFw, b.simd_xor(resultBlock, expectedBlock), b.allZeroes());
+    Value * anyFailure = b.bitblock_any(failures);
+    Value * failure_count = b.CreateUDiv(b.bitblock_popcount(failures), b.getSize(mTestFw));
+    b.setScalarField("totalFailures", b.CreateAdd(b.getScalarField("totalFailures"), failure_count));
     if (!QuietMode) {
-        kb->CreateCondBr(anyFailure, reportFailure, continueTest);
-        kb->SetInsertPoint(reportFailure);
-        kb->CallPrintRegister("operand1", kb->bitCast(operand1Block));
-        kb->CallPrintRegister("operand2", kb->bitCast(operand2Block));
-        kb->CallPrintRegister(mIdisaOperation + "(" + std::to_string(mTestFw) + ", operand1, operand2)", resultBlock);
-        kb->CallPrintRegister("expecting", expectedBlock);
-        kb->CreateBr(continueTest);
-        kb->SetInsertPoint(continueTest);
+        b.CreateCondBr(anyFailure, reportFailure, continueTest);
+        b.SetInsertPoint(reportFailure);
+        b.CallPrintRegister("operand1", b.bitCast(operand1Block));
+        b.CallPrintRegister("operand2", b.bitCast(operand2Block));
+        b.CallPrintRegister(mIdisaOperation + "(" + std::to_string(mTestFw) + ", operand1, operand2)", resultBlock);
+        b.CallPrintRegister("expecting", expectedBlock);
+        b.CreateBr(continueTest);
+        b.SetInsertPoint(continueTest);
     }
 }
 
@@ -417,14 +417,14 @@ IDISAtestFunctionType pipelineGen(CPUDriver & pxDriver) {
 
     auto & b = pxDriver.getBuilder();
 
-    Type * const sizeTy = b->getSizeTy();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const sizeTy = b.getSizeTy();
+    Type * const int32Ty = b.getInt32Ty();
 
     Bindings inputs;
     inputs.emplace_back(int32Ty, "operand1FileDecriptor");
     inputs.emplace_back(int32Ty, "operand2FileDecriptor");
     if (!TestOutputFile.empty()) {
-        inputs.emplace_back(b->getInt8PtrTy(), "outputFileName");
+        inputs.emplace_back(b.getInt8PtrTy(), "outputFileName");
     }
 
     auto P = pxDriver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});

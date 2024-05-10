@@ -15,102 +15,102 @@ const auto FINAL_BLOCK_SUFFIX = "_FinalBlock";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateMultiBlockLogic
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockKernelCompiler::generateMultiBlockLogic(BuilderRef b, Value * const numOfBlocks) {
+void BlockKernelCompiler::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfBlocks) {
 
     const auto stride = mTarget->getStride();
 
-    if (LLVM_UNLIKELY(stride != b->getBitBlockWidth())) {
+    if (LLVM_UNLIKELY(stride != b.getBitBlockWidth())) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);
         out << getName() << ": the Stride (" << stride << ") of BlockOrientedKernel "
-               "equal to the BitBlockWidth (" << b->getBitBlockWidth() << ")";
+               "equal to the BitBlockWidth (" << b.getBitBlockWidth() << ")";
         report_fatal_error(out.str());
     }
 
     const auto hasFinalBlock = true; // mTarget->requiresExplicitPartialFinalStride();
 
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    mStrideLoopBody = b->CreateBasicBlock(getName() + "_strideLoopBody");
+    BasicBlock * const entryBlock = b.GetInsertBlock();
+    mStrideLoopBody = b.CreateBasicBlock(getName() + "_strideLoopBody");
 
 
-    BasicBlock * const incrementCountableItems = b->CreateBasicBlock(getName() + "_incrementCountableItems");
-    BasicBlock * const stridesDone = b->CreateBasicBlock(getName() + "_stridesDone");
+    BasicBlock * const incrementCountableItems = b.CreateBasicBlock(getName() + "_incrementCountableItems");
+    BasicBlock * const stridesDone = b.CreateBasicBlock(getName() + "_stridesDone");
     BasicBlock * doFinalBlock = nullptr;
     BasicBlock * segmentDone = nullptr;
 
     if (hasFinalBlock) {
-        doFinalBlock = b->CreateBasicBlock(getName() + "_doFinalBlock");
-        segmentDone = b->CreateBasicBlock(getName() + "_segmentDone");
-        b->CreateUnlikelyCondBr(mIsFinal, doFinalBlock, mStrideLoopBody);
+        doFinalBlock = b.CreateBasicBlock(getName() + "_doFinalBlock");
+        segmentDone = b.CreateBasicBlock(getName() + "_segmentDone");
+        b.CreateUnlikelyCondBr(mIsFinal, doFinalBlock, mStrideLoopBody);
     } else {
-        b->CreateBr(mStrideLoopBody);
+        b.CreateBr(mStrideLoopBody);
     }
 
     /// BLOCK BODY
 
-    b->SetInsertPoint(mStrideLoopBody);
+    b.SetInsertPoint(mStrideLoopBody);
     mStrideLoopTarget = nullptr;
-    if (hasFinalBlock && b->supportsIndirectBr()) {
+    if (hasFinalBlock && b.supportsIndirectBr()) {
         Value * const baseTarget = BlockAddress::get(segmentDone);
-        mStrideLoopTarget = b->CreatePHI(baseTarget->getType(), 2, "strideTarget");
+        mStrideLoopTarget = b.CreatePHI(baseTarget->getType(), 2, "strideTarget");
         mStrideLoopTarget->addIncoming(baseTarget, entryBlock);
     }
-    mStrideBlockIndex = b->CreatePHI(b->getSizeTy(), 2);
-    mStrideBlockIndex->addIncoming(b->getSize(0), entryBlock);
+    mStrideBlockIndex = b.CreatePHI(b.getSizeTy(), 2);
+    mStrideBlockIndex->addIncoming(b.getSize(0), entryBlock);
 
     /// GENERATE DO BLOCK METHOD
 
     writeDoBlockMethod(b);
 
-    Value * const nextStrideBlockIndex = b->CreateAdd(mStrideBlockIndex, b->getSize(1));
-    Value * noMore = b->CreateICmpEQ(nextStrideBlockIndex, numOfBlocks);
+    Value * const nextStrideBlockIndex = b.CreateAdd(mStrideBlockIndex, b.getSize(1));
+    Value * noMore = b.CreateICmpEQ(nextStrideBlockIndex, numOfBlocks);
     if (canSetTerminateSignal()) {
-        noMore = b->CreateOr(noMore, b->getTerminationSignal());
+        noMore = b.CreateOr(noMore, b.getTerminationSignal());
     }
-    b->CreateUnlikelyCondBr(noMore, stridesDone, incrementCountableItems);
+    b.CreateUnlikelyCondBr(noMore, stridesDone, incrementCountableItems);
 
-    b->SetInsertPoint(incrementCountableItems);
+    b.SetInsertPoint(incrementCountableItems);
     incrementCountableItemCounts(b);
-    BasicBlock * const bodyEnd = b->GetInsertBlock();
+    BasicBlock * const bodyEnd = b.GetInsertBlock();
     if (mStrideLoopTarget) {
         mStrideLoopTarget->addIncoming(mStrideLoopTarget, bodyEnd);
     }
     mStrideBlockIndex->addIncoming(nextStrideBlockIndex, bodyEnd);
 
-    b->CreateBr(mStrideLoopBody);
+    b.CreateBr(mStrideLoopBody);
 
     stridesDone->moveAfter(bodyEnd);
 
     /// STRIDE DONE
 
-    b->SetInsertPoint(stridesDone);
+    b.SetInsertPoint(stridesDone);
 
     if (hasFinalBlock) {
 
         // Now conditionally perform the final block processing depending on the doFinal parameter.
         if (mStrideLoopTarget) {
-            mStrideLoopBranch = b->CreateIndirectBr(mStrideLoopTarget, 3);
+            mStrideLoopBranch = b.CreateIndirectBr(mStrideLoopTarget, 3);
             mStrideLoopBranch->addDestination(doFinalBlock);
             mStrideLoopBranch->addDestination(segmentDone);
         } else {
-            b->CreateUnlikelyCondBr(mIsFinal, doFinalBlock, segmentDone);
+            b.CreateUnlikelyCondBr(mIsFinal, doFinalBlock, segmentDone);
         }
 
         doFinalBlock->moveAfter(stridesDone);
 
         /// DO FINAL BLOCK
 
-        b->SetInsertPoint(doFinalBlock);
+        b.SetInsertPoint(doFinalBlock);
         writeFinalBlockMethod(b, getRemainingItems(b));
-        b->CreateBr(segmentDone);
+        b.CreateBr(segmentDone);
 
-        segmentDone->moveAfter(b->GetInsertBlock());
+        segmentDone->moveAfter(b.GetInsertBlock());
 
-        b->SetInsertPoint(segmentDone);
+        b.SetInsertPoint(segmentDone);
 
         // Update the branch prediction metadata to indicate that the likely target will be segmentDone
         if (mStrideLoopTarget) {
-            MDBuilder mdb(b->getContext());
+            MDBuilder mdb(b.getContext());
             const auto destinations = mStrideLoopBranch->getNumDestinations();
             SmallVector<uint32_t, 16> weights(destinations);
             for (unsigned i = 0; i < destinations; ++i) {
@@ -127,7 +127,7 @@ void BlockKernelCompiler::generateMultiBlockLogic(BuilderRef b, Value * const nu
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief incrementCountableItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockKernelCompiler::incrementCountableItemCounts(BuilderRef b) {
+void BlockKernelCompiler::incrementCountableItemCounts(KernelBuilder & b) {
     // Update the processed item counts
 
     const auto stride = mTarget->getStride();
@@ -137,13 +137,13 @@ void BlockKernelCompiler::incrementCountableItemCounts(BuilderRef b) {
             const ProcessingRate & rate = input.getRate();
             Value * offset = nullptr;
             if (rate.isFixed()) {
-                offset = b->getSize(ceiling(getUpperBound(input) * stride));
+                offset = b.getSize(ceiling(getUpperBound(input) * stride));
             } else { // if (rate.isPopCount() || rate.isNegatedPopCount())
                 offset = getPopCountRateItemCount(b, rate);
             }
-            Value * const initial = b->getProcessedItemCount(input.getName());
-            Value * const processed = b->CreateAdd(initial, offset);
-            b->setProcessedItemCount(input.getName(), processed);
+            Value * const initial = b.getProcessedItemCount(input.getName());
+            Value * const processed = b.CreateAdd(initial, offset);
+            b.setProcessedItemCount(input.getName(), processed);
         }
     }
     // Update the produced item counts
@@ -152,13 +152,13 @@ void BlockKernelCompiler::incrementCountableItemCounts(BuilderRef b) {
             const ProcessingRate & rate = output.getRate();
             Value * offset = nullptr;
             if (rate.isFixed()) {
-                offset = b->getSize(ceiling(getUpperBound(output) * stride));
+                offset = b.getSize(ceiling(getUpperBound(output) * stride));
             } else { // if (rate.isPopCount() || rate.isNegatedPopCount())
                 offset = getPopCountRateItemCount(b, rate);
             }
-            Value * const initial = b->getProducedItemCount(output.getName());
-            Value * const produced = b->CreateAdd(initial, offset);
-            b->setProducedItemCount(output.getName(), produced);
+            Value * const initial = b.getProducedItemCount(output.getName());
+            Value * const produced = b.CreateAdd(initial, offset);
+            b.setProducedItemCount(output.getName(), produced);
         }
     }
 }
@@ -166,7 +166,7 @@ void BlockKernelCompiler::incrementCountableItemCounts(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPopCountRateItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * BlockKernelCompiler::getPopCountRateItemCount(BuilderRef /* b */,
+Value * BlockKernelCompiler::getPopCountRateItemCount(KernelBuilder & /* b */,
                                                       const ProcessingRate & /* rate */) {
     report_fatal_error("PopCount rates are not currently supported");
 }
@@ -174,7 +174,7 @@ Value * BlockKernelCompiler::getPopCountRateItemCount(BuilderRef /* b */,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getRemainingItems
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * BlockKernelCompiler::getRemainingItems(BuilderRef b) {
+Value * BlockKernelCompiler::getRemainingItems(KernelBuilder & b) {
     const auto count = mInputStreamSets.size();
     assert (count > 0);
     for (unsigned i = 0; i < count; i++) {
@@ -188,15 +188,15 @@ Value * BlockKernelCompiler::getRemainingItems(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeDoBlockMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void BlockKernelCompiler::writeDoBlockMethod(BuilderRef b) {
+inline void BlockKernelCompiler::writeDoBlockMethod(KernelBuilder & b) {
 
-    Value * const self = b->getHandle();
+    Value * const self = b.getHandle();
     Function * const cp = mCurrentMethod;
-    auto ip = b->saveIP();
+    auto ip = b.saveIP();
     Vec<Value *> availableItemCount;
 
     /// Check if the do block method is called and create the function if necessary
-    if (!b->supportsIndirectBr()) {
+    if (!b.supportsIndirectBr()) {
 
         std::vector<Type *> params;
         params.reserve(1 + mAccessibleInputItems.size());
@@ -205,8 +205,8 @@ inline void BlockKernelCompiler::writeDoBlockMethod(BuilderRef b) {
             params.push_back(avail->getType());
         }
 
-        FunctionType * const type = FunctionType::get(b->getVoidTy(), params, false);
-        mCurrentMethod = Function::Create(type, GlobalValue::InternalLinkage, getName() + DO_BLOCK_SUFFIX, b->getModule());
+        FunctionType * const type = FunctionType::get(b.getVoidTy(), params, false);
+        mCurrentMethod = Function::Create(type, GlobalValue::InternalLinkage, getName() + DO_BLOCK_SUFFIX, b.getModule());
         mCurrentMethod->setCallingConv(CallingConv::C);
         mCurrentMethod->setDoesNotThrow();
         auto args = mCurrentMethod->arg_begin();
@@ -218,16 +218,16 @@ inline void BlockKernelCompiler::writeDoBlockMethod(BuilderRef b) {
         }
         assert (availableItemCount.size() == mAccessibleInputItems.size());
         mAccessibleInputItems.swap(availableItemCount);
-        b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", mCurrentMethod));
+        b.SetInsertPoint(BasicBlock::Create(b.getContext(), "entry", mCurrentMethod));
     }
 
     TARGET->generateDoBlockMethod(b); // must be implemented by the BlockOrientedKernelBuilder subtype
 
-    if (!b->supportsIndirectBr()) {
+    if (!b.supportsIndirectBr()) {
         // Restore the DoSegment function state then call the DoBlock method
-        b->CreateRetVoid();
+        b.CreateRetVoid();
         mDoBlockMethod = mCurrentMethod;
-        b->restoreIP(ip);
+        b.restoreIP(ip);
         setHandle(self);
         mCurrentMethod = cp;
         mAccessibleInputItems.swap(availableItemCount);
@@ -239,24 +239,24 @@ inline void BlockKernelCompiler::writeDoBlockMethod(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeFinalBlockMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-inline void BlockKernelCompiler::writeFinalBlockMethod(BuilderRef b, Value * remainingItems) {
+inline void BlockKernelCompiler::writeFinalBlockMethod(KernelBuilder & b, Value * remainingItems) {
 
-    Value * const self = b->getHandle();
+    Value * const self = b.getHandle();
     Function * const cp = mCurrentMethod;
     Value * const remainingItemCount = remainingItems;
-    auto ip = b->saveIP();
+    auto ip = b.saveIP();
     Vec<Value *> availableItemCount;
 
-    if (!b->supportsIndirectBr()) {
+    if (!b.supportsIndirectBr()) {
         std::vector<Type *> params;
         params.reserve(2 + mAccessibleInputItems.size());
         params.push_back(self->getType());
-        params.push_back(b->getSizeTy());
+        params.push_back(b.getSizeTy());
         for (Value * avail : mAccessibleInputItems) {
             params.push_back(avail->getType());
         }
-        FunctionType * const type = FunctionType::get(b->getVoidTy(), params, false);
-        mCurrentMethod = Function::Create(type, GlobalValue::InternalLinkage, getName() + FINAL_BLOCK_SUFFIX, b->getModule());
+        FunctionType * const type = FunctionType::get(b.getVoidTy(), params, false);
+        mCurrentMethod = Function::Create(type, GlobalValue::InternalLinkage, getName() + FINAL_BLOCK_SUFFIX, b.getModule());
         mCurrentMethod->setCallingConv(CallingConv::C);
         mCurrentMethod->setDoesNotThrow();
         auto args = mCurrentMethod->arg_begin();
@@ -270,14 +270,14 @@ inline void BlockKernelCompiler::writeFinalBlockMethod(BuilderRef b, Value * rem
         }
         assert (availableItemCount.size() == mAccessibleInputItems.size());
         mAccessibleInputItems.swap(availableItemCount);
-        b->SetInsertPoint(BasicBlock::Create(b->getContext(), "entry", mCurrentMethod));
+        b.SetInsertPoint(BasicBlock::Create(b.getContext(), "entry", mCurrentMethod));
     }
 
     TARGET->generateFinalBlockMethod(b, remainingItems); // may be implemented by the BlockOrientedKernel subtype
 
-    if (!b->supportsIndirectBr()) {
-        b->CreateRetVoid();
-        b->restoreIP(ip);
+    if (!b.supportsIndirectBr()) {
+        b.CreateRetVoid();
+        b.restoreIP(ip);
         setHandle(self);
         mAccessibleInputItems.swap(availableItemCount);
         // Restore the DoSegment function state then call the DoFinal method
@@ -286,7 +286,7 @@ inline void BlockKernelCompiler::writeFinalBlockMethod(BuilderRef b, Value * rem
         args.push_back(self);
         args.push_back(remainingItemCount);
         args.insert(args.end(), mAccessibleInputItems.begin(), mAccessibleInputItems.end());
-        b->CreateCall(mCurrentMethod->getFunctionType(), mCurrentMethod, args);
+        b.CreateCall(mCurrentMethod->getFunctionType(), mCurrentMethod, args);
         mCurrentMethod = cp;
     }
 
@@ -295,22 +295,22 @@ inline void BlockKernelCompiler::writeFinalBlockMethod(BuilderRef b, Value * rem
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateDefaultFinalBlockMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void BlockKernelCompiler::generateDefaultFinalBlockMethod(BuilderRef b) {
-    if (b->supportsIndirectBr()) {
-        BasicBlock * const bb = b->CreateBasicBlock("resume");
-        mStrideLoopBranch->addDestination(bb);
-        BasicBlock * const current = b->GetInsertBlock();
-        mStrideLoopTarget->addIncoming(BlockAddress::get(bb), current);
-        mStrideBlockIndex->addIncoming(b->getSize(0), current);
-        b->CreateBr(mStrideLoopBody);
-        bb->moveAfter(current);
-        b->SetInsertPoint(bb);
+void BlockKernelCompiler::generateDefaultFinalBlockMethod(KernelBuilder & b) {
+    if (b.supportsIndirectBr()) {
+        BasicBlock * const resumePoint = b.CreateBasicBlock("resume");
+        mStrideLoopBranch->addDestination(resumePoint);
+        BasicBlock * const current = b.GetInsertBlock();
+        mStrideLoopTarget->addIncoming(BlockAddress::get(resumePoint), current);
+        mStrideBlockIndex->addIncoming(b.getSize(0), current);
+        b.CreateBr(mStrideLoopBody);
+        resumePoint->moveAfter(current);
+        b.SetInsertPoint(resumePoint);
     } else {
         std::vector<Value *> args;
         args.reserve(1 + mAccessibleInputItems.size());
-        args.push_back(b->getHandle());
+        args.push_back(b.getHandle());
         args.insert(args.end(), mAccessibleInputItems.begin(), mAccessibleInputItems.end());
-        b->CreateCall(mDoBlockMethod->getFunctionType(), mDoBlockMethod, args);
+        b.CreateCall(mDoBlockMethod->getFunctionType(), mDoBlockMethod, args);
     }
 }
 

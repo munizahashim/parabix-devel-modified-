@@ -26,16 +26,15 @@ namespace kernel {
 
 class CaptureBlock : public kernel::BlockOrientedKernel {
 public:
-    CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream);
+    CaptureBlock(KernelBuilder & b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream);
 protected:
-    void generateDoBlockMethod(BuilderRef b) override;
-    void generateFinalBlockMethod(BuilderRef b, llvm::Value * const remainingByte) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * const remainingByte) override;
 };
 
 class BitstreamIllustrator : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
 public:
-    BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh = '.', char oneCh = '1');
+    BitstreamIllustrator(KernelBuilder & b, StreamSet * bits, StreamSet * displayBasis, char zeroCh = '.', char oneCh = '1');
 protected:
     void generatePabloMethod() override;
 
@@ -45,9 +44,8 @@ private:
 };
 
 class PrintableASCII : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
 public:
-    PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute = '.');
+    PrintableASCII(KernelBuilder & b, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute = '.');
 protected:
     void generatePabloMethod() override;
 
@@ -56,9 +54,8 @@ private:
 };
 
 class PrintableBixNum : public pablo::PabloKernel {
-    using BuilderRef = BuilderRef;
 public:
-    PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printable, char hexBase = 'A');
+    PrintableBixNum(KernelBuilder & b, StreamSet * bixnum, StreamSet * printable, char hexBase = 'A');
 protected:
     void generatePabloMethod() override;
 
@@ -72,8 +69,8 @@ static std::string GenerateName(StringRef name, StreamSet * s) {
            "@" + name.str();
 }
 
-DebugDisplayKernel::DebugDisplayKernel(BuilderRef b, StringRef name, StreamSet * s)
-: MultiBlockKernel(b, GenerateName(name, s), {{"s", s}}, {}, {}, {}, {InternalScalar{b->getSizeTy(), "initialStride"}})
+DebugDisplayKernel::DebugDisplayKernel(KernelBuilder & b, StringRef name, StreamSet * s)
+: MultiBlockKernel(b, GenerateName(name, s), {{"s", s}}, {}, {}, {}, {InternalScalar{b.getSizeTy(), "initialStride"}})
 , mName(name)
 , mFW(s->getFieldWidth())
 , mSCount(s->getNumElements())
@@ -81,12 +78,12 @@ DebugDisplayKernel::DebugDisplayKernel(BuilderRef b, StringRef name, StreamSet *
     if (mFW != 1) {
         setStride(1);
     } else {
-        setStride(b->getBitBlockWidth());
+        setStride(b.getBitBlockWidth());
     }
     addAttribute(SideEffecting());
 }
 
-void DebugDisplayKernel::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
+void DebugDisplayKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     auto getRegName = [&](uint32_t i) -> std::string {
         if (mSCount != 1) {
             return std::string(mName) + "[" + std::to_string(i) + "]";
@@ -97,52 +94,52 @@ void DebugDisplayKernel::generateMultiBlockLogic(BuilderRef b, Value * const num
 
     bool useBitblocks = mFW == 1;
 
-    Type * const sizeTy = b->getSizeTy();
-    Value * const sz_ZERO = b->getSize(0);
-    Value * const sz_ONE = b->getSize(1);
+    Type * const sizeTy = b.getSizeTy();
+    Value * const sz_ZERO = b.getSize(0);
+    Value * const sz_ONE = b.getSize(1);
 
-    BasicBlock * const entry = b->GetInsertBlock();
-    BasicBlock * const loop = b->CreateBasicBlock("loop");
-    BasicBlock * const exit = b->CreateBasicBlock("exit");
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const loop = b.CreateBasicBlock("loop");
+    BasicBlock * const exit = b.CreateBasicBlock("exit");
 
     Value * initialStride = nullptr;
     if (!useBitblocks) {
-        initialStride = b->getScalarField("initialStride");
+        initialStride = b.getScalarField("initialStride");
     }
     
     if (!useBitblocks) {
         // Since stride width == 1, an extra final call to this kernel is made.
         // We don't want to print anything out on this final call.
-        b->CreateCondBr(b->isFinal(), exit, loop);
+        b.CreateCondBr(b.isFinal(), exit, loop);
     } else {
-        b->CreateBr(loop);
+        b.CreateBr(loop);
     }
 
-    b->SetInsertPoint(loop);
-    PHINode * const strideNum = b->CreatePHI(sizeTy, 2);
+    b.SetInsertPoint(loop);
+    PHINode * const strideNum = b.CreatePHI(sizeTy, 2);
     strideNum->addIncoming(sz_ZERO, entry);
     if (useBitblocks) {
         // strideNum is equivalent to the block number since stride width == bitblock width
         for (uint32_t i = 0; i < mSCount; ++i) {
-            Value * const block = b->loadInputStreamBlock("s", b->getInt32(i), strideNum);
-            b->CallPrintRegister(getRegName(i), block);
+            Value * const block = b.loadInputStreamBlock("s", b.getInt32(i), strideNum);
+            b.CallPrintRegister(getRegName(i), block);
         }
     } else {
-        IntegerType * const fieldTy = b->getIntNTy(mFW);
+        IntegerType * const fieldTy = b.getIntNTy(mFW);
         for (uint32_t i = 0; i < mSCount; ++i) {
-            Value * const ptr = b->getRawInputPointer("s", b->getInt32(i), b->CreateAdd(strideNum, initialStride));
-            Value * const val = b->CreateLoad(fieldTy, ptr);
-            b->CallPrintInt(getRegName(i), val);
+            Value * const ptr = b.getRawInputPointer("s", b.getInt32(i), b.CreateAdd(strideNum, initialStride));
+            Value * const val = b.CreateLoad(fieldTy, ptr);
+            b.CallPrintInt(getRegName(i), val);
         }
     }
-    Value * const nextStrideNum = b->CreateAdd(strideNum, sz_ONE);
+    Value * const nextStrideNum = b.CreateAdd(strideNum, sz_ONE);
     strideNum->addIncoming(nextStrideNum, loop);
     if (!useBitblocks) {
-        b->setScalarField("initialStride", b->CreateAdd(nextStrideNum, initialStride));
+        b.setScalarField("initialStride", b.CreateAdd(nextStrideNum, initialStride));
     }
-    b->CreateCondBr(b->CreateICmpNE(nextStrideNum, numOfStrides), loop, exit);
+    b.CreateCondBr(b.CreateICmpNE(nextStrideNum, numOfStrides), loop, exit);
 
-    b->SetInsertPoint(exit);
+    b.SetInsertPoint(exit);
 }
 
 extern "C" void appendStreamText_wrapper(intptr_t illustrator_addr, uint64_t streamNo, char * streamText, uint64_t lgth) {
@@ -239,8 +236,8 @@ void ParabixIllustrator::displayAllCapturedData() {
     }
 }
 
-BitstreamIllustrator::BitstreamIllustrator(BuilderRef kb, StreamSet * bits, StreamSet * displayBasis, char zeroCh, char oneCh)
-    : pablo::PabloKernel(kb, "BitstreamIllustrator" + std::to_string(zeroCh) + "_" + std::to_string(oneCh),
+BitstreamIllustrator::BitstreamIllustrator(KernelBuilder & b, StreamSet * bits, StreamSet * displayBasis, char zeroCh, char oneCh)
+    : pablo::PabloKernel(b, "BitstreamIllustrator" + std::to_string(zeroCh) + "_" + std::to_string(oneCh),
                   {Binding{"bits", bits}},
                   {Binding{"displayBasis", displayBasis}}),
                   mZeroCh(zeroCh), mOneCh(oneCh) {}
@@ -269,8 +266,8 @@ void BitstreamIllustrator::generatePabloMethod() {
     }
 }
 
-PrintableASCII::PrintableASCII(BuilderRef kb, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
-    : pablo::PabloKernel(kb, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
+PrintableASCII::PrintableASCII(KernelBuilder & b, StreamSet * basisBits, StreamSet * printableBasis, char nonASCIIsubstitute)
+    : pablo::PabloKernel(b, "PrintableASCII" + std::to_string(nonASCIIsubstitute),
                   {Binding{"basisBits", basisBits}},
                   {Binding{"printableBasis", printableBasis}}),
                   mNonASCIIsubstitute(nonASCIIsubstitute) {}
@@ -294,8 +291,8 @@ void PrintableASCII::generatePabloMethod() {
     }
 }
 
-PrintableBixNum::PrintableBixNum(BuilderRef kb, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
-    : pablo::PabloKernel(kb, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
+PrintableBixNum::PrintableBixNum(KernelBuilder & b, StreamSet * bixnum, StreamSet * printableBasis, char hexBase)
+    : pablo::PabloKernel(b, "PrintableBixNum_x" + std::to_string(bixnum->getNumElements()) + hexBase,
                   {Binding{"bixnum", bixnum}},
                   {Binding{"printableBasis", printableBasis}}), mHexBase(hexBase) {}
 
@@ -317,7 +314,7 @@ void PrintableBixNum::generatePabloMethod() {
     }
 }
 
-CaptureBlock::CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream)
+CaptureBlock::CaptureBlock(KernelBuilder & b, Scalar * accumObj, Scalar * streamNo, StreamSet * byteStream)
 : BlockOrientedKernel(b, "CallBack",
                       {Binding{"byteStream", byteStream}},
                       {},
@@ -327,22 +324,22 @@ CaptureBlock::CaptureBlock(BuilderRef b, Scalar * accumObj, Scalar * streamNo, S
                           addAttribute(SideEffecting());
                       }
 
-void CaptureBlock::generateDoBlockMethod(BuilderRef b) {
-    Value * byteStreamBasePtr = b->CreatePointerCast(b->getInputStreamBlockPtr("byteStream", b->getSize(0)), b->getInt8PtrTy());
-    Value * accumObj = b->getScalarField("accumObj");
-    Value * streamNo = b->getScalarField("streamNo");
-    Function * callback = b->getModule()->getFunction("appendStreamText_wrapper");
+void CaptureBlock::generateDoBlockMethod(KernelBuilder & b) {
+    Value * byteStreamBasePtr = b.CreatePointerCast(b.getInputStreamBlockPtr("byteStream", b.getSize(0)), b.getInt8PtrTy());
+    Value * accumObj = b.getScalarField("accumObj");
+    Value * streamNo = b.getScalarField("streamNo");
+    Function * callback = b.getModule()->getFunction("appendStreamText_wrapper");
     FunctionType * fty = callback->getFunctionType();
-    b->CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, b->getSize(codegen::BlockSize)});
+    b.CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, b.getSize(codegen::BlockSize)});
 }
 
-void CaptureBlock::generateFinalBlockMethod(BuilderRef b, Value * const remainingBytes) {
-    Value * byteStreamBasePtr = b->CreatePointerCast(b->getInputStreamBlockPtr("byteStream", b->getSize(0)), b->getInt8PtrTy());
-    Value * accumObj = b->getScalarField("accumObj");
-    Value * streamNo = b->getScalarField("streamNo");
-    Function * callback = b->getModule()->getFunction("appendStreamText_wrapper");
+void CaptureBlock::generateFinalBlockMethod(KernelBuilder & b, Value * const remainingBytes) {
+    Value * byteStreamBasePtr = b.CreatePointerCast(b.getInputStreamBlockPtr("byteStream", b.getSize(0)), b.getInt8PtrTy());
+    Value * accumObj = b.getScalarField("accumObj");
+    Value * streamNo = b.getScalarField("streamNo");
+    Function * callback = b.getModule()->getFunction("appendStreamText_wrapper");
     FunctionType * fty = callback->getFunctionType();
-    b->CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, remainingBytes});
+    b.CreateCall(fty, callback, {accumObj, streamNo, byteStreamBasePtr, remainingBytes});
 }
 
 

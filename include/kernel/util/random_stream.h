@@ -7,9 +7,9 @@ namespace kernel {
 
 class RandomStreamKernel final : public SegmentOrientedKernel {
 public:
-    RandomStreamKernel(BuilderRef iBuilder, unsigned seed, unsigned valueWidth, size_t streamLength);
-    void generateInitializeMethod(BuilderRef iBuilder) override;
-    void generateDoSegmentMethod(BuilderRef iBuilder) override;
+    RandomStreamKernel(KernelBuilder & b, unsigned seed, unsigned valueWidth, size_t streamLength);
+    void generateInitializeMethod(KernelBuilder & b) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
 protected:
     const unsigned mSeed;
     const unsigned mValueWidth;

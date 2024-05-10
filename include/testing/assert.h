@@ -16,14 +16,13 @@ namespace kernel {
 * Should NOT be used directly. Use either `AssertEQ` or `AssertNE` instead.
  */
 class StreamEquivalenceKernel : public MultiBlockKernel {
-    using BuilderRef = BuilderRef;
 public:
     enum class Mode { EQ, NE };
 
-    StreamEquivalenceKernel(BuilderRef b, Mode mode, StreamSet * x, StreamSet * y, Scalar * outPtr);
-    void generateInitializeMethod(BuilderRef b) override;
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
-    void generateFinalizeMethod(BuilderRef b) override;
+    StreamEquivalenceKernel(KernelBuilder & b, Mode mode, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    void generateInitializeMethod(KernelBuilder & b) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 private:
     const Mode mMode;
 };

@@ -118,17 +118,17 @@ public:
         return mLengthAssertions;
     }
 
-    void addKernelDeclarations(BuilderRef b) final;
+    void addKernelDeclarations(KernelBuilder & b) final;
 
-    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(BuilderRef b) const final;
+    std::unique_ptr<KernelCompiler> instantiateKernelCompiler(KernelBuilder & b) const final;
 
     ~PipelineKernel() override;
 
-    llvm::Function * addOrDeclareMainFunction(BuilderRef b, const MainMethodGenerationType method) const final;
+    llvm::Function * addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const final;
 
 protected:
 
-    PipelineKernel(BuilderRef b,
+    PipelineKernel(KernelBuilder & b,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
@@ -137,7 +137,7 @@ protected:
                    Relationships && internallyGenerated,
                    LengthAssertions && lengthAssertions);
 
-    PipelineKernel(BuilderRef b,
+    PipelineKernel(KernelBuilder & b,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
 
@@ -153,7 +153,7 @@ private:
 
     struct Internal {};
 
-    PipelineKernel(Internal, BuilderRef b,
+    PipelineKernel(Internal, KernelBuilder & b,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
@@ -165,31 +165,31 @@ private:
 
 private:
 
-    void addAdditionalInitializationArgTypes(BuilderRef b, InitArgTypes & argTypes) const final;
+    void addAdditionalInitializationArgTypes(KernelBuilder & b, InitArgTypes & argTypes) const final;
 
-    void recursivelyConstructFamilyKernels(BuilderRef b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
+    void recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
 
-    void linkExternalMethods(BuilderRef b) final;
+    void linkExternalMethods(KernelBuilder & b) final;
 
-    void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides) final;
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) final;
 
-    void generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, llvm::Value * expectedNumOfStrides) final;
+    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) final;
 
-    void addAdditionalFunctions(BuilderRef b) final;
+    void addAdditionalFunctions(KernelBuilder & b) final;
 
-    void addInternalProperties(BuilderRef b) final;
+    void addInternalProperties(KernelBuilder & b) final;
 
-    void generateInitializeMethod(BuilderRef b) final;
+    void generateInitializeMethod(KernelBuilder & b) final;
 
-    void generateInitializeThreadLocalMethod(BuilderRef b) final;
+    void generateInitializeThreadLocalMethod(KernelBuilder & b) final;
 
-    void generateKernelMethod(BuilderRef b) final;
+    void generateKernelMethod(KernelBuilder & b) final;
 
-    void generateFinalizeThreadLocalMethod(BuilderRef b) final;
+    void generateFinalizeThreadLocalMethod(KernelBuilder & b) final;
 
-    void generateFinalizeMethod(BuilderRef b) final;
+    void generateFinalizeMethod(KernelBuilder & b) final;
 
-    void runOptimizationPasses(BuilderRef b) const final;
+    void runOptimizationPasses(KernelBuilder & b) const final;
 
 protected:
 
@@ -203,7 +203,7 @@ protected:
 
     void writeInternallyGeneratedStreamSetScaleVector(const Relationships & R, MetadataScaleVector & V, const size_t scale) const final;
 
-    ParamMap::PairEntry createRepeatingStreamSet(BuilderRef b, const RepeatingStreamSet * streamSet, const size_t maxStrideLength) const;
+    ParamMap::PairEntry createRepeatingStreamSet(KernelBuilder & b, const RepeatingStreamSet * streamSet, const size_t maxStrideLength) const;
 
     const IllustratorBindings & getIllustratorBindings() const {
         return mIllustratorBindings;

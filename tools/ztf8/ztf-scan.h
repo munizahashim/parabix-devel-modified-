@@ -12,7 +12,7 @@ namespace kernel {
 
 class LengthGroupCompression final : public MultiBlockKernel {
 public:
-    LengthGroupCompression(BuilderRef b,
+    LengthGroupCompression(KernelBuilder & b,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
                            StreamSet * symbolMarks,
@@ -22,7 +22,7 @@ public:
                            StreamSet * encodedBytes,
                            unsigned strideBlocks = 8);
 private:
-    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
@@ -30,7 +30,7 @@ private:
 
 class LengthGroupDecompression final : public MultiBlockKernel {
 public:
-    LengthGroupDecompression(BuilderRef b,
+    LengthGroupDecompression(KernelBuilder & b,
                              EncodingInfo encodingScheme,
                              unsigned groupNo,
                              StreamSet * keyMarks,
@@ -40,7 +40,7 @@ public:
                              StreamSet * const result,
                              unsigned strideBlocks = 8);
 private:
-    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     const EncodingInfo mEncodingScheme;
     const unsigned mGroupNo;
@@ -48,7 +48,7 @@ private:
 
 class FixedLengthCompression final : public MultiBlockKernel {
 public:
-    FixedLengthCompression(BuilderRef b,
+    FixedLengthCompression(KernelBuilder & b,
                            EncodingInfo encodingScheme,
                            unsigned length,
                            StreamSet * const byteData,
@@ -58,7 +58,7 @@ public:
                            StreamSet * encodedBytes,
                            unsigned strideBlocks = 8);
 private:
-    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     const EncodingInfo mEncodingScheme;
     const unsigned mLo;
@@ -68,7 +68,7 @@ private:
 
 class FixedLengthDecompression final : public MultiBlockKernel {
 public:
-    FixedLengthDecompression(BuilderRef b,
+    FixedLengthDecompression(KernelBuilder & b,
                              EncodingInfo encodingScheme,
                              unsigned lo,
                              StreamSet * const byteData,
@@ -77,7 +77,7 @@ public:
                              std::vector<StreamSet *> hashMarks,
                              StreamSet * const result, unsigned strideBlocks = 8);
 private:
-    void generateMultiBlockLogic(BuilderRef iBuilder, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
     const EncodingInfo mEncodingScheme;
     const unsigned mLo;

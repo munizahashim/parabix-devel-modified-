@@ -10,7 +10,6 @@
 #include <kernel/scan/line_number_generator.h>
 #include <kernel/streamutils/collapse.h>
 #include <kernel/streamutils/deletion.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/unicode/charclasses.h>
 #include <re/adt/re_cc.h>

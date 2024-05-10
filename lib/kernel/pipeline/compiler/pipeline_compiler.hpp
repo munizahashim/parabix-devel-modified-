@@ -160,24 +160,24 @@ class PipelineCompiler final : public KernelCompiler, public PipelineCommonGraph
 
 public:
 
-    PipelineCompiler(BuilderRef b, PipelineKernel * const pipelineKernel);
+    PipelineCompiler(KernelBuilder & b, PipelineKernel * const pipelineKernel);
 
-    void generateImplicitKernels(BuilderRef b);
-    void addPipelineKernelProperties(BuilderRef b);
-    void constructStreamSetBuffers(BuilderRef b) override;
-    void generateInitializeMethod(BuilderRef b);
-    void generateAllocateSharedInternalStreamSetsMethod(BuilderRef b, Value * const expectedNumOfStrides);
-    void generateInitializeThreadLocalMethod(BuilderRef b);
-    void generateAllocateThreadLocalInternalStreamSetsMethod(BuilderRef b, Value * expectedNumOfStrides);
-    void generateKernelMethod(BuilderRef b);
-    void generateFinalizeMethod(BuilderRef b);
-    void generateFinalizeThreadLocalMethod(BuilderRef b);
-    std::vector<Value *> getFinalOutputScalars(BuilderRef b) override;
-    void runOptimizationPasses(BuilderRef b);
-    void bindAdditionalInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) override;
-    static void linkPThreadLibrary(BuilderRef b);
+    void generateImplicitKernels(KernelBuilder & b);
+    void addPipelineKernelProperties(KernelBuilder & b);
+    void constructStreamSetBuffers(KernelBuilder & b) override;
+    void generateInitializeMethod(KernelBuilder & b);
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides);
+    void generateInitializeThreadLocalMethod(KernelBuilder & b);
+    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides);
+    void generateKernelMethod(KernelBuilder & b);
+    void generateFinalizeMethod(KernelBuilder & b);
+    void generateFinalizeThreadLocalMethod(KernelBuilder & b);
+    std::vector<Value *> getFinalOutputScalars(KernelBuilder & b) override;
+    void runOptimizationPasses(KernelBuilder & b);
+    void bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) override;
+    static void linkPThreadLibrary(KernelBuilder & b);
     #ifdef ENABLE_PAPI
-    static void linkPAPILibrary(BuilderRef b);
+    static void linkPAPILibrary(KernelBuilder & b);
     #endif
 
     unsigned getCacheLineGroupId(const unsigned kernelId) const {
@@ -200,370 +200,370 @@ private:
 
 public:
 
-    void addInternalKernelProperties(BuilderRef b, const unsigned kernelId, const bool isRoot);
-    void generateSingleThreadKernelMethod(BuilderRef b);
-    void generateMultiThreadKernelMethod(BuilderRef b);
+    void addInternalKernelProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot);
+    void generateSingleThreadKernelMethod(KernelBuilder & b);
+    void generateMultiThreadKernelMethod(KernelBuilder & b);
 
 // main doSegment functions
 
-    void start(BuilderRef b);
-    void setActiveKernel(BuilderRef b, const unsigned index, const bool allowThreadLocal, const bool getCommonThreadLocal = false);
-    void executeKernel(BuilderRef b);
-    void end(BuilderRef b);
+    void start(KernelBuilder & b);
+    void setActiveKernel(KernelBuilder & b, const unsigned index, const bool allowThreadLocal, const bool getCommonThreadLocal = false);
+    void executeKernel(KernelBuilder & b);
+    void end(KernelBuilder & b);
 
 // internal pipeline functions
 
-    LLVM_READNONE StructType * getThreadStuctType(BuilderRef b, const std::vector<Value *> & props) const;
-    void writeThreadStructObject(BuilderRef b, StructType * const threadStateTy, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
-    void readThreadStuctObject(BuilderRef b, StructType * const threadStateTy, Value * threadState);
-    void deallocateThreadState(BuilderRef b, Value * const threadState);
+    LLVM_READNONE StructType * getThreadStuctType(KernelBuilder & b, const std::vector<Value *> & props) const;
+    void writeThreadStructObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
+    void readThreadStuctObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState);
+    void deallocateThreadState(KernelBuilder & b, Value * const threadState);
 
-    void allocateThreadLocalState(BuilderRef b, Value * const localState, Value * const threadId = nullptr);
-    void deallocateThreadLocalState(BuilderRef b, Value * const localState);
-    Value * readTerminationSignalFromLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
-    void writeTerminationSignalToLocalState(BuilderRef b, StructType * const threadStateTy, Value * const threadState, Value * const terminated) const;
+    void allocateThreadLocalState(KernelBuilder & b, Value * const localState, Value * const threadId = nullptr);
+    void deallocateThreadLocalState(KernelBuilder & b, Value * const localState);
+    Value * readTerminationSignalFromLocalState(KernelBuilder & b, StructType * const threadStateTy, Value * const threadState) const;
+    void writeTerminationSignalToLocalState(KernelBuilder & b, StructType * const threadStateTy, Value * const threadState, Value * const terminated) const;
 
     std::vector<llvm::Value *> storeDoSegmentState() const;
-    void readDoSegmentState(BuilderRef b, StructType * const threadStructTy, Value * const propertyState);
+    void readDoSegmentState(KernelBuilder & b, StructType * const threadStructTy, Value * const propertyState);
     void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
 
-    inline Value * isProcessThread(BuilderRef b, StructType * const threadStateTy, Value * const threadState) const;
-    void updateExternalProducedItemCounts(BuilderRef b);
-    void writeMaximumStrideLengthMetadata(BuilderRef b) const;
+    inline Value * isProcessThread(KernelBuilder & b, StructType * const threadStateTy, Value * const threadState) const;
+    void updateExternalProducedItemCounts(KernelBuilder & b);
+    void writeMaximumStrideLengthMetadata(KernelBuilder & b) const;
 
 // partitioning codegen functions
 
-    void makePartitionEntryPoints(BuilderRef b);
-    void branchToInitialPartition(BuilderRef b);
-    BasicBlock * getPartitionExitPoint(BuilderRef b);
-    void checkForPartitionEntry(BuilderRef b);
+    void makePartitionEntryPoints(KernelBuilder & b);
+    void branchToInitialPartition(KernelBuilder & b);
+    BasicBlock * getPartitionExitPoint(KernelBuilder & b);
+    void checkForPartitionEntry(KernelBuilder & b);
 
     void determinePartitionStrideRateScalingFactor();
 
-    void writePartitionEntryIOGuard(BuilderRef b);
-    Value * calculatePartitionSegmentLength(BuilderRef b);
+    void writePartitionEntryIOGuard(KernelBuilder & b);
+    Value * calculatePartitionSegmentLength(KernelBuilder & b);
 
-    void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(BuilderRef b) const;
+    void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(KernelBuilder & b) const;
 
-    void phiOutPartitionItemCounts(BuilderRef b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
-    void phiOutPartitionStatusFlags(BuilderRef b, const unsigned targetPartitionId, const bool fromKernelEntry);
+    void phiOutPartitionItemCounts(KernelBuilder & b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
+    void phiOutPartitionStatusFlags(KernelBuilder & b, const unsigned targetPartitionId, const bool fromKernelEntry);
 
-    void phiOutPartitionStateAndReleaseSynchronizationLocks(BuilderRef b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
+    void phiOutPartitionStateAndReleaseSynchronizationLocks(KernelBuilder & b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
 
-    void acquirePartitionSynchronizationLock(BuilderRef b, const unsigned firstKernelInTargetPartition, Value * const segNo);
-    void releaseAllSynchronizationLocksFor(BuilderRef b, const unsigned kernel);
+    void acquirePartitionSynchronizationLock(KernelBuilder & b, const unsigned firstKernelInTargetPartition, Value * const segNo);
+    void releaseAllSynchronizationLocksFor(KernelBuilder & b, const unsigned kernel);
 
-    void writeInitiallyTerminatedPartitionExit(BuilderRef b);
-    void checkForPartitionExit(BuilderRef b);
+    void writeInitiallyTerminatedPartitionExit(KernelBuilder & b);
+    void checkForPartitionExit(KernelBuilder & b);
 
-    void ensureAnyExternalProcessedAndProducedCountsAreUpdated(BuilderRef b, const unsigned targetKernelId, const bool fromKernelEntry);
+    void ensureAnyExternalProcessedAndProducedCountsAreUpdated(KernelBuilder & b, const unsigned targetKernelId, const bool fromKernelEntry);
 
 // flow control functions
 
-    void addSegmentLengthSlidingWindowKernelProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
-    void initializeInitialSlidingWindowSegmentLengths(BuilderRef b, Value * const segmentLengthScalingFactor);
-    void initializeFlowControl(BuilderRef b);
-    void detemineMaximumNumberOfStrides(BuilderRef b);
-    void updateNextSlidingWindowSize(BuilderRef b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
+    void addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
+    void initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor);
+    void initializeFlowControl(KernelBuilder & b);
+    void detemineMaximumNumberOfStrides(KernelBuilder & b);
+    void updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
 
 // inter-kernel codegen functions
 
-    void readAvailableItemCounts(BuilderRef b);
-    void readProcessedItemCounts(BuilderRef b);
-    void readProducedItemCounts(BuilderRef b);
+    void readAvailableItemCounts(KernelBuilder & b);
+    void readProcessedItemCounts(KernelBuilder & b);
+    void readProducedItemCounts(KernelBuilder & b);
 
-    void initializeKernelLoopEntryPhis(BuilderRef b);
-    void initializeKernelCheckOutputSpacePhis(BuilderRef b);
-    void initializeKernelTerminatedPhis(BuilderRef b);
-    void initializeJumpToNextUsefulPartitionPhis(BuilderRef b);
-    void initializeKernelInsufficientIOExitPhis(BuilderRef b);
-    void initializeKernelLoopExitPhis(BuilderRef b);
-    void initializeKernelExitPhis(BuilderRef b);
-    void checkForSufficientIO(BuilderRef b);
-    void determineNumOfLinearStrides(BuilderRef b);
-    void checkForSufficientInputData(BuilderRef b, const BufferPort & inputPort, const unsigned streamSet);
-    void checkForSufficientOutputSpace(BuilderRef b, const BufferPort & outputPort, const unsigned streamSet);
-    void ensureSufficientOutputSpace(BuilderRef b, const BufferPort & port, const unsigned streamSet);
+    void initializeKernelLoopEntryPhis(KernelBuilder & b);
+    void initializeKernelCheckOutputSpacePhis(KernelBuilder & b);
+    void initializeKernelTerminatedPhis(KernelBuilder & b);
+    void initializeJumpToNextUsefulPartitionPhis(KernelBuilder & b);
+    void initializeKernelInsufficientIOExitPhis(KernelBuilder & b);
+    void initializeKernelLoopExitPhis(KernelBuilder & b);
+    void initializeKernelExitPhis(KernelBuilder & b);
+    void checkForSufficientIO(KernelBuilder & b);
+    void determineNumOfLinearStrides(KernelBuilder & b);
+    void checkForSufficientInputData(KernelBuilder & b, const BufferPort & inputPort, const unsigned streamSet);
+    void checkForSufficientOutputSpace(KernelBuilder & b, const BufferPort & outputPort, const unsigned streamSet);
+    void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet);
 
-    Value * calculateTransferableItemCounts(BuilderRef b, Value * const numOfLinearStrides);
+    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides);
 
     enum class InputExhaustionReturnType {
         Conjunction, Disjunction
     };
 
-    Value * checkIfInputIsExhausted(BuilderRef b, InputExhaustionReturnType returnValType);
-    Value * hasMoreInput(BuilderRef b);
+    Value * checkIfInputIsExhausted(KernelBuilder & b, InputExhaustionReturnType returnValType);
+    Value * hasMoreInput(KernelBuilder & b);
 
     struct FinalItemCount {
         Value * minFixedRateFactor;
         Value * partialPartitionStrides;
     };
 
-    void calculateFinalItemCounts(BuilderRef b, Vec<Value *> & accessibleItems, Vec<Value *> & writableItems, Value *& minFixedRateFactor, Value *& finalStrideRemainder);
+    void calculateFinalItemCounts(KernelBuilder & b, Vec<Value *> & accessibleItems, Vec<Value *> & writableItems, Value *& minFixedRateFactor, Value *& finalStrideRemainder);
 
-    Value * revertTransitiveAddCalculation(BuilderRef b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
+    Value * revertTransitiveAddCalculation(KernelBuilder & b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
 
-    void zeroInputAfterFinalItemCount(BuilderRef b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses);
-    void freeZeroedInputBuffers(BuilderRef b);
+    void zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses);
+    void freeZeroedInputBuffers(KernelBuilder & b);
 
-    Value * allocateLocalZeroExtensionSpace(BuilderRef b, BasicBlock * const insertBefore) const;
+    Value * allocateLocalZeroExtensionSpace(KernelBuilder & b, BasicBlock * const insertBefore) const;
 
-    void writeKernelCall(BuilderRef b);
-    void buildKernelCallArgumentList(BuilderRef b, ArgVec & args);
-    void updateProcessedAndProducedItemCounts(BuilderRef b);
-    void writeInternalProcessedAndProducedItemCounts(BuilderRef b, const bool atTermination);
-    void readAndUpdateInternalProcessedAndProducedItemCounts(BuilderRef b);
-    void readReturnedOutputVirtualBaseAddresses(BuilderRef b) const;
-    Value * addVirtualBaseAddressArg(BuilderRef b, const StreamSetBuffer * buffer, ArgVec & args);
+    void writeKernelCall(KernelBuilder & b);
+    void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
+    void updateProcessedAndProducedItemCounts(KernelBuilder & b);
+    void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
+    void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);
+    void readReturnedOutputVirtualBaseAddresses(KernelBuilder & b) const;
+    Value * addVirtualBaseAddressArg(KernelBuilder & b, const StreamSetBuffer * buffer, ArgVec & args);
 
-    void normalCompletionCheck(BuilderRef b);
+    void normalCompletionCheck(KernelBuilder & b);
 
-    void writeInsufficientIOExit(BuilderRef b);
-    void writeJumpToNextPartition(BuilderRef b);
+    void writeInsufficientIOExit(KernelBuilder & b);
+    void writeJumpToNextPartition(KernelBuilder & b);
 
-    void computeFullyProcessedItemCounts(BuilderRef b, Value * const terminated);
-    void computeFullyProducedItemCounts(BuilderRef b, Value * const terminated);
+    void computeFullyProcessedItemCounts(KernelBuilder & b, Value * const terminated);
+    void computeFullyProducedItemCounts(KernelBuilder & b, Value * const terminated);
 
-    void updateKernelExitPhisAfterInitiallyTerminated(BuilderRef b);
-    void updatePhisAfterTermination(BuilderRef b);
+    void updateKernelExitPhisAfterInitiallyTerminated(KernelBuilder & b);
+    void updatePhisAfterTermination(KernelBuilder & b);
 
-    void clearUnwrittenOutputData(BuilderRef b);
+    void clearUnwrittenOutputData(KernelBuilder & b);
 
-    void computeMinimumConsumedItemCounts(BuilderRef b);
-    void writeConsumedItemCounts(BuilderRef b);
-    void recordFinalProducedItemCounts(BuilderRef b);
-    void writeUpdatedItemCounts(BuilderRef b);
+    void computeMinimumConsumedItemCounts(KernelBuilder & b);
+    void writeConsumedItemCounts(KernelBuilder & b);
+    void recordFinalProducedItemCounts(KernelBuilder & b);
+    void writeUpdatedItemCounts(KernelBuilder & b);
 
-    void writeOutputScalars(BuilderRef b, const size_t index, std::vector<Value *> & args);
-    void initializeScalarValues(BuilderRef b);
-    Value * getScalar(BuilderRef b, const size_t index);
+    void writeOutputScalars(KernelBuilder & b, const size_t index, std::vector<Value *> & args);
+    void initializeScalarValues(KernelBuilder & b);
+    Value * getScalar(KernelBuilder & b, const size_t index);
 
 // intra-kernel codegen functions
 
-    Value * getInputStrideLength(BuilderRef b, const BufferPort &inputPort, const StringRef location);
-    Value * getOutputStrideLength(BuilderRef b, const BufferPort &outputPort, const StringRef location);
-    Value * calculateStrideLength(BuilderRef b, const BufferPort & port, Value * const previouslyTransferred, Value * const strideIndex, StringRef location);
-    Value * calculateNumOfLinearItems(BuilderRef b, const BufferPort &port, Value * const adjustment, StringRef location);
-    Value * getAccessibleInputItems(BuilderRef b, const BufferPort & inputPort, const bool useOverflow = true);
-    Value * getNumOfAccessibleStrides(BuilderRef b, const BufferPort & inputPort, Value * const numOfLinearStrides);
-    Value * getWritableOutputItems(BuilderRef b, const BufferPort & outputPort, const bool force = false);
-    Value * getNumOfWritableStrides(BuilderRef b, const BufferPort & port, Value * const numOfLinearStrides);
-    Value * addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const;
-    Value * subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount);
+    Value * getInputStrideLength(KernelBuilder & b, const BufferPort &inputPort, const StringRef location);
+    Value * getOutputStrideLength(KernelBuilder & b, const BufferPort &outputPort, const StringRef location);
+    Value * calculateStrideLength(KernelBuilder & b, const BufferPort & port, Value * const previouslyTransferred, Value * const strideIndex, StringRef location);
+    Value * calculateNumOfLinearItems(KernelBuilder & b, const BufferPort &port, Value * const adjustment, StringRef location);
+    Value * getAccessibleInputItems(KernelBuilder & b, const BufferPort & inputPort, const bool useOverflow = true);
+    Value * getNumOfAccessibleStrides(KernelBuilder & b, const BufferPort & inputPort, Value * const numOfLinearStrides);
+    Value * getWritableOutputItems(KernelBuilder & b, const BufferPort & outputPort, const bool force = false);
+    Value * getNumOfWritableStrides(KernelBuilder & b, const BufferPort & port, Value * const numOfLinearStrides);
+    Value * addLookahead(KernelBuilder & b, const BufferPort & inputPort, Value * const itemCount) const;
+    Value * subtractLookahead(KernelBuilder & b, const BufferPort & inputPort, Value * const itemCount);
 
     unsigned getPopCountStepSize(const StreamSetPort inputRefPort) const;
-    Value * getPartialSumItemCount(BuilderRef b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset, StringRef location) const;
-    Value * getMaximumNumOfPartialSumStrides(BuilderRef b, const BufferPort &port, Value * const numOfLinearStrides);
-    void splatMultiStepPartialSumValues(BuilderRef b);
+    Value * getPartialSumItemCount(KernelBuilder & b, const BufferPort &port, Value * const previouslyTransferred, Value * const offset, StringRef location) const;
+    Value * getMaximumNumOfPartialSumStrides(KernelBuilder & b, const BufferPort &port, Value * const numOfLinearStrides);
+    void splatMultiStepPartialSumValues(KernelBuilder & b);
 
 // termination codegen functions
 
-    void addTerminationProperties(BuilderRef b, const size_t kernel, const size_t groupId);
-    Value * hasKernelTerminated(BuilderRef b, const size_t kernel, const bool normally = false) const;
-    Value * isClosed(BuilderRef b, const StreamSetPort inputPort, const bool normally = false) const;
-    Value * isClosed(BuilderRef b, const unsigned streamSet, const bool normally = false) const;
+    void addTerminationProperties(KernelBuilder & b, const size_t kernel, const size_t groupId);
+    Value * hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally = false) const;
+    Value * isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally = false) const;
+    Value * isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally = false) const;
     unsigned getTerminationSignalIndex(const unsigned consumer) const;
-    Value * isClosedNormally(BuilderRef b, const StreamSetPort inputPort) const;
+    Value * isClosedNormally(KernelBuilder & b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
-    void checkIfKernelIsAlreadyTerminated(BuilderRef b);
-    void checkPropagatedTerminationSignals(BuilderRef b);
-    Value * readTerminationSignal(BuilderRef b, const unsigned kernelId);
-    void writeTerminationSignal(BuilderRef b, const unsigned kernelId, Value * const signal) const;
-    Value * hasPipelineTerminated(BuilderRef b);
-    void signalAbnormalTermination(BuilderRef b);
-    LLVM_READNONE static Constant * getTerminationSignal(BuilderRef b, const TerminationSignal type);
+    void checkIfKernelIsAlreadyTerminated(KernelBuilder & b);
+    void checkPropagatedTerminationSignals(KernelBuilder & b);
+    Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId);
+    void writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const;
+    Value * hasPipelineTerminated(KernelBuilder & b);
+    void signalAbnormalTermination(KernelBuilder & b);
+    LLVM_READNONE static Constant * getTerminationSignal(KernelBuilder & b, const TerminationSignal type);
 
-    void readCountableItemCountsAfterAbnormalTermination(BuilderRef b);
-    void propagateTerminationSignal(BuilderRef b);
-    void verifyPostInvocationTerminationSignal(BuilderRef b);
+    void readCountableItemCountsAfterAbnormalTermination(KernelBuilder & b);
+    void propagateTerminationSignal(KernelBuilder & b);
+    void verifyPostInvocationTerminationSignal(KernelBuilder & b);
 
 // consumer codegen functions
 
     unsigned getTruncatedStreamSetSourceId(const unsigned streamSet) const;
-    void addConsumerKernelProperties(BuilderRef b, const unsigned producer);
-    void writeTransitoryConsumedItemCount(BuilderRef b, const unsigned streamSet, Value * const produced);
-    void readExternalConsumerItemCounts(BuilderRef b);
-    void readConsumedItemCounts(BuilderRef b);
-    Value * readConsumedItemCount(BuilderRef b, const size_t streamSet);
-    void setConsumedItemCount(BuilderRef b, const size_t streamSet, Value * consumed, const unsigned slot) const;
-    void updateExternalConsumedItemCounts(BuilderRef b);
-    void zeroAnySkippedTransitoryConsumedItemCountsUntil(BuilderRef b, const unsigned targetKernelId);
+    void addConsumerKernelProperties(KernelBuilder & b, const unsigned producer);
+    void writeTransitoryConsumedItemCount(KernelBuilder & b, const unsigned streamSet, Value * const produced);
+    void readExternalConsumerItemCounts(KernelBuilder & b);
+    void readConsumedItemCounts(KernelBuilder & b);
+    Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet);
+    void setConsumedItemCount(KernelBuilder & b, const size_t streamSet, Value * consumed, const unsigned slot) const;
+    void updateExternalConsumedItemCounts(KernelBuilder & b);
+    void zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBuilder & b, const unsigned targetKernelId);
 
 // buffer management codegen functions
 
-    void addBufferHandlesToPipelineKernel(BuilderRef b, const unsigned index, const unsigned groupId);
-    void allocateOwnedBuffers(BuilderRef b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
-    void loadInternalStreamSetHandles(BuilderRef b, const bool nonLocal);
-    void remapThreadLocalBufferMemory(BuilderRef b);
-    void releaseOwnedBuffers(BuilderRef b);
-    void freePendingFreeableDynamicBuffers(BuilderRef b);
+    void addBufferHandlesToPipelineKernel(KernelBuilder & b, const unsigned index, const unsigned groupId);
+    void allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
+    void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
+    void remapThreadLocalBufferMemory(KernelBuilder & b);
+    void releaseOwnedBuffers(KernelBuilder & b);
+    void freePendingFreeableDynamicBuffers(KernelBuilder & b);
     void resetInternalBufferHandles();
-    void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(BuilderRef b, const size_t kernelId) const;
+    void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
-    Value * getVirtualBaseAddress(BuilderRef b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
-    void getInputVirtualBaseAddresses(BuilderRef b, Vec<Value *> & baseAddresses) const;
-    void getZeroExtendedInputVirtualBaseAddresses(BuilderRef b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
+    Value * getVirtualBaseAddress(KernelBuilder & b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
+    void getInputVirtualBaseAddresses(KernelBuilder & b, Vec<Value *> & baseAddresses) const;
+    void getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
 
-    void addZeroInputStructProperties(BuilderRef b) const;
+    void addZeroInputStructProperties(KernelBuilder & b) const;
 
 // repeating streamset functions
 
     using InternallyGeneratedStreamSetMap = flat_map<Value *, std::pair<Value *, Value>>;
 
-    void generateGlobalDataForRepeatingStreamSet(BuilderRef b, const unsigned streamSet, Value * const expectedNumOfStrides);
-    void addRepeatingStreamSetBufferProperties(BuilderRef b);
-    void deallocateRepeatingBuffers(BuilderRef b);
-    void generateMetaDataForRepeatingStreamSets(BuilderRef b);
-    Constant * getGuaranteedRepeatingStreamSetLength(BuilderRef b, const unsigned streamSet) const;
-    void bindRepeatingStreamSetInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    void generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet, Value * const expectedNumOfStrides);
+    void addRepeatingStreamSetBufferProperties(KernelBuilder & b);
+    void deallocateRepeatingBuffers(KernelBuilder & b);
+    void generateMetaDataForRepeatingStreamSets(KernelBuilder & b);
+    Constant * getGuaranteedRepeatingStreamSetLength(KernelBuilder & b, const unsigned streamSet) const;
+    void bindRepeatingStreamSetInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) const;
     void addRepeatingStreamSetInitializationArguments(const unsigned kernelId, ArgVec & args) const;
 
 // prefetch instructions
 
-    void prefetchAtLeastThreeCacheLinesFrom(BuilderRef b, Value * const addr, const bool write) const;
+    void prefetchAtLeastThreeCacheLinesFrom(KernelBuilder & b, Value * const addr, const bool write) const;
 
 // cycle counter functions
 
-    void addCycleCounterProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
+    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
 
     bool trackCycleCounter(const CycleCounter type) const;
-    void startCycleCounter(BuilderRef b, const CycleCounter type);
-    void startCycleCounter(BuilderRef b, const std::initializer_list<CycleCounter> types);
-    void updateCycleCounter(BuilderRef b, const unsigned kernelId, const CycleCounter type) const;
-    void updateCycleCounter(BuilderRef b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
-    void updateTotalCycleCounterTime(BuilderRef b) const;
+    void startCycleCounter(KernelBuilder & b, const CycleCounter type);
+    void startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types);
+    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) const;
+    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
+    void updateTotalCycleCounterTime(KernelBuilder & b) const;
 
-    static void linkInstrumentationFunctions(BuilderRef b);
+    static void linkInstrumentationFunctions(KernelBuilder & b);
 
-    void recordBlockingIO(BuilderRef b, const StreamSetPort port) const;
+    void recordBlockingIO(KernelBuilder & b, const StreamSetPort port) const;
 
-    void printOptionalCycleCounter(BuilderRef b);
+    void printOptionalCycleCounter(KernelBuilder & b);
     StreamSetPort selectPrincipleCycleCountBinding(const unsigned kernel) const;
-    void printOptionalBlockingIOStatistics(BuilderRef b);
+    void printOptionalBlockingIOStatistics(KernelBuilder & b);
 
 
-    void initializeBufferExpansionHistory(BuilderRef b) const;
-    void recordBufferExpansionHistory(BuilderRef b, const unsigned streamSet, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
-    void printOptionalBufferExpansionHistory(BuilderRef b);
+    void initializeBufferExpansionHistory(KernelBuilder & b) const;
+    void recordBufferExpansionHistory(KernelBuilder & b, const unsigned streamSet, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
+    void printOptionalBufferExpansionHistory(KernelBuilder & b);
 
-    void initializeStridesPerSegment(BuilderRef b) const;
-    void recordStridesPerSegment(BuilderRef b, unsigned kernelId, Value * const totalStrides) const;
-    void concludeStridesPerSegmentRecording(BuilderRef b) const;
-    void printOptionalStridesPerSegment(BuilderRef b) const;
-    void printOptionalBlockedIOPerSegment(BuilderRef b) const;
+    void initializeStridesPerSegment(KernelBuilder & b) const;
+    void recordStridesPerSegment(KernelBuilder & b, unsigned kernelId, Value * const totalStrides) const;
+    void concludeStridesPerSegmentRecording(KernelBuilder & b) const;
+    void printOptionalStridesPerSegment(KernelBuilder & b) const;
+    void printOptionalBlockedIOPerSegment(KernelBuilder & b) const;
 
-    void addProducedItemCountDeltaProperties(BuilderRef b, unsigned kernel) const;
-    void recordProducedItemCountDeltas(BuilderRef b) const;
-    void printProducedItemCountDeltas(BuilderRef b) const;
+    void addProducedItemCountDeltaProperties(KernelBuilder & b, unsigned kernel) const;
+    void recordProducedItemCountDeltas(KernelBuilder & b) const;
+    void printProducedItemCountDeltas(KernelBuilder & b) const;
 
-    void addUnconsumedItemCountProperties(BuilderRef b, unsigned kernel) const;
-    void recordUnconsumedItemCounts(BuilderRef b);
-    void printUnconsumedItemCounts(BuilderRef b) const;
+    void addUnconsumedItemCountProperties(KernelBuilder & b, unsigned kernel) const;
+    void recordUnconsumedItemCounts(KernelBuilder & b);
+    void printUnconsumedItemCounts(KernelBuilder & b) const;
 
-    void addItemCountDeltaProperties(BuilderRef b, const unsigned kernel, const StringRef suffix) const;
+    void addItemCountDeltaProperties(KernelBuilder & b, const unsigned kernel, const StringRef suffix) const;
 
-    void recordItemCountDeltas(BuilderRef b, const Vec<Value *> & current, const Vec<Value *> & prior, const StringRef suffix) const;
+    void recordItemCountDeltas(KernelBuilder & b, const Vec<Value *> & current, const Vec<Value *> & prior, const StringRef suffix) const;
 
-    void printItemCountDeltas(BuilderRef b, const StringRef title, const StringRef suffix) const;
+    void printItemCountDeltas(KernelBuilder & b, const StringRef title, const StringRef suffix) const;
 
 // internal optimization passes
 
     void simplifyPhiNodes(Module * const m) const;
-    void replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock *& toReplace, BasicBlock * const phiContainer);
+    void replacePhiCatchWithCurrentBlock(KernelBuilder & b, BasicBlock *& toReplace, BasicBlock * const phiContainer);
 
 // synchronization functions
 
-    void obtainCurrentSegmentNumber(BuilderRef b, BasicBlock * const entryBlock);
-    void incrementCurrentSegNo(BuilderRef b, BasicBlock * const exitBlock);
-    void acquireSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
-    void releaseSynchronizationLock(BuilderRef b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
-    Value * getSynchronizationLockPtrForKernel(BuilderRef b, const unsigned kernelId, const unsigned lockType) const;
+    void obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock);
+    void incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock);
+    void acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
+    void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
+    Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
     inline LLVM_READNONE bool isMultithreaded() const;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    Value * obtainNextSegmentNumber(BuilderRef b);
+    Value * obtainNextSegmentNumber(KernelBuilder & b);
     #endif
 
 // family functions
 
-    void addFamilyKernelProperties(BuilderRef b, const unsigned kernelId, const unsigned groupId) const;
-    void bindFamilyInitializationArguments(BuilderRef b, ArgIterator & arg, const ArgIterator & arg_end) const;
-    void addFamilyCallInitializationArguments(BuilderRef b, const unsigned kernelId, ArgVec & args) const;
+    void addFamilyKernelProperties(KernelBuilder & b, const unsigned kernelId, const unsigned groupId) const;
+    void bindFamilyInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) const;
+    void addFamilyCallInitializationArguments(KernelBuilder & b, const unsigned kernelId, ArgVec & args) const;
 
 // thread local functions
 
-    Value * getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal = false) const;
+    Value * getThreadLocalHandlePtr(KernelBuilder & b, const unsigned kernelIndex, const bool commonThreadLocal = false) const;
 
 // optimization branch functions
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
-    Value * checkOptimizationBranchSpanLength(BuilderRef b, Value * const numOfLinearStrides);
+    Value * checkOptimizationBranchSpanLength(KernelBuilder & b, Value * const numOfLinearStrides);
 
 // papi instrumentation functions
 #ifdef ENABLE_PAPI
-    ArrayType * getPAPIEventCounterType(BuilderRef b) const;
-    void addPAPIEventCounterPipelineProperties(BuilderRef b);
-    void addPAPIEventCounterKernelProperties(BuilderRef b, const unsigned kernel, const bool isRoot);
-    void initializePAPI(BuilderRef b) const;
-    void registerPAPIThread(BuilderRef b) const;
-    void getPAPIEventSet(BuilderRef b);
-    void createPAPIMeasurementArrays(BuilderRef b);
-    void readPAPIMeasurement(BuilderRef b, Value * const measurementArray) const;
-    void startPAPIMeasurement(BuilderRef b, const PAPIKernelCounter measurementType) const;
-    void startPAPIMeasurement(BuilderRef b, const std::initializer_list<PAPIKernelCounter> types) const;
-    void accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, const PAPIKernelCounter measurementType) const;
-    void accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const;
-    void recordTotalPAPIMeasurement(BuilderRef b) const;
-    void unregisterPAPIThread(BuilderRef b) const;
-    void startPAPI(BuilderRef b);
-    void stopPAPI(BuilderRef b);
-    void printPAPIReportIfRequested(BuilderRef b);
-    void checkPAPIRetValAndExitOnError(BuilderRef b, StringRef source, const int expected, Value * const retVal) const;
+    ArrayType * getPAPIEventCounterType(KernelBuilder & b) const;
+    void addPAPIEventCounterPipelineProperties(KernelBuilder & b);
+    void addPAPIEventCounterKernelProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
+    void initializePAPI(KernelBuilder & b) const;
+    void registerPAPIThread(KernelBuilder & b) const;
+    void getPAPIEventSet(KernelBuilder & b);
+    void createPAPIMeasurementArrays(KernelBuilder & b);
+    void readPAPIMeasurement(KernelBuilder & b, Value * const measurementArray) const;
+    void startPAPIMeasurement(KernelBuilder & b, const PAPIKernelCounter measurementType) const;
+    void startPAPIMeasurement(KernelBuilder & b, const std::initializer_list<PAPIKernelCounter> types) const;
+    void accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, const PAPIKernelCounter measurementType) const;
+    void accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const;
+    void recordTotalPAPIMeasurement(KernelBuilder & b) const;
+    void unregisterPAPIThread(KernelBuilder & b) const;
+    void startPAPI(KernelBuilder & b);
+    void stopPAPI(KernelBuilder & b);
+    void printPAPIReportIfRequested(KernelBuilder & b);
+    void checkPAPIRetValAndExitOnError(KernelBuilder & b, StringRef source, const int expected, Value * const retVal) const;
 
 #endif
 
 // histogram functions
 
     bool recordsAnyHistogramData() const;
-    void addHistogramProperties(BuilderRef b, const size_t kernelId, const size_t groupId);
-    void freeHistogramProperties(BuilderRef b);
-    void updateTransferredItemsForHistogramData(BuilderRef b);
-    void printHistogramReport(BuilderRef b, HistogramReportType type) const;
+    void addHistogramProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
+    void freeHistogramProperties(KernelBuilder & b);
+    void updateTransferredItemsForHistogramData(KernelBuilder & b);
+    void printHistogramReport(KernelBuilder & b, HistogramReportType type) const;
 
-    static void linkHistogramFunctions(BuilderRef b);
+    static void linkHistogramFunctions(KernelBuilder & b);
 
 // streamset illustration function
 
-    void registerStreamSetIllustrator(BuilderRef b, const size_t streamSet) const;
-    void illustrateStreamSet(BuilderRef b, const size_t streamSet, Value * const initial, Value * const current) const;
+    void registerStreamSetIllustrator(KernelBuilder & b, const size_t streamSet) const;
+    void illustrateStreamSet(KernelBuilder & b, const size_t streamSet, Value * const initial, Value * const current) const;
 
 // dynamic multithreading functions
 
-    void addDynamicThreadingReportProperties(BuilderRef b, const unsigned groupId);
-    void initDynamicThreadingReportProperties(BuilderRef b);
-    void recordDynamicThreadingState(BuilderRef b, Value * segNo, Value * currentSyncOverhead, Value * currentNumOfThreads) const;
-    void printDynamicThreadingReport(BuilderRef b) const;
-    static void linkDynamicThreadingReport(BuilderRef b);
+    void addDynamicThreadingReportProperties(KernelBuilder & b, const unsigned groupId);
+    void initDynamicThreadingReportProperties(KernelBuilder & b);
+    void recordDynamicThreadingState(KernelBuilder & b, Value * segNo, Value * currentSyncOverhead, Value * currentNumOfThreads) const;
+    void printDynamicThreadingReport(KernelBuilder & b) const;
+    static void linkDynamicThreadingReport(KernelBuilder & b);
 
 // debug message functions
 
     #ifdef PRINT_DEBUG_MESSAGES
-    void debugInit(BuilderRef b);
+    void debugInit(KernelBuilder & b);
     template <typename ... Args>
-    void debugPrint(BuilderRef b, Twine format, Args ...args) const;
+    void debugPrint(KernelBuilder & b, Twine format, Args ...args) const;
     #endif
 
 // misc. functions
 
-    Value * getFamilyFunctionFromKernelState(BuilderRef b, Type * const type, const std::string &suffix) const;
-    Value * callKernelInitializeFunction(BuilderRef b, const ArgVec & args) const;
-    std::pair<Value *, FunctionType *> getKernelAllocateSharedInternalStreamSetsFunction(BuilderRef b) const;
-    void callKernelInitializeThreadLocalFunction(BuilderRef b) const;
-    std::pair<Value *, FunctionType *> getKernelAllocateThreadLocalInternalStreamSetsFunction(BuilderRef b) const;
-    std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(BuilderRef b) const;
-    Value * callKernelExpectedSourceOutputSizeFunction(BuilderRef b, ArrayRef<Value *> args) const;
-    Value * callKernelFinalizeThreadLocalFunction(BuilderRef b, const SmallVector<Value *, 2> & args) const;
-    Value * callKernelFinalizeFunction(BuilderRef b, const SmallVector<Value *, 1> & args) const;
+    Value * getFamilyFunctionFromKernelState(KernelBuilder & b, Type * const type, const std::string &suffix) const;
+    Value * callKernelInitializeFunction(KernelBuilder & b, const ArgVec & args) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateSharedInternalStreamSetsFunction(KernelBuilder & b) const;
+    void callKernelInitializeThreadLocalFunction(KernelBuilder & b) const;
+    std::pair<Value *, FunctionType *> getKernelAllocateThreadLocalInternalStreamSetsFunction(KernelBuilder & b) const;
+    std::pair<Value *, FunctionType *> getKernelDoSegmentFunction(KernelBuilder & b) const;
+    Value * callKernelExpectedSourceOutputSizeFunction(KernelBuilder & b, ArrayRef<Value *> args) const;
+    Value * callKernelFinalizeThreadLocalFunction(KernelBuilder & b, const SmallVector<Value *, 2> & args) const;
+    Value * callKernelFinalizeFunction(KernelBuilder & b, const SmallVector<Value *, 1> & args) const;
 
     LLVM_READNONE std::string makeKernelName(const size_t kernelIndex) const;
     LLVM_READNONE std::string makeBufferName(const size_t kernelIndex, const StreamSetPort port) const;
@@ -593,7 +593,7 @@ public:
     const Binding & getBinding(const StreamSetPort port) const;
 
     void clearInternalStateForCurrentKernel();
-    void initializeKernelAssertions(BuilderRef b);
+    void initializeKernelAssertions(KernelBuilder & b);
 
     bool hasAtLeastOneNonGreedyInput() const;
     bool hasAnyGreedyInput(const unsigned kernelId) const;
@@ -902,7 +902,7 @@ protected:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-inline PipelineCompiler::PipelineCompiler(BuilderRef b, PipelineKernel * const pipelineKernel)
+inline PipelineCompiler::PipelineCompiler(KernelBuilder & b, PipelineKernel * const pipelineKernel)
 : PipelineCompiler(pipelineKernel, PipelineAnalysis::analyze(b, pipelineKernel)) {
     // Use a delegating constructor to compute the pipeline graph data once and pass it to
     // the compiler. Although a const function attribute ought to suffice, gcc 8.2 does not

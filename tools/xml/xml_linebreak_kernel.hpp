@@ -23,9 +23,8 @@ namespace kernel {
  */
 class XmlLineBreakKernel : public pablo::PabloKernel {
 public:
-    using BuilderRef = BuilderRef;
 
-    XmlLineBreakKernel(BuilderRef b, StreamSet * basis, StreamSet * out)
+    XmlLineBreakKernel(KernelBuilder & b, StreamSet * basis, StreamSet * out)
     : PabloKernel(b, "XmlLineBreakKernel", {{"basis", basis}}, {{"out", out, FixedRate(), Add1()}})
     {
         assert(basis->getFieldWidth() == 8 && basis->getNumElements() == 1);

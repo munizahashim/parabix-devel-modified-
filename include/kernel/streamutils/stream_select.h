@@ -71,13 +71,11 @@ using SelectedInputList = std::vector<SelectedInput>;
  */
 class StreamSelect : public BlockOrientedKernel {
 public:
-    using BuilderRef = BuilderRef;
-
-    StreamSelect(BuilderRef b, StreamSet * output, SelectOperation operation);
-    StreamSelect(BuilderRef b, StreamSet * output, SelectOperationList operations);
+    StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation);
+    StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperationList operations);
 
 protected:
-    void generateDoBlockMethod(BuilderRef b) override;
+    void generateDoBlockMethod(KernelBuilder & b) override;
 
 private:
     SelectedInputList mOperations;
@@ -105,12 +103,10 @@ private:
  */
 class IStreamSelect : public MultiBlockKernel {
 public:
-    using BuilderRef = BuilderRef;
-
-    IStreamSelect(BuilderRef b, StreamSet * output, SelectOperation operation);
+    IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation);
 
 protected:
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 
 private:
     SelectedInput mOperation;
@@ -270,9 +266,7 @@ mapOperationsToStreamNames(SelectOperation const & operations);
 std::pair<SelectedInputList, std::unordered_map<StreamSet *, std::string>>
 mapOperationsToStreamNames(SelectOperationList const & operations);
 
-using BuilderRef = const std::unique_ptr<KernelBuilder> &;
-
-std::vector<llvm::Value *> loadInputSelectionsBlock(BuilderRef b, SelectedInputList ops, llvm::Value * blockOffset);
+std::vector<llvm::Value *> loadInputSelectionsBlock(KernelBuilder & b, SelectedInputList ops, llvm::Value * blockOffset);
 
 /*
     Stream Set Generators

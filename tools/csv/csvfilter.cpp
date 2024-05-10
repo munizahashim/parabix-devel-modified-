@@ -24,7 +24,6 @@
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
-#include <kernel/util/debug_display.h>
 #include <kernel/scan/scanmatchgen.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
@@ -167,7 +166,7 @@ void filtration(string inputFile, string HeaderInput, string DataInput, bool dro
 //    // A Parabix program is build as a set of kernel calls called a pipeline.
 //    // A pipeline is construction using a Parabix driver object.
 //    auto & b = pxDriver.getBuilder();
-//    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "inputFileDecriptor"}}, {});
+//    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
 //    //  The program will use a file descriptor as an input.
 //    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 //    StreamSet * ByteStream = P->CreateStreamSet(1, 8);

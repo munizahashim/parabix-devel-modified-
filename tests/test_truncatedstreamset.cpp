@@ -36,12 +36,12 @@ static cl::opt<bool> optVerbose("v", cl::desc("Verbose output"), cl::init(false)
 
 class CopyKernel final : public SegmentOrientedKernel {
 public:
-    CopyKernel(BuilderRef b, StreamSet * input, StreamSet * output, Scalar * upTo);
+    CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo);
 protected:
-    void generateDoSegmentMethod(BuilderRef b) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-CopyKernel::CopyKernel(BuilderRef b, StreamSet * input, StreamSet * output, Scalar * upTo)
+CopyKernel::CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo)
 : SegmentOrientedKernel(b, [&]() {
     std::string backing;
     raw_string_ostream str(backing);
@@ -63,82 +63,82 @@ CopyKernel::CopyKernel(BuilderRef b, StreamSet * input, StreamSet * output, Scal
     addAttribute(CanTerminateEarly());
 }
 
-void CopyKernel::generateDoSegmentMethod(BuilderRef b) {
+void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
-    BasicBlock * const copyPartial = b->CreateBasicBlock("copyPartial");
-    BasicBlock * const segmentExit = b->CreateBasicBlock("segmentExit");
+    BasicBlock * const copyPartial = b.CreateBasicBlock("copyPartial");
+    BasicBlock * const segmentExit = b.CreateBasicBlock("segmentExit");
 
     const auto is = getInputStreamSet(0);
     const auto ne = is->getNumElements();
     const auto fw = is->getFieldWidth();
-    const auto bw = b->getBitBlockWidth();
+    const auto bw = b.getBitBlockWidth();
 
-    Value * const upTo = b->getScalarField("upTo");
-    Value * const processed = b->getProcessedItemCount("input");
-    Value * const avail = b->getAvailableItemCount("input");
+    Value * const upTo = b.getScalarField("upTo");
+    Value * const processed = b.getProcessedItemCount("input");
+    Value * const avail = b.getAvailableItemCount("input");
 
-    ConstantInt * const sz_ZERO = b->getSize(0);
+    ConstantInt * const sz_ZERO = b.getSize(0);
 
-    Value * const inputPtr = b->getInputStreamBlockPtr("input", sz_ZERO, sz_ZERO);
-    Value * const outputPtr = b->getOutputStreamBlockPtr("output", sz_ZERO, sz_ZERO);
+    Value * const inputPtr = b.getInputStreamBlockPtr("input", sz_ZERO, sz_ZERO);
+    Value * const outputPtr = b.getOutputStreamBlockPtr("output", sz_ZERO, sz_ZERO);
 
-    Value * const needsPartialCopy = b->CreateICmpUGE(avail, upTo);
+    Value * const needsPartialCopy = b.CreateICmpUGE(avail, upTo);
 
-    Value * const remaining = b->CreateSub(upTo, processed);
-    Constant * const BLOCK_WIDTH = b->getSize(bw);
-    Value * const blockIndex = b->CreateUDiv(remaining, BLOCK_WIDTH);
-    Value * const toCopy = b->CreateSelect(needsPartialCopy, blockIndex, b->getNumOfStrides());
-    Value * const endInputPtr = b->getInputStreamBlockPtr("input", sz_ZERO, toCopy);
+    Value * const remaining = b.CreateSub(upTo, processed);
+    Constant * const BLOCK_WIDTH = b.getSize(bw);
+    Value * const blockIndex = b.CreateUDiv(remaining, BLOCK_WIDTH);
+    Value * const toCopy = b.CreateSelect(needsPartialCopy, blockIndex, b.getNumOfStrides());
+    Value * const endInputPtr = b.getInputStreamBlockPtr("input", sz_ZERO, toCopy);
 
-    DataLayout dl(b->getModule());
-    Type * const intPtrTy = dl.getIntPtrType(b->getContext());
-    Value * const inputPtrInt = b->CreatePtrToInt(inputPtr, intPtrTy);
-    Value * const endInputPtrInt = b->CreatePtrToInt(endInputPtr, intPtrTy);
-    Value * const numBytes = b->CreateSub(endInputPtrInt, inputPtrInt);
-    b->CreateMemCpy(outputPtr, inputPtr, numBytes, bw / 8);
-    b->CreateLikelyCondBr(b->CreateICmpUGE(avail, upTo), copyPartial, segmentExit);
+    DataLayout dl(b.getModule());
+    Type * const intPtrTy = dl.getIntPtrType(b.getContext());
+    Value * const inputPtrInt = b.CreatePtrToInt(inputPtr, intPtrTy);
+    Value * const endInputPtrInt = b.CreatePtrToInt(endInputPtr, intPtrTy);
+    Value * const numBytes = b.CreateSub(endInputPtrInt, inputPtrInt);
+    b.CreateMemCpy(outputPtr, inputPtr, numBytes, bw / 8);
+    b.CreateLikelyCondBr(b.CreateICmpUGE(avail, upTo), copyPartial, segmentExit);
 
-    b->SetInsertPoint(copyPartial);
-    Value * items = b->CreateURem(remaining, BLOCK_WIDTH);
+    b.SetInsertPoint(copyPartial);
+    Value * items = b.CreateURem(remaining, BLOCK_WIDTH);
     if (fw > 1) {
-        items = b->CreateMul(items, b->getSize(fw));
+        items = b.CreateMul(items, b.getSize(fw));
     }
     for (unsigned i = 0; i < ne; ++i) {
         Value * inputPtr = nullptr;
         Value * outputPtr = nullptr;
-        Constant * const sz_I = b->getSize(i);
+        Constant * const sz_I = b.getSize(i);
         Value * current = items;
         for (unsigned j = 0; j < fw; ++j) {
             if (fw == 1) {
-                inputPtr = b->getInputStreamBlockPtr("input", sz_I, blockIndex);
-                outputPtr = b->getOutputStreamBlockPtr("output", sz_I, blockIndex);
+                inputPtr = b.getInputStreamBlockPtr("input", sz_I, blockIndex);
+                outputPtr = b.getOutputStreamBlockPtr("output", sz_I, blockIndex);
             } else {
-                Constant * const sz_J = b->getSize(j);
-                inputPtr = b->getInputStreamPackPtr("input", sz_I, sz_J, blockIndex);
-                outputPtr = b->getOutputStreamPackPtr("output", sz_I, sz_J, blockIndex);
+                Constant * const sz_J = b.getSize(j);
+                inputPtr = b.getInputStreamPackPtr("input", sz_I, sz_J, blockIndex);
+                outputPtr = b.getOutputStreamPackPtr("output", sz_I, sz_J, blockIndex);
             }
-            Value * const maskPos = b->CreateUMin(current, BLOCK_WIDTH);
-            Value * const mask = b->CreateNot(b->bitblock_mask_from(maskPos));
-            Value * val = b->CreateAnd(b->CreateAlignedLoad(b->getBitBlockType(), inputPtr, bw / 8), mask);
-            b->CreateStore(val, outputPtr);
-            current = b->CreateSaturatingSub(current, BLOCK_WIDTH);
+            Value * const maskPos = b.CreateUMin(current, BLOCK_WIDTH);
+            Value * const mask = b.CreateNot(b.bitblock_mask_from(maskPos));
+            Value * val = b.CreateAnd(b.CreateAlignedLoad(b.getBitBlockType(), inputPtr, bw / 8), mask);
+            b.CreateStore(val, outputPtr);
+            current = b.CreateSaturatingSub(current, BLOCK_WIDTH);
         }
     }
-    b->setProducedItemCount("output", upTo);
-    b->setTerminationSignal();
-    b->CreateBr(segmentExit);
+    b.setProducedItemCount("output", upTo);
+    b.setTerminationSignal();
+    b.CreateBr(segmentExit);
 
-    b->SetInsertPoint(segmentExit);
+    b.SetInsertPoint(segmentExit);
 }
 
 class PassThroughKernel final : public SegmentOrientedKernel {
 public:
-    PassThroughKernel(BuilderRef b, TruncatedStreamSet * output, Scalar * upTo);
+    PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo);
 protected:
-    void generateDoSegmentMethod(BuilderRef b) override;
+    void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-PassThroughKernel::PassThroughKernel(BuilderRef b, TruncatedStreamSet * output, Scalar * upTo)
+PassThroughKernel::PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo)
 : SegmentOrientedKernel(b, "passThroughKernel",
 // input streams
 {},
@@ -152,38 +152,37 @@ PassThroughKernel::PassThroughKernel(BuilderRef b, TruncatedStreamSet * output, 
     addAttribute(CanTerminateEarly());
 }
 
-void PassThroughKernel::generateDoSegmentMethod(BuilderRef b) {
+void PassThroughKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
-    BasicBlock * const termKernel = b->CreateBasicBlock("termKernel");
-    BasicBlock * const segmentExit = b->CreateBasicBlock("segmentExit");
-    Value * const upTo = b->getScalarField("upTo");
+    BasicBlock * const termKernel = b.CreateBasicBlock("termKernel");
+    BasicBlock * const segmentExit = b.CreateBasicBlock("segmentExit");
+    Value * const upTo = b.getScalarField("upTo");
 
-    Value * const max = b->getWritableOutputItems("output"); assert (max);
-    Value * const avail = b->CreateAdd(b->getProducedItemCount("output"), max);
-    b->CreateLikelyCondBr(b->CreateICmpULT(avail, upTo), segmentExit, termKernel);
+    Value * const max = b.getWritableOutputItems("output"); assert (max);
+    Value * const avail = b.CreateAdd(b.getProducedItemCount("output"), max);
+    b.CreateLikelyCondBr(b.CreateICmpULT(avail, upTo), segmentExit, termKernel);
 
-    b->SetInsertPoint(termKernel);
-    b->setProducedItemCount("output", upTo);
-    b->setTerminationSignal();
-    b->CreateBr(segmentExit);
+    b.SetInsertPoint(termKernel);
+    b.setProducedItemCount("output", upTo);
+    b.setTerminationSignal();
+    b.CreateBr(segmentExit);
 
-    b->SetInsertPoint(segmentExit);
+    b.SetInsertPoint(segmentExit);
 }
 
 class StreamEq : public MultiBlockKernel {
-    using BuilderRef = BuilderRef;
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(BuilderRef b, StreamSet * x, StreamSet * y, Scalar * outPtr);
-    void generateInitializeMethod(BuilderRef b) override;
-    void generateMultiBlockLogic(BuilderRef b, llvm::Value * const numOfStrides) override;
-    void generateFinalizeMethod(BuilderRef b) override;
+    StreamEq(KernelBuilder & b, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    void generateInitializeMethod(KernelBuilder & b) override;
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+    void generateFinalizeMethod(KernelBuilder & b) override;
 
 };
 
 StreamEq::StreamEq(
-    BuilderRef b,
+    KernelBuilder & b,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
@@ -202,99 +201,99 @@ StreamEq::StreamEq(
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b->getInt1Ty(), "accum")})
+    {InternalScalar(b.getInt1Ty(), "accum")})
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
     addAttribute(SideEffecting());
 }
 
-void StreamEq::generateInitializeMethod(BuilderRef b) {
-    b->setScalarField("accum", b->getInt1(true));
+void StreamEq::generateInitializeMethod(KernelBuilder & b) {
+    b.setScalarField("accum", b.getInt1(true));
 }
 
-void StreamEq::generateMultiBlockLogic(BuilderRef b, Value * const numOfStrides) {
-    auto istreamset = b->getInputStreamSet("lhs");
+void StreamEq::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    auto istreamset = b.getInputStreamSet("lhs");
     const uint32_t FW = istreamset->getFieldWidth();
     const uint32_t COUNT = istreamset->getNumElements();
 
-    BasicBlock * const entryBlock = b->GetInsertBlock();
-    BasicBlock * const loopBlock = b->CreateBasicBlock("loop");
-    BasicBlock * const exitBlock = b->CreateBasicBlock("exit");
+    BasicBlock * const entryBlock = b.GetInsertBlock();
+    BasicBlock * const loopBlock = b.CreateBasicBlock("loop");
+    BasicBlock * const exitBlock = b.CreateBasicBlock("exit");
 
-    Value * const initialAccum = b->getScalarField("accum");
-    Constant * const sz_ZERO = b->getSize(0);
+    Value * const initialAccum = b.getScalarField("accum");
+    Constant * const sz_ZERO = b.getSize(0);
 
-    Value * const hasMoreItems = b->CreateICmpNE(numOfStrides, sz_ZERO);
+    Value * const hasMoreItems = b.CreateICmpNE(numOfStrides, sz_ZERO);
 
-    b->CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
+    b.CreateLikelyCondBr(hasMoreItems, loopBlock, exitBlock);
 
-    b->SetInsertPoint(loopBlock);
-    PHINode * const strideNo = b->CreatePHI(b->getSizeTy(), 2);
+    b.SetInsertPoint(loopBlock);
+    PHINode * const strideNo = b.CreatePHI(b.getSizeTy(), 2);
     strideNo->addIncoming(sz_ZERO, entryBlock);
-    PHINode * const accumPhi = b->CreatePHI(b->getInt1Ty(), 2);
+    PHINode * const accumPhi = b.CreatePHI(b.getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
 
     for (uint32_t i = 0; i < COUNT; ++i) {
 
-        Constant * const I = b->getInt32(i);
+        Constant * const I = b.getInt32(i);
 
         for (unsigned j = 0; j < FW; ++j) {
 
             Value * lhs;
             Value * rhs;
             if (FW == 1) {
-                lhs = b->getInputStreamBlockPtr("lhs", I, strideNo);
-                rhs = b->getInputStreamBlockPtr("rhs", I, strideNo);
+                lhs = b.getInputStreamBlockPtr("lhs", I, strideNo);
+                rhs = b.getInputStreamBlockPtr("rhs", I, strideNo);
             } else {
-                Constant * const J = b->getInt32(j);
-                lhs = b->getInputStreamPackPtr("lhs", I, J, strideNo);
-                rhs = b->getInputStreamPackPtr("rhs", I, J, strideNo);
+                Constant * const J = b.getInt32(j);
+                lhs = b.getInputStreamPackPtr("lhs", I, J, strideNo);
+                rhs = b.getInputStreamPackPtr("rhs", I, J, strideNo);
             }
-            lhs = b->CreateBlockAlignedLoad(b->getBitBlockType(), lhs);
-            rhs = b->CreateBlockAlignedLoad(b->getBitBlockType(), rhs);
+            lhs = b.CreateBlockAlignedLoad(b.getBitBlockType(), lhs);
+            rhs = b.CreateBlockAlignedLoad(b.getBitBlockType(), rhs);
 
             // Perform vector comparison lhs != rhs.
             // Result will be a vector of all zeros if lhs == rhs
-            Value * const vComp = b->CreateICmpNE(lhs, rhs);
-            Value * const vCompAsInt = b->CreateBitCast(vComp, b->getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
+            Value * const vComp = b.CreateICmpNE(lhs, rhs);
+            Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
             // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-            Value * const comp = b->CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-        //    b->CallPrintInt("comp", comp);
+            Value * const comp = b.CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
+        //    b.CallPrintInt("comp", comp);
             // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-            nextAccum = b->CreateAnd(nextAccum, comp);
+            nextAccum = b.CreateAnd(nextAccum, comp);
 
         }
 
     }
 
 
-    Value * const nextStrideNo = b->CreateAdd(strideNo, b->getSize(1));
+    Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
     strideNo->addIncoming(nextStrideNo, loopBlock);
     accumPhi->addIncoming(nextAccum, loopBlock);
-    b->CreateCondBr(b->CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
+    b.CreateCondBr(b.CreateICmpNE(nextStrideNo, numOfStrides), loopBlock, exitBlock);
 
-    b->SetInsertPoint(exitBlock);
-    PHINode * const finalAccum = b->CreatePHI(b->getInt1Ty(), 2);
+    b.SetInsertPoint(exitBlock);
+    PHINode * const finalAccum = b.CreatePHI(b.getInt1Ty(), 2);
     finalAccum->addIncoming(initialAccum, entryBlock);
     finalAccum->addIncoming(nextAccum, loopBlock);
-    b->setScalarField("accum", finalAccum);
+    b.setScalarField("accum", finalAccum);
 }
 
-void StreamEq::generateFinalizeMethod(BuilderRef b) {
+void StreamEq::generateFinalizeMethod(KernelBuilder & b) {
     // a `result` value of `true` means the assertion passed
-    Value * result = b->getScalarField("accum");
+    Value * result = b.getScalarField("accum");
 
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
-    Value * resultPtr = b->getScalarField("result_ptr");
-    Value * const ptrVal = b->CreateLoad(b->getInt32Ty(), resultPtr);
-    Value * resultState  = b->CreateSelect(result, b->getInt32(0), b->getInt32(1));;
+    Value * resultPtr = b.getScalarField("result_ptr");
+    Value * const ptrVal = b.CreateLoad(b.getInt32Ty(), resultPtr);
+    Value * resultState  = b.CreateSelect(result, b.getInt32(0), b.getInt32(1));;
 
-    Value * const newVal = b->CreateSelect(b->CreateICmpEQ(ptrVal, b->getInt32(1)), b->getInt32(1), resultState);
-    b->CreateStore(newVal, resultPtr);
+    Value * const newVal = b.CreateSelect(b.CreateICmpEQ(ptrVal, b.getInt32(1)), b.getInt32(1), resultState);
+    b.CreateStore(newVal, resultPtr);
 }
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);
@@ -309,8 +308,8 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
 
     auto & b = pxDriver.getBuilder();
 
-    IntegerType * const int64Ty = b->getInt64Ty();
-    PointerType * const int32PtrTy = b->getInt32Ty()->getPointerTo();
+    IntegerType * const int64Ty = b.getInt64Ty();
+    PointerType * const int32PtrTy = b.getInt32Ty()->getPointerTo();
 
     auto P = pxDriver.makePipeline(
                 {Binding{int64Ty, "copyCount"},

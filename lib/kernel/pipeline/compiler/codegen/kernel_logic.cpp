@@ -5,16 +5,16 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief setActiveKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, const bool allowThreadLocal, const bool getCommonThreadLocal) {
+void PipelineCompiler::setActiveKernel(KernelBuilder & b, const unsigned kernelId, const bool allowThreadLocal, const bool getCommonThreadLocal) {
     assert (kernelId >= FirstKernel && kernelId <= LastKernel);
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
     if (LLVM_LIKELY(mKernel->isStateful())) {
-        Value * handle = b->getScalarFieldPtr(makeKernelName(kernelId)).first;
+        Value * handle = b.getScalarFieldPtr(makeKernelName(kernelId)).first;
         if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
             PointerType * pty = mKernel->getSharedStateType()->getPointerTo();
-            handle = b->CreateLoad(pty, handle);
+            handle = b.CreateLoad(pty, handle);
         }
         mKernelSharedHandle = handle;
     }
@@ -33,9 +33,9 @@ void PipelineCompiler::setActiveKernel(BuilderRef b, const unsigned kernelId, co
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeFullyProcessedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * const terminated) {
+void PipelineCompiler::computeFullyProcessedItemCounts(KernelBuilder & b, Value * const terminated) {
 
-    Constant * const sz_MAX_INT = ConstantInt::getAllOnesValue(b->getSizeTy());
+    Constant * const sz_MAX_INT = ConstantInt::getAllOnesValue(b.getSizeTy());
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
@@ -53,12 +53,12 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
             // If the input rate has a block size attribute then --- for the purpose of determining how many
             // items have been consumed --- we consider a stream set to be fully processed when an entire
             // stride has been processed.
-            Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
-            processed = b->CreateAnd(processed, ConstantExpr::getNeg(BLOCK_WIDTH));
+            Constant * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
+            processed = b.CreateAnd(processed, ConstantExpr::getNeg(BLOCK_WIDTH));
         }
 
         Value * const avail = sz_MAX_INT; // mLocallyAvailableItems[source(e, mBufferGraph)];
-        Value * const fullyProcessed = b->CreateSelect(terminated, avail, processed);
+        Value * const fullyProcessed = b.CreateSelect(terminated, avail, processed);
 
         mFullyProcessedItemCount[port] = fullyProcessed;
         if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -66,13 +66,13 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
             const BufferNode & bn = mBufferGraph[streamSet];
             if (bn.Locality == BufferLocality::ThreadLocal) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
-                Value * const fullyConsumed = b->CreateICmpEQ(produced, processed);
+                Value * const fullyConsumed = b.CreateICmpEQ(produced, processed);
                 Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
-                Value * const fatalError = b->CreateICmpEQ(mTerminatedAtLoopExitPhi, fatal);
-                Value * const valid = b->CreateOr(fullyConsumed, fatalError);
-                Constant * const bindingName = b->GetString(input.getName());
+                Value * const fatalError = b.CreateICmpEQ(mTerminatedAtLoopExitPhi, fatal);
+                Value * const valid = b.CreateOr(fullyConsumed, fatalError);
+                Constant * const bindingName = b.GetString(input.getName());
 
-                b->CreateAssert(valid,
+                b.CreateAssert(valid,
                                 "%s.%s: local available item count (%" PRId64 ") does not match "
                                 "its processed item count (%" PRId64 ")",
                                 mCurrentKernelName, bindingName,
@@ -85,7 +85,7 @@ void PipelineCompiler::computeFullyProcessedItemCounts(BuilderRef b, Value * con
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief computeFullyProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::computeFullyProducedItemCounts(BuilderRef b, Value * const terminated) {
+void PipelineCompiler::computeFullyProducedItemCounts(KernelBuilder & b, Value * const terminated) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto port = br.Port;
@@ -104,13 +104,13 @@ void PipelineCompiler::computeFullyProducedItemCounts(BuilderRef b, Value * cons
             const Binding & output = br.Binding;
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
                 const auto & D = output.findAttribute(AttrId::Delayed);
-                produced = b->CreateSaturatingSub(produced, b->getSize(D.amount()));
+                produced = b.CreateSaturatingSub(produced, b.getSize(D.amount()));
             }
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::BlockSize))) {
-                Constant * const BLOCK_WIDTH = b->getSize(b->getBitBlockWidth());
-                produced = b->CreateAnd(produced, ConstantExpr::getNeg(BLOCK_WIDTH));
+                Constant * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
+                produced = b.CreateAnd(produced, ConstantExpr::getNeg(BLOCK_WIDTH));
             }
-            produced = b->CreateSelect(terminated, mUpdatedProducedPhi[port], produced);
+            produced = b.CreateSelect(terminated, mUpdatedProducedPhi[port], produced);
         }
         assert (isFromCurrentFunction(b, produced, false));
         mFullyProducedItemCount[port]->addIncoming(produced, mKernelLoopExitPhiCatch);
@@ -120,31 +120,31 @@ void PipelineCompiler::computeFullyProducedItemCounts(BuilderRef b, Value * cons
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addLookahead
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::addLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) const {
+Value * PipelineCompiler::addLookahead(KernelBuilder & b, const BufferPort & inputPort, Value * const itemCount) const {
     if (LLVM_LIKELY(inputPort.LookAhead == 0)) {
         return itemCount;
     }
-    Constant * const lookAhead = b->getSize(inputPort.LookAhead);
-    return b->CreateAdd(itemCount, lookAhead);
+    Constant * const lookAhead = b.getSize(inputPort.LookAhead);
+    return b.CreateAdd(itemCount, lookAhead);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief subtractLookahead
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::subtractLookahead(BuilderRef b, const BufferPort & inputPort, Value * const itemCount) {
+Value * PipelineCompiler::subtractLookahead(KernelBuilder & b, const BufferPort & inputPort, Value * const itemCount) {
     if (LLVM_LIKELY(inputPort.LookAhead == 0)) {
         return itemCount;
     }
-    Constant * const lookAhead = b->getSize(inputPort.LookAhead);
+    Constant * const lookAhead = b.getSize(inputPort.LookAhead);
     Value * const closed = isClosed(b, inputPort.Port);
-    Value * const reducedItemCount = b->CreateSaturatingSub(itemCount, lookAhead);
-    return b->CreateSelect(closed, itemCount, reducedItemCount);
+    Value * const reducedItemCount = b.CreateSaturatingSub(itemCount, lookAhead);
+    return b.CreateSelect(closed, itemCount, reducedItemCount);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getThreadLocalHandlePtr
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned kernelIndex, const bool commonThreadLocal) const {
+Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsigned kernelIndex, const bool commonThreadLocal) const {
     const Kernel * const kernel = getKernel(kernelIndex);
     assert ("getThreadLocalHandlePtr should not have been called" && kernel->hasThreadLocal());
     const auto prefix = makeKernelName(kernelIndex);
@@ -154,14 +154,14 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(BuilderRef b, const unsigned k
         handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
         assert (handle);
     } else {
-        handle = getScalarFieldPtr(b.get(), prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        handle = getScalarFieldPtr(b, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     }
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
         if (LLVM_UNLIKELY(CheckAssertions)) {
-            b->CreateAssert(handle, "null handle load");
+            b.CreateAssert(handle, "null handle load");
         }
-        handle = b->CreateLoad(localStateTy->getPointerTo(), handle);
+        handle = b.CreateLoad(localStateTy->getPointerTo(), handle);
     }
     assert (handle->getType()->isPointerTy());
     return handle;
@@ -402,12 +402,12 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernelAssertions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeKernelAssertions(BuilderRef b) {
+void PipelineCompiler::initializeKernelAssertions(KernelBuilder & b) {
     SmallVector<char, 256> tmp;
     for (auto kernel = PipelineInput; kernel <= LastKernel; ++kernel) {
         raw_svector_ostream out(tmp);
         out << kernel << "." << getKernel(kernel)->getName();
-        mKernelName[kernel] = b->GetString(out.str());
+        mKernelName[kernel] = b.GetString(out.str());
         tmp.clear();
     }
 }

@@ -52,11 +52,11 @@ typedef uint64_t (*GCountFunctionType)(uint32_t fd);
 
 GCountFunctionType pipelineGen(CPUDriver & pxDriver) {
 
-    auto & B = pxDriver.getBuilder();
+    auto & b = pxDriver.getBuilder();
 
     auto P = pxDriver.makePipeline(
-                {Binding{B->getInt32Ty(), "fileDescriptor"}},
-                {Binding{B->getInt64Ty(), "countResult"}});
+                {Binding{b.getInt32Ty(), "fileDescriptor"}},
+                {Binding{b.getInt64Ty(), "countResult"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
 

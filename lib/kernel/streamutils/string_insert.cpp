@@ -33,7 +33,7 @@ LLVM_READONLY std::string ZeroInsertName(const std::vector<unsigned> & insertAmt
     return name;
 }
     
-ZeroInsertBixNum::ZeroInsertBixNum(BuilderRef b, const std::vector<unsigned> & insertAmts,
+ZeroInsertBixNum::ZeroInsertBixNum(KernelBuilder & b, const std::vector<unsigned> & insertAmts,
                                        StreamSet * insertMarks, StreamSet * insertBixNum)
 : PabloKernel(b, "StringInsertBixNum" + Kernel::getStringHash(ZeroInsertName(insertAmts, insertMarks)),
               {Binding{"insertMarks", insertMarks}},
@@ -76,7 +76,7 @@ LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & ins
     return name;
 }
 
-StringReplaceKernel::StringReplaceKernel(BuilderRef b, const std::vector<std::string> & insertStrs,
+StringReplaceKernel::StringReplaceKernel(KernelBuilder & b, const std::vector<std::string> & insertStrs,
                                          StreamSet * basis, StreamSet * spreadMask,
                                          StreamSet * insertMarks, StreamSet * runIndex,
                                          StreamSet * output, int markOffset)

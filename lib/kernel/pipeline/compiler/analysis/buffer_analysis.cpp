@@ -579,9 +579,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief determineBufferSize
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineBufferSize(BuilderRef b) {
+void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
 
-    const auto blockWidth = b->getBitBlockWidth();
+    const auto blockWidth = b.getBitBlockWidth();
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
@@ -652,7 +652,7 @@ void PipelineAnalysis::determineBufferSize(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addStreamSetsToBufferGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::addStreamSetsToBufferGraph(BuilderRef b) {
+void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
 
     mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 

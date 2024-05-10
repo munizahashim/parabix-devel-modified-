@@ -186,7 +186,7 @@ private:
  * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
  * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pipeline_random_engine & rng) {
+void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng) {
 
     // This process serves two purposes: (1) generate the initial memory layout for our thread-local
     // streamsets. (2) determine how many the number of pages to assign each streamset based on the
@@ -218,11 +218,11 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
         return;
     }
 
-    DataLayout DL(b->getModule());
+    DataLayout DL(b.getModule());
 
-    const auto blockWidth = b->getBitBlockWidth();
+    const auto blockWidth = b.getBitBlockWidth();
 
-    const size_t pageSize = b->getPageSize();
+    const size_t pageSize = b.getPageSize();
 
     IntervalGraph I(numOfThreadLocalStreamSets);
 
@@ -254,7 +254,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(BuilderRef b, pip
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
                     Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                    const auto typeSize = b->getTypeSize(DL, type);
+                    const auto typeSize = b.getTypeSize(DL, type);
                     const ProcessingRate & rate = outputRate.getRate();
                     assert (rate.isFixed());
                     const auto j = mapping[streamSet - FirstStreamSet];

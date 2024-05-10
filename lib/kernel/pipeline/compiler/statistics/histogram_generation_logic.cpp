@@ -197,15 +197,15 @@ enum DynamicHistogram {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addHistogramProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelId, const size_t groupId) {
+void PipelineCompiler::addHistogramProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
 
-    IntegerType * const i64Ty = b->getInt64Ty();
+    IntegerType * const i64Ty = b.getInt64Ty();
 
     FixedArray<Type *, 3> fields;
     fields[0] = i64Ty;
     fields[1] = i64Ty;
-    fields[2] = b->getVoidPtrTy();
-    StructType * const listTy = StructType::get(b->getContext(), fields);
+    fields[2] = b.getVoidPtrTy();
+    StructType * const listTy = StructType::get(b.getContext(), fields);
 
     const auto anyGreedy = hasAnyGreedyInput(kernelId);
 
@@ -247,7 +247,7 @@ void PipelineCompiler::addHistogramProperties(BuilderRef b, const size_t kernelI
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief freeHistogramProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
+void PipelineCompiler::freeHistogramProperties(KernelBuilder & b) {
 
     Function * freeLinkedListFunc = nullptr;
 
@@ -259,23 +259,23 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
             if (freeLinkedListFunc == nullptr) {
 
 
-                PointerType * const voidPtrTy = b->getVoidPtrTy();
+                PointerType * const voidPtrTy = b.getVoidPtrTy();
 
-                IntegerType * const i64Ty = b->getInt64Ty();
+                IntegerType * const i64Ty = b.getInt64Ty();
 
                 FixedArray<Type *, 3> fields;
                 fields[0] = i64Ty;
                 fields[1] = i64Ty;
                 fields[2] = voidPtrTy;
-                StructType * const listTy = StructType::get(b->getContext(), fields);
+                StructType * const listTy = StructType::get(b.getContext(), fields);
 
                 PointerType * const listPtrTy = listTy->getPointerTo();
 
-                FunctionType * const funcTy = FunctionType::get(b->getVoidTy(), {listPtrTy}, false);
+                FunctionType * const funcTy = FunctionType::get(b.getVoidTy(), {listPtrTy}, false);
 
-                const auto ip = b->saveIP();
+                const auto ip = b.saveIP();
 
-                Module * const m = b->getModule();
+                Module * const m = b.getModule();
 
                 LLVMContext & C = m->getContext();
                 freeLinkedListFunc = Function::Create(funcTy, Function::InternalLinkage, "__freeHistogramLinkedList", m);
@@ -284,7 +284,7 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
                 BasicBlock * const freeLoop = BasicBlock::Create(C, "freeLoop", freeLinkedListFunc);
                 BasicBlock * const freeExit = BasicBlock::Create(C, "freeExit", freeLinkedListFunc);
 
-                b->SetInsertPoint(entry);
+                b.SetInsertPoint(entry);
 
                 auto arg = freeLinkedListFunc->arg_begin();
                 auto nextArg = [&]() {
@@ -299,30 +299,30 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
                 assert (arg == freeLinkedListFunc->arg_end());
 
                 FixedArray<Value *, 2> offset;
-                offset[0] = b->getInt32(0);
-                offset[1] = b->getInt32(2);
+                offset[0] = b.getInt32(0);
+                offset[1] = b.getInt32(2);
 
-                Value * const first = b->CreateLoad(voidPtrTy, b->CreateGEP(listTy, root, offset));
+                Value * const first = b.CreateLoad(voidPtrTy, b.CreateGEP(listTy, root, offset));
                 Value * const nil = ConstantPointerNull::get(voidPtrTy);
 
-                b->CreateCondBr(b->CreateICmpNE(first, nil), freeLoop, freeExit);
+                b.CreateCondBr(b.CreateICmpNE(first, nil), freeLoop, freeExit);
 
-                b->SetInsertPoint(freeLoop);
-                PHINode * const current = b->CreatePHI(voidPtrTy, 2);
+                b.SetInsertPoint(freeLoop);
+                PHINode * const current = b.CreatePHI(voidPtrTy, 2);
                 current->addIncoming(first, entry);
-                Value * const currentList = b->CreatePointerCast(current, listPtrTy);
-                Value * const next = b->CreateLoad(voidPtrTy, b->CreateGEP(listTy, currentList, offset));
-                b->CreateFree(currentList);
+                Value * const currentList = b.CreatePointerCast(current, listPtrTy);
+                Value * const next = b.CreateLoad(voidPtrTy, b.CreateGEP(listTy, currentList, offset));
+                b.CreateFree(currentList);
                 current->addIncoming(next, freeLoop);
-                b->CreateCondBr(b->CreateICmpNE(next, nil), freeLoop, freeExit);
+                b.CreateCondBr(b.CreateICmpNE(next, nil), freeLoop, freeExit);
 
-                b->SetInsertPoint(freeExit);
-                b->CreateRetVoid();
+                b.SetInsertPoint(freeExit);
+                b.CreateRetVoid();
 
-                b->restoreIP(ip);
+                b.restoreIP(ip);
             }
 
-            b->CreateCall(freeLinkedListFunc->getFunctionType(), freeLinkedListFunc, {root} );
+            b.CreateCall(freeLinkedListFunc->getFunctionType(), freeLinkedListFunc, {root} );
 
         };
 
@@ -332,11 +332,11 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
 
             if (LLVM_UNLIKELY(mGenerateDeferredItemCountHistogram && bd.hasAttribute(AttrId::Deferred))) {
                 const auto prefix = makeBufferName(i, br.Port);
-                freeLinkedList(getScalarFieldPtr(b.get(), prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first);
+                freeLinkedList(getScalarFieldPtr(b, prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first);
             }
             if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram && (anyGreedy || pr.isUnknown()))) {
                 const auto prefix = makeBufferName(i, br.Port);
-                freeLinkedList(getScalarFieldPtr(b.get(), prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first);
+                freeLinkedList(getScalarFieldPtr(b, prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first);
             }
 
         };
@@ -357,36 +357,36 @@ void PipelineCompiler::freeHistogramProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateTransferredItemsForHistogramData
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
+void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b) {
 
-    ConstantInt * const sz_ZERO = b->getSize(0);
-    ConstantInt * const sz_ONE = b->getSize(1);
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
 
-    IntegerType * const i64Ty = b->getInt64Ty();
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    IntegerType * const i64Ty = b.getInt64Ty();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
 
     const auto anyGreedy = hasAnyGreedyInput(mKernelId);
 
     auto recordDynamicEntry = [&](Value * const initialEntry, Value * const itemCount, Type * listTy) {
 
-        Module * const m = b->getModule();
+        Module * const m = b.getModule();
 
         Function * func = m->getFunction("updateHistogramList");
         if (func == nullptr) {
 
           //  PointerType * const entryPtrTy = type->getPointerTo();
-            IntegerType * const sizeTy = b->getSizeTy();
+            IntegerType * const sizeTy = b.getSizeTy();
 
             PointerType * const listPtrTy = listTy->getPointerTo();
 
-            FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {listPtrTy, sizeTy}, false);
+            FunctionType * funcTy = FunctionType::get(b.getVoidTy(), {listPtrTy, sizeTy}, false);
 
-            ConstantInt * const i32_ZERO = b->getInt32(0);
-            ConstantInt * const i32_ONE = b->getInt32(1);
-            ConstantInt * const i32_TWO = b->getInt32(2);
-            ConstantInt * const i64_ONE = b->getSize(1);
+            ConstantInt * const i32_ZERO = b.getInt32(0);
+            ConstantInt * const i32_ONE = b.getInt32(1);
+            ConstantInt * const i32_TWO = b.getInt32(2);
+            ConstantInt * const i64_ONE = b.getSize(1);
 
-            const auto ip = b->saveIP();
+            const auto ip = b.saveIP();
 
             LLVMContext & C = m->getContext();
             func = Function::Create(funcTy, Function::InternalLinkage, "updateHistogramList", m);
@@ -398,7 +398,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             BasicBlock * insertNewEntry = BasicBlock::Create(C, "insertNewEntry", func);
             BasicBlock * updateEntry = BasicBlock::Create(C, "updateEntry", func);
 
-            b->SetInsertPoint(entry);
+            b.SetInsertPoint(entry);
 
             auto arg = func->arg_begin();
             auto nextArg = [&]() {
@@ -414,68 +414,68 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
             itemCount->setName("itemCount");
             assert (arg == func->arg_end());
 
-            b->CreateUnlikelyCondBr(b->CreateICmpEQ(itemCount, sz_ZERO), updateEntry, scanLoop);
+            b.CreateUnlikelyCondBr(b.CreateICmpEQ(itemCount, sz_ZERO), updateEntry, scanLoop);
 
-            b->SetInsertPoint(scanLoop);
-            PHINode * const lastEntry = b->CreatePHI(listPtrTy, 2, "lastEntry");
+            b.SetInsertPoint(scanLoop);
+            PHINode * const lastEntry = b.CreatePHI(listPtrTy, 2, "lastEntry");
             lastEntry->addIncoming(firstEntry, entry);
-            PHINode * const lastItemCount = b->CreatePHI(b->getSizeTy(), 2, "lastPosition");
+            PHINode * const lastItemCount = b.CreatePHI(b.getSizeTy(), 2, "lastPosition");
             lastItemCount->addIncoming(sz_ZERO, entry);
 
             FixedArray<Value *, 2> offset;
             offset[0] = i32_ZERO;
             offset[1] = i32_TWO;
 
-            Value * const currentEntryPtr = b->CreateGEP(listTy, lastEntry, offset);
-            Value * const currentEntry = b->CreateLoad(listPtrTy, currentEntryPtr);
-            Value * const noMore = b->CreateICmpEQ(currentEntry, ConstantPointerNull::get(listPtrTy));
-            b->CreateCondBr(noMore, insertNewEntry, checkForUpdateOrInsert);
+            Value * const currentEntryPtr = b.CreateGEP(listTy, lastEntry, offset);
+            Value * const currentEntry = b.CreateLoad(listPtrTy, currentEntryPtr);
+            Value * const noMore = b.CreateICmpEQ(currentEntry, ConstantPointerNull::get(listPtrTy));
+            b.CreateCondBr(noMore, insertNewEntry, checkForUpdateOrInsert);
 
-            b->SetInsertPoint(checkForUpdateOrInsert);
+            b.SetInsertPoint(checkForUpdateOrInsert);
             offset[1] = i32_ZERO;
-            Value * const currentItemCount = b->CreateLoad(i64Ty, b->CreateGEP(listTy, currentEntry, offset));
+            Value * const currentItemCount = b.CreateLoad(i64Ty, b.CreateGEP(listTy, currentEntry, offset));
             if (LLVM_UNLIKELY(CheckAssertions)) {
-                Value * const valid = b->CreateICmpULT(lastItemCount, currentItemCount);
-                b->CreateAssert(valid, "Histogram history error: last position (%" PRIu64
+                Value * const valid = b.CreateICmpULT(lastItemCount, currentItemCount);
+                b.CreateAssert(valid, "Histogram history error: last position (%" PRIu64
                                 ") >= current position (%" PRIu64 ")", lastItemCount, currentItemCount);
             }
             lastEntry->addIncoming(currentEntry, checkForUpdateOrInsert);
             lastItemCount->addIncoming(currentItemCount, checkForUpdateOrInsert);
-            b->CreateCondBr(b->CreateICmpULT(currentItemCount, itemCount), scanLoop, updateOrInsertEntry);
+            b.CreateCondBr(b.CreateICmpULT(currentItemCount, itemCount), scanLoop, updateOrInsertEntry);
 
-            b->SetInsertPoint(updateOrInsertEntry);
-            b->CreateCondBr(b->CreateICmpEQ(currentItemCount, itemCount), updateEntry, insertNewEntry);
+            b.SetInsertPoint(updateOrInsertEntry);
+            b.CreateCondBr(b.CreateICmpEQ(currentItemCount, itemCount), updateEntry, insertNewEntry);
 
-            b->SetInsertPoint(insertNewEntry);
-            Value * const size = b->getTypeSize(listTy);
-            Value * const newEntry = b->CreatePointerCast(b->CreateAlignedMalloc(size, sizeof(uint64_t)), listPtrTy);
+            b.SetInsertPoint(insertNewEntry);
+            Value * const size = b.getTypeSize(listTy);
+            Value * const newEntry = b.CreatePointerCast(b.CreateAlignedMalloc(size, sizeof(uint64_t)), listPtrTy);
             offset[1] = i32_ZERO;
-            b->CreateStore(itemCount, b->CreateGEP(listTy, newEntry, offset));
+            b.CreateStore(itemCount, b.CreateGEP(listTy, newEntry, offset));
             offset[1] = i32_ONE;
-            b->CreateStore(i64_ONE, b->CreateGEP(listTy, newEntry, offset));
+            b.CreateStore(i64_ONE, b.CreateGEP(listTy, newEntry, offset));
             offset[1] = i32_TWO;
-            b->CreateStore(b->CreatePointerCast(currentEntry, voidPtrTy), b->CreateGEP(listTy, newEntry, offset));
-            b->CreateStore(b->CreatePointerCast(newEntry, voidPtrTy), b->CreateGEP(listTy, lastEntry, offset));
-            b->CreateRetVoid();
+            b.CreateStore(b.CreatePointerCast(currentEntry, voidPtrTy), b.CreateGEP(listTy, newEntry, offset));
+            b.CreateStore(b.CreatePointerCast(newEntry, voidPtrTy), b.CreateGEP(listTy, lastEntry, offset));
+            b.CreateRetVoid();
 
-            b->SetInsertPoint(updateEntry);
-            PHINode * const entryToUpdate = b->CreatePHI(listPtrTy, 2);
+            b.SetInsertPoint(updateEntry);
+            PHINode * const entryToUpdate = b.CreatePHI(listPtrTy, 2);
             entryToUpdate->addIncoming(currentEntry, updateOrInsertEntry);
             entryToUpdate->addIncoming(firstEntry, entry);
             offset[1] = i32_ONE;
-            Value * const ptr = b->CreateGEP(listTy, entryToUpdate, offset);
-            Value * const val = b->CreateAdd(b->CreateLoad(i64Ty, ptr), i64_ONE);
-            b->CreateStore(val, ptr);
-            b->CreateRetVoid();
+            Value * const ptr = b.CreateGEP(listTy, entryToUpdate, offset);
+            Value * const val = b.CreateAdd(b.CreateLoad(i64Ty, ptr), i64_ONE);
+            b.CreateStore(val, ptr);
+            b.CreateRetVoid();
 
-            b->restoreIP(ip);
+            b.restoreIP(ip);
         }
 
         FixedArray<Value *, 2> args;
         args[0] = initialEntry;
         args[1] = itemCount;
 
-        b->CreateCall(func->getFunctionType(), func, args);
+        b.CreateCall(func->getFunctionType(), func, args);
 
     };
 
@@ -485,17 +485,17 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
 
         auto calculateDiff = [&](Value * const A, Value * const B, StringRef Name) -> Value * {
             if (LLVM_UNLIKELY(CheckAssertions)) {
-                Value * const valid = b->CreateICmpUGE(A, B);
-                b->CreateAssert(valid, "Expected %s.%s (%" PRIu64 ") to exceed %s rate (%" PRIu64 ")",
-                                mCurrentKernelName, b->GetString(bd.getName()), A, b->GetString(Name), B);
+                Value * const valid = b.CreateICmpUGE(A, B);
+                b.CreateAssert(valid, "Expected %s.%s (%" PRIu64 ") to exceed %s rate (%" PRIu64 ")",
+                                mCurrentKernelName, b.GetString(bd.getName()), A, b.GetString(Name), B);
             }
-            return b->CreateSub(A, B);
+            return b.CreateSub(A, B);
         };
 
         if (LLVM_UNLIKELY(mGenerateDeferredItemCountHistogram && bd.hasAttribute(AttrId::Deferred))) {
             const auto prefix = makeBufferName(mKernelId, br.Port);
             Value * base; Type * type;
-            std::tie(base, type) = b->getScalarFieldPtr(prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
+            std::tie(base, type) = b.getScalarFieldPtr(prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
             Value * diff = nullptr;
             if (br.Port.Type == PortType::Input) {
                 diff = calculateDiff(mProcessedItemCount[br.Port], mCurrentProcessedDeferredItemCountPhi[br.Port], "processed deferred");
@@ -509,7 +509,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
         if (mGenerateTransferredItemCountHistogram && (anyGreedy || !pr.isFixed())) {
             const auto prefix = makeBufferName(mKernelId, br.Port);
             Value * base; Type * type;
-            std::tie(base, type) = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
+            std::tie(base, type) = b.getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX);
 
             Value * diff = nullptr;
             if (br.Port.Type == PortType::Input) {
@@ -520,18 +520,18 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
 
             if (LLVM_LIKELY(isa<ArrayType>(type))) {
                 if (LLVM_UNLIKELY(CheckAssertions)) {
-                    Value * const maxSize = b->getSize(type->getArrayNumElements() - 1);
-                    Value * const valid = b->CreateICmpULE(diff, maxSize);
-                    Constant * const bindingName = b->GetString(bd.getName());
-                    b->CreateAssert(valid, "%s.%s: attempting to update %" PRIu64 "-th value of histogram data "
+                    Value * const maxSize = b.getSize(type->getArrayNumElements() - 1);
+                    Value * const valid = b.CreateICmpULE(diff, maxSize);
+                    Constant * const bindingName = b.GetString(bd.getName());
+                    b.CreateAssert(valid, "%s.%s: attempting to update %" PRIu64 "-th value of histogram data "
                                            "but internal array can only support up to %" PRIu64 " elements",
                                             mCurrentKernelName, bindingName, diff, maxSize);
                 }
                 FixedArray<Value *, 2> args;
                 args[0] = sz_ZERO;
                 args[1] = diff;
-                Value * const toInc = b->CreateGEP(type, base, args);
-                b->CreateStore(b->CreateAdd(b->CreateLoad(i64Ty, toInc), sz_ONE), toInc);
+                Value * const toInc = b.CreateGEP(type, base, args);
+                b.CreateStore(b.CreateAdd(b.CreateLoad(i64Ty, toInc), sz_ONE), toInc);
             } else {
                 recordDynamicEntry(base, diff, type);
             }
@@ -552,40 +552,40 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printHistogramReport
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType type) const {
+void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportType type) const {
 
     // struct HistogramPortData
     FixedArray<Type *, 5> hpdFields;
-    hpdFields[0] = b->getInt32Ty(); // PortType
-    hpdFields[1] = b->getInt32Ty(); // PortNum
-    hpdFields[2] = b->getInt8PtrTy(); // Binding Name
-    hpdFields[3] = b->getInt64Ty(); // Size
-    hpdFields[4] = b->getVoidPtrTy(); // Data
-    StructType * const hpdTy = StructType::get(b->getContext(), hpdFields);
+    hpdFields[0] = b.getInt32Ty(); // PortType
+    hpdFields[1] = b.getInt32Ty(); // PortNum
+    hpdFields[2] = b.getInt8PtrTy(); // Binding Name
+    hpdFields[3] = b.getInt64Ty(); // Size
+    hpdFields[4] = b.getVoidPtrTy(); // Data
+    StructType * const hpdTy = StructType::get(b.getContext(), hpdFields);
 
     // struct HistogramKernelData
     FixedArray<Type *, 4> hkdFields;
-    hkdFields[0] = b->getInt32Ty(); // Id
-    hkdFields[1] = b->getInt32Ty(); // NumOfPorts
-    hkdFields[2] = b->getInt8PtrTy(); // KernelName
+    hkdFields[0] = b.getInt32Ty(); // Id
+    hkdFields[1] = b.getInt32Ty(); // NumOfPorts
+    hkdFields[2] = b.getInt8PtrTy(); // KernelName
     hkdFields[3] = hpdTy->getPointerTo(); // PortData
-    StructType * const hkdTy = StructType::get(b->getContext(), hkdFields);
+    StructType * const hkdTy = StructType::get(b.getContext(), hkdFields);
 
     #ifndef NDEBUG
     BEGIN_SCOPED_REGION
-    DataLayout dl(b->getModule());
+    DataLayout dl(b.getModule());
     assert (CBuilder::getTypeSize(dl, hpdTy) == sizeof(HistogramPortData));
     assert (CBuilder::getTypeSize(dl, hkdTy) == sizeof(HistogramKernelData));
     END_SCOPED_REGION
     #endif
 
-    ConstantInt * const i32_ZERO = b->getInt32(0);
-    ConstantInt * const i32_ONE = b->getInt32(1);
-    ConstantInt * const i32_TWO = b->getInt32(2);
-    ConstantInt * const i32_THREE = b->getInt32(3);
-    ConstantInt * const i32_FOUR = b->getInt32(4);
+    ConstantInt * const i32_ZERO = b.getInt32(0);
+    ConstantInt * const i32_ONE = b.getInt32(1);
+    ConstantInt * const i32_TWO = b.getInt32(2);
+    ConstantInt * const i32_THREE = b.getInt32(3);
+    ConstantInt * const i32_FOUR = b.getInt32(4);
 
-    PointerType * const voidPtrTy = b->getVoidPtrTy();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
 
     unsigned numOfKernels = 0;
 
@@ -639,7 +639,7 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
 
     }
 
-    Value * const kernelData = b->CreateAlignedMalloc(hkdTy, b->getSize(numOfKernels), 0, b->getCacheAlignment());
+    Value * const kernelData = b.CreateAlignedMalloc(hkdTy, b.getSize(numOfKernels), 0, b.getCacheAlignment());
 
     for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
 
@@ -689,16 +689,16 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
         }
 
         FixedArray<Value *, 2> offset;
-        offset[0] = b->getInt32(index++);
+        offset[0] = b.getInt32(index++);
         offset[1] = i32_ZERO;
-        b->CreateStore(b->getInt32(kernelId), b->CreateGEP(hkdTy, kernelData, offset));
+        b.CreateStore(b.getInt32(kernelId), b.CreateGEP(hkdTy, kernelData, offset));
         offset[1] = i32_ONE;
-        b->CreateStore(b->getInt32(numOfPorts), b->CreateGEP(hkdTy, kernelData, offset));
+        b.CreateStore(b.getInt32(numOfPorts), b.CreateGEP(hkdTy, kernelData, offset));
         offset[1] = i32_TWO;
-        b->CreateStore(b->GetString(getKernel(kernelId)->getName()), b->CreateGEP(hkdTy, kernelData, offset));
-        Value * const portData = b->CreateAlignedMalloc(hpdTy, b->getSize(numOfPorts), 0, b->getCacheAlignment());
+        b.CreateStore(b.GetString(getKernel(kernelId)->getName()), b.CreateGEP(hkdTy, kernelData, offset));
+        Value * const portData = b.CreateAlignedMalloc(hpdTy, b.getSize(numOfPorts), 0, b.getCacheAlignment());
         offset[1] = i32_THREE;
-        b->CreateStore(portData, b->CreateGEP(hkdTy, kernelData, offset));
+        b.CreateStore(portData, b.CreateGEP(hkdTy, kernelData, offset));
 
         unsigned portIndex = 0;
 
@@ -718,13 +718,13 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
 
             assert (portIndex < numOfPorts);
 
-            offset[0] = b->getInt32(portIndex++);
+            offset[0] = b.getInt32(portIndex++);
             offset[1] = i32_ZERO;
-            b->CreateStore(b->getInt32((unsigned)br.Port.Type), b->CreateGEP(hpdTy, portData, offset));
+            b.CreateStore(b.getInt32((unsigned)br.Port.Type), b.CreateGEP(hpdTy, portData, offset));
             offset[1] = i32_ONE;
-            b->CreateStore(b->getInt32(br.Port.Number), b->CreateGEP(hpdTy, portData, offset));
+            b.CreateStore(b.getInt32(br.Port.Number), b.CreateGEP(hpdTy, portData, offset));
             offset[1] = i32_TWO;
-            b->CreateStore(b->GetString(bind.getName()), b->CreateGEP(hpdTy, portData, offset));
+            b.CreateStore(b.GetString(bind.getName()), b.CreateGEP(hpdTy, portData, offset));
 
             const auto prefix = makeBufferName(kernelId, br.Port);
 
@@ -732,19 +732,19 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
             uint64_t maxSize = 0;
 
             if (type == HistogramReportType::TransferredItems) {
-                data = b->getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first;
+                data = b.getScalarFieldPtr(prefix + STATISTICS_TRANSFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first;
                 if (!anyGreedy && !pr.isUnknown()) {
                     maxSize = ceiling(br.Maximum) + 1;
                 }
             } else if (type == HistogramReportType::DeferredItems) {
-                data = b->getScalarFieldPtr(prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first;
+                data = b.getScalarFieldPtr(prefix + STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX).first;
             }
 
             offset[1] = i32_THREE;
-            b->CreateStore(b->getInt64(maxSize), b->CreateGEP(hpdTy, portData, offset));
+            b.CreateStore(b.getInt64(maxSize), b.CreateGEP(hpdTy, portData, offset));
 
             offset[1] = i32_FOUR;
-            b->CreateStore(b->CreatePointerCast(data, voidPtrTy), b->CreateGEP(hpdTy, portData, offset));
+            b.CreateStore(b.CreatePointerCast(data, voidPtrTy), b.CreateGEP(hpdTy, portData, offset));
 
         };
 
@@ -759,15 +759,15 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
 
     // call the report function
     FixedArray<Value *, 3> args;
-    args[0] = b->CreatePointerCast(kernelData, voidPtrTy);
-    args[1] = b->getInt64(numOfKernels);
-    args[2] = b->getInt32((unsigned)type);
+    args[0] = b.CreatePointerCast(kernelData, voidPtrTy);
+    args[1] = b.getInt64(numOfKernels);
+    args[2] = b.getInt32((unsigned)type);
 
-    Module * const m = b->getModule();
+    Module * const m = b.getModule();
 
     Function * const reportPrinter = m->getFunction("__print_pipeline_histogram_report");
     assert (reportPrinter);
-    b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
+    b.CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
     // memory cleanup
     for (unsigned kernelId = FirstKernel, index = 0; kernelId <= LastKernel; ++kernelId) {
@@ -805,20 +805,20 @@ void PipelineCompiler::printHistogramReport(BuilderRef b, HistogramReportType ty
         continue;
 free_port_data:
         FixedArray<Value *, 2> offset;
-        offset[0] = b->getInt32(index++);
+        offset[0] = b.getInt32(index++);
         offset[1] = i32_THREE;
-        b->CreateFree(b->CreateLoad(hpdTy->getPointerTo(), b->CreateGEP(hkdTy, kernelData, offset)));
+        b.CreateFree(b.CreateLoad(hpdTy->getPointerTo(), b.CreateGEP(hkdTy, kernelData, offset)));
     }
-    b->CreateFree(kernelData);
+    b.CreateFree(kernelData);
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkHistogramFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::linkHistogramFunctions(BuilderRef b) {
-    FunctionType * funcTy = FunctionType::get(b->getVoidTy(), {b->getVoidPtrTy(), b->getInt64Ty(), b->getInt32Ty()}, false);
-    b->LinkFunction("__print_pipeline_histogram_report", funcTy, (void*)__print_pipeline_histogram_report);
+void PipelineCompiler::linkHistogramFunctions(KernelBuilder & b) {
+    FunctionType * funcTy = FunctionType::get(b.getVoidTy(), {b.getVoidPtrTy(), b.getInt64Ty(), b.getInt32Ty()}, false);
+    b.LinkFunction("__print_pipeline_histogram_report", funcTy, (void*)__print_pipeline_histogram_report);
 }
 
 }

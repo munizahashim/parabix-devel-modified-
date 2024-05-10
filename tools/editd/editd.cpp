@@ -175,12 +175,12 @@ typedef void (*preprocessFunctionType)(StreamSetPtr & chStream, const int32_t fd
 
 class PreprocessKernel final: public pablo::PabloKernel {
 public:
-    PreprocessKernel(BuilderRef b, StreamSet * BasisBits, StreamSet * CCResults);
+    PreprocessKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * CCResults);
 protected:
     void generatePabloMethod() override;
 };
 
-PreprocessKernel::PreprocessKernel(BuilderRef b, StreamSet * BasisBits, StreamSet * CCResults)
+PreprocessKernel::PreprocessKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * CCResults)
 : PabloKernel(b, "editd_preprocess", {{"basis", BasisBits}}, {{"pat", CCResults}}) {
 
 }
@@ -202,7 +202,7 @@ void PreprocessKernel::generatePabloMethod() {
 preprocessFunctionType preprocessPipeline(CPUDriver & pxDriver) {
     StreamSet * const CCResults = pxDriver.CreateStreamSet(4);
     auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = pxDriver.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer(1))}, {{int32Ty, "fileDescriptor"}});
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
@@ -239,7 +239,7 @@ LLVM_READNONE std::string createName(const std::vector<std::string> & patterns) 
 
 class PatternKernel final : public pablo::PabloKernel {
 public:
-    PatternKernel(BuilderRef b, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E);
+    PatternKernel(KernelBuilder & b, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E);
     StringRef getSignature() const override {
         return mSignature;
     }
@@ -251,7 +251,7 @@ private:
     const std::string mSignature;
 };
 
-PatternKernel::PatternKernel(BuilderRef b, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E)
+PatternKernel::PatternKernel(KernelBuilder & b, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E)
 : PabloKernel(b, "Editd_pattern_" + getStringHash(createName(patterns)),
 {{"pat", pat}},
 {{"E", E}})
@@ -300,7 +300,7 @@ typedef void (*multiEditdFunctionType)(const int fd);
 multiEditdFunctionType multiEditdPipeline(CPUDriver & pxDriver) {
 
     auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b->getInt32Ty(), "fileDescriptor"}});
+    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "fileDescriptor"}});
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
@@ -365,7 +365,7 @@ typedef void (*editdIndexFunctionType)(const StreamSetPtr & byteData, const char
 editdIndexFunctionType editdIndexPatternPipeline(CPUDriver & pxDriver, unsigned patternLen) {
     auto & b = pxDriver.getBuilder();
     StreamSet * const ChStream = pxDriver.CreateStreamSet(4);
-    auto P = pxDriver.makePipelineWithIO({{"chStream", ChStream}}, {}, {{b->getInt8PtrTy(), "pattStream"}});
+    auto P = pxDriver.makePipelineWithIO({{"chStream", ChStream}}, {}, {{b.getInt8PtrTy(), "pattStream"}});
     Scalar * const pattStream = P->getInputScalar("pattStream");
     StreamSet * const MatchResults = P->CreateStreamSet(editDistance + 1);
     P->CreateKernelCall<editdCPUKernel>(editDistance, patternLen, groupSize, pattStream, ChStream, MatchResults);

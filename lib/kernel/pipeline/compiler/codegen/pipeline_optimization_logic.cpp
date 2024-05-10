@@ -20,13 +20,13 @@ namespace kernel {
  *
  * replace the phi catch with the actual exit blocks
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock *& toReplace, BasicBlock * const phiContainer) {
+void PipelineCompiler::replacePhiCatchWithCurrentBlock(KernelBuilder & b, BasicBlock *& toReplace, BasicBlock * const phiContainer) {
     // NOTE: not all versions of LLVM seem to have BasicBlock::replacePhiUsesWith or PHINode::replaceIncomingBlockWith.
     // This code could be made to use those instead.
 
     assert (toReplace);
 
-    BasicBlock * const to = b->GetInsertBlock();
+    BasicBlock * const to = b.GetInsertBlock();
 
     for (Instruction & inst : *phiContainer) {
         if (LLVM_LIKELY(isa<PHINode>(inst))) {
@@ -62,12 +62,12 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(BuilderRef b, BasicBlock 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::runOptimizationPasses(BuilderRef b) {
+void PipelineCompiler::runOptimizationPasses(KernelBuilder & b) {
 
     // To make sure the optimizations aren't hiding an error, first run the verifier
     // detect any possible errors prior to optimizing it.
 
-    Module * const m = b->getModule();
+    Module * const m = b.getModule();
     auto pm = std::make_unique<legacy::PassManager>();
 
     #ifndef NDEBUG

@@ -13,11 +13,11 @@ namespace kernel {
 
 class CCScanKernel : public BlockOrientedKernel {
 public:
-    CCScanKernel(BuilderRef b, unsigned streamNum);
+    CCScanKernel(KernelBuilder & b, unsigned streamNum);
 
 private:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
-    llvm::Function * generateScanWordRoutine(BuilderRef iBuilder) const;
+    void generateDoBlockMethod(KernelBuilder & iBuilder) override;
+    llvm::Function * generateScanWordRoutine(KernelBuilder & iBuilder) const;
 
     unsigned mStreamNum;
     unsigned mScanwordBitWidth;

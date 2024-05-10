@@ -49,7 +49,7 @@ typedef void (*ztf1FunctionType)(uint32_t fd);
 ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> ztf1PabloSrc) {
 
     auto & b = driver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
@@ -84,7 +84,7 @@ ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<Pablo
 
 ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> ztf1PabloSrc) {
     auto & b = driver.getBuilder();
-    Type * const int32Ty = b->getInt32Ty();
+    Type * const int32Ty = b.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 

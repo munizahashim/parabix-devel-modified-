@@ -27,7 +27,6 @@ public:
     using Kernel = kernel::Kernel;
     using Relationship = kernel::Relationship;
     using Bindings = kernel::Bindings;
-    using BuilderRef = kernel::Kernel::BuilderRef;
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
@@ -36,8 +35,8 @@ public:
 
     std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
 
-    BuilderRef getBuilder() {
-        return mBuilder;
+    kernel::KernelBuilder & getBuilder() {
+        return *mBuilder;
     }
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;

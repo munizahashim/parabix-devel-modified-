@@ -11,7 +11,7 @@ using namespace pablo;
 
 namespace kernel {
 
-ShiftForward::ShiftForward(BuilderRef b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
+ShiftForward::ShiftForward(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
 : PabloKernel(b, "ShftFwd" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)
@@ -27,7 +27,7 @@ void ShiftForward::generatePabloMethod() {
     }
 }
 
-ShiftBack::ShiftBack(BuilderRef b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
+ShiftBack::ShiftBack(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
 : PabloKernel(b, "ShftBack" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs, FixedRate(1), LookAhead(shiftAmount)}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)
@@ -42,7 +42,7 @@ void ShiftBack::generatePabloMethod() {
     }
 }
 
-IndexedAdvance::IndexedAdvance(BuilderRef b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount)
+IndexedAdvance::IndexedAdvance(KernelBuilder & b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount)
 : PabloKernel(b, "IndexedAdvance" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs}, Binding{"index", index}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)

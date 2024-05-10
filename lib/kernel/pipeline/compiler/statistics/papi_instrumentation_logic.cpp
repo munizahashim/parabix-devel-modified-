@@ -21,10 +21,10 @@ constexpr auto add_perf_events_failure_message =
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPAPIEventCounterType
  ** ------------------------------------------------------------------------------------------------------------- */
-ArrayType * PipelineCompiler::getPAPIEventCounterType(BuilderRef b) const {
-    IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b->getContext());
+ArrayType * PipelineCompiler::getPAPIEventCounterType(KernelBuilder & b) const {
+    IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b.getContext());
 //    const auto pw = papiCounterTy->getIntegerBitWidth();
-//    const auto bw = b->getBitBlockWidth();
+//    const auto bw = b.getBitBlockWidth();
 //    ArrayType * papiEventCounterTotalTy = nullptr;
 //    if (NumOfPAPIEvents == 1 || (pw > bw)) {
 //        return ArrayType::get(papiCounterTy, NumOfPAPIEvents);
@@ -41,7 +41,7 @@ ArrayType * PipelineCompiler::getPAPIEventCounterType(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPAPIEventCounterPipelineProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addPAPIEventCounterPipelineProperties(BuilderRef b) {
+void PipelineCompiler::addPAPIEventCounterPipelineProperties(KernelBuilder & b) {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
 
         // TODO: make a better method than this for accumulating the final thread local counts.
@@ -67,7 +67,7 @@ void PipelineCompiler::addPAPIEventCounterPipelineProperties(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPAPIEventCounterKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addPAPIEventCounterKernelProperties(BuilderRef b, const unsigned kernel, const bool /* isRoot */) {
+void PipelineCompiler::addPAPIEventCounterKernelProperties(KernelBuilder & b, const unsigned kernel, const bool /* isRoot */) {
     if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
@@ -89,34 +89,34 @@ void PipelineCompiler::addPAPIEventCounterKernelProperties(BuilderRef b, const u
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getPAPIEventSet
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::getPAPIEventSet(BuilderRef b) {
+void PipelineCompiler::getPAPIEventSet(KernelBuilder & b) {
     if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
-        PAPIEventSetVal = b->getScalarField(STATISTICS_PAPI_EVENT_SET_CODE);
+        PAPIEventSetVal = b.getScalarField(STATISTICS_PAPI_EVENT_SET_CODE);
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerPAPIThread
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::registerPAPIThread(BuilderRef /* b */) const {
+void PipelineCompiler::registerPAPIThread(KernelBuilder & /* b */) const {
     // PAPI documentation indicates this and unregister thread are not necessary.
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief createPAPIMeasurementArrays
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::createPAPIMeasurementArrays(BuilderRef b) {
+void PipelineCompiler::createPAPIMeasurementArrays(KernelBuilder & b) {
     if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
         // PAPI_start starts counting all of the hardware events contained in the previously defined EventSet.
         // All counters are implicitly set to zero before counting.
         ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
         Constant * nil = Constant::getNullValue(papiCounterArrayTy);
         for (unsigned i = 0; i < NUM_OF_PAPI_COUNTERS; ++i) {
-            Value * ptr = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
-            b->CreateStore(nil, ptr);
+            Value * ptr = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
+            b.CreateStore(nil, ptr);
             PAPIEventCounterArray[i] = ptr;
         }
-        PAPITempMeasurementArray = b->CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        PAPITempMeasurementArray = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
     }
 }
 
@@ -124,31 +124,31 @@ void PipelineCompiler::createPAPIMeasurementArrays(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readPAPIEventsIntoArray
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readPAPIMeasurement(BuilderRef b, Value * const measurementArray) const {
+void PipelineCompiler::readPAPIMeasurement(KernelBuilder & b, Value * const measurementArray) const {
     assert (NumOfPAPIEvents > 0);
     assert (measurementArray);
 
-    Module * const m = b->getModule();
+    Module * const m = b.getModule();
     Function * const PAPIReadFn = m->getFunction("PAPI_read"); assert (PAPIReadFn);
     FixedArray<Value *, 2> args;
     args[0] = PAPIEventSetVal; assert (PAPIEventSetVal);
-    PointerType * const papiCounterPtrTy = TypeBuilder<papi_counter_t, false>::get(b->getContext())->getPointerTo();
-    args[1] = b->CreatePointerCast(measurementArray, papiCounterPtrTy); assert (measurementArray);
+    PointerType * const papiCounterPtrTy = TypeBuilder<papi_counter_t, false>::get(b.getContext())->getPointerTo();
+    args[1] = b.CreatePointerCast(measurementArray, papiCounterPtrTy); assert (measurementArray);
     // TODO: should probably check the error code here but if we do get an error,
     // what can we avoid contaminating the results but also inform the user something
     // went wrong?
 
-    Value * const retVal = b->CreateCall(PAPIReadFn->getFunctionType(), PAPIReadFn, args);
+    Value * const retVal = b.CreateCall(PAPIReadFn->getFunctionType(), PAPIReadFn, args);
     if (LLVM_UNLIKELY(CheckAssertions)) {
-        Value * valid = b->CreateICmpEQ(retVal, ConstantInt::get(retVal->getType(), PAPI_OK));
-        b->CreateAssert (valid, "PAPI_read failed");
+        Value * valid = b.CreateICmpEQ(retVal, ConstantInt::get(retVal->getType(), PAPI_OK));
+        b.CreateAssert (valid, "PAPI_read failed");
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startPAPIMeasurement
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::startPAPIMeasurement(BuilderRef b, const PAPIKernelCounter measurementType) const {
+void PipelineCompiler::startPAPIMeasurement(KernelBuilder & b, const PAPIKernelCounter measurementType) const {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
         readPAPIMeasurement(b, PAPIEventCounterArray[measurementType]);
     }
@@ -157,7 +157,7 @@ void PipelineCompiler::startPAPIMeasurement(BuilderRef b, const PAPIKernelCounte
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startPAPIMeasurement
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::startPAPIMeasurement(BuilderRef b, const std::initializer_list<PAPIKernelCounter> measurementType) const {
+void PipelineCompiler::startPAPIMeasurement(KernelBuilder & b, const std::initializer_list<PAPIKernelCounter> measurementType) const {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
         auto counter = measurementType.begin();
         const auto first = *counter;
@@ -165,7 +165,7 @@ void PipelineCompiler::startPAPIMeasurement(BuilderRef b, const std::initializer
         ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
         while (++counter != measurementType.end()) {
             for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
-                b->CreateStore(b->CreateLoad(papiCounterArrayTy, PAPIEventCounterArray[first]), PAPIEventCounterArray[*counter]);
+                b.CreateStore(b.CreateLoad(papiCounterArrayTy, PAPIEventCounterArray[first]), PAPIEventCounterArray[*counter]);
             }
         }
     }
@@ -174,7 +174,7 @@ void PipelineCompiler::startPAPIMeasurement(BuilderRef b, const std::initializer
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief accumPAPIMeasurementWithoutReset
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, const PAPIKernelCounter measurementType) const {
+void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, const PAPIKernelCounter measurementType) const {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
@@ -186,31 +186,31 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size
         const auto prefix = makeKernelName(kernelId);
         Value * eventCounterSumArray; Type * eventCounterSumty;
 
-        std::tie(eventCounterSumArray, eventCounterSumty) = b->getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+        std::tie(eventCounterSumArray, eventCounterSumty) = b.getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
         Type * const counterArrayTy = eventCounterSumty->getArrayElementType();
         assert (counterArrayTy->isArrayTy());
         Type * const counterTy = counterArrayTy->getArrayElementType();
 
-        Constant * i32_ZERO = b->getInt32(0);
+        Constant * i32_ZERO = b.getInt32(0);
 
         FixedArray<Value *, 2> from;
         from[0] = i32_ZERO;
 
         FixedArray<Value *, 3> update;
         update[0] = i32_ZERO;
-        update[1] = b->getInt32((unsigned)measurementType);
+        update[1] = b.getInt32((unsigned)measurementType);
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
-            from[1] = b->getInt32(i);
-            Value * const beforeVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPIEventCounterArray[measurementType], from));
-            Value * const afterVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
-            Value * const diff = b->CreateSaturatingSub(afterVal, beforeVal);
+            from[1] = b.getInt32(i);
+            Value * const beforeVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[measurementType], from));
+            Value * const afterVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
             update[2] = from[1];
-            Value * const ptr = b->CreateGEP(eventCounterSumty, eventCounterSumArray, update);
-            Value * const curr = b->CreateLoad(counterTy, ptr);
+            Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
+            Value * const curr = b.CreateLoad(counterTy, ptr);
             assert (curr->getType() == diff->getType());
-            Value * const updatedVal = b->CreateAdd(curr, diff);
-            b->CreateStore(updatedVal, ptr);
+            Value * const updatedVal = b.CreateAdd(curr, diff);
+            b.CreateStore(updatedVal, ptr);
         }
     }
 }
@@ -218,7 +218,7 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief accumPAPIMeasurementWithoutReset
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const {
+void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
@@ -230,33 +230,33 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size
         const auto prefix = makeKernelName(kernelId);
         Value * eventCounterSumArray; Type * eventCounterSumty;
 
-        std::tie(eventCounterSumArray, eventCounterSumty) = b->getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+        std::tie(eventCounterSumArray, eventCounterSumty) = b.getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
         Type * const counterArrayTy = eventCounterSumty->getArrayElementType();
         assert (counterArrayTy->isArrayTy());
         Type * const counterTy = counterArrayTy->getArrayElementType();
 
-        Constant * i32_ZERO = b->getInt32(0);
+        Constant * i32_ZERO = b.getInt32(0);
 
         FixedArray<Value *, 2> from;
         from[0] = i32_ZERO;
 
         FixedArray<Value *, 3> update;
         update[0] = i32_ZERO;
-        update[1] = b->CreateSelect(cond, b->getInt32(ifTrue), b->getInt32(ifFalse));
+        update[1] = b.CreateSelect(cond, b.getInt32(ifTrue), b.getInt32(ifFalse));
 
-        Value * array = b->CreateSelect(cond, PAPIEventCounterArray[ifTrue], PAPIEventCounterArray[ifFalse]);
+        Value * array = b.CreateSelect(cond, PAPIEventCounterArray[ifTrue], PAPIEventCounterArray[ifFalse]);
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
-            from[1] = b->getInt32(i);
-            Value * const beforeVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, array, from));
-            Value * const afterVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
-            Value * const diff = b->CreateSaturatingSub(afterVal, beforeVal);
+            from[1] = b.getInt32(i);
+            Value * const beforeVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, array, from));
+            Value * const afterVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
             update[2] = from[1];
-            Value * const ptr = b->CreateGEP(eventCounterSumty, eventCounterSumArray, update);
-            Value * const curr = b->CreateLoad(counterTy, ptr);
+            Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
+            Value * const curr = b.CreateLoad(counterTy, ptr);
             assert (curr->getType() == diff->getType());
-            Value * const updatedVal = b->CreateAdd(curr, diff);
-            b->CreateStore(updatedVal, ptr);
+            Value * const updatedVal = b.CreateAdd(curr, diff);
+            b.CreateStore(updatedVal, ptr);
         }
     }
 }
@@ -264,32 +264,32 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(BuilderRef b, const size
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordTotalPAPIMeasurement
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::recordTotalPAPIMeasurement(BuilderRef b) const {
+void PipelineCompiler::recordTotalPAPIMeasurement(KernelBuilder & b) const {
     if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
 
         readPAPIMeasurement(b, PAPITempMeasurementArray);
 
         Value * eventCounterSumArray; Type * counterArrayTy;
-        std::tie(eventCounterSumArray, counterArrayTy) = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
+        std::tie(eventCounterSumArray, counterArrayTy) = b.getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
 
         Type * const counterTy = counterArrayTy->getArrayElementType();
         assert (counterTy->isIntegerTy());
 
-        Constant * const i32_ZERO = b->getInt32(0);
+        Constant * const i32_ZERO = b.getInt32(0);
 
         FixedArray<Value *, 2> from;
         from[0] = i32_ZERO;
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
-            from[1] = b->getInt32(i);
-            Value * const beforeVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPIEventCounterArray[PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME], from));
-            Value * const afterVal = b->CreateLoad(counterTy, b->CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
-            Value * const diff = b->CreateSaturatingSub(afterVal, beforeVal);
-            Value * const ptr = b->CreateGEP(counterArrayTy, eventCounterSumArray, from);
-            Value * const curr = b->CreateLoad(counterTy, ptr);
+            from[1] = b.getInt32(i);
+            Value * const beforeVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME], from));
+            Value * const afterVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
+            Value * const ptr = b.CreateGEP(counterArrayTy, eventCounterSumArray, from);
+            Value * const curr = b.CreateLoad(counterTy, ptr);
             assert (curr->getType() == diff->getType());
-            Value * const updatedVal = b->CreateAdd(curr, diff);
-            b->CreateStore(updatedVal, ptr);
+            Value * const updatedVal = b.CreateAdd(curr, diff);
+            b.CreateStore(updatedVal, ptr);
         }
     }
 }
@@ -298,7 +298,7 @@ void PipelineCompiler::recordTotalPAPIMeasurement(BuilderRef b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief unregisterPAPIThread
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::unregisterPAPIThread(BuilderRef /* b */) const {
+void PipelineCompiler::unregisterPAPIThread(KernelBuilder & /* b */) const {
     // PAPI documentation indicates this and register thread are not necessary.
 }
 
@@ -306,7 +306,7 @@ void PipelineCompiler::unregisterPAPIThread(BuilderRef /* b */) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startPAPI
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::startPAPI(BuilderRef b) {
+void PipelineCompiler::startPAPI(KernelBuilder & b) {
 //    if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
 //        getPAPIEventSet(b);
 //        readPAPIMeasurement(b, PipelineOutput, PAPIReadKernelStartMeasurementArray);
@@ -316,7 +316,7 @@ void PipelineCompiler::startPAPI(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief stopPAPIAndDestroyEventSet
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::stopPAPI(BuilderRef b) {
+void PipelineCompiler::stopPAPI(KernelBuilder & b) {
 //    if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
 //        accumPAPIMeasurementWithoutReset(b, PAPIReadKernelStartMeasurementArray, PipelineOutput, PAPI_FULL_PIPELINE_TIME);
 //    }
@@ -325,45 +325,45 @@ void PipelineCompiler::stopPAPI(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief checkPAPIRetVal
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::checkPAPIRetValAndExitOnError(BuilderRef b, StringRef source, const int expected, Value * const retVal) const {
+void PipelineCompiler::checkPAPIRetValAndExitOnError(KernelBuilder & b, StringRef source, const int expected, Value * const retVal) const {
 
-    IntegerType * const intTy = TypeBuilder<int, false>::get(b->getContext());
+    IntegerType * const intTy = TypeBuilder<int, false>::get(b.getContext());
     ConstantInt * const papiOk = ConstantInt::get(intTy, expected);
 
     assert (NumOfPAPIEvents > 0);
 
-    BasicBlock * const current = b->GetInsertBlock();
+    BasicBlock * const current = b.GetInsertBlock();
     Function * const function = current->getParent();
     Module * const m = function->getParent();
-    BasicBlock * onError = BasicBlock::Create(b->getContext(), source + "_onError", function, current->getNextNode());
-    BasicBlock * onSuccess = BasicBlock::Create(b->getContext(), source + "_onSuccess", function, onError);
+    BasicBlock * onError = BasicBlock::Create(b.getContext(), source + "_onError", function, current->getNextNode());
+    BasicBlock * onSuccess = BasicBlock::Create(b.getContext(), source + "_onSuccess", function, onError);
 
-    Value * const isOk = b->CreateICmpEQ(retVal, papiOk);
-    b->CreateLikelyCondBr(isOk, onSuccess, onError);
+    Value * const isOk = b.CreateICmpEQ(retVal, papiOk);
+    b.CreateLikelyCondBr(isOk, onSuccess, onError);
 
-    b->SetInsertPoint(onError);
+    b.SetInsertPoint(onError);
     Function * PAPI_strerrFn = m->getFunction("PAPI_strerror");
     if (PAPI_strerrFn == nullptr) {
-        PointerType * const int8PtrTy = b->getInt8PtrTy();
+        PointerType * const int8PtrTy = b.getInt8PtrTy();
         FunctionType * PAPI_strerrFnTy = FunctionType::get(int8PtrTy, {intTy}, false);
         PAPI_strerrFn = Function::Create(PAPI_strerrFnTy, Function::ExternalLinkage, "PAPI_strerror", m);
     }
     FixedArray<Value *, 1> strerrArgs;
     strerrArgs[0] = retVal;
-    Value * const strerr = b->CreateCall(PAPI_strerrFn->getFunctionType(), PAPI_strerrFn, strerrArgs);
+    Value * const strerr = b.CreateCall(PAPI_strerrFn->getFunctionType(), PAPI_strerrFn, strerrArgs);
 
 
     FixedArray<Value *, 4> args;
-    args[0] = b->getInt32(STDERR_FILENO);
-    args[1] = b->GetString("Error: %s returned %s\n");
-    args[2] = b->GetString(source);
+    args[0] = b.getInt32(STDERR_FILENO);
+    args[1] = b.GetString("Error: %s returned %s\n");
+    args[2] = b.GetString(source);
     args[3] = strerr;
-    Function * const Dprintf = b->GetDprintf();
-    b->CreateCall(Dprintf->getFunctionType(), Dprintf, args);
-    b->CreateExit(-1);
-    b->CreateBr(onSuccess);
+    Function * const Dprintf = b.GetDprintf();
+    b.CreateCall(Dprintf->getFunctionType(), Dprintf, args);
+    b.CreateExit(-1);
+    b.CreateBr(onSuccess);
 
-    b->SetInsertPoint(onSuccess);
+    b.SetInsertPoint(onSuccess);
 }
 
 template<typename T>
@@ -660,32 +660,32 @@ void __print_pipeline_totals_PAPI_report(const unsigned numOfThreads,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printPAPIReport
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
+void PipelineCompiler::printPAPIReportIfRequested(KernelBuilder & b) {
     if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
 
-        IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b->getContext());
+        IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b.getContext());
         PointerType * const counterPtrTy = papiCounterTy->getPointerTo();
 
-        IntegerType * const intTy = TypeBuilder<unsigned, false>::get(b->getContext());
+        IntegerType * const intTy = TypeBuilder<unsigned, false>::get(b.getContext());
 
-        ConstantInt * const ZERO = b->getInt32(0);
+        ConstantInt * const ZERO = b.getInt32(0);
 
         auto toGlobal = [&](ArrayRef<Constant *> array, Type * const type, size_t size) {
             ArrayType * const arTy = ArrayType::get(type, size);
             Constant * const ar = ConstantArray::get(arTy, array);
-            Module & mod = *b->getModule();
+            Module & mod = *b.getModule();
             GlobalVariable * const gv = new GlobalVariable(mod, ar->getType(), true, GlobalValue::PrivateLinkage, ar);
             FixedArray<Value *, 2> tmp;
             tmp[0] = ZERO;
             tmp[1] = ZERO;
-            return b->CreateInBoundsGEP(arTy, gv, tmp);
+            return b.CreateInBoundsGEP(arTy, gv, tmp);
         };
 
-        Value * const arrayOfEventCodes = b->getScalarField(STATISTICS_PAPI_EVENT_SET_LIST);
+        Value * const arrayOfEventCodes = b.getScalarField(STATISTICS_PAPI_EVENT_SET_LIST);
 
         Value * totals; Type * totalsTy;
 
-        std::tie(totals, totalsTy) = b->getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
+        std::tie(totals, totalsTy) = b.getScalarFieldPtr(STATISTICS_PAPI_TOTAL_COUNT_ARRAY);
 
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
 
@@ -693,43 +693,43 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             args[0] = mMaximumNumOfThreads;
             args[1] = ConstantInt::get(intTy, NumOfPAPIEvents);
             args[2] = arrayOfEventCodes;
-            args[3] = b->CreatePointerCast(totals, counterPtrTy);
+            args[3] = b.CreatePointerCast(totals, counterPtrTy);
 
-            Function * const reportPrinter = b->getModule()->getFunction("__print_pipeline_totals_PAPI_report");
+            Function * const reportPrinter = b.getModule()->getFunction("__print_pipeline_totals_PAPI_report");
             assert (reportPrinter);
-            b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
+            b.CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
         } else {
 
-            DataLayout dl(b->getModule());
+            DataLayout dl(b.getModule());
 
             std::vector<Constant *> kernelNames;
             for (auto i = FirstKernel; i <= LastKernel; ++i) {
                 const Kernel * const kernel = getKernel(i);
-                kernelNames.push_back(b->GetString(kernel->getName()));
+                kernelNames.push_back(b.GetString(kernel->getName()));
             }
 
             const auto numOfKernels = LastKernel - FirstKernel + 1U;
 
-            PointerType * const int8PtrTy = b->getInt8PtrTy();
+            PointerType * const int8PtrTy = b.getInt8PtrTy();
 
             Value * const arrayOfKernelNames = toGlobal(kernelNames, int8PtrTy, numOfKernels);
 
             ArrayType * const arTy = ArrayType::get(counterPtrTy, LastKernel - FirstKernel + 1);
 
-            Value * const pointerArray = b->CreateAlloca(arTy);
+            Value * const pointerArray = b.CreateAlloca(arTy);
 
             FixedArray<Value *, 2> indices;
-            indices[0] = b->getInt32(0);
+            indices[0] = b.getInt32(0);
             for (size_t i = FirstKernel; i <= LastKernel; ++i) {
                 Value * base; Type * ty;
-                std::tie(base, ty) = b->getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
-                indices[1] = b->getInt32(i - FirstKernel);
-                b->CreateStore(b->CreatePointerCast(base, counterPtrTy), b->CreateGEP(arTy, pointerArray, indices));
+                std::tie(base, ty) = b.getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
+                indices[1] = b.getInt32(i - FirstKernel);
+                b.CreateStore(b.CreatePointerCast(base, counterPtrTy), b.CreateGEP(arTy, pointerArray, indices));
 
             }
 
-            Function * const reportPrinter = b->getModule()->getFunction("__print_pipeline_PAPI_report");
+            Function * const reportPrinter = b.getModule()->getFunction("__print_pipeline_PAPI_report");
             assert (reportPrinter);
 
             FixedArray<Value *, 6> args;
@@ -737,11 +737,11 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
             args[1] = arrayOfKernelNames;
             args[2] = ConstantInt::get(intTy, NumOfPAPIEvents);
             args[3] = arrayOfEventCodes;
-            args[4] = b->CreatePointerCast(pointerArray, counterPtrTy->getPointerTo()); // values
-            args[5] = b->CreatePointerCast(totals, counterPtrTy);
+            args[4] = b.CreatePointerCast(pointerArray, counterPtrTy->getPointerTo()); // values
+            args[5] = b.CreatePointerCast(totals, counterPtrTy);
 
 
-            b->CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
+            b.CreateCall(reportPrinter->getFunctionType(), reportPrinter, args);
 
         }
 
@@ -752,23 +752,23 @@ void PipelineCompiler::printPAPIReportIfRequested(BuilderRef b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkPAPILibrary
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::linkPAPILibrary(BuilderRef b) {
-//    b->LinkFunction("PAPI_library_init", PAPI_library_init);
-//    b->LinkFunction("PAPI_thread_init", PAPI_thread_init);
-//    b->LinkFunction("PAPI_create_eventset", PAPI_create_eventset);
-//    b->LinkFunction("PAPI_add_events", PAPI_add_events);
-    b->LinkFunction("PAPI_start", PAPI_start);
-    b->LinkFunction("PAPI_read", PAPI_read);
-//    b->LinkFunction("PAPI_accum", PAPI_accum);
-    b->LinkFunction("PAPI_stop", PAPI_stop);
-    b->LinkFunction("PAPI_cleanup_eventset", PAPI_cleanup_eventset);
-    b->LinkFunction("PAPI_destroy_eventset", PAPI_destroy_eventset);
-    b->LinkFunction("PAPI_shutdown", PAPI_shutdown);
-    b->LinkFunction("PAPI_strerror", PAPI_strerror);
+void PipelineCompiler::linkPAPILibrary(KernelBuilder & b) {
+//    b.LinkFunction("PAPI_library_init", PAPI_library_init);
+//    b.LinkFunction("PAPI_thread_init", PAPI_thread_init);
+//    b.LinkFunction("PAPI_create_eventset", PAPI_create_eventset);
+//    b.LinkFunction("PAPI_add_events", PAPI_add_events);
+    b.LinkFunction("PAPI_start", PAPI_start);
+    b.LinkFunction("PAPI_read", PAPI_read);
+//    b.LinkFunction("PAPI_accum", PAPI_accum);
+    b.LinkFunction("PAPI_stop", PAPI_stop);
+    b.LinkFunction("PAPI_cleanup_eventset", PAPI_cleanup_eventset);
+    b.LinkFunction("PAPI_destroy_eventset", PAPI_destroy_eventset);
+    b.LinkFunction("PAPI_shutdown", PAPI_shutdown);
+    b.LinkFunction("PAPI_strerror", PAPI_strerror);
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-        b->LinkFunction("__print_pipeline_totals_PAPI_report", __print_pipeline_totals_PAPI_report);
+        b.LinkFunction("__print_pipeline_totals_PAPI_report", __print_pipeline_totals_PAPI_report);
     } else {
-        b->LinkFunction("__print_pipeline_PAPI_report", __print_pipeline_PAPI_report);
+        b.LinkFunction("__print_pipeline_PAPI_report", __print_pipeline_PAPI_report);
     }
 }
 

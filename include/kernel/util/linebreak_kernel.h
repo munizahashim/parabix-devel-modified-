@@ -41,7 +41,7 @@ enum class NullCharMode {Data, Break, Abort};
 
 class UnixLinesKernelBuilder final : public pablo::PabloKernel {
 public:
-    UnixLinesKernelBuilder(BuilderRef b,
+    UnixLinesKernelBuilder(KernelBuilder & b,
                            kernel::StreamSet * Source,
                            kernel::StreamSet * UnixLineEnds,
                            UnterminatedLineAtEOF m = UnterminatedLineAtEOF::Ignore,
@@ -63,7 +63,7 @@ void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
 
 class NullDelimiterKernel final : public pablo::PabloKernel {
 public:
-    NullDelimiterKernel(BuilderRef b,
+    NullDelimiterKernel(KernelBuilder & b,
                         kernel::StreamSet * Source,
                         kernel::StreamSet * NullDelimiters,
                         UnterminatedLineAtEOF m = UnterminatedLineAtEOF::Ignore);
@@ -83,7 +83,7 @@ protected:
 // stream.
 class LineStartsKernel final : public pablo::PabloKernel {
 public:
-    LineStartsKernel(BuilderRef b, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts, kernel::StreamSet * index = nullptr);
+    LineStartsKernel(KernelBuilder & b, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts, kernel::StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -92,7 +92,7 @@ private:
 
 class LineSpansKernel final : public pablo::PabloKernel {
 public:
-    LineSpansKernel(BuilderRef b, kernel::StreamSet * LineStarts, kernel::StreamSet * LineEnds, kernel::StreamSet * LineSpans);
+    LineSpansKernel(KernelBuilder & b, kernel::StreamSet * LineStarts, kernel::StreamSet * LineEnds, kernel::StreamSet * LineSpans);
 protected:
     void generatePabloMethod() override;
 };

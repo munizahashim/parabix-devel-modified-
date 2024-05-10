@@ -5,7 +5,6 @@
 
 #include <testing/testing.h>
 #include <kernel/util/nesting.h>
-#include <kernel/util/debug_display.h>
 
 using namespace kernel;
 using namespace testing;

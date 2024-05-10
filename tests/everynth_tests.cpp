@@ -18,7 +18,7 @@ using namespace pablo;
 
 class EveryNthKernel : public PabloKernel {
 public:
-    EveryNthKernel(const std::unique_ptr<KernelBuilder> & b, StreamSet * const input, StreamSet * output, uint64_t n)
+    EveryNthKernel(KernelBuilder & b, StreamSet * const input, StreamSet * output, uint64_t n)
     : PabloKernel(b,
                   "everyNthKernel" + std::to_string(n),
                   {Binding{"input", input}},

@@ -188,7 +188,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printBufferGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::printBufferGraph(BuilderRef b, raw_ostream & out) const {
+void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) const {
 
     using BufferId = StreamSetBuffer::BufferKind;
 

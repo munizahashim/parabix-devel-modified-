@@ -14,11 +14,11 @@ namespace kernel {
 
 class editdScanKernel : public BlockOrientedKernel {
 public:
-    editdScanKernel(BuilderRef b, StreamSet * matchResults);
+    editdScanKernel(KernelBuilder & b, StreamSet * matchResults);
 
 private:
-    void generateDoBlockMethod(BuilderRef iBuilder) override;
-    llvm::Function * generateScanWordRoutine(BuilderRef iBuilder) const;
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    llvm::Function * generateScanWordRoutine(KernelBuilder & b) const;
 
     unsigned mNumElements;
     unsigned mScanwordBitWidth;
