@@ -8,3 +8,4 @@ u32TestFiles/
 gb18030/TestOutput
 json/TestOutput
 json_perf/TestOutput
+nfd/nfd_output
