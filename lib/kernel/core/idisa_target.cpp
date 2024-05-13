@@ -18,7 +18,13 @@
 #include <idisa/idisa_nvptx_builder.h>
 #endif
 #include <llvm/IR/Module.h>
+
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#include <llvm/TargetParser/Triple.h>
+#else
 #include <llvm/ADT/Triple.h>
+#endif
+
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <kernel/core/kernel_builder.h>
