@@ -94,6 +94,8 @@ public:
         P.calculatePartialSumStepFactors(b);
         P.determineBufferSize(b);
 
+        P.addFlowControlAnnotations();
+
         P.makeConsumerGraph();
 
         P.buildZeroInputGraph();
@@ -210,6 +212,8 @@ private:
     void identifyIllustratedStreamSets();
 
     void buildZeroInputGraph();
+
+    void addFlowControlAnnotations();
 
     // thread local analysis
 

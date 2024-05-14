@@ -232,6 +232,11 @@ bool TimeKernelsIsEnabled;
 static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKernelsIsEnabled),
                                         cl::desc("Times each kernel, printing elapsed time for each on exit"), cl::init(false));
 
+
+bool UseProcessThreadForIO;
+static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
+                                        cl::desc("Only permit the process thread to perform IO"), cl::init(false));
+
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;
 

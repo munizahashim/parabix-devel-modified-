@@ -277,6 +277,11 @@ enum BufferLocality {
     , ZeroElementsOrWidth
 };
 
+enum KernelFlags {
+    PermitSegmentSizeSlidingWindowing = 1
+    , InitialSourceConsumer = 2
+};
+
 struct BufferNode {
     StreamSetBuffer * Buffer = nullptr;
     unsigned Type = 0;
@@ -296,6 +301,11 @@ struct BufferNode {
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
+
+
+    bool permitSlidingWindow() const {
+        return (Type & KernelFlags::PermitSegmentSizeSlidingWindowing) != 0;
+    }
 
     bool isOwned() const {
         return (Type & BufferType::Unowned) == 0;

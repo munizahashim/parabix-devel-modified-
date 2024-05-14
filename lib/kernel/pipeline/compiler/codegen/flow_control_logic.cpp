@@ -86,7 +86,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
         // rate input into this partition. However if this a nested pipeline, we cannot assume
         // that the outer pipeline will feed data to this at a fixed rate.
-        if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
+        if (mBufferGraph[mKernelId].permitSlidingWindow()) {
 
             mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
 

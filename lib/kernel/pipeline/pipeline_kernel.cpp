@@ -906,7 +906,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (codegen::EnableDynamicMultithreading) {
         out << "+DM";
     }
-
+    if (codegen::UseProcessThreadForIO) {
+        out << "+IOT";
+    }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
             out << "+CYC";

@@ -111,6 +111,7 @@ extern int IllustratorDisplay;
 extern float DynamicMultithreadingAddThreshold;
 extern float DynamicMultithreadingRemoveThreshold;
 extern size_t DynamicMultithreadingPeriod;
+extern bool UseProcessThreadForIO;
 
 void ParseCommandLineOptions(int argc, const char *const *argv, std::initializer_list<const llvm::cl::OptionCategory *> hiding = {});
 
