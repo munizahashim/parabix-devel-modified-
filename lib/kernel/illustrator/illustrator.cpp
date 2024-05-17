@@ -916,7 +916,7 @@ updated_trie:
 
                                 const auto s = (j * 4);
                                 assert (s < G.Rows);
-                                const auto t = std::min(G.Rows - s, 3UL);
+                                const auto t = std::min(G.Rows - s, 4UL);
                                 assert (j < FormattedOutput.size());
                                 const auto x = numOfRows - j - 1;
                                 assert (x < FormattedOutput.size());
