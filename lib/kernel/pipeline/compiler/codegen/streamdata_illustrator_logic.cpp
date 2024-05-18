@@ -7,6 +7,10 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::registerStreamSetIllustrator(KernelBuilder & b, const size_t streamSet) const {
 
+    if ((mBufferGraph[streamSet].Type & HasIllustratedStreamset) == 0) {
+        return;
+    }
+
     for (const auto & bind : mIllustratedStreamSetBindings) {
         if (bind.StreamSet == streamSet) {
 
@@ -42,6 +46,10 @@ void PipelineCompiler::registerStreamSetIllustrator(KernelBuilder & b, const siz
  * @brief illustrateStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::illustrateStreamSet(KernelBuilder & b, const size_t streamSet, Value * const initial, Value * const current) const {
+
+    if ((mBufferGraph[streamSet].Type & HasIllustratedStreamset) == 0) {
+        return;
+    }
 
     assert (mInternallySynchronizedSubsegmentNumber);
     for (const auto & bind : mIllustratedStreamSetBindings) {
