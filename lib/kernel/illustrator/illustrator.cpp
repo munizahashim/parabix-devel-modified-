@@ -189,7 +189,6 @@ struct StreamDataStateObject {
     StreamDataAllocator InternalAllocator;
 };
 
-
 using StreamDataEntry = std::tuple<const char *, const void *, const StreamDataCapture *>;
 
 class StreamDataIllustrator {
@@ -879,7 +878,6 @@ updated_trie:
 
                         const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
 
-
                         const size_t length = std::min(blockDataLimit, to - position);
                         assert (length > 0);
 
@@ -934,11 +932,13 @@ updated_trie:
                                     for (size_t k = 0; k < length; ++k) {
                                         const auto in = (readStart + k);
                                         assert (in < blockWidth);
-                                        const uint8_t v = (rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1)))) != 0;
+                                        const uint8_t v = ( rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1))) ) != 0;
                                         assert (v == 0 || v == 1);
                                         const auto out = (writeStart + k);
                                         assert (out < charsPerRow);
-                                        toFill[out] |= (uint8_t)(v << r);
+                                        const auto z = (uint8_t)(v << r);
+                                        assert ((toFill[out] & z) == 0);
+                                        toFill[out] |= z;
                                     }
                                 }
 
@@ -946,6 +946,7 @@ updated_trie:
                                     const auto out = (writeStart + k);
                                     assert (out < charsPerRow);
                                     auto & c = toFill[out];
+                                    assert (c < 16);
                                     if (c < 10) {
                                         c += '0';
                                     } else {
