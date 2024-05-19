@@ -358,12 +358,15 @@ void ParabixObjectCache::initiateCacheCleanUp() noexcept {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getDefaultCachePath
  ** ------------------------------------------------------------------------------------------------------------- */
+#ifdef PARABIX_OBJECT_CACHE
 inline void getDefaultCachePath(Path & configPath) {
-    // default: $HOME/.cache/parabix/
+    configPath = PARABIX_OBJECT_CACHE;
+#else
+    // default: $HOME/.parabix/cache
     sys::path::home_directory(configPath);
-    sys::path::append(configPath, ".cache", "parabix");
+    sys::path::append(configPath, ".parabix", "cache");
+#endif
 }
-
 #if 0
 
 /** ------------------------------------------------------------------------------------------------------------- *
