@@ -9,6 +9,7 @@
 #include <re/adt/re_name.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
+#include <unicode/data/PropertyObjects.h>
 #include <unicode/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/builder.hpp>
@@ -18,9 +19,6 @@
 using namespace kernel;
 using namespace pablo;
 using namespace cc;
-
-
-
 
 
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
@@ -60,4 +58,31 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
     unicodeCompiler.compile();
     Var * const property_stream = getOutputStreamVar("property_stream");
     pb.createAssign(pb.createExtract(property_stream, pb.getInteger(0)), propertyVar);
+}
+
+UnicodePropertyBasis::UnicodePropertyBasis(KernelBuilder & b, UCD::EnumeratedPropertyObject * enumObj, StreamSet * Source, StreamSet * PropertyBasis)
+: PabloKernel(b,
+"UCD:" + getPropertyFullName(enumObj->getPropertyCode()) + "_basis",
+{Binding{"source", Source}},
+{Binding{"property_basis", PropertyBasis}})
+, mEnumObj(enumObj) {
+
+}
+
+void UnicodePropertyBasis::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    std::vector<UCD::UnicodeSet> & bases = mEnumObj->GetEnumerationBasisSets();
+    std::vector<Var *> propertyVar;
+    for (unsigned i = 0; i < bases.size(); i++) {
+        std::string vname = "basis" + std::to_string(i);
+        propertyVar.push_back(pb.createVar(vname, pb.createZeroes()));
+        re::CC * basisCC = re::makeCC(bases[i], &Unicode);
+        unicodeCompiler.addTarget(propertyVar[i], basisCC);
+    }
+    unicodeCompiler.compile();
+    Var * const property_basis = getOutputStreamVar("property_basis");
+    for (unsigned i = 0; i < bases.size(); i++) {
+        pb.createAssign(pb.createExtract(property_basis, pb.getInteger(i)), propertyVar[i]);
+    }
 }
