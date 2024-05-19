@@ -6,6 +6,7 @@
 #include <pablo/parse/source_file.h>
 
 #include <llvm/ADT/SmallString.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Path.h>
 
 namespace pablo {
@@ -13,8 +14,15 @@ namespace parse {
 
 inline static std::string appendToBasePath(std::string const & filename) {
     llvm::SmallString<128> path{};
-    llvm::sys::path::home_directory(path);
-    llvm::sys::path::append(path, ".cache", "parabix", filename);
+#ifdef PARABIX_OBJECT_CACHE
+    path = PARABIX_OBJECT_CACHE;
+    path = llvm::sys::path::parent_path(path);
+#else
+    // default: $HOME/.parabix
+    sys::path::home_directory(path);
+    sys::path::append(path, ".parabix");
+#endif
+    llvm::sys::path::append(path, "pablosrc", filename);
     return std::string(path.c_str());
 }
 
