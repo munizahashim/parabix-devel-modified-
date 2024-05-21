@@ -39,6 +39,10 @@ extern "C" uint64_t file_size(const uint32_t fd) {
     }
     return st.st_size;
 }
+extern "C" void *mmap(void *addr, size_t len, int prot, int flags,
+           int fildes, off_t off);
+extern "C" int munmap(void *addr, size_t len);
+extern "C" int madvise(void *addr, size_t length, int advice);
 
 //int madvise_wrapper(void * addr, size_t length, int flags) {
 //    const auto r = madvise(addr, length, flags);

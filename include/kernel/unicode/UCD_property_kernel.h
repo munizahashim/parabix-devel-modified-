@@ -7,6 +7,7 @@
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 
 namespace re { class Name; }
+namespace UCD { class EnumeratedPropertyObject; }
 
 namespace kernel {
 
@@ -22,6 +23,15 @@ private:
 private:
     std::string mPropNameValue;
     re::Name * mName;
+};
+
+class UnicodePropertyBasis : public pablo::PabloKernel {
+public:
+    UnicodePropertyBasis(KernelBuilder & b, UCD::EnumeratedPropertyObject * enumObj, StreamSet * BasisBits, StreamSet * PropertyBasis);
+protected:
+    void generatePabloMethod() override;
+private:
+    UCD::EnumeratedPropertyObject * mEnumObj;
 };
 
 }

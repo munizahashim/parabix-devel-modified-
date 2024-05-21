@@ -230,6 +230,10 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
         }
     }
 
+    if ((mBufferGraphRef[kernel].Type & HasIllustratedStreamset) != 0) {
+        return false;
+    }
+
     if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls()) {
         return false;
     }

@@ -1,6 +1,7 @@
 #include "pipeline_analysis.hpp"
 #include <llvm/Support/Format.h>
 #include <llvm/ADT/DenseMap.h>
+#include <bitset>
 
 namespace kernel {
 

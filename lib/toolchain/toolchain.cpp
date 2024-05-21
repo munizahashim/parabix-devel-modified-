@@ -297,7 +297,6 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     if (DebugOptions.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;
-    if (IllustratorDisplay > 0) return true;
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (ShowASMOption != OmittedOption) return true;
     #endif

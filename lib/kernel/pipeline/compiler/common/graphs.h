@@ -265,6 +265,9 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
+
+// ------------------
+    , HasIllustratedStreamset = 512
 };
 
 ENABLE_ENUM_FLAGS(BufferType)

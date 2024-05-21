@@ -9,7 +9,11 @@
 #include <codegen/virtual_driver.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Constants.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#include <llvm/TargetParser/Triple.h>
+#else
 #include <llvm/ADT/Triple.h>
+#endif
 #ifndef NDEBUG
 #include <llvm/IR/Function.h>
 #endif

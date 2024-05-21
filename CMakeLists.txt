@@ -185,11 +185,13 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
 # Parabix Object Cache default
-if (NOT EXISTS "$ENV{HOME}/.cache/")
-    message("Created $ENV{HOME}/.cache/")
-    MAKE_DIRECTORY("$ENV{HOME}/.cache/")
+if (NOT EXISTS "$ENV{HOME}/.parabix/")
+    MAKE_DIRECTORY("$ENV{HOME}/.parabix/")
+    message("Created $ENV{HOME}/.parabix/")
 endif()
-set(PARABIX_OBJECT_CACHE "$ENV{HOME}/.cache/parabix/")
+set(PARABIX_WORKING "$ENV{HOME}/.parabix")
+set(PARABIX_OBJECT_CACHE "${PARABIX_WORKING}/objcache")
+
 if (NOT EXISTS "${PARABIX_OBJECT_CACHE}")
     MAKE_DIRECTORY("${PARABIX_OBJECT_CACHE}")
     message("Created: ${PARABIX_OBJECT_CACHE}")
@@ -361,8 +363,13 @@ function(parabix_add_pablo_src NAME)
         list(APPEND FILE_LIST "${CMAKE_CURRENT_SOURCE_DIR}/${PABLO_FILE}")
     endforeach(PABLO_FILE)
 
+    set(PARABIX_PABLO_SRC "${PARABIX_WORKING}/pablosrc/")
+    if (NOT EXISTS "${PARABIX_PABLO_SRC}")
+        MAKE_DIRECTORY("${PARABIX_PABLO_SRC}")
+        message("Created ${PARABIX_PABLO_SRC}")
+    endif()
     add_custom_target(${NAME}
-        COMMAND cp ${FILE_LIST} ${PARABIX_OBJECT_CACHE}
+        COMMAND cp ${FILE_LIST} ${PARABIX_PABLO_SRC}
         DEPENDS ${ARGN})
 endfunction(parabix_add_pablo_src)
 

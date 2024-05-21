@@ -753,7 +753,11 @@ check_for_additional_remapping:
                     }
                 }
                 bp.Flags |= BufferPortType::Illustrated;
-                mBufferGraph[streamSet].IsLinear = true;
+                mBufferGraph[streamSet].Type |= HasIllustratedStreamset;
+                BEGIN_SCOPED_REGION
+                const auto producer = parent(streamSet, mBufferGraph);
+                mBufferGraph[producer].Type |= HasIllustratedStreamset;
+                END_SCOPED_REGION
                 mIllustratedStreamSetBindings.emplace_back(streamSet, p);
 ignore_duplicate_entry:
                 break;
