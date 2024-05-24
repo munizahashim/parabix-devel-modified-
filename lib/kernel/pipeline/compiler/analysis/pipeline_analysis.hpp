@@ -103,6 +103,7 @@ public:
         P.mapInternallyGeneratedStreamSets();
 
         // Finish the buffer graph
+
         P.determineInitialThreadLocalBufferLayout(b, rng);
 
         P.addStreamSetsToBufferGraph(b);

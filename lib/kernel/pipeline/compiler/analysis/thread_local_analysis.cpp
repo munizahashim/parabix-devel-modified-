@@ -255,8 +255,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     const Binding & outputRate = producerRate.Binding;
                     Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
                     const auto typeSize = b.getTypeSize(DL, type);
-                    const ProcessingRate & rate = outputRate.getRate();
-                    assert (rate.isFixed());
                     const auto j = mapping[streamSet - FirstStreamSet];
                     assert (j != -1U);
                     const auto size = typeSize * bn.RequiredCapacity;
