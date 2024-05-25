@@ -19,12 +19,8 @@
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Transforms/Utils/Cloning.h>
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 9, 0)
 #include <llvm/Transforms/Scalar/GVN.h>
-#endif
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
 #include <llvm/Transforms/Scalar/SROA.h>
-#endif
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Utils.h>
@@ -34,9 +30,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <llvm/IR/Verifier.h>
 #include "llvm/IR/Mangler.h"
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
 #include <llvm/ExecutionEngine/MCJIT.h>
-#endif
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
 #define OF_None F_None
 #endif
@@ -182,9 +176,7 @@ inline void CPUDriver::preparePassManager() {
         mPassManager->add(createPrintModulePass(*mIROutputStream));
     }
     mPassManager->add(createPromoteMemoryToRegisterPass());    // Promote stack variables to constants or PHI nodes
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
     mPassManager->add(createSROAPass());                       // Promote elements of aggregate allocas whose addresses are not taken to registers.
-    #endif
     mPassManager->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
     mPassManager->add(createEarlyCSEPass());                   // Simple common subexpression elimination pass
     mPassManager->add(createInstructionCombiningPass());       // Simple peephole optimizations and bit-twiddling.
@@ -194,7 +186,6 @@ inline void CPUDriver::preparePassManager() {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         mPassManager->add(createRemoveRedundantAssertionsPass());
     }
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
         if (!codegen::ShowASMOption.empty()) {
             std::error_code error;
@@ -216,7 +207,6 @@ inline void CPUDriver::preparePassManager() {
     if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
         mPassManager->add(createVerifierPass());
     }
-    #endif
 }
 
 void CPUDriver::generateUncachedKernels() {
@@ -236,14 +226,9 @@ void CPUDriver::generateUncachedKernels() {
 
     for (unsigned i = 0; i < mUncachedKernel.size(); ++i) {
         auto & kernel = mUncachedKernel[i];
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
         NamedRegionTimer T(kernel->getSignature(), kernel->getName(),
                            "kernel", "Kernel Generation",
                            codegen::TimeKernelsIsEnabled);
-        #else
-        NamedRegionTimer T(kernel->getName(), "Kernel Generation",
-                           codegen::TimeKernelsIsEnabled);
-        #endif
         kernel->generateKernel(getBuilder());
         Module * const module = kernel->getModule(); assert (module);
         module->setTargetTriple(mMainModule->getTargetTriple());
@@ -254,9 +239,7 @@ void CPUDriver::generateUncachedKernels() {
 
     mUncachedKernel.clear();
 
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(5, 0, 0)
     llvm::reportAndResetTimings();
-    #endif
     llvm::PrintStatistics();
 }
 

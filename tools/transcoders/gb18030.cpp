@@ -54,8 +54,8 @@ static cl::opt<GBerrorMode> GBerrorOption(cl::desc("Treatment of erroneous GB 18
     cl::values(
         clEnumValN(GBerrorMode::Abort, "abort-on-error", "generate output for all valid GB18030 input up to the first error"),
         clEnumValN(GBerrorMode::DropBadInput, "drop-bad-characters", "drop bad GB18030 characters from the input"),
-        clEnumValN(GBerrorMode::UseReplacementChar, "use-replacement-char", "replace bad input characters with a replacement character")
-        CL_ENUM_VAL_SENTINEL), cl::cat(gb18030Options), cl::init(GBerrorMode::Abort));
+        clEnumValN(GBerrorMode::UseReplacementChar, "use-replacement-char", "replace bad input characters with a replacement character")),
+                                          cl::cat(gb18030Options), cl::init(GBerrorMode::Abort));
 
 static cl::opt<unsigned> ReplacementCharacter("replacement-character", cl::desc("Codepoint value of the character used to replace any unmapped or invalid input sequence."), cl::init(0xFFFD), cl::cat(gb18030Options));
 static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding (default: UTF-8)"), cl::init("UTF-8"), cl::cat(gb18030Options));

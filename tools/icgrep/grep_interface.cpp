@@ -41,8 +41,8 @@ static cl::opt<re::RE_Syntax, true> RegexpSyntaxOption(cl::desc("Regular express
         clEnumValN(re::RE_Syntax::BRE, "basic-regexp", "Alias for -G"),
         clEnumValN(re::RE_Syntax::PCRE, "perl-regexp", "Alias for -P"),
         clEnumValN(re::RE_Syntax::FileGLOB, "GLOB", "Posix GLOB syntax for file name patterns"),
-        clEnumValN(re::RE_Syntax::PROSITE, "PROSITE", "PROSITE protein patterns syntax")
-        CL_ENUM_VAL_SENTINEL), cl::cat(RE_Options), cl::location(RegexpSyntax), cl::init(re::RE_Syntax::PCRE));
+        clEnumValN(re::RE_Syntax::PROSITE, "PROSITE", "PROSITE protein patterns syntax")),
+            cl::cat(RE_Options), cl::location(RegexpSyntax), cl::init(re::RE_Syntax::PCRE));
 
 bool IgnoreCaseFlag;
 static cl::opt<bool, true> IgnoreCaseOption("i", cl::location(IgnoreCaseFlag), cl::desc("Ignore case distinctions in the pattern and the file."), cl::cat(RE_Options), cl::Grouping);
@@ -97,8 +97,7 @@ BinaryFilesMode BinaryFilesFlag;
 static cl::opt<BinaryFilesMode, true> BinaryFilesOption("binary-files", cl::desc("Processing mode for binary files:"),
                                                      cl::values(clEnumValN(Binary, "binary", "Report match/non-match without printing matches."),
                                                                 clEnumValN(WithoutMatch, "without-match", "Always report as non-matching."),
-                                                                clEnumValN(Text, "text", "Treat binary files as text.")
-                                                                CL_ENUM_VAL_SENTINEL), cl::cat(Input_Options), cl::location(BinaryFilesFlag), cl::init(WithoutMatch));
+                                                                clEnumValN(Text, "text", "Treat binary files as text.")), cl::cat(Input_Options), cl::location(BinaryFilesFlag), cl::init(WithoutMatch));
     
 
     
@@ -121,8 +120,7 @@ static cl::opt<GrepModeType, true> GrepModeOption(cl::desc("Abbreviated output m
         clEnumValN(FilesWithMatch, "files-with-match", "Alias for -l"),
         clEnumValN(FilesWithoutMatch, "files-without-match", "Alias for -L"),
         clEnumValN(QuietMode, "quiet", "Alias for -q"),
-        clEnumValN(QuietMode, "silent", "Alias for -q")
-        CL_ENUM_VAL_SENTINEL), cl::cat(Output_Options), cl::location(Mode), cl::init(NormalMode));
+        clEnumValN(QuietMode, "silent", "Alias for -q")), cl::cat(Output_Options), cl::location(Mode), cl::init(NormalMode));
 
 bool WithFilenameFlag;
 static cl::opt<bool, true> WithFilenameOption("H", cl::location(WithFilenameFlag), cl::desc("Show the file name with each matching line."), cl::cat(Output_Options), cl::Grouping);
@@ -185,8 +183,7 @@ ColoringType ColorFlag;
 static cl::opt<ColoringType, true> Color("colors", cl::desc("Set colorization of the output"), cl::location(ColorFlag), cl::cat(Output_Options), cl::init(autoColor),
                                  cl::values(clEnumValN(alwaysColor, "always", "Enable colorization"),
                                             clEnumValN(autoColor,   "auto", "Colorize output to stdout"),
-                                            clEnumValN(neverColor,  "never", "Disable colorization")
-                                            CL_ENUM_VAL_SENTINEL));
+                                            clEnumValN(neverColor,  "never", "Disable colorization")));
 static cl::alias ColorAlias("colours", cl::desc("Alias for -color"), cl::aliasopt(Color));
 
 //

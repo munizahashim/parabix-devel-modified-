@@ -101,6 +101,9 @@ bool AVX512BW_available() {
 namespace IDISA {
 
 KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
+    if (codegen::BlockSize == 64) {
+        return new KernelBuilderImpl<IDISA_I64_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+    }
 #ifdef PARABIX_ARM_TARGET
     if (LLVM_LIKELY(codegen::BlockSize == 0)) {  // No BlockSize override: use processor SIMD width
         codegen::BlockSize = 128;
@@ -110,24 +113,20 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
 #ifdef PARABIX_X86_TARGET
     const auto hostCPUFeatures = getHostCPUFeatures();
     if (LLVM_LIKELY(codegen::BlockSize == 0)) {  // No BlockSize override: use processor SIMD width
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
         if (hostCPUFeatures.hasAVX512F) codegen::BlockSize = 512;
         else
-#endif
         if (hostCPUFeatures.hasAVX2) codegen::BlockSize = 256;
         else codegen::BlockSize = 128;
     }
     else if (((codegen::BlockSize & (codegen::BlockSize - 1)) != 0) || (codegen::BlockSize < 64)) {
         llvm::report_fatal_error("BlockSize must be a power of 2 and >=64");
     }
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
     if (codegen::BlockSize >= 512) {
         // AVX512BW builder can only be used for BlockSize multiples of 512
         if (hostCPUFeatures.hasAVX512F) {
             return new KernelBuilderImpl<IDISA_AVX512F_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
         }
     }
-#endif
     if (codegen::BlockSize >= 256) {
         // AVX2 or AVX builders can only be used for BlockSize multiples of 256
         if (hostCPUFeatures.hasAVX2) {
@@ -136,8 +135,10 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C) {
             return new KernelBuilderImpl<IDISA_AVX_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
         }
     }
-    if (SSSE3_available()) return new KernelBuilderImpl<IDISA_SSSE3_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
-    return new KernelBuilderImpl<IDISA_SSE2_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+    if (codegen::BlockSize == 128) {
+        if (SSSE3_available()) return new KernelBuilderImpl<IDISA_SSSE3_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+        return new KernelBuilderImpl<IDISA_SSE2_Builder>(C, codegen::BlockSize, codegen::LaneWidth);
+    }
 #else
     llvm::errs() << "No PARABIX_X86_TARGET!\n";
 #endif
