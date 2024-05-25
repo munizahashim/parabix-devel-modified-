@@ -75,6 +75,8 @@ public:
 
         P.analyzePrincipalRateIO();
 
+        P.addFlowControlAnnotations();
+
         P.determinePartitionJumpIndices();
 
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -93,8 +95,6 @@ public:
         }
         P.calculatePartialSumStepFactors(b);
         P.determineBufferSize(b);
-
-        P.addFlowControlAnnotations();
 
         P.makeConsumerGraph();
 
@@ -297,7 +297,10 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        NumOfThreads = 0;
+    unsigned                        FirstComputePartitionId = 0;
+    unsigned                        LastComputePartitionId = 0;
+    bool                            AllowIOProcessThread = false;
+
     bool                            HasZeroExtendedStream = false;
 
     size_t                          RequiredThreadLocalStreamSetMemory = 0;

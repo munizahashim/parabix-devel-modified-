@@ -265,8 +265,8 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
-
-// ------------------
+    , CrossThreaded = 32
+    // ------------------
     , HasIllustratedStreamset = 512
 };
 
@@ -338,6 +338,10 @@ struct BufferNode {
         return (Type & BufferType::Truncated) != 0;
     }
 
+    bool isCrossThreaded() const {
+        return (Type & BufferType::CrossThreaded) != 0;
+    }
+
     bool isThreadLocal() const {
         return (Locality == BufferLocality::ThreadLocal);
     }
@@ -367,7 +371,8 @@ enum BufferPortType : unsigned {
     IsShared = 16,
     IsManaged = 32,
     CanModifySegmentLength = 64,
-    Illustrated = 128
+    Illustrated = 128,
+    InitialIOThreadRead = 256
 };
 
 struct BufferPort {
@@ -422,6 +427,10 @@ struct BufferPort {
 
     bool isIllustrated() const {
         return (Flags & BufferPortType::Illustrated) != 0;
+    }
+
+    bool isInitialIOThreadRead() const {
+        return (Flags & BufferPortType::InitialIOThreadRead) != 0;
     }
 
     bool operator < (const BufferPort & rn) const {

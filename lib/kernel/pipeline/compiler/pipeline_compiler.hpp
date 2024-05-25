@@ -209,7 +209,6 @@ public:
     void start(KernelBuilder & b);
     void setActiveKernel(KernelBuilder & b, const unsigned index, const bool allowThreadLocal, const bool getCommonThreadLocal = false);
     void executeKernel(KernelBuilder & b);
-    void end(KernelBuilder & b);
 
 // internal pipeline functions
 
@@ -269,6 +268,7 @@ public:
 // inter-kernel codegen functions
 
     void readAvailableItemCounts(KernelBuilder & b);
+    Value * readAvailableItemCount(KernelBuilder & b, const size_t streamSet);
     void readProcessedItemCounts(KernelBuilder & b);
     void readProducedItemCounts(KernelBuilder & b);
 
@@ -344,7 +344,7 @@ public:
     Value * getOutputStrideLength(KernelBuilder & b, const BufferPort &outputPort, const StringRef location);
     Value * calculateStrideLength(KernelBuilder & b, const BufferPort & port, Value * const previouslyTransferred, Value * const strideIndex, StringRef location);
     Value * calculateNumOfLinearItems(KernelBuilder & b, const BufferPort &port, Value * const adjustment, StringRef location);
-    Value * getAccessibleInputItems(KernelBuilder & b, const BufferPort & inputPort, const bool useOverflow = true);
+    Value * getAccessibleInputItems(KernelBuilder & b, const BufferPort & inputPort);
     Value * getNumOfAccessibleStrides(KernelBuilder & b, const BufferPort & inputPort, Value * const numOfLinearStrides);
     Value * getWritableOutputItems(KernelBuilder & b, const BufferPort & outputPort, const bool force = false);
     Value * getNumOfWritableStrides(KernelBuilder & b, const BufferPort & port, Value * const numOfLinearStrides);
@@ -359,16 +359,17 @@ public:
 // termination codegen functions
 
     void addTerminationProperties(KernelBuilder & b, const size_t kernel, const size_t groupId);
-    Value * hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally = false) const;
-    Value * isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally = false) const;
-    Value * isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally = false) const;
+    Value * hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally = false);
+    Value * isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally = false);
+    Value * isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally = false);
     unsigned getTerminationSignalIndex(const unsigned consumer) const;
-    Value * isClosedNormally(KernelBuilder & b, const StreamSetPort inputPort) const;
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
     void checkIfKernelIsAlreadyTerminated(KernelBuilder & b);
     void checkPropagatedTerminationSignals(KernelBuilder & b);
     Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId);
     void writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const;
+    Value * readIfStreamSetlIsClosed(KernelBuilder & b, const size_t streamSet);
+    Value *  readIfKernelIsClosed(KernelBuilder & b, const size_t kernelId);
     Value * hasPipelineTerminated(KernelBuilder & b);
     void signalAbnormalTermination(KernelBuilder & b);
     LLVM_READNONE static Constant * getTerminationSignal(KernelBuilder & b, const TerminationSignal type);
@@ -632,6 +633,9 @@ protected:
     const unsigned                              LastScalar;
     const unsigned                              PartitionCount;
 
+    const unsigned                              FirstComputePartitionId;
+    const unsigned                              LastComputePartitionId;
+
     #ifdef ENABLE_PAPI
     const unsigned                              NumOfPAPIEvents;
     #else
@@ -640,6 +644,7 @@ protected:
 
     const size_t                                RequiredThreadLocalStreamSetMemory;
 
+    const bool                                  AllowIOProcessThread;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
     const bool                                  EnableCycleCounter;
@@ -670,6 +675,7 @@ protected:
     const ZeroInputGraph                        mZeroInputGraph;
 
     // pipeline state
+    bool                                        mIsIOProcessThread = false;
     unsigned                                    mKernelId = 0;
     const Kernel *                              mKernel = nullptr;
     Value *                                     mKernelSharedHandle = nullptr;
@@ -687,7 +693,7 @@ protected:
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
 
-    BasicBlock *                                mPipelineLoop = nullptr;
+//    BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
     BasicBlock *                                mKernelCheckOutputSpace = nullptr;
@@ -701,7 +707,7 @@ protected:
     BasicBlock *                                mKernelLoopExit = nullptr;
     BasicBlock *                                mKernelLoopExitPhiCatch = nullptr;
     BasicBlock *                                mKernelExit = nullptr;
-    BasicBlock *                                mPipelineEnd = nullptr;
+//    BasicBlock *                                mPipelineEnd = nullptr;
     BasicBlock *                                mRethrowException = nullptr;
 
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;
@@ -943,6 +949,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , FirstScalar(P.FirstScalar)
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
+, FirstComputePartitionId(P.FirstComputePartitionId)
+, LastComputePartitionId(P.LastComputePartitionId)
 #ifdef ENABLE_PAPI
 , NumOfPAPIEvents([&]() -> unsigned {
     const auto & S = codegen::PapiCounterOptions;
@@ -954,6 +962,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 }())
 #endif
 , RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
+, AllowIOProcessThread(P.AllowIOProcessThread)
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))

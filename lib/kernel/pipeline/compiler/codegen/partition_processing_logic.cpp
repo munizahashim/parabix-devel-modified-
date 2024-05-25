@@ -7,29 +7,97 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
 
-    for (unsigned i = 1; i < PartitionCount; ++i) {
-        mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), mPipelineEnd);
-    }
+    assert (LastComputePartitionId < (PartitionCount - 1));
 
-//    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-//    mPartitionEntryPoint[PartitionCount] = b.CreateBasicBlock("PipelineLoopCond", mPipelineEnd);
-//    #else
-//    mPartitionEntryPoint[PartitionCount] = mPipelineEnd;
-//    #endif
+    BasicBlock * const pipelineEnd =  b.CreateBasicBlock("PipelineEnd");
 
     IntegerType * const boolTy = b.getInt1Ty();
     IntegerType * const sizeTy = b.getInt64Ty();
 
-    for (unsigned i = 2; i < PartitionCount; ++i) {
-        mPartitionPipelineProgressPhi[i] =
-            PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+    #ifndef NDEBUG
+    for (unsigned i = 0 + 1; i < PartitionCount; ++i) {
+        mPartitionEntryPoint[i] = nullptr;
+    }
+    #endif
+
+    assert (KernelPartitionId[FirstKernel] == 1);
+    assert (FirstComputePartitionId > 0);
+    assert (FirstComputePartitionId <= LastComputePartitionId);
+    assert (KernelPartitionId[LastKernel] == (PartitionCount - 2));
+    assert (LastComputePartitionId < (PartitionCount - 1));
+
+    if (mIsIOProcessThread) {
+        assert (!mIsNestedPipeline);
+        for (unsigned i = 1; i < FirstComputePartitionId; ++i) {
+            assert (mPartitionEntryPoint[i] == nullptr);
+            mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
+        }
+        for (unsigned i = LastComputePartitionId + 1; i < (PartitionCount - 1); ++i) {
+            assert (mPartitionEntryPoint[i] == nullptr);
+            mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
+        }
+        assert (mPartitionEntryPoint[(PartitionCount - 1)] == nullptr);
+        mPartitionEntryPoint[(PartitionCount - 1)] = pipelineEnd;
+        for (unsigned i = 2; i < FirstComputePartitionId; ++i) {
+            mPartitionPipelineProgressPhi[i] =
+                PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+        }
+        for (unsigned i = LastComputePartitionId + 1; i < PartitionCount; ++i) {
+            mPartitionPipelineProgressPhi[i] =
+                PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+        }
+    } else {
+        for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
+            assert (mPartitionEntryPoint[i] == nullptr);
+            mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
+        }
+        assert (mPartitionEntryPoint[(PartitionCount - 1)] == nullptr);
+        mPartitionEntryPoint[(PartitionCount - 1)] = pipelineEnd;
+        for (unsigned i = FirstComputePartitionId + 1; i <= LastComputePartitionId; ++i) {
+            mPartitionPipelineProgressPhi[i] =
+                PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+        }
+        mPartitionPipelineProgressPhi[(PartitionCount - 1)] =
+            PHINode::Create(boolTy, PartitionCount, ".pipelineProgress", mPartitionEntryPoint[(PartitionCount - 1)] );
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        for (unsigned i = 2; i < (PartitionCount - 1); ++i) {
-            mPartitionStartTimePhi[i] =
-                PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
+        if (mIsIOProcessThread) {
+            for (unsigned i = 2; i < FirstComputePartitionId; ++i) {
+                mPartitionStartTimePhi[i] =
+                    PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
+            }
+            for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
+                mPartitionStartTimePhi[i] = nullptr;
+            }
+            for (unsigned i = LastComputePartitionId + 1; i < PartitionCount; ++i) {
+                mPartitionStartTimePhi[i] =
+                    PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
+            }
+        } else {
+            for (unsigned i = FirstComputePartitionId + 1; i <= LastComputePartitionId; ++i) {
+                mPartitionStartTimePhi[i] =
+                    PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
+            }
         }
+    }
+
+    for (size_t i = 0; i < PartitionCount; ++i) {
+        for (size_t j = 0; j < LastStreamSet - FirstStreamSet + 1; ++j) {
+            mPartitionProducedItemCountPhi[i][j] = nullptr;
+        }
+    }
+    for (size_t i = 0; i < PartitionCount; ++i) {
+        for (size_t j = FirstKernel; j <= LastKernel; ++j) {
+            mPartitionTerminationSignalPhi[i][j - FirstKernel] = nullptr;
+        }
+    }
+    for (size_t kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+        mKernelTerminationSignal[kernel] = nullptr;
+    }
+
+    if (mIsIOProcessThread) {
+        return;
     }
 
     // Create any PHI nodes we need to propogate the current produced/consumed item counts
@@ -39,7 +107,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        if (LLVM_UNLIKELY(bn.isConstant())) {
+        if (LLVM_UNLIKELY(bn.isConstant() || bn.isCrossThreaded())) {
             continue;
         }
 
@@ -81,11 +149,11 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             }
         }
         const auto readsPartId = KernelPartitionId[lastReader];
-        assert (readsPartId != KernelPartitionId[PipelineOutput]);
+        assert (FirstComputePartitionId <= readsPartId && readsPartId <= LastComputePartitionId);
         const auto prodPrefix = prefix + "_produced@partition";
         const auto prodPartId = KernelPartitionId[producer];
         for (auto partitionId = prodPartId + 1; partitionId <= readsPartId; ++partitionId) {
-            auto entryPoint = mPartitionEntryPoint[partitionId];
+            auto entryPoint = mPartitionEntryPoint[partitionId]; assert (entryPoint);
             PHINode * const phi = PHINode::Create(sizeTy, PartitionCount, prodPrefix + std::to_string(partitionId), entryPoint);
             mPartitionProducedItemCountPhi[partitionId][k] = phi;
         }
@@ -97,29 +165,32 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     assert (KernelPartitionId[PipelineInput] == 0);
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
 
-    const auto firstPartition = KernelPartitionId[FirstKernel];
-
     BitVector toCheck(LastKernel + 1);
 
-    for (auto partitionId = firstPartition; partitionId < PartitionCount; ++partitionId) {
+    const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
+
+    auto makeTerminationSignal = [&](const size_t partitionId) {
         auto entryPoint = mPartitionEntryPoint[partitionId];
         const auto prefix = "terminationSignalForPartition" + std::to_string(partitionId) + "@";
         const auto l = FirstKernelInPartition[partitionId];
-        toCheck.reset();
-        for (auto p = firstPartition; p < partitionId; ++p) {
+        toCheck.reset();    
+
+        const auto final = std::min<size_t>(partitionId, (LastComputePartitionId + 1));
+        for (auto p = FirstComputePartitionId; p < final; ++p) {
             if (mTerminationCheck[p]) {
                 toCheck.set(FirstKernelInPartition[p]);
             }
         }
 
-        for (auto k = FirstKernel; k < l; ) {
+        for (auto k = firstComputeKernel; k < l; ) {
             for (const auto e : make_iterator_range(out_edges(k, mBufferGraph))) {
                 const auto streamSet = target(e, mBufferGraph);
                 for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                     const auto consumer = target(f, mBufferGraph);
                     const auto conPartId = KernelPartitionId[consumer];
-                    if (conPartId >= partitionId) {
-                        toCheck.set(getTerminationSignalIndex(k));
+                    if (conPartId >= partitionId && (conPartId <= LastComputePartitionId || conPartId == (PartitionCount - 1))) {
+                        const auto s = getTerminationSignalIndex(k);
+                        toCheck.set(s);
                         goto added_to_set;
                     }
                 }
@@ -127,13 +198,19 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
 added_to_set: ++k;
         }
 
-        for (auto k = FirstKernel; k < l; ++k) {
+        for (auto k = firstComputeKernel; k < l; ++k) {
             if (toCheck.test(k)) {
                 PHINode * const phi = PHINode::Create(sizeTy, 2, prefix + std::to_string(k), entryPoint);
                 mPartitionTerminationSignalPhi[partitionId][k - FirstKernel] = phi;
             }
         }
+    };
+
+    for (auto partitionId = FirstComputePartitionId; partitionId <= LastComputePartitionId; ++partitionId) {
+        makeTerminationSignal(partitionId);
     }
+    assert (KernelPartitionId[PipelineOutput] == (PartitionCount - 1U));
+    makeTerminationSignal(PartitionCount - 1U);
 
 }
 
@@ -142,23 +219,33 @@ added_to_set: ++k;
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
 
-    const auto firstPartition = KernelPartitionId[FirstKernel];
-    BasicBlock * const entry = mPartitionEntryPoint[firstPartition];
+    size_t firstPartition;
+    if (mIsIOProcessThread) {
+        firstPartition = KernelPartitionId[FirstKernel];
+        if (LLVM_UNLIKELY(firstPartition == FirstComputePartitionId)) {
+            firstPartition = LastComputePartitionId + 1;
+        }
+    } else {
+        firstPartition = FirstComputePartitionId;
+    }
+    BasicBlock * const entry = mPartitionEntryPoint[firstPartition]; assert (entry);
     b.CreateBr(entry);
 
     b.SetInsertPoint(entry);
     mCurrentPartitionId = -1U;
-    setActiveKernel(b, FirstKernel, true);
+    const auto firstKernel = FirstKernelInPartition[firstPartition];
+    setActiveKernel(b, firstKernel, true);
+    assert (mKernelId == firstKernel);
     #ifdef ENABLE_PAPI
     startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
     #endif
     startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
     if (isMultithreaded()) {
-        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
-        updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        const auto type = isDataParallel(firstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLock(b, firstKernel, type, mSegNo);
+        updateCycleCounter(b, firstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
         #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        accumPAPIMeasurementWithoutReset(b, firstKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
         #endif
     }
 
@@ -169,7 +256,21 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 BasicBlock * PipelineCompiler::getPartitionExitPoint(KernelBuilder & /* b */) {
     assert (mKernelId >= FirstKernel && mKernelId <= PipelineOutput);
-    return mPartitionEntryPoint[mCurrentPartitionId + 1];
+    assert (mCurrentPartitionId < (PartitionCount - 1));
+    auto nextPartitionId = mCurrentPartitionId + 1;
+    if (mIsIOProcessThread) {
+        assert (mCurrentPartitionId < FirstComputePartitionId || mCurrentPartitionId > LastComputePartitionId);
+        if (nextPartitionId == FirstComputePartitionId) {
+            nextPartitionId = LastComputePartitionId + 1;
+        }
+    } else {
+        assert (FirstComputePartitionId <= mCurrentPartitionId && mCurrentPartitionId <= LastComputePartitionId);
+        if (nextPartitionId > LastComputePartitionId) {
+            nextPartitionId = (PartitionCount - 1);
+        }
+    }
+    BasicBlock * bb = mPartitionEntryPoint[nextPartitionId]; assert (bb);
+    return bb;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -182,11 +283,13 @@ void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
     mUsingNewSynchronizationVariable = false;
     #endif
     const auto partitionId = KernelPartitionId[mKernelId];
+    assert (mIsIOProcessThread ^ (FirstComputePartitionId <= partitionId && partitionId <= LastComputePartitionId));
     if (partitionId != mCurrentPartitionId) {
         mIsPartitionRoot = true;
         assert (FirstKernelInPartition[partitionId] == mKernelId);
         mCurrentPartitionId = partitionId;
         mCurrentPartitionRoot = mKernelId;
+        assert (FirstKernelInPartition[partitionId] == mKernelId);
         mNextPartitionEntryPoint = getPartitionExitPoint(b);
         determinePartitionStrideRateScalingFactor();
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -201,8 +304,6 @@ void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
         debugPrint(b, "  *** entering partition %" PRIu64, b.getSize(mCurrentPartitionId));
         #endif
     }
-    assert (KernelPartitionId[mKernelId - 1U] <= mCurrentPartitionId);
-    assert ((KernelPartitionId[mKernelId - 1U] + 1U) >= mCurrentPartitionId);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -319,14 +420,18 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::phiOutPartitionStatusFlags(KernelBuilder & b, const unsigned targetPartitionId, const bool fromKernelEntryBlock) {
 
+    if (mIsIOProcessThread) {
+        return;
+    }
+
     BasicBlock * const exitPoint = b.GetInsertBlock();
 
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
-
     const auto firstKernelOfTargetPartition = FirstKernelInPartition[targetPartitionId];
     assert (firstKernelOfTargetPartition <= PipelineOutput);
-
-    for (auto kernel = FirstKernel; kernel < firstKernelOfTargetPartition; ++kernel) {
+    const auto firstKernel = FirstKernelInPartition[FirstComputePartitionId];
+    assert (firstKernel <= firstKernelOfTargetPartition);
+    for (auto kernel = firstKernel; kernel < firstKernelOfTargetPartition; ++kernel) {
         PHINode * const termPhi = mPartitionTerminationSignalPhi[targetPartitionId][kernel - FirstKernel];
         if (termPhi) {
             Value * const term = mKernelTerminationSignal[kernel];
@@ -334,6 +439,9 @@ void PipelineCompiler::phiOutPartitionStatusFlags(KernelBuilder & b, const unsig
             termPhi->addIncoming(term ? term : unterminated, exitPoint);
         }
     }
+
+    assert (!mIsIOProcessThread);
+    assert (FirstComputePartitionId <= targetPartitionId && targetPartitionId <= LastComputePartitionId || targetPartitionId == KernelPartitionId[PipelineOutput]);
 
     PHINode * const progressPhi = mPartitionPipelineProgressPhi[targetPartitionId];
     assert (progressPhi);
@@ -349,6 +457,7 @@ void PipelineCompiler::phiOutPartitionStatusFlags(KernelBuilder & b, const unsig
 void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(KernelBuilder & b,
     const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo) {
 
+    assert (!mIsIOProcessThread);
     assert (KernelPartitionId[FirstKernel] == 1);
 
     for (auto kernel = PipelineInput; kernel < mKernelId; ++kernel) {
@@ -357,37 +466,6 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
 
     phiOutPartitionItemCounts(b, mKernelId, targetPartitionId, fromKernelEntryBlock);
 
-//    flat_set<size_t> consumed;
-//    for (auto kernel = targetKernelId; kernel <= PipelineOutput; ++kernel) {
-//        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-//            const auto streamSet = getTruncatedStreamSetSourceId(source(input, mBufferGraph));
-//            const BufferNode & bn = mBufferGraph[streamSet];
-//            if (bn.isNonThreadLocal() && bn.isOwned() && bn.isInternal() && !bn.hasZeroElementsOrWidth()) {
-//                assert (!bn.isTruncated());
-//                consumed.insert(streamSet);
-//            }
-//        }
-//    }
-
-//    for (auto kernel = mKernelId; kernel < targetKernelId; ++kernel) {
-//        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//            const auto streamSet = getTruncatedStreamSetSourceId(target(output, mBufferGraph));
-//            if (consumed.count(streamSet)) {
-//                Value * consumed = readConsumedItemCount(b, streamSet);
-//                const BufferNode & bn = mBufferGraph[streamSet];
-//                const StreamSetBuffer * const buffer = bn.Buffer;
-//                assert ("buffer cannot be null!" && buffer);
-//                assert (isFromCurrentFunction(b, buffer->getHandle()));
-//                Value * const baseAddress = buffer->getBaseAddress(b);
-//                Value * const vba = buffer->getVirtualBasePtr(b, baseAddress, consumed);
-//                const BufferPort & rt = mBufferGraph[output];
-//                const auto handleName = makeBufferName(kernel, rt.Port);
-//                b.setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
-//            }
-//        }
-//    }
-
-
     releaseAllSynchronizationLocksFor(b, mKernelId);
 
     assert (afterFirstSegNo);
@@ -395,17 +473,11 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
     Value * const curSegNo = mSegNo;
     mSegNo = afterFirstSegNo;
 
-
-
-
     for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
         phiOutPartitionItemCounts(b, kernel, targetPartitionId, fromKernelEntryBlock);
         if (HasTerminationSignal.test(kernel)) {
             mKernelTerminationSignal[kernel] = readTerminationSignal(b, kernel);
         }
-
-
-
         releaseAllSynchronizationLocksFor(b, kernel);
     }
 
@@ -422,6 +494,8 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, const unsigned firstKernelInTargetPartition, Value * const segNo) {
 
+    assert (!mIsIOProcessThread);
+
     #ifdef ENABLE_PAPI
     startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION});
     #endif
@@ -432,12 +506,15 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
     assert (firstKernelInTargetPartition != PipelineOutput);
     #endif
 
-    if (firstKernelInTargetPartition == PipelineOutput) {
-        const auto type = isDataParallel(LastKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLock(b, LastKernel, type, segNo);
-    } else {
-        const auto type = isDataParallel(firstKernelInTargetPartition) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
+    if (!mIsIOProcessThread) {
+        if (firstKernelInTargetPartition == PipelineOutput) {
+            const auto lastKernel = FirstKernelInPartition[LastComputePartitionId + 1] - 1U;
+            const auto type = isDataParallel(lastKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+            acquireSynchronizationLock(b, LastKernel, type, segNo);
+        } else {
+            const auto type = isDataParallel(firstKernelInTargetPartition) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+            acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
+        }
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
@@ -459,6 +536,11 @@ void PipelineCompiler::releaseAllSynchronizationLocksFor(KernelBuilder & b, cons
     if (KernelPartitionId[kernel - 1] != KernelPartitionId[kernel]) {
         recordStridesPerSegment(b, kernel, b.getSize(0));
     }
+
+    if (mIsIOProcessThread) {
+        return;
+    }
+
     if (isDataParallel(kernel)) {
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_PRE_INVOCATION, mSegNo);
         releaseSynchronizationLock(b, kernel, SYNC_LOCK_POST_INVOCATION, mSegNo);
@@ -479,15 +561,32 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 
     // NOTE: this branches to the next partition regardless of the jump target destination.
 
-    const auto nextPartitionId = mCurrentPartitionId + 1;
+    auto nextPartitionId = mCurrentPartitionId + 1U;
+    if (mIsIOProcessThread) {
+        if (nextPartitionId == FirstComputePartitionId) {
+            nextPartitionId = LastComputePartitionId + 1;
+        }
+    } else {
+        if (nextPartitionId == (LastComputePartitionId + 1)) {
+            nextPartitionId = (PartitionCount - 1);
+            assert (KernelPartitionId[PipelineOutput] == (PartitionCount - 1));
+        }
+    }
+    assert (nextPartitionId == (PartitionCount - 1) || (mIsIOProcessThread ^ (FirstComputePartitionId <= nextPartitionId && nextPartitionId <= LastComputePartitionId)));
+
     const auto jumpTargetId = PartitionJumpTargetId[mCurrentPartitionId];
+
     assert (nextPartitionId <= jumpTargetId);
 
-    if (LLVM_LIKELY((nextPartitionId != jumpTargetId) && mIsPartitionRoot)) {
+    assert (jumpTargetId == (PartitionCount - 1) || (mIsIOProcessThread ^ (FirstComputePartitionId <= jumpTargetId && jumpTargetId <= LastComputePartitionId)));
+
+    if (LLVM_LIKELY((nextPartitionId != jumpTargetId) && mIsPartitionRoot) && (!mIsIOProcessThread)) {
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "** " + makeKernelName(mKernelId) + ".initiallyTerminated (seqexit) = %" PRIu64, mSegNo);
         #endif
+
+        assert (nextPartitionId <= LastComputePartitionId);
 
         const auto targetKernelId = FirstKernelInPartition[nextPartitionId];
 
@@ -524,6 +623,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
     } else if (mKernelJumpToNextUsefulPartition) {
 
         assert (mIsPartitionRoot);
+        assert (!mIsIOProcessThread);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "** " + makeKernelName(mKernelId) + ".initiallyTerminated (reusejump) = %" PRIu64, mSegNo);
@@ -554,6 +654,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         #endif
 
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+            assert (!mIsIOProcessThread);
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
             acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
         }
@@ -572,10 +673,12 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
 
     assert (mIsPartitionRoot);
+    assert (!mIsIOProcessThread);
 
     b.SetInsertPoint(mKernelJumpToNextUsefulPartition);
     const auto jumpPartitionId = PartitionJumpTargetId[mCurrentPartitionId];
     assert (mCurrentPartitionId < jumpPartitionId);
+    assert (FirstComputePartitionId <= jumpPartitionId && jumpPartitionId <= LastComputePartitionId || FirstKernelInPartition[jumpPartitionId] == PipelineOutput);
     const auto targetKernelId = FirstKernelInPartition[jumpPartitionId];
     assert (targetKernelId > (mKernelId + 1U));
 
@@ -586,12 +689,27 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
 
     updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b.getSize(0));
 
+    auto lastKernelOnThread = targetKernelId;
+
+    const auto onSameThread = (FirstComputePartitionId <= jumpPartitionId && jumpPartitionId <= LastComputePartitionId) == mIsIOProcessThread;
+    if (mIsIOProcessThread == onSameThread) {
+         lastKernelOnThread = FirstKernelInPartition[LastComputePartitionId + 1] - 1;
+    }
+
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     if (LLVM_LIKELY(targetKernelId != PipelineOutput)) {
     #endif
-        acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
+        const auto onComputeThread = (FirstComputePartitionId <= jumpPartitionId && jumpPartitionId <= LastComputePartitionId);
+        if (onComputeThread == mIsIOProcessThread) {
+            acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
+        } else {
+            const auto lastKernelOnThread = FirstKernelInPartition[LastComputePartitionId + 1] - 1;
+            assert (lastKernelOnThread > mKernelId);
+            acquirePartitionSynchronizationLock(b, lastKernelOnThread, mSegNo);
+        }
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, jumpPartitionId, false, mSegNo);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
+
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     } else {
         if (LLVM_UNLIKELY(isDataParallel(mKernelId))) {
@@ -640,7 +758,19 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
     accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
     #endif
 
-    const auto nextKernel = mKernelId + 1;
+    size_t nextKernel = mKernelId + 1;
+    if (mIsIOProcessThread) {
+        assert (mKernelId < FirstKernelInPartition[FirstComputePartitionId] || mKernelId >= FirstKernelInPartition[LastComputePartitionId + 1]);
+        if (nextKernel == FirstKernelInPartition[FirstComputePartitionId]) {
+            nextKernel = FirstKernelInPartition[LastComputePartitionId + 1];
+        }
+    } else {
+        assert (FirstKernelInPartition[FirstComputePartitionId] <= mKernelId && mKernelId < FirstKernelInPartition[LastComputePartitionId + 1]);
+        if (nextKernel == FirstKernelInPartition[LastComputePartitionId + 1]) {
+            nextKernel = PipelineOutput;
+        }
+    }
+
     if (LLVM_LIKELY(nextKernel < PipelineOutput)) {
         #ifdef ENABLE_PAPI
         startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
@@ -664,6 +794,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
     if (nextPartitionId != mCurrentPartitionId) {
         assert (mCurrentPartitionId < nextPartitionId);
         assert (nextPartitionId <= PartitionCount);
+
         BasicBlock * const exitBlock = b.GetInsertBlock();
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "  *** exiting partition %" PRIu64, b.getSize(mCurrentPartitionId));
@@ -672,6 +803,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
         b.SetInsertPoint(mNextPartitionEntryPoint);
         PHINode * const progressPhi = mPartitionPipelineProgressPhi[nextPartitionId];
+        assert (progressPhi);
         progressPhi->addIncoming(mPipelineProgress, exitBlock);
         mPipelineProgress = progressPhi;
 
@@ -704,13 +836,15 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
         const auto firstKernelOfNextPartition = FirstKernelInPartition[nextPartitionId];
         assert (firstKernelOfNextPartition <= PipelineOutput);
-
-        for (auto kernel = FirstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
+        const auto firstKernel = FirstKernelInPartition[FirstComputePartitionId];
+        assert (firstKernel <= firstKernelOfNextPartition);
+        for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
             PHINode * const termPhi = mPartitionTerminationSignalPhi[nextPartitionId][kernel - FirstKernel];
             if (termPhi) {
                 assert (isFromCurrentFunction(b, termPhi, false));
-                assert (isFromCurrentFunction(b, mKernelTerminationSignal[kernel], false));
-                termPhi->addIncoming(mKernelTerminationSignal[kernel], exitBlock);
+                Value * termSignal = mKernelTerminationSignal[kernel];
+                assert (isFromCurrentFunction(b, termSignal, false));
+                termPhi->addIncoming(termSignal, exitBlock);
                 mKernelTerminationSignal[kernel] = termPhi;
             }
         }

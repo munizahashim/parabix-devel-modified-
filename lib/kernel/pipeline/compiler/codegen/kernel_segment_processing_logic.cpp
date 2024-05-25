@@ -12,8 +12,11 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(KernelBuilder & b) {
 
+    assert (FirstKernel <= mKernelId && mKernelId <= LastKernel);
+
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
+    assert ("every kernel ought to be marked a partition root if jumping is disabled" && (!mIsIOProcessThread || mIsPartitionRoot));
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
@@ -53,7 +56,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mMayHaveInsufficientIO = checkInputChannels || checkOutputChannels;
 
     assert (mNextPartitionEntryPoint);
-
+    assert (mCurrentPartitionId < KernelPartitionId[PipelineOutput]);
     assert (PartitionJumpTargetId[mCurrentPartitionId] > mCurrentPartitionId);
 
     const auto prefix = makeKernelName(mKernelId);
@@ -80,15 +83,17 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mKernelJumpToNextUsefulPartition = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
-        const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
-        assert (jumpId > mCurrentPartitionId);
-        if ((jumpId != (mCurrentPartitionId + 1) || KernelPartitionId[mKernelId + 1] == mCurrentPartitionId) && mIsPartitionRoot) {
-            SmallVector<char, 256> tmp;
-            raw_svector_ostream nm(tmp);
-            nm << prefix << "_jumpFromPartition_" << mCurrentPartitionId
-               << "_to_" << PartitionJumpTargetId[mCurrentPartitionId];
-            mKernelJumpToNextUsefulPartition = b.CreateBasicBlock(nm.str(), mNextPartitionEntryPoint);
+        if (!mIsIOProcessThread) {
+            // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
+            const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
+            assert (jumpId > mCurrentPartitionId);
+            if ((jumpId != (mCurrentPartitionId + 1) || KernelPartitionId[mKernelId + 1] == mCurrentPartitionId) && mIsPartitionRoot) {
+                SmallVector<char, 256> tmp;
+                raw_svector_ostream nm(tmp);
+                nm << prefix << "_jumpFromPartition_" << mCurrentPartitionId
+                   << "_to_" << PartitionJumpTargetId[mCurrentPartitionId];
+                mKernelJumpToNextUsefulPartition = b.CreateBasicBlock(nm.str(), mNextPartitionEntryPoint);
+            }
         }
     }
 
@@ -104,11 +109,10 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     /// -------------------------------------------------------------------------------------
 
     checkIfKernelIsAlreadyTerminated(b);
-
-    readAvailableItemCounts(b);
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readConsumedItemCounts(b);
+    readAvailableItemCounts(b);
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);
@@ -242,7 +246,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     computeFullyProcessedItemCounts(b, terminated);
     computeMinimumConsumedItemCounts(b);
     computeFullyProducedItemCounts(b, terminated);
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot && !mIsIOProcessThread) {
         updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);
     }
     replacePhiCatchWithCurrentBlock(b, mKernelLoopExitPhiCatch, mKernelExit);
@@ -261,6 +265,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     /// -------------------------------------------------------------------------------------
 
     if (mKernelJumpToNextUsefulPartition) {
+        assert (!mIsIOProcessThread);
         writeJumpToNextPartition(b);
     }
 
@@ -278,7 +283,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     recordProducedItemCountDeltas(b);
     // chain the progress state so that the next one carries on from this one
     mPipelineProgress = mAnyProgressedAtExitPhi;
-    if (mIsPartitionRoot) {
+    if (mIsPartitionRoot && !mIsIOProcessThread) {
         assert (mTotalNumOfStridesAtExitPhi);
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
         assert (mFinalPartitionSegmentAtExitPhi);
@@ -317,14 +322,14 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
     }
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto port = mBufferGraph[e].Port;
+        const auto & br = mBufferGraph[e];
+        const auto port = br.Port;
         assert (mProcessedItemCount[port]);
         mAlreadyProcessedPhi[port]->addIncoming(mProcessedItemCount[port], exitBlockAfterLoopAgainTest);
         if (mAlreadyProcessedDeferredPhi[port]) {
             assert (mProcessedDeferredItemCount[port]);
             mAlreadyProcessedDeferredPhi[port]->addIncoming(mProcessedDeferredItemCount[port], exitBlockAfterLoopAgainTest);
         }
-//        mAvailableInputItemCountPhi[port]->addIncoming(mAvailableInputItemCount[port], exitBlockAfterLoopAgainTest);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -457,11 +462,6 @@ void PipelineCompiler::initializeKernelLoopEntryPhis(KernelBuilder & b) {
             mAlreadyProcessedDeferredPhi[port] = phi;
             mCurrentProcessedDeferredItemCountPhi[port] = phi;
         }
-//        PHINode * const availPhi = b.CreatePHI(sizeTy, 2, prefix + "_availableInputPhi");
-//        mAvailableInputItemCountPhi[port] = availPhi;
-//        mAvailableInputItemCount[port] = availPhi;
-//        const auto streamSet = source(e, mBufferGraph);
-//        availPhi->addIncoming(mLocallyAvailableItems[streamSet], mKernelLoopStart);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {

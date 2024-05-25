@@ -127,11 +127,16 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto name = makeKernelName(kernelId);
 
-    const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+   // const auto partId = KernelPartitionId[kernelId];
 
-    if (isRoot) {
-        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
+    const auto onComputeThread = (FirstKernelInPartition[FirstComputePartitionId] <= kernelId && kernelId < FirstKernelInPartition[LastComputePartitionId + 1]);
+
+    if (onComputeThread) {
+        const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+        if (isRoot) {
+            addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
+        }
     }
 
     addConsumerKernelProperties(b, kernelId);
@@ -190,7 +195,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
 
-    if (LLVM_UNLIKELY(allowDataParallelExecution)) {
+    if (LLVM_UNLIKELY(allowDataParallelExecution && onComputeThread)) {
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 

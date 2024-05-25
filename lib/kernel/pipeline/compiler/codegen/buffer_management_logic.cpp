@@ -354,34 +354,69 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
 void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+
         const auto streamSet = source(e, mBufferGraph);
-        if (mLocallyAvailableItems[streamSet] == nullptr) {
-            const BufferNode & bn = mBufferGraph[streamSet];
-            Value * produced = nullptr;
-            if (LLVM_UNLIKELY(bn.isConstant())) {
-                produced = ConstantInt::getAllOnesValue(b.getSizeTy());
+        if (mLocallyAvailableItems[streamSet] == nullptr || mIsIOProcessThread) {
+            const auto & port = mBufferGraph[e];
+            Value * avail = nullptr;
+            if (LLVM_UNLIKELY(port.isInitialIOThreadRead())) {
+                assert ("this could deadlock the IO thread" && mBufferGraph[streamSet].isInternal());
+                assert ("this could deadlock the IO thread" && !mIsIOProcessThread);
+
+                BasicBlock * const checkForInput = b.CreateBasicBlock("checkForInput");
+                BasicBlock * const checkForInputExit = b.CreateBasicBlock("checkForInputExit");
+                Value * const processed = mInitiallyProcessedItemCount[port.Port];
+                b.CreateBr(checkForInput);
+
+                b.SetInsertPoint(checkForInput);
+//                Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
+//                b.CreateCall(schedYieldFunc);
+                avail = readAvailableItemCount(b, streamSet);
+                Value * const closed = b.CreateIsNotNull(readIfStreamSetlIsClosed(b, streamSet));
+                Value * const ready = b.CreateOr(b.CreateICmpNE(processed, avail), closed);
+                b.CreateCondBr(ready, checkForInputExit, checkForInput);
+
+                b.SetInsertPoint(checkForInputExit);
+
+
             } else {
-                const auto f = in_edge(streamSet, mBufferGraph);
-                const auto producer = source(f, mBufferGraph);
-                const BufferPort & outputPort = mBufferGraph[f];
-                assert (outputPort.Port.Type == PortType::Output);
-                if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                    assert (bn.isExternal());
-                    // the output port of the pipeline input is an input streamset of the pipeline kernel.
-                    produced = getAvailableInputItems(outputPort.Port.Number);
-                    writeTransitoryConsumedItemCount(b, streamSet, produced);
-                } else {
-                    const auto prefix = makeBufferName(producer, outputPort.Port);
-                    if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                        produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-                    } else {
-                        produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
-                    }
-                }
+                avail = readAvailableItemCount(b, streamSet);
             }
-            mLocallyAvailableItems[streamSet] = produced; assert (produced);
+            mLocallyAvailableItems[streamSet] = avail;
         }
     }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readAvailableItemCount
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t streamSet) {
+    const BufferNode & bn = mBufferGraph[streamSet];
+    Value * produced = nullptr;
+    if (LLVM_UNLIKELY(bn.isConstant())) {
+        produced = ConstantInt::getAllOnesValue(b.getSizeTy());
+    } else {
+        const auto f = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(f, mBufferGraph);
+        const BufferPort & outputPort = mBufferGraph[f];
+        assert (outputPort.Port.Type == PortType::Output);
+        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            assert (bn.isExternal());
+            // the output port of the pipeline input is an input streamset of the pipeline kernel.
+            produced = getAvailableInputItems(outputPort.Port.Number);
+            writeTransitoryConsumedItemCount(b, streamSet, produced);
+        } else {
+            const auto prefix = makeBufferName(producer, outputPort.Port);
+            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
+                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            } else {
+                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+            }
+        }
+    }
+    assert (produced);
+    return produced;
 }
 
 

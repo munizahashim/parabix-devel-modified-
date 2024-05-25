@@ -39,6 +39,8 @@ namespace kernel {
 void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo && mSegNo);
+    } else if (LLVM_UNLIKELY(mIsIOProcessThread)) {
+        return;
     } else if (mUseDynamicMultithreading) {
         Value * const segNoPtr = b.getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
@@ -65,6 +67,9 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
+    if (LLVM_UNLIKELY(mIsIOProcessThread)) {
+        return;
+    }
     assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
@@ -100,6 +105,9 @@ LLVM_READNONE Constant * __getSyncLockName(KernelBuilder & b, const unsigned typ
 
 }
 
+#define HAS_SYNC(kernelId) \
+    (FirstKernelInPartition[FirstComputePartitionId] <= kernelId && kernelId < FirstKernelInPartition[LastComputePartitionId + 1])
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief acquireCurrentSegment
  *
@@ -107,7 +115,7 @@ LLVM_READNONE Constant * __getSyncLockName(KernelBuilder & b, const unsigned typ
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (isMultithreaded()) {
+    if (isMultithreaded() && HAS_SYNC(kernelId)) {
         // TODO: make this an function?
         const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(type);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
@@ -153,7 +161,8 @@ void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsig
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (isMultithreaded() || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
+#warning trace wont work here
+    if ((isMultithreaded() && HAS_SYNC(kernelId)) || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         Value * const nextSegNo = b.CreateAdd(segNo, b.getSize(1));
         if (LLVM_UNLIKELY(CheckAssertions)) {

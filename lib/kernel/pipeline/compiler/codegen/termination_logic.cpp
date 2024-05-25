@@ -35,8 +35,17 @@ unsigned PipelineCompiler::getTerminationSignalIndex(const unsigned kernel) cons
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasKernelTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally) const {
-    Value * const signal = mKernelTerminationSignal[getTerminationSignalIndex(kernel)]; assert (signal);
+Value * PipelineCompiler::hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally) {
+    const auto idx = getTerminationSignalIndex(kernel);
+    const auto partitionId = KernelPartitionId[kernel];
+    Value * signal = nullptr;
+    const auto isComputeThreadPartition = (FirstComputePartitionId <= partitionId) && (partitionId <= LastComputePartitionId);
+    if (mIsIOProcessThread != isComputeThreadPartition) {
+        signal = mKernelTerminationSignal[idx];
+        assert (isFromCurrentFunction(b, signal, false));
+    } else {
+        signal = readIfKernelIsClosed(b, kernel);
+    }
     if (normally) {
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         return b.CreateICmpEQ(signal, completed);
@@ -65,8 +74,8 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
         if (const auto type = mTerminationCheck[partitionId]) {
             const auto root = FirstKernelInPartition[partitionId];
             assert (HasTerminationSignal[root]);
-            Value * const signal = mKernelTerminationSignal[root];
-            assert (isFromCurrentFunction(b, signal, false));
+            Value * signal = readIfKernelIsClosed(b, root);
+
             if (type & TerminationCheckFlag::Hard) {
                 assert (signal);
                 Value * const final = b.CreateICmpEQ(signal, fatal);
@@ -120,14 +129,14 @@ void PipelineCompiler::signalAbnormalTermination(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally) const {
+Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally) {
     return isClosed(b, getInputBufferVertex(inputPort), normally);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) const {
+Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) {
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b.getFalse();
@@ -143,14 +152,6 @@ Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, 
         }
     }
     return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isClosedNormally
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosedNormally(KernelBuilder & b, const StreamSetPort inputPort) const {
-    return isClosed(b, inputPort, true);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -181,6 +182,27 @@ void PipelineCompiler::checkIfKernelIsAlreadyTerminated(KernelBuilder & b) {
         mInitiallyTerminated = hasKernelTerminated(b, mKernelId);
     }
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readIfStreamSetlIsClosed
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value *  PipelineCompiler::readIfStreamSetlIsClosed(KernelBuilder & b, const size_t streamSet) {
+    return readIfKernelIsClosed(b, parent(streamSet, mBufferGraph));
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readIfStreamSetlIsClosed
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value *  PipelineCompiler::readIfKernelIsClosed(KernelBuilder & b, const size_t kernelId) {
+    const auto idx = getTerminationSignalIndex(kernelId);
+    Value * signal = mKernelTerminationSignal[idx];
+    if (signal == nullptr) {
+        signal = readTerminationSignal(b, idx);
+        mKernelTerminationSignal[idx] = signal;
+    }
+    return signal;
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief checkPropagatedTerminationSignals

@@ -234,9 +234,11 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
         return false;
     }
 
-    if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls()) {
+    if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls() || (mBufferGraphRef[kernel].Type & InitialSourceConsumer) != 0) {
         return false;
     }
+
+
 
     for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraphRef))) {
         const BufferPort & p = mBufferGraphRef[e];

@@ -372,7 +372,7 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
-    Value * const closed = isClosed(b, streamSet);
+
 
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
 
@@ -380,14 +380,9 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
 
     Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
 
+    Value * closed = isClosed(b, streamSet);
     Value * minimum = strideLength;
-//    if (mPrincipalFixedRateFactor && port.isFixed()) {
-//        assert (!port.isPrincipal());
-//        const Binding & input = port.Binding;
-//        const ProcessingRate & rate = input.getRate();
-//        const auto factor = rate.getRate() / mFixedRateLCM;
-//        minimum = b.CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
-//    }
+
     Value * const required = addLookahead(b, port, minimum); assert (required);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -711,7 +706,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const BufferPort & port, const bool useOverflow1) {
+Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const BufferPort & port) {
 
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
@@ -735,8 +730,8 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
-    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
+    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);
@@ -1115,7 +1110,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             if (LLVM_UNLIKELY(port.isPrincipal())) {
                 mPrincipalFixedRateFactor = nullptr;
             }
-            accessible = b.CreateSelect(isClosedNormally(b, port.Port), selected, accessible, "accessible");
+            accessible = b.CreateSelect(isClosed(b, port.Port, true), selected, accessible, "accessible");
         }
         accessibleItems[port.Port.Number] = accessible;
     }
@@ -1214,7 +1209,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
 
                     const Rational r{factor.numerator(), factor.denominator() * stride}; // := factor / Rational{stride};
                     Value * const z = b.CreateCeilUMulRational(y, r);
-                    calculated = b.CreateSelect(isClosedNormally(b, inputPort), z, calculated);
+                    calculated = b.CreateSelect(isClosed(b, inputPort, true), z, calculated);
                 }
 
                 accessibleItems[inputPort.Number] = calculated;
